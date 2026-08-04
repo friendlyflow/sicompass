@@ -210,7 +210,11 @@ impl FakeImap {
             }
         });
 
-        FakeImap { addr, log, shutdown }
+        FakeImap {
+            addr,
+            log,
+            shutdown,
+        }
     }
 
     fn url(&self) -> String {
@@ -240,7 +244,10 @@ impl FakeImap {
         cmds.iter()
             .find(|c| c.contains(needle))
             .unwrap_or_else(|| {
-                panic!("no command containing {needle:?}; transcript:\n  {}", cmds.join("\n  "))
+                panic!(
+                    "no command containing {needle:?}; transcript:\n  {}",
+                    cmds.join("\n  ")
+                )
             })
             .clone()
     }
@@ -332,21 +339,38 @@ fn dispatch(
             .unwrap_or_else(|_| format!("<undecodable: {payload}>"));
         // Recorded with a synthetic prefix so tests can assert on the decoded
         // SASL body rather than its base64 envelope.
-        log.lock().expect("log mutex").push(format!("SASL-PAYLOAD {decoded}"));
+        log.lock()
+            .expect("log mutex")
+            .push(format!("SASL-PAYLOAD {decoded}"));
         send(w, &format!("{tag} OK AUTHENTICATE completed\r\n"));
     } else if upper.starts_with("CAPABILITY") {
-        send(w, &format!("* CAPABILITY IMAP4rev1 {}\r\n", opts.capabilities));
+        send(
+            w,
+            &format!("* CAPABILITY IMAP4rev1 {}\r\n", opts.capabilities),
+        );
         send(w, &format!("{tag} OK CAPABILITY completed\r\n"));
     } else if upper.starts_with("LIST") {
         // `[Gmail]` is \Noselect and must be filtered out by `list_folders`.
         send(w, "* LIST (\\HasNoChildren) \"/\" \"INBOX\"\r\n");
         send(w, "* LIST (\\HasChildren \\Noselect) \"/\" \"[Gmail]\"\r\n");
-        send(w, "* LIST (\\HasNoChildren \\Trash) \"/\" \"[Gmail]/Trash\"\r\n");
-        send(w, "* LIST (\\HasNoChildren \\Sent) \"/\" \"[Gmail]/Sent Mail\"\r\n");
-        send(w, "* LIST (\\HasNoChildren \\All) \"/\" \"[Gmail]/All Mail\"\r\n");
+        send(
+            w,
+            "* LIST (\\HasNoChildren \\Trash) \"/\" \"[Gmail]/Trash\"\r\n",
+        );
+        send(
+            w,
+            "* LIST (\\HasNoChildren \\Sent) \"/\" \"[Gmail]/Sent Mail\"\r\n",
+        );
+        send(
+            w,
+            "* LIST (\\HasNoChildren \\All) \"/\" \"[Gmail]/All Mail\"\r\n",
+        );
         send(w, &format!("{tag} OK LIST completed\r\n"));
     } else if upper.starts_with("SELECT") || upper.starts_with("EXAMINE") {
-        send(w, "* FLAGS (\\Answered \\Flagged \\Deleted \\Seen \\Draft)\r\n");
+        send(
+            w,
+            "* FLAGS (\\Answered \\Flagged \\Deleted \\Seen \\Draft)\r\n",
+        );
         send(w, "* 2 EXISTS\r\n");
         send(w, "* 0 RECENT\r\n");
         send(w, "* OK [UIDVALIDITY 4242] UIDs valid\r\n");
@@ -363,20 +387,32 @@ fn dispatch(
         if upper.contains("BODY[]") {
             fetch_body(w, tag, rest);
         } else {
-            send(w, &format!("* 1 FETCH (UID 1 ENVELOPE ({ENVELOPE_1}) FLAGS (\\Seen))\r\n"));
-            send(w, &format!("* 2 FETCH (UID 2 ENVELOPE ({ENVELOPE_2}) FLAGS (\\Flagged))\r\n"));
+            send(
+                w,
+                &format!("* 1 FETCH (UID 1 ENVELOPE ({ENVELOPE_1}) FLAGS (\\Seen))\r\n"),
+            );
+            send(
+                w,
+                &format!("* 2 FETCH (UID 2 ENVELOPE ({ENVELOPE_2}) FLAGS (\\Flagged))\r\n"),
+            );
             send(w, &format!("{tag} OK FETCH completed\r\n"));
         }
     } else if upper.starts_with("UID STORE") || upper.starts_with("STORE") {
         send(w, "* 2 FETCH (UID 2 FLAGS (\\Seen))\r\n");
         send(w, &format!("{tag} OK STORE completed\r\n"));
     } else if upper.starts_with("UID COPY") || upper.starts_with("COPY") {
-        send(w, &format!("{tag} OK [COPYUID 4242 2 9] COPY completed\r\n"));
+        send(
+            w,
+            &format!("{tag} OK [COPYUID 4242 2 9] COPY completed\r\n"),
+        );
     } else if upper.starts_with("UID MOVE") || upper.starts_with("MOVE") {
         if opts.reject_move {
             send(w, &format!("{tag} NO [CANNOT] MOVE not supported\r\n"));
         } else {
-            send(w, &format!("{tag} OK [COPYUID 4242 2 9] MOVE completed\r\n"));
+            send(
+                w,
+                &format!("{tag} OK [COPYUID 4242 2 9] MOVE completed\r\n"),
+            );
         }
     } else if upper.starts_with("UID EXPUNGE") || upper.starts_with("EXPUNGE") {
         send(w, "* 2 EXPUNGE\r\n");
@@ -409,7 +445,10 @@ fn fetch_body(w: &mut TcpStream, tag: &str, rest: &str) {
 
     if uid == 2 {
         let body = message_2_source();
-        send(w, &format!("* 2 FETCH (UID 2 BODY[] {{{}}}\r\n", body.len()));
+        send(
+            w,
+            &format!("* 2 FETCH (UID 2 BODY[] {{{}}}\r\n", body.len()),
+        );
         send(w, &body);
         send(w, ")\r\n");
     }
@@ -424,10 +463,12 @@ fn append(
     tag: &str,
     rest: &str,
 ) -> bool {
-    let len: usize = match rest
-        .rsplit_once('{')
-        .and_then(|(_, n)| n.trim_end_matches(['}', '+']).trim_end_matches('}').parse().ok())
-    {
+    let len: usize = match rest.rsplit_once('{').and_then(|(_, n)| {
+        n.trim_end_matches(['}', '+'])
+            .trim_end_matches('}')
+            .parse()
+            .ok()
+    }) {
         Some(n) => n,
         None => {
             send(w, &format!("{tag} BAD APPEND needs a literal\r\n"));
@@ -448,7 +489,10 @@ fn append(
     log.lock()
         .expect("log mutex")
         .push(format!("APPEND-LITERAL {}", String::from_utf8_lossy(&buf)));
-    send(w, &format!("{tag} OK [APPENDUID 4242 9] APPEND completed\r\n"));
+    send(
+        w,
+        &format!("{tag} OK [APPENDUID 4242 9] APPEND completed\r\n"),
+    );
     true
 }
 
@@ -515,8 +559,14 @@ async fn login_sends_credentials_after_greeting() {
     imap.list_folders().await.expect("list_folders");
 
     let login = server.expect_command("LOGIN");
-    assert!(login.contains(&user), "LOGIN should carry the username: {login}");
-    assert!(login.contains("hunter2"), "LOGIN should carry the password: {login}");
+    assert!(
+        login.contains(&user),
+        "LOGIN should carry the username: {login}"
+    );
+    assert!(
+        login.contains("hunter2"),
+        "LOGIN should carry the password: {login}"
+    );
     server.assert_no_command("AUTHENTICATE");
 }
 
@@ -554,11 +604,19 @@ async fn list_folders_keeps_special_use_and_drops_noselect() {
     let names: Vec<&str> = folders.iter().map(|f| f.name.as_str()).collect();
     assert_eq!(
         names,
-        vec!["INBOX", "[Gmail]/Trash", "[Gmail]/Sent Mail", "[Gmail]/All Mail"],
+        vec![
+            "INBOX",
+            "[Gmail]/Trash",
+            "[Gmail]/Sent Mail",
+            "[Gmail]/All Mail"
+        ],
         "\\Noselect containers must not appear as selectable folders"
     );
 
-    let trash = folders.iter().find(|f| f.name == "[Gmail]/Trash").expect("Trash");
+    let trash = folders
+        .iter()
+        .find(|f| f.name == "[Gmail]/Trash")
+        .expect("Trash");
     assert!(
         trash.attributes.iter().any(|a| a == "\\Trash"),
         "SPECIAL-USE attributes drive trash/archive routing: {:?}",
@@ -571,7 +629,10 @@ async fn list_messages_decodes_envelopes_flags_and_orders_newest_first() {
     let server = FakeImap::start(Options::default());
     let mut imap = RealImap::from_config(&server.config(&unique_user("headers")));
 
-    let headers = imap.list_messages("INBOX", 50).await.expect("list_messages");
+    let headers = imap
+        .list_messages("INBOX", 50)
+        .await
+        .expect("list_messages");
 
     assert_eq!(headers.len(), 2);
     // Most-recent-first.
@@ -607,7 +668,8 @@ async fn fetch_message_parses_literal_body_and_attachment() {
     let mut imap = RealImap::from_config(&server.config(&unique_user("body")));
 
     let msg = imap
-        .fetch_message("INBOX", 2).await
+        .fetch_message("INBOX", 2)
+        .await
         .expect("fetch_message")
         .expect("UID 2 exists");
 
@@ -625,10 +687,16 @@ async fn fetch_message_parses_literal_body_and_attachment() {
 
     let att = msg.attachments.first().expect("one attachment");
     assert_eq!(att.filename, "notes.txt");
-    assert_eq!(att.data, b"hello, world", "base64 attachment must be decoded");
+    assert_eq!(
+        att.data, b"hello, world",
+        "base64 attachment must be decoded"
+    );
 
     let fetch = server.expect_command("BODY[]");
-    assert!(fetch.contains("UID FETCH 2"), "must fetch by UID, not sequence: {fetch}");
+    assert!(
+        fetch.contains("UID FETCH 2"),
+        "must fetch by UID, not sequence: {fetch}"
+    );
 }
 
 #[tokio::test]
@@ -637,7 +705,10 @@ async fn fetch_message_returns_none_for_unknown_uid() {
     let mut imap = RealImap::from_config(&server.config(&unique_user("missing")));
 
     // The fake server answers UID 99 with a bare OK and no FETCH data.
-    let msg = imap.fetch_message("INBOX", 99).await.expect("fetch_message");
+    let msg = imap
+        .fetch_message("INBOX", 99)
+        .await
+        .expect("fetch_message");
 
     assert!(msg.is_none(), "a missing UID is Ok(None), not an error");
     server.expect_command("UID FETCH 99");
@@ -649,7 +720,8 @@ async fn fetch_message_by_message_id_searches_then_fetches() {
     let mut imap = RealImap::from_config(&server.config(&unique_user("byid")));
 
     let msg = imap
-        .fetch_message_by_message_id("INBOX", "<msg2@example.com>").await
+        .fetch_message_by_message_id("INBOX", "<msg2@example.com>")
+        .await
         .expect("fetch_message_by_message_id")
         .expect("search resolves to UID 2");
 
@@ -671,7 +743,8 @@ async fn set_flags_issues_separate_add_and_remove_stores() {
     let server = FakeImap::start(Options::default());
     let mut imap = RealImap::from_config(&server.config(&unique_user("flags")));
 
-    imap.set_flags("INBOX", 2, &["\\Seen"], &["\\Flagged"]).await
+    imap.set_flags("INBOX", 2, &["\\Seen"], &["\\Flagged"])
+        .await
         .expect("set_flags");
 
     let cmds = server.commands();
@@ -693,7 +766,9 @@ async fn set_flags_skips_the_store_when_a_side_is_empty() {
     let server = FakeImap::start(Options::default());
     let mut imap = RealImap::from_config(&server.config(&unique_user("flags-one")));
 
-    imap.set_flags("INBOX", 2, &["\\Seen"], &[]).await.expect("set_flags");
+    imap.set_flags("INBOX", 2, &["\\Seen"], &[])
+        .await
+        .expect("set_flags");
 
     server.expect_command("+FLAGS");
     server.assert_no_command("-FLAGS");
@@ -704,7 +779,9 @@ async fn copy_message_issues_uid_copy() {
     let server = FakeImap::start(Options::default());
     let mut imap = RealImap::from_config(&server.config(&unique_user("copy")));
 
-    imap.copy_message("INBOX", 2, "[Gmail]/All Mail").await.expect("copy_message");
+    imap.copy_message("INBOX", 2, "[Gmail]/All Mail")
+        .await
+        .expect("copy_message");
 
     let copy = server.expect_command("UID COPY");
     assert!(copy.contains('2') && copy.contains("All Mail"), "{copy}");
@@ -715,7 +792,9 @@ async fn move_message_prefers_the_move_extension() {
     let server = FakeImap::start(Options::default());
     let mut imap = RealImap::from_config(&server.config(&unique_user("move")));
 
-    imap.move_message("INBOX", 2, "[Gmail]/Trash").await.expect("move_message");
+    imap.move_message("INBOX", 2, "[Gmail]/Trash")
+        .await
+        .expect("move_message");
 
     server.expect_command("UID MOVE");
     server.assert_no_command("UID EXPUNGE");
@@ -729,7 +808,8 @@ async fn move_message_falls_back_to_copy_delete_expunge() {
     });
     let mut imap = RealImap::from_config(&server.config(&unique_user("move-fallback")));
 
-    imap.move_message("INBOX", 2, "[Gmail]/Trash").await
+    imap.move_message("INBOX", 2, "[Gmail]/Trash")
+        .await
         .expect("fallback should still succeed");
 
     // Order matters: COPY must precede the \Deleted flag and the expunge, or a
@@ -759,7 +839,10 @@ async fn expunge_uid_targets_a_single_uid() {
     imap.expunge_uid("INBOX", 2).await.expect("expunge_uid");
 
     let expunge = server.expect_command("UID EXPUNGE");
-    assert!(expunge.ends_with('2'), "must scope the expunge to UID 2: {expunge}");
+    assert!(
+        expunge.ends_with('2'),
+        "must scope the expunge to UID 2: {expunge}"
+    );
 }
 
 #[tokio::test]
@@ -772,7 +855,10 @@ async fn append_transfers_the_message_as_a_literal() {
 
     let cmd = server.expect_command("APPEND");
     assert!(cmd.contains("Sent Mail"), "{cmd}");
-    assert!(cmd.contains(&format!("{{{}}}", raw.len())), "literal length: {cmd}");
+    assert!(
+        cmd.contains(&format!("{{{}}}", raw.len())),
+        "literal length: {cmd}"
+    );
 
     let literal = server.expect_command("APPEND-LITERAL");
     assert!(
@@ -794,7 +880,8 @@ async fn fetch_threads_parses_the_uid_thread_response() {
     let mut imap = RealImap::from_config(&server.config(&unique_user("threads")));
 
     let threads = imap
-        .fetch_threads("INBOX").await
+        .fetch_threads("INBOX")
+        .await
         .expect("fetch_threads")
         .expect("server advertises THREAD=REFERENCES");
 
@@ -825,7 +912,8 @@ async fn fetch_threads_falls_back_to_orderedsubject() {
     });
     let mut imap = RealImap::from_config(&server.config(&unique_user("ordsubj")));
 
-    imap.fetch_threads("INBOX").await
+    imap.fetch_threads("INBOX")
+        .await
         .expect("fetch_threads")
         .expect("ORDEREDSUBJECT is also threadable");
 
@@ -857,7 +945,9 @@ fn idle_sets_the_notify_flag_on_unsolicited_exists() {
 
     assert!(fired, "an unsolicited EXISTS must raise the refresh flag");
     assert!(
-        server.wait_for(Duration::from_secs(1), |c| c.iter().any(|l| l.contains("IDLE"))),
+        server.wait_for(Duration::from_secs(1), |c| c
+            .iter()
+            .any(|l| l.contains("IDLE"))),
         "the worker must actually issue IDLE"
     );
     server.expect_command("DONE");

@@ -131,8 +131,8 @@ struct EmulatorState {
     /// Not used by the grid itself — read by the provider so it knows whether
     /// to wrap pasted text in `ESC[200~`/`ESC[201~`.
     bracketed_paste: bool,
-    scroll_top: u16,    // inclusive, 0-indexed
-    scroll_bot: u16,    // inclusive, 0-indexed
+    scroll_top: u16, // inclusive, 0-indexed
+    scroll_bot: u16, // inclusive, 0-indexed
 }
 
 impl EmulatorState {
@@ -156,11 +156,19 @@ impl EmulatorState {
     }
 
     fn screen(&mut self) -> &mut Screen {
-        if self.on_alt { &mut self.alt } else { &mut self.primary }
+        if self.on_alt {
+            &mut self.alt
+        } else {
+            &mut self.primary
+        }
     }
 
     fn screen_ref(&self) -> &Screen {
-        if self.on_alt { &self.alt } else { &self.primary }
+        if self.on_alt {
+            &self.alt
+        } else {
+            &self.primary
+        }
     }
 
     fn idx(&self, col: u16, row: u16) -> usize {
@@ -168,7 +176,12 @@ impl EmulatorState {
     }
 
     fn current_cell(&self) -> DashboardCell {
-        DashboardCell { ch: ' ', fg: self.fg, bg: self.bg, attrs: self.attrs }
+        DashboardCell {
+            ch: ' ',
+            fg: self.fg,
+            bg: self.bg,
+            attrs: self.attrs,
+        }
     }
 
     fn put_char(&mut self, ch: char) {
@@ -181,7 +194,12 @@ impl EmulatorState {
             self.pending_wrap = false;
         }
 
-        let cell = DashboardCell { ch, fg: self.fg, bg: self.bg, attrs: self.attrs };
+        let cell = DashboardCell {
+            ch,
+            fg: self.fg,
+            bg: self.bg,
+            attrs: self.attrs,
+        };
         let cols = self.cols;
         let rows = self.rows;
         let col = self.screen_ref().cursor_col;
@@ -273,7 +291,9 @@ impl EmulatorState {
         let blank = self.current_cell();
         let s = self.screen();
         for _ in 0..n {
-            if top >= bot { break; }
+            if top >= bot {
+                break;
+            }
             // Move row top+1 → top, top+2 → top+1, ..., bot → bot-1.
             for r in top..bot {
                 let src_start = (r + 1) * cols;
@@ -297,7 +317,9 @@ impl EmulatorState {
         let blank = self.current_cell();
         let s = self.screen();
         for _ in 0..n {
-            if top >= bot { break; }
+            if top >= bot {
+                break;
+            }
             // Move row bot-1 → bot, bot-2 → bot-1, ..., top → top+1.
             for r in (top..bot).rev() {
                 let src_start = r * cols;
@@ -394,7 +416,9 @@ impl EmulatorState {
     }
 
     fn switch_screen(&mut self, alt: bool) {
-        if self.on_alt == alt { return; }
+        if self.on_alt == alt {
+            return;
+        }
         self.on_alt = alt;
         self.pending_wrap = false;
         // When entering alt screen, blank it. Leaving doesn't blank; the
@@ -443,21 +467,35 @@ impl EmulatorState {
                 49 => self.bg = DEFAULT_BG,
                 38 | 48 => {
                     let is_fg = p == 38;
-                    if i + 1 >= flat.len() { break; }
+                    if i + 1 >= flat.len() {
+                        break;
+                    }
                     match flat[i + 1] {
                         5 => {
-                            if i + 2 >= flat.len() { break; }
+                            if i + 2 >= flat.len() {
+                                break;
+                            }
                             let c = palette_256(flat[i + 2] as u8);
-                            if is_fg { self.fg = c; } else { self.bg = c; }
+                            if is_fg {
+                                self.fg = c;
+                            } else {
+                                self.bg = c;
+                            }
                             i += 2;
                         }
                         2 => {
-                            if i + 4 >= flat.len() { break; }
+                            if i + 4 >= flat.len() {
+                                break;
+                            }
                             let r = flat[i + 2] as u32;
                             let g = flat[i + 3] as u32;
                             let b = flat[i + 4] as u32;
                             let c = (r << 24) | (g << 16) | (b << 8) | 0xFF;
-                            if is_fg { self.fg = c; } else { self.bg = c; }
+                            if is_fg {
+                                self.fg = c;
+                            } else {
+                                self.bg = c;
+                            }
                             i += 4;
                         }
                         _ => {}
@@ -475,8 +513,12 @@ impl EmulatorState {
         self.scroll_top = 0;
         self.scroll_bot = rows.saturating_sub(1);
         let blank = self.current_cell();
-        self.primary.cells.resize((cols as usize) * (rows as usize), blank.clone());
-        self.alt.cells.resize((cols as usize) * (rows as usize), blank);
+        self.primary
+            .cells
+            .resize((cols as usize) * (rows as usize), blank.clone());
+        self.alt
+            .cells
+            .resize((cols as usize) * (rows as usize), blank);
         self.primary.cursor_col = self.primary.cursor_col.min(cols.saturating_sub(1));
         self.primary.cursor_row = self.primary.cursor_row.min(rows.saturating_sub(1));
         self.alt.cursor_col = self.alt.cursor_col.min(cols.saturating_sub(1));
@@ -518,10 +560,7 @@ impl EmulatorState {
             cells: s.cells.clone(),
             cursor: None,
         };
-        if self.cursor_visible
-            && s.cursor_col < self.cols
-            && s.cursor_row < self.rows
-        {
+        if self.cursor_visible && s.cursor_col < self.cols && s.cursor_row < self.rows {
             frame.cursor = Some((s.cursor_col, s.cursor_row));
         }
         frame
@@ -539,22 +578,16 @@ impl Perform for EmulatorState {
 
     fn execute(&mut self, byte: u8) {
         match byte {
-            0x08 => self.backspace(),     // BS
-            0x09 => self.tab(),           // HT
+            0x08 => self.backspace(),              // BS
+            0x09 => self.tab(),                    // HT
             0x0A | 0x0B | 0x0C => self.linefeed(), // LF, VT, FF
             0x0D => self.cursor_carriage_return(), // CR
-            0x07 => {} // BEL — silent
+            0x07 => {}                             // BEL — silent
             _ => {}
         }
     }
 
-    fn csi_dispatch(
-        &mut self,
-        params: &Params,
-        intermediates: &[u8],
-        _ignore: bool,
-        action: char,
-    ) {
+    fn csi_dispatch(&mut self, params: &Params, intermediates: &[u8], _ignore: bool, action: char) {
         // DEC private modes use `?` as an intermediate.
         if intermediates.first() == Some(&b'?') {
             match action {
@@ -562,7 +595,7 @@ impl Perform for EmulatorState {
                     let on = action == 'h';
                     for p in params.iter() {
                         match p.first().copied().unwrap_or(0) {
-                            7  => self.autowrap = on,
+                            7 => self.autowrap = on,
                             25 => self.cursor_visible = on,
                             1049 | 47 | 1047 => self.switch_screen(on),
                             2004 => self.bracketed_paste = on,
@@ -603,8 +636,18 @@ impl Perform for EmulatorState {
             }
             'H' | 'f' => {
                 let mut it = params.iter();
-                let row = it.next().and_then(|p| p.first().copied()).unwrap_or(1).max(1) - 1;
-                let col = it.next().and_then(|p| p.first().copied()).unwrap_or(1).max(1) - 1;
+                let row = it
+                    .next()
+                    .and_then(|p| p.first().copied())
+                    .unwrap_or(1)
+                    .max(1)
+                    - 1;
+                let col = it
+                    .next()
+                    .and_then(|p| p.first().copied())
+                    .unwrap_or(1)
+                    .max(1)
+                    - 1;
                 self.move_cursor_to(col, row);
             }
             'd' => {
@@ -617,8 +660,16 @@ impl Perform for EmulatorState {
             'm' => self.apply_sgr(params),
             'r' => {
                 let mut it = params.iter();
-                let top = it.next().and_then(|p| p.first().copied()).unwrap_or(1).max(1) - 1;
-                let bot = it.next().and_then(|p| p.first().copied()).unwrap_or(self.rows as u16);
+                let top = it
+                    .next()
+                    .and_then(|p| p.first().copied())
+                    .unwrap_or(1)
+                    .max(1)
+                    - 1;
+                let bot = it
+                    .next()
+                    .and_then(|p| p.first().copied())
+                    .unwrap_or(self.rows as u16);
                 let bot = bot.max(1) - 1;
                 self.scroll_top = top.min(self.rows.saturating_sub(1));
                 self.scroll_bot = bot.min(self.rows.saturating_sub(1));
@@ -654,8 +705,12 @@ impl Perform for EmulatorState {
                 self.scroll_top = 0;
                 self.scroll_bot = self.rows.saturating_sub(1);
                 let blank = self.current_cell();
-                for cell in self.primary.cells.iter_mut() { *cell = blank.clone(); }
-                for cell in self.alt.cells.iter_mut() { *cell = blank.clone(); }
+                for cell in self.primary.cells.iter_mut() {
+                    *cell = blank.clone();
+                }
+                for cell in self.alt.cells.iter_mut() {
+                    *cell = blank.clone();
+                }
                 self.primary.cursor_col = 0;
                 self.primary.cursor_row = 0;
                 self.alt.cursor_col = 0;
@@ -686,10 +741,9 @@ fn blank_cell() -> DashboardCell {
 /// Standard xterm 16-color palette → 0xRRGGBBAA.
 fn palette_color(idx: u8) -> u32 {
     const PALETTE: [u32; 16] = [
-        0x000000FF, 0xCD0000FF, 0x00CD00FF, 0xCDCD00FF,
-        0x0000EEFF, 0xCD00CDFF, 0x00CDCDFF, 0xE5E5E5FF,
-        0x808080FF, 0xFF0000FF, 0x00FF00FF, 0xFFFF00FF,
-        0x5C5CFFFF, 0xFF00FFFF, 0x00FFFFFF, 0xFFFFFFFF,
+        0x000000FF, 0xCD0000FF, 0x00CD00FF, 0xCDCD00FF, 0x0000EEFF, 0xCD00CDFF, 0x00CDCDFF,
+        0xE5E5E5FF, 0x808080FF, 0xFF0000FF, 0x00FF00FF, 0xFFFF00FF, 0x5C5CFFFF, 0xFF00FFFF,
+        0x00FFFFFF, 0xFFFFFFFF,
     ];
     PALETTE[(idx & 0x0F) as usize]
 }
@@ -747,7 +801,11 @@ pub fn encode_dashboard_key(key: &DashboardKey) -> Option<Vec<u8>> {
                 }
                 // Ctrl+space / Ctrl+@ → NUL.
                 if c == ' ' || c == '@' {
-                    return Some(if key.alt { vec![0x1B, 0x00] } else { vec![0x00] });
+                    return Some(if key.alt {
+                        vec![0x1B, 0x00]
+                    } else {
+                        vec![0x00]
+                    });
                 }
                 // Ctrl+[ → ESC. Ctrl+] → GS (0x1D). Ctrl+\ → FS (0x1C).
                 let b = match c {
@@ -895,10 +953,10 @@ mod tests {
     fn csi_cuu_cud_cuf_cub_move_cursor() {
         let mut em = Emulator::new(10, 5);
         em.feed(b"\x1b[3;3H"); // row 3, col 3 (1-based) → (2, 2)
-        em.feed(b"\x1b[A");    // up 1 → (2, 1)
+        em.feed(b"\x1b[A"); // up 1 → (2, 1)
         em.feed(b"u");
         em.feed(b"\x1b[2;2H"); // (1, 1)
-        em.feed(b"\x1b[2C");   // right 2 → (1, 3)
+        em.feed(b"\x1b[2C"); // right 2 → (1, 3)
         em.feed(b"r");
         assert_eq!(cell_ch(&em, 2, 1), 'u');
         assert_eq!(cell_ch(&em, 3, 1), 'r');
@@ -909,7 +967,7 @@ mod tests {
         let mut em = Emulator::new(10, 2);
         em.feed(b"abcdef");
         em.feed(b"\x1b[3G"); // CHA → col 3 (1-based) → 2
-        em.feed(b"\x1b[K");  // erase from cursor to end
+        em.feed(b"\x1b[K"); // erase from cursor to end
         assert_eq!(cell_ch(&em, 0, 0), 'a');
         assert_eq!(cell_ch(&em, 1, 0), 'b');
         assert_eq!(cell_ch(&em, 2, 0), ' ');
@@ -921,7 +979,11 @@ mod tests {
         let mut em = Emulator::new(5, 3);
         em.feed(b"hello\r\nworld");
         em.feed(b"\x1b[2J");
-        for r in 0..3 { for c in 0..5 { assert_eq!(cell_ch(&em, c, r), ' '); } }
+        for r in 0..3 {
+            for c in 0..5 {
+                assert_eq!(cell_ch(&em, c, r), ' ');
+            }
+        }
     }
 
     #[test]
@@ -930,7 +992,7 @@ mod tests {
         em.feed(b"\x1b[31mR\x1b[0mn");
         let f = em.snapshot();
         assert_eq!(f.cell(0, 0).fg, palette_color(1)); // red
-        assert_eq!(f.cell(1, 0).fg, DEFAULT_FG);       // reset
+        assert_eq!(f.cell(1, 0).fg, DEFAULT_FG); // reset
     }
 
     #[test]
@@ -992,10 +1054,10 @@ mod tests {
     #[test]
     fn esc_save_restore_cursor() {
         let mut em = Emulator::new(5, 2);
-        em.feed(b"\x1b[1;3H");  // (0, 2)
-        em.feed(b"\x1b7");       // save
+        em.feed(b"\x1b[1;3H"); // (0, 2)
+        em.feed(b"\x1b7"); // save
         em.feed(b"\x1b[2;1Hx"); // jump and write
-        em.feed(b"\x1b8");       // restore
+        em.feed(b"\x1b8"); // restore
         em.feed(b"y");
         assert_eq!(cell_ch(&em, 0, 1), 'x');
         assert_eq!(cell_ch(&em, 2, 0), 'y');
@@ -1027,38 +1089,62 @@ mod tests {
     fn encode_special_keys() {
         assert_eq!(
             encode_dashboard_key(&DashboardKey {
-                keysym: DashboardKeysym::Enter, ctrl: false, shift: false, alt: false,
-            }).unwrap(),
+                keysym: DashboardKeysym::Enter,
+                ctrl: false,
+                shift: false,
+                alt: false,
+            })
+            .unwrap(),
             b"\r",
         );
         assert_eq!(
             encode_dashboard_key(&DashboardKey {
-                keysym: DashboardKeysym::Up, ctrl: false, shift: false, alt: false,
-            }).unwrap(),
+                keysym: DashboardKeysym::Up,
+                ctrl: false,
+                shift: false,
+                alt: false,
+            })
+            .unwrap(),
             b"\x1b[A",
         );
         assert_eq!(
             encode_dashboard_key(&DashboardKey {
-                keysym: DashboardKeysym::Backspace, ctrl: false, shift: false, alt: false,
-            }).unwrap(),
+                keysym: DashboardKeysym::Backspace,
+                ctrl: false,
+                shift: false,
+                alt: false,
+            })
+            .unwrap(),
             b"\x7F",
         );
         assert_eq!(
             encode_dashboard_key(&DashboardKey {
-                keysym: DashboardKeysym::PageUp, ctrl: false, shift: false, alt: false,
-            }).unwrap(),
+                keysym: DashboardKeysym::PageUp,
+                ctrl: false,
+                shift: false,
+                alt: false,
+            })
+            .unwrap(),
             b"\x1b[5~",
         );
         assert_eq!(
             encode_dashboard_key(&DashboardKey {
-                keysym: DashboardKeysym::F(1), ctrl: false, shift: false, alt: false,
-            }).unwrap(),
+                keysym: DashboardKeysym::F(1),
+                ctrl: false,
+                shift: false,
+                alt: false,
+            })
+            .unwrap(),
             b"\x1bOP",
         );
         assert_eq!(
             encode_dashboard_key(&DashboardKey {
-                keysym: DashboardKeysym::F(5), ctrl: false, shift: false, alt: false,
-            }).unwrap(),
+                keysym: DashboardKeysym::F(5),
+                ctrl: false,
+                shift: false,
+                alt: false,
+            })
+            .unwrap(),
             b"\x1b[15~",
         );
     }
@@ -1066,28 +1152,44 @@ mod tests {
     #[test]
     fn encode_escape_keysym_emits_esc_byte() {
         let bytes = encode_dashboard_key(&DashboardKey {
-            keysym: DashboardKeysym::Escape, ctrl: false, shift: false, alt: false,
-        }).unwrap();
+            keysym: DashboardKeysym::Escape,
+            ctrl: false,
+            shift: false,
+            alt: false,
+        })
+        .unwrap();
         assert_eq!(bytes, b"\x1b");
     }
 
     #[test]
     fn encode_ctrl_letter_to_control_byte() {
         let bytes = encode_dashboard_key(&DashboardKey {
-            keysym: DashboardKeysym::Char('c'), ctrl: true, shift: false, alt: false,
-        }).unwrap();
+            keysym: DashboardKeysym::Char('c'),
+            ctrl: true,
+            shift: false,
+            alt: false,
+        })
+        .unwrap();
         assert_eq!(bytes, vec![0x03]); // SIGINT
         let bytes = encode_dashboard_key(&DashboardKey {
-            keysym: DashboardKeysym::Char('d'), ctrl: true, shift: false, alt: false,
-        }).unwrap();
+            keysym: DashboardKeysym::Char('d'),
+            ctrl: true,
+            shift: false,
+            alt: false,
+        })
+        .unwrap();
         assert_eq!(bytes, vec![0x04]); // EOF
     }
 
     #[test]
     fn encode_alt_letter_prefixes_esc() {
         let bytes = encode_dashboard_key(&DashboardKey {
-            keysym: DashboardKeysym::Char('b'), ctrl: false, shift: false, alt: true,
-        }).unwrap();
+            keysym: DashboardKeysym::Char('b'),
+            ctrl: false,
+            shift: false,
+            alt: true,
+        })
+        .unwrap();
         assert_eq!(bytes, vec![0x1B, b'b']);
     }
 
@@ -1095,8 +1197,14 @@ mod tests {
     fn encode_unmodified_char_is_none() {
         // Plain printable letters arrive through `dashboard_text`; the keysym
         // path should produce no bytes.
-        assert!(encode_dashboard_key(&DashboardKey {
-            keysym: DashboardKeysym::Char('a'), ctrl: false, shift: false, alt: false,
-        }).is_none());
+        assert!(
+            encode_dashboard_key(&DashboardKey {
+                keysym: DashboardKeysym::Char('a'),
+                ctrl: false,
+                shift: false,
+                alt: false,
+            })
+            .is_none()
+        );
     }
 }

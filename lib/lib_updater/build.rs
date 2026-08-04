@@ -27,8 +27,7 @@ fn main() {
         return;
     }
 
-    let manifest = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap())
-        .join("manifest.xml");
+    let manifest = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap()).join("manifest.xml");
 
     // /MANIFEST:EMBED — embed the manifest in the .exe rather than emitting a
     // sidecar `.exe.manifest`. /MANIFESTINPUT names the file. Both are MSVC

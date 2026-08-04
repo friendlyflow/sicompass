@@ -26,7 +26,11 @@ impl ChatClientProvider {
             Ok(())
         } else {
             let b: serde_json::Value = resp.json().unwrap_or_default();
-            Err(b.get("error").and_then(|v| v.as_str()).unwrap_or("kick failed").to_owned())
+            Err(b
+                .get("error")
+                .and_then(|v| v.as_str())
+                .unwrap_or("kick failed")
+                .to_owned())
         }
     }
 
@@ -53,7 +57,11 @@ impl ChatClientProvider {
             Ok(())
         } else {
             let b: serde_json::Value = resp.json().unwrap_or_default();
-            Err(b.get("error").and_then(|v| v.as_str()).unwrap_or("ban failed").to_owned())
+            Err(b
+                .get("error")
+                .and_then(|v| v.as_str())
+                .unwrap_or("ban failed")
+                .to_owned())
         }
     }
 
@@ -71,7 +79,11 @@ impl ChatClientProvider {
             Ok(())
         } else {
             let b: serde_json::Value = resp.json().unwrap_or_default();
-            Err(b.get("error").and_then(|v| v.as_str()).unwrap_or("invite failed").to_owned())
+            Err(b
+                .get("error")
+                .and_then(|v| v.as_str())
+                .unwrap_or("invite failed")
+                .to_owned())
         }
     }
 
@@ -90,7 +102,11 @@ impl ChatClientProvider {
             Ok(())
         } else {
             let b: serde_json::Value = resp.json().unwrap_or_default();
-            Err(b.get("error").and_then(|v| v.as_str()).unwrap_or("unban failed").to_owned())
+            Err(b
+                .get("error")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unban failed")
+                .to_owned())
         }
     }
 }

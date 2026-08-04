@@ -10,7 +10,7 @@
 //! (Linux: `~/.cache`, macOS: `~/Library/Caches`, Windows: `%LOCALAPPDATA%`).
 
 use crate::MessageHeader;
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 use sicompass_sdk::platform;
 
 pub struct EnvelopeCache {
@@ -41,9 +41,10 @@ impl EnvelopeCache {
     /// column has to be added separately. A duplicate-column error just means
     /// the migration already ran.
     fn migrate_message_id(&self) {
-        let _ = self
-            .conn
-            .execute("ALTER TABLE envelopes ADD COLUMN message_id TEXT NOT NULL DEFAULT ''", []);
+        let _ = self.conn.execute(
+            "ALTER TABLE envelopes ADD COLUMN message_id TEXT NOT NULL DEFAULT ''",
+            [],
+        );
     }
 
     fn init_schema(&self) -> rusqlite::Result<()> {
@@ -143,10 +144,9 @@ impl EnvelopeCache {
 
     /// Delete all cached envelopes for `folder` and record the new UIDVALIDITY.
     pub fn invalidate_folder(&self, folder: &str, new_uidvalidity: u32) {
-        let _ = self.conn.execute(
-            "DELETE FROM envelopes WHERE folder = ?1",
-            params![folder],
-        );
+        let _ = self
+            .conn
+            .execute("DELETE FROM envelopes WHERE folder = ?1", params![folder]);
         let _ = self.conn.execute(
             "INSERT INTO folder_meta (folder, uidvalidity, count)
              VALUES (?1, ?2, 0)
@@ -209,7 +209,13 @@ impl EnvelopeCache {
     /// Selectively update only the flags that were explicitly changed.
     ///
     /// `new_seen` / `new_flagged` are `None` when that flag was not touched.
-    pub fn patch_flags(&self, folder: &str, uid: u32, new_seen: Option<bool>, new_flagged: Option<bool>) {
+    pub fn patch_flags(
+        &self,
+        folder: &str,
+        uid: u32,
+        new_seen: Option<bool>,
+        new_flagged: Option<bool>,
+    ) {
         if let Some(seen) = new_seen {
             let _ = self.conn.execute(
                 "UPDATE envelopes SET seen = ?3 WHERE folder = ?1 AND uid = ?2",
@@ -226,12 +232,10 @@ impl EnvelopeCache {
 
     /// Remove a single cached envelope (after EXPUNGE).
     pub fn remove(&self, folder: &str, uid: u32) {
-        let _ = self
-            .conn
-            .execute(
-                "DELETE FROM envelopes WHERE folder = ?1 AND uid = ?2",
-                params![folder, uid as i64],
-            );
+        let _ = self.conn.execute(
+            "DELETE FROM envelopes WHERE folder = ?1 AND uid = ?2",
+            params![folder, uid as i64],
+        );
         // Update count.
         let count: i64 = self
             .conn

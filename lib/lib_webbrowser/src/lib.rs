@@ -38,9 +38,11 @@ pub fn register_translations() {
         let _ = localize::register_bundle("de-BE", include_str!("../locales/de-BE.ftl"));
     });
 }
-use sicompass_sdk::ffon::{html_to_ffon_with_forms, html_submit_selector};
-#[cfg(test)] use sicompass_sdk::ffon::html_to_ffon;
-#[cfg(test)] use sicompass_sdk::ffon::html_resolve_href;
+#[cfg(test)]
+use sicompass_sdk::ffon::html_resolve_href;
+#[cfg(test)]
+use sicompass_sdk::ffon::html_to_ffon;
+use sicompass_sdk::ffon::{html_submit_selector, html_to_ffon_with_forms};
 use std::collections::HashMap;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
@@ -183,7 +185,9 @@ impl WebbrowserProvider {
         if test_no_launch() {
             self.cached_page = Some(CachedPage {
                 url: url.to_owned(),
-                elements: vec![FfonElement::new_str(format!("<test-no-launch>{url}</test-no-launch>"))],
+                elements: vec![FfonElement::new_str(format!(
+                    "<test-no-launch>{url}</test-no-launch>"
+                ))],
             });
             self.form_map = FormMap::new();
             self.current_url = url.to_owned();
@@ -218,8 +222,7 @@ impl WebbrowserProvider {
                     match init_live_session().await {
                         Ok(session) => *guard = Some(session),
                         Err(e) => {
-                            *errors.lock().unwrap() =
-                                Some(format!("Error launching browser: {e}"));
+                            *errors.lock().unwrap() = Some(format!("Error launching browser: {e}"));
                             inflight.store(false, Ordering::Release);
                             return;
                         }
@@ -239,7 +242,9 @@ impl WebbrowserProvider {
                         // Drop the session so the next attempt starts fresh.
                         *live.lock().await = None;
                         *ready.lock().unwrap() = Some((
-                            vec![FfonElement::new_str(format!("Error loading {url_owned}: {e}"))],
+                            vec![FfonElement::new_str(format!(
+                                "Error loading {url_owned}: {e}"
+                            ))],
                             FormMap::new(),
                         ));
                     }
@@ -259,7 +264,10 @@ impl WebbrowserProvider {
             match result {
                 Ok(load) => {
                     let (elements, form_map) = page_to_ffon_with_forms(&load, url);
-                    self.cached_page = Some(CachedPage { url: url.to_owned(), elements });
+                    self.cached_page = Some(CachedPage {
+                        url: url.to_owned(),
+                        elements,
+                    });
                     self.form_map = form_map;
                 }
                 Err(e) => {
@@ -291,10 +299,14 @@ impl WebbrowserProvider {
 
     /// Persist a form field's new value into `cached_page` so re-fetches keep it.
     fn patch_cached_form_field(&mut self, form_key: &str, new_value: &str) {
-        let Some(slash) = form_key.find('/') else { return; };
+        let Some(slash) = form_key.find('/') else {
+            return;
+        };
         let form_name = &form_key[..slash];
         let field_label = &form_key[slash + 1..];
-        let Some(page) = &mut self.cached_page else { return; };
+        let Some(page) = &mut self.cached_page else {
+            return;
+        };
         let prefix = format!("{field_label}: <input>");
         let replacement = format!("{field_label}: <input>{new_value}</input>");
         patch_form_field_in_tree(&mut page.elements, form_name, &prefix, &replacement);
@@ -313,7 +325,10 @@ impl WebbrowserProvider {
     fn submit_form_windows(&mut self, form_n: usize) {
         // Test stub: never launch Chrome from tests.
         if test_no_launch() {
-            set_error(&self.pending_error, "test-no-launch: submit skipped".to_owned());
+            set_error(
+                &self.pending_error,
+                "test-no-launch: submit skipped".to_owned(),
+            );
             return;
         }
 
@@ -337,12 +352,18 @@ impl WebbrowserProvider {
             // Drop guard: clear `in_flight` on every exit path, including panic.
             struct ClearOnDrop(Arc<AtomicBool>);
             impl Drop for ClearOnDrop {
-                fn drop(&mut self) { self.0.store(false, Ordering::Release); }
+                fn drop(&mut self) {
+                    self.0.store(false, Ordering::Release);
+                }
             }
             let _guard = ClearOnDrop(in_flight);
 
             chromium_runtime().block_on(submit_form_windows_async(
-                url, form_n, stored_values, ready, error_slot,
+                url,
+                form_n,
+                stored_values,
+                ready,
+                error_slot,
             ));
         });
     }
@@ -354,11 +375,15 @@ impl WebbrowserProvider {
     /// fill into; typed values are replayed in the submit thread.
     #[cfg(not(target_os = "windows"))]
     fn cdp_fill_field(&self, form_key: &str, value: &str) -> bool {
-        let Some(node) = self.form_map.get(form_key) else { return false; };
+        let Some(node) = self.form_map.get(form_key) else {
+            return false;
+        };
         // Locking here still occupies the frame, but these are single CDP
         // round-trips, not a page load.
         let guard = chromium_runtime().block_on(self.live.lock());
-        let Some(live) = guard.as_ref() else { return false; };
+        let Some(live) = guard.as_ref() else {
+            return false;
+        };
         let selector = node.css_selector.clone();
         let form_index = node.form_index;
         let match_index = node.match_index;
@@ -369,10 +394,7 @@ impl WebbrowserProvider {
         let page = live.page.clone();
         let js = build_fill_js(form_index, match_index, &selector, &value, submit);
         let result = chromium_runtime().block_on(async move {
-            tokio::time::timeout(
-                tokio::time::Duration::from_secs(5),
-                page.evaluate(js),
-            ).await
+            tokio::time::timeout(tokio::time::Duration::from_secs(5), page.evaluate(js)).await
         });
         result.map(|r| r.is_ok()).unwrap_or(false)
     }
@@ -385,7 +407,9 @@ impl Default for WebbrowserProvider {
 }
 
 impl Provider for WebbrowserProvider {
-    fn name(&self) -> &str { "webbrowser" }
+    fn name(&self) -> &str {
+        "webbrowser"
+    }
     fn display_name(&self) -> String {
         register_translations();
         localize::t("webbrowser-display-name")
@@ -397,7 +421,11 @@ impl Provider for WebbrowserProvider {
         // URL bar element
         let url_bar = format!(
             "<input>{}</input>",
-            if self.current_url.is_empty() { "https://" } else { &self.current_url }
+            if self.current_url.is_empty() {
+                "https://"
+            } else {
+                &self.current_url
+            }
         );
 
         // A load is running: the URL bar plus a status line, so the view is not
@@ -436,7 +464,8 @@ impl Provider for WebbrowserProvider {
                 // (On Windows there is no live Chrome to fill into; on other
                 // platforms we still fill the live DOM AND remember the value
                 // so the two stay in sync if the user resubmits after a tick.)
-                self.form_field_values.insert(form_key.clone(), new_content.to_owned());
+                self.form_field_values
+                    .insert(form_key.clone(), new_content.to_owned());
                 // Non-Windows: fill the live Chrome DOM as a side effect.
                 #[cfg(not(target_os = "windows"))]
                 {
@@ -453,7 +482,9 @@ impl Provider for WebbrowserProvider {
             }
         }
         // Otherwise treat as URL navigation.
-        let Some(full_url) = normalize_url_input(new_content) else { return false; };
+        let Some(full_url) = normalize_url_input(new_content) else {
+            return false;
+        };
         // The cursor is on the URL bar the user just typed into. Once the page
         // is readable the app should drop them into its content, so they don't
         // have to press Right after every load. Armed here rather than inside
@@ -474,7 +505,9 @@ impl Provider for WebbrowserProvider {
         self.rebuild_path_cache();
     }
 
-    fn current_path(&self) -> &str { &self.path_cache }
+    fn current_path(&self) -> &str {
+        &self.path_cache
+    }
 
     fn set_current_path(&mut self, path: &str) {
         // Store the path as-is; clear segment tracking since we can't reliably
@@ -485,7 +518,9 @@ impl Provider for WebbrowserProvider {
 
     fn on_button_press(&mut self, function_name: &str) {
         // "submit:form_N" — find the submit button selector and click it.
-        let Some(form_n_str) = function_name.strip_prefix("submit:form_") else { return; };
+        let Some(form_n_str) = function_name.strip_prefix("submit:form_") else {
+            return;
+        };
         let form_n: usize = form_n_str.parse().unwrap_or(0);
 
         #[cfg(target_os = "windows")]
@@ -495,7 +530,9 @@ impl Provider for WebbrowserProvider {
 
         #[cfg(not(target_os = "windows"))]
         {
-            let (selector, match_index) = self.form_map.iter()
+            let (selector, match_index) = self
+                .form_map
+                .iter()
                 .find(|(key, node)| {
                     key.starts_with(&format!("form_{form_n}/"))
                         && matches!(node.kind, FormNodeKind::Submit)
@@ -504,7 +541,9 @@ impl Provider for WebbrowserProvider {
                 .unwrap_or_else(|| (html_submit_selector("", ""), 0));
 
             let guard = chromium_runtime().block_on(self.live.lock());
-            let Some(live) = guard.as_ref() else { return; };
+            let Some(live) = guard.as_ref() else {
+                return;
+            };
             let page = live.page.clone();
             let ready = Arc::clone(&self.ready_content);
             let url = self.current_url.clone();
@@ -526,13 +565,14 @@ impl Provider for WebbrowserProvider {
                     let _ = tokio::time::timeout(
                         tokio::time::Duration::from_secs(5),
                         page.evaluate(js),
-                    ).await;
+                    )
+                    .await;
                     // Wait for navigation to settle after click.
                     tokio::time::sleep(tokio::time::Duration::from_millis(2500)).await;
-                    if let Ok(Ok(html)) = tokio::time::timeout(
-                        tokio::time::Duration::from_secs(10),
-                        page.content(),
-                    ).await {
+                    if let Ok(Ok(html)) =
+                        tokio::time::timeout(tokio::time::Duration::from_secs(10), page.content())
+                            .await
+                    {
                         // A submit can land on a bot check just as a navigation
                         // can, so the response goes through the same renderer.
                         let (elements, form_map) =
@@ -549,7 +589,10 @@ impl Provider for WebbrowserProvider {
     fn tick(&mut self) -> bool {
         let content = self.ready_content.lock().ok().and_then(|mut g| g.take());
         if let Some((elements, form_map)) = content {
-            self.cached_page = Some(CachedPage { url: self.current_url.clone(), elements });
+            self.cached_page = Some(CachedPage {
+                url: self.current_url.clone(),
+                elements,
+            });
             self.form_map = form_map;
             // Submit-response page is now showing: old typed values no longer
             // apply to any field on this page.  Clear them so a subsequent
@@ -582,7 +625,8 @@ impl Provider for WebbrowserProvider {
                     tokio::time::timeout(
                         tokio::time::Duration::from_millis(500),
                         live.session.browser.execute(CloseParams::default()),
-                    ).await
+                    )
+                    .await
                 });
             }
         }
@@ -633,7 +677,8 @@ impl WebbrowserProvider {
                     tokio::time::timeout(
                         tokio::time::Duration::from_secs(5),
                         page.execute(ClearBrowserCookiesParams::default()),
-                    ).await
+                    )
+                    .await
                 });
                 if !matches!(res, Ok(Ok(_))) {
                     *error = "Could not clear cookies (browser not responding)".to_owned();
@@ -656,8 +701,12 @@ impl WebbrowserProvider {
 /// single-profile layouts may put them at `<profile>/Cookies`.
 fn remove_cookie_files(profile: &std::path::Path) {
     for rel in [
-        "Default/Cookies", "Default/Cookies-journal", "Default/Cookies-wal",
-        "Cookies", "Cookies-journal", "Cookies-wal",
+        "Default/Cookies",
+        "Default/Cookies-journal",
+        "Default/Cookies-wal",
+        "Cookies",
+        "Cookies-journal",
+        "Cookies-wal",
     ] {
         let _ = std::fs::remove_file(profile.join(rel));
     }
@@ -676,8 +725,7 @@ fn extract_form_key(path: &str) -> Option<String> {
     let trimmed = path.trim_start_matches('/');
     let segments: Vec<&str> = trimmed.split('/').collect();
     let start = segments.iter().position(|seg| {
-        seg.starts_with("form_")
-            && seg[5..].chars().next().is_some_and(|c| c.is_ascii_digit())
+        seg.starts_with("form_") && seg[5..].chars().next().is_some_and(|c| c.is_ascii_digit())
     })?;
     Some(segments[start..].join("/"))
 }
@@ -700,7 +748,13 @@ fn js_quote(s: &str) -> String {
 /// when `form_index == 0` (a control outside any `<form>`). When `submit` is set
 /// (a form-less search box), an Enter key sequence is dispatched afterwards so the
 /// site's search handler fires, since there is no submit button to click.
-fn build_fill_js(form_index: usize, match_index: usize, selector: &str, value: &str, submit: bool) -> String {
+fn build_fill_js(
+    form_index: usize,
+    match_index: usize,
+    selector: &str,
+    value: &str,
+    submit: bool,
+) -> String {
     let root = if form_index > 0 {
         format!("(document.forms[{}] || document)", form_index - 1)
     } else {
@@ -744,7 +798,9 @@ fn patch_form_field_in_tree(
     replacement: &str,
 ) -> bool {
     for elem in elems.iter_mut() {
-        let FfonElement::Obj(obj) = elem else { continue };
+        let FfonElement::Obj(obj) = elem else {
+            continue;
+        };
         if obj.key == form_name || obj.key.ends_with(form_name) {
             for child in obj.children.iter_mut() {
                 if let FfonElement::Str(s) = child {
@@ -768,7 +824,9 @@ fn patch_form_field_in_tree(
 /// tested without launching Chrome.
 fn normalize_url_input(input: &str) -> Option<String> {
     let trimmed = input.trim();
-    if trimmed.is_empty() { return None; }
+    if trimmed.is_empty() {
+        return None;
+    }
     if trimmed.contains("://") {
         Some(trimmed.to_owned())
     } else {
@@ -868,8 +926,11 @@ async fn navigate_and_get_html(page: &chromiumoxide::Page, url: &str) -> Result<
                 tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
             }
             accepted = tokio::time::timeout(t(5), try_accept_consent(page))
-                .await.unwrap_or(false);
-            if accepted { break; }
+                .await
+                .unwrap_or(false);
+            if accepted {
+                break;
+            }
         }
         if accepted {
             // Follow the accept round-trip (Google bounces through
@@ -881,7 +942,11 @@ async fn navigate_and_get_html(page: &chromiumoxide::Page, url: &str) -> Result<
             }
         }
         let post_url = tokio::time::timeout(t(5), page.url())
-            .await.ok().and_then(|r| r.ok()).flatten().unwrap_or_default();
+            .await
+            .ok()
+            .and_then(|r| r.ok())
+            .flatten()
+            .unwrap_or_default();
         if is_consent_wall_str(&post_url) || html_has_consent_wall(&html) {
             // The wall is what the site is serving, so hand it over as the page
             // and say what it is. Its accept button is often operable from here.
@@ -972,15 +1037,12 @@ async fn await_navigation_stable(
     let mut stable_since: Option<tokio::time::Instant> = None;
     loop {
         tokio::time::sleep(poll).await;
-        let url = tokio::time::timeout(
-            tokio::time::Duration::from_secs(3),
-            page.url(),
-        )
-        .await
-        .ok()
-        .and_then(|r| r.ok())
-        .flatten()
-        .unwrap_or_default();
+        let url = tokio::time::timeout(tokio::time::Duration::from_secs(3), page.url())
+            .await
+            .ok()
+            .and_then(|r| r.ok())
+            .flatten()
+            .unwrap_or_default();
 
         if url != last_url {
             last_url = url;
@@ -1013,7 +1075,10 @@ async fn submit_form_windows_async(
     let session = match launch_browser().await {
         Ok(s) => s,
         Err(e) => {
-            set_error(&error_slot, format!("Could not launch Chrome for submit: {e}"));
+            set_error(
+                &error_slot,
+                format!("Could not launch Chrome for submit: {e}"),
+            );
             return;
         }
     };
@@ -1082,7 +1147,13 @@ async fn submit_form_windows_inner(
             // changed under us between check and fill (impossible here).
             continue;
         };
-        let js = build_fill_js(node.form_index, node.match_index, &node.css_selector, value, false);
+        let js = build_fill_js(
+            node.form_index,
+            node.match_index,
+            &node.css_selector,
+            value,
+            false,
+        );
         tokio::time::timeout(t(5), page.evaluate(js))
             .await
             .map_err(|_| format!("Timed out filling field {form_key}"))?
@@ -1094,8 +1165,7 @@ async fn submit_form_windows_inner(
     let selector = fresh_form_map
         .iter()
         .find(|(key, node)| {
-            key.starts_with(&format!("form_{form_n}/"))
-                && matches!(node.kind, FormNodeKind::Submit)
+            key.starts_with(&format!("form_{form_n}/")) && matches!(node.kind, FormNodeKind::Submit)
         })
         .map(|(_, node)| node.css_selector.clone())
         .unwrap_or_else(|| html_submit_selector("", ""));
@@ -1130,7 +1200,10 @@ async fn submit_form_windows_inner(
         .flatten()
         .unwrap_or_else(|| url.to_owned());
 
-    Ok(page_to_ffon_with_forms(&PageLoad::plain(response_html), &response_url))
+    Ok(page_to_ffon_with_forms(
+        &PageLoad::plain(response_html),
+        &response_url,
+    ))
 }
 
 // ---------------------------------------------------------------------------
@@ -1139,8 +1212,7 @@ async fn submit_form_windows_inner(
 
 // Multi-thread runtime (2 workers) for chromiumoxide. Kept alive for the
 // process lifetime so repeated fetches reuse the same thread pool.
-static CHROMIUM_RUNTIME: std::sync::OnceLock<tokio::runtime::Runtime> =
-    std::sync::OnceLock::new();
+static CHROMIUM_RUNTIME: std::sync::OnceLock<tokio::runtime::Runtime> = std::sync::OnceLock::new();
 
 // ---------------------------------------------------------------------------
 // Windows: hide Chrome windows that appear during headed launch
@@ -1166,7 +1238,10 @@ static CHROMIUM_RUNTIME: std::sync::OnceLock<tokio::runtime::Runtime> =
 #[cfg(target_os = "windows")]
 mod win_hide {
     unsafe extern "system" {
-        fn EnumWindows(lp_enum_func: unsafe extern "system" fn(isize, isize) -> i32, l_param: isize) -> i32;
+        fn EnumWindows(
+            lp_enum_func: unsafe extern "system" fn(isize, isize) -> i32,
+            l_param: isize,
+        ) -> i32;
         fn GetWindowThreadProcessId(hwnd: isize, lp_dw_process_id: *mut u32) -> u32;
         fn IsWindowVisible(hwnd: isize) -> i32;
         fn OpenProcess(dw_desired_access: u32, b_inherit_handle: i32, dw_process_id: u32) -> isize;
@@ -1180,8 +1255,10 @@ mod win_hide {
         fn SetWindowPos(
             hwnd: isize,
             hwnd_insert_after: isize,
-            x: i32, y: i32,
-            cx: i32, cy: i32,
+            x: i32,
+            y: i32,
+            cx: i32,
+            cy: i32,
             u_flags: u32,
         ) -> i32;
         fn GetForegroundWindow() -> isize;
@@ -1244,8 +1321,13 @@ mod win_hide {
             }
             let our_tid = GetCurrentThreadId();
             let mut _pid: u32 = 0;
-            let fg_tid = if fg != 0 { GetWindowThreadProcessId(fg, &mut _pid) } else { 0 };
-            let attached = fg_tid != 0 && fg_tid != our_tid && AttachThreadInput(our_tid, fg_tid, 1) != 0;
+            let fg_tid = if fg != 0 {
+                GetWindowThreadProcessId(fg, &mut _pid)
+            } else {
+                0
+            };
+            let attached =
+                fg_tid != 0 && fg_tid != our_tid && AttachThreadInput(our_tid, fg_tid, 1) != 0;
             SetForegroundWindow(hwnd);
             BringWindowToTop(hwnd);
             if attached {
@@ -1256,9 +1338,9 @@ mod win_hide {
 
     const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x1000;
     /// Do not resize the window.
-    const SWP_NOSIZE:     u32 = 0x0001;
+    const SWP_NOSIZE: u32 = 0x0001;
     /// Do not change z-order.
-    const SWP_NOZORDER:   u32 = 0x0004;
+    const SWP_NOZORDER: u32 = 0x0004;
     /// Do not activate/focus the window.
     const SWP_NOACTIVATE: u32 = 0x0010;
 
@@ -1305,37 +1387,46 @@ mod win_hide {
 
         let mut saw_new = false;
         for hwnd in current {
-            if before.contains(&hwnd) { continue; }
-            if unsafe { IsWindowVisible(hwnd) } == 0 { continue; }
+            if before.contains(&hwnd) {
+                continue;
+            }
+            if unsafe { IsWindowVisible(hwnd) } == 0 {
+                continue;
+            }
 
             // Get the process ID for this window.
             let mut pid: u32 = 0;
             unsafe { GetWindowThreadProcessId(hwnd, &mut pid) };
-            if pid == 0 { continue; }
+            if pid == 0 {
+                continue;
+            }
 
             // Open the process to query its image name.
-            let h_proc = unsafe {
-                OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid)
-            };
-            if h_proc == 0 { continue; }
+            let h_proc = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
+            if h_proc == 0 {
+                continue;
+            }
 
             let mut buf = [0u16; 512];
             let mut len = buf.len() as u32;
-            let ok = unsafe {
-                QueryFullProcessImageNameW(h_proc, 0, buf.as_mut_ptr(), &mut len)
-            };
+            let ok = unsafe { QueryFullProcessImageNameW(h_proc, 0, buf.as_mut_ptr(), &mut len) };
             unsafe { CloseHandle(h_proc) };
 
-            if ok == 0 { continue; }
+            if ok == 0 {
+                continue;
+            }
             let path = String::from_utf16_lossy(&buf[..len as usize]).to_lowercase();
             if path.contains("chrome") || path.contains("msedge") {
                 // Move off-screen without resizing, changing z-order, or
                 // activating.  Never hide — see module comment.
                 unsafe {
                     SetWindowPos(
-                        hwnd, 0,
-                        OFFSCREEN_X, OFFSCREEN_Y,
-                        0, 0,
+                        hwnd,
+                        0,
+                        OFFSCREEN_X,
+                        OFFSCREEN_Y,
+                        0,
+                        0,
                         SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
                     );
                 }
@@ -1370,8 +1461,8 @@ mod win_hide {
 ///    visible window. This is a last resort, not the normal path.
 #[cfg(target_os = "linux")]
 fn chrome_via_xvfb() -> Result<std::path::PathBuf, String> {
-    let chrome = find_chrome_executable()
-        .ok_or_else(|| "Chrome/Chromium not found in PATH".to_owned())?;
+    let chrome =
+        find_chrome_executable().ok_or_else(|| "Chrome/Chromium not found in PATH".to_owned())?;
     let chrome = chrome.to_string_lossy();
 
     let script = if which::which("xvfb-run").is_ok() {
@@ -1403,8 +1494,7 @@ fn chrome_via_xvfb() -> Result<std::path::PathBuf, String> {
     };
 
     let wrapper = std::env::temp_dir().join("sicompass-xvfb-chrome.sh");
-    std::fs::write(&wrapper, &script)
-        .map_err(|e| format!("failed to write Xvfb wrapper: {e}"))?;
+    std::fs::write(&wrapper, &script).map_err(|e| format!("failed to write Xvfb wrapper: {e}"))?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -1455,13 +1545,16 @@ fn find_chrome_executable() -> Option<std::path::PathBuf> {
     #[cfg(target_os = "windows")]
     {
         let env_candidates: &[(&str, &str)] = &[
-            ("ProgramFiles",      r"Google\Chrome\Application\chrome.exe"),
-            ("ProgramFiles",      r"Chromium\Application\chrome.exe"),
-            ("ProgramFiles",      r"Microsoft\Edge\Application\msedge.exe"),
+            ("ProgramFiles", r"Google\Chrome\Application\chrome.exe"),
+            ("ProgramFiles", r"Chromium\Application\chrome.exe"),
+            ("ProgramFiles", r"Microsoft\Edge\Application\msedge.exe"),
             ("ProgramFiles(x86)", r"Google\Chrome\Application\chrome.exe"),
             ("ProgramFiles(x86)", r"Chromium\Application\chrome.exe"),
-            ("ProgramFiles(x86)", r"Microsoft\Edge\Application\msedge.exe"),
-            ("LocalAppData",      r"Google\Chrome\Application\chrome.exe"),
+            (
+                "ProgramFiles(x86)",
+                r"Microsoft\Edge\Application\msedge.exe",
+            ),
+            ("LocalAppData", r"Google\Chrome\Application\chrome.exe"),
         ];
         for (env, rel) in env_candidates {
             if let Ok(base) = std::env::var(env) {
@@ -1550,7 +1643,8 @@ async fn launch_browser() -> Result<BrowserSession, String> {
         .chrome_executable(exe)
         .build()
         .map_err(|e| format!("chromium config error: {e}"))?;
-    let (browser, mut handler) = Browser::launch(config).await
+    let (browser, mut handler) = Browser::launch(config)
+        .await
         .map_err(|e| format!("failed to launch Chrome (xvfb): {e}"))?;
     tokio::spawn(async move { while handler.next().await.is_some() {} });
     Ok(BrowserSession { browser })
@@ -1628,14 +1722,20 @@ async fn launch_browser() -> Result<BrowserSession, String> {
         }
     });
 
-    let (browser, mut handler) = Browser::launch(config).await.map_err(|e| format!(
-        "failed to launch Chrome at {} — \
+    let (browser, mut handler) = Browser::launch(config).await.map_err(|e| {
+        format!(
+            "failed to launch Chrome at {} — \
          is Chrome installed? (set SICOMPASS_CHROME_PATH to override): {e}",
-        exe.display()
-    ))?;
+            exe.display()
+        )
+    })?;
     tokio::spawn(async move { while handler.next().await.is_some() {} });
 
-    Ok(BrowserSession { browser, _hider_stop: stop_tx, prev_foreground })
+    Ok(BrowserSession {
+        browser,
+        _hider_stop: stop_tx,
+        prev_foreground,
+    })
 }
 
 /// macOS / other: headed Chrome via chromiumoxide's built-in launcher.
@@ -1662,16 +1762,16 @@ async fn launch_browser() -> Result<BrowserSession, String> {
         .chrome_executable(&exe)
         .build()
         .map_err(|e| format!("chromium config error: {e}"))?;
-    let (browser, mut handler) = Browser::launch(config).await
-        .map_err(|e| format!(
+    let (browser, mut handler) = Browser::launch(config).await.map_err(|e| {
+        format!(
             "failed to launch Chrome at {} — \
              is Chrome installed? (set SICOMPASS_CHROME_PATH to override): {e}",
             exe.display()
-        ))?;
+        )
+    })?;
     tokio::spawn(async move { while handler.next().await.is_some() {} });
     Ok(BrowserSession { browser })
 }
-
 
 // Full stealth script injected before every page load.
 // Based on puppeteer-extra-plugin-stealth patches — hides headless Chrome from
@@ -1847,10 +1947,13 @@ const INTERSTITIAL_TEXT_LIMIT: usize = 800;
 /// Total visible text in a rendered page, used to tell a challenge page apart
 /// from a real page with a CAPTCHA widget somewhere on it.
 fn ffon_text_len(elements: &[FfonElement]) -> usize {
-    elements.iter().map(|e| match e {
-        FfonElement::Str(s) => s.chars().count(),
-        FfonElement::Obj(o) => o.key.chars().count() + ffon_text_len(&o.children),
-    }).sum()
+    elements
+        .iter()
+        .map(|e| match e {
+            FfonElement::Str(s) => s.chars().count(),
+            FfonElement::Obj(o) => o.key.chars().count() + ffon_text_len(&o.children),
+        })
+        .sum()
 }
 
 /// A one-line notice when `html` is a bot check or CAPTCHA rather than the page
@@ -1884,7 +1987,10 @@ struct PageLoad {
 
 impl PageLoad {
     fn plain(html: String) -> Self {
-        PageLoad { html, notices: Vec::new() }
+        PageLoad {
+            html,
+            notices: Vec::new(),
+        }
     }
 }
 
@@ -1892,7 +1998,10 @@ impl PageLoad {
 /// the load flow recorded, then whatever the content itself gives away.
 fn page_to_ffon_with_forms(load: &PageLoad, url: &str) -> (Vec<FfonElement>, FormMap) {
     let (mut elements, form_map) = html_to_ffon_with_forms(&load.html, url);
-    let notices: Vec<String> = load.notices.iter().cloned()
+    let notices: Vec<String> = load
+        .notices
+        .iter()
+        .cloned()
         .chain(challenge_notice(&load.html, &elements))
         .collect();
     for (i, notice) in notices.into_iter().enumerate() {
@@ -1905,7 +2014,9 @@ fn page_to_ffon_with_forms(load: &PageLoad, url: &str) -> (Vec<FfonElement>, For
 /// Used by the main app's `fetch_url_to_elements` bridge.
 pub fn fetch_url_to_ffon(url: &str) -> Vec<FfonElement> {
     if test_no_launch() {
-        return vec![FfonElement::new_str(format!("<test-no-launch>{url}</test-no-launch>"))];
+        return vec![FfonElement::new_str(format!(
+            "<test-no-launch>{url}</test-no-launch>"
+        ))];
     }
     match fetch_html_chromium(url) {
         Ok(load) => page_to_ffon_with_forms(&load, url).0,
@@ -1915,12 +2026,9 @@ pub fn fetch_url_to_ffon(url: &str) -> Vec<FfonElement> {
 
 fn fetch_html_chromium(url: &str) -> Result<PageLoad, String> {
     chromium_runtime().block_on(async move {
-        tokio::time::timeout(
-            tokio::time::Duration::from_secs(60),
-            fetch_html_inner(url),
-        )
-        .await
-        .unwrap_or_else(|_| Err(format!("timed out loading {url} (60 s)")))
+        tokio::time::timeout(tokio::time::Duration::from_secs(60), fetch_html_inner(url))
+            .await
+            .unwrap_or_else(|_| Err(format!("timed out loading {url} (60 s)")))
     })
 }
 
@@ -1994,8 +2102,11 @@ async fn fetch_page(session: &BrowserSession, url: &str) -> Result<PageLoad, Str
                 tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
             }
             accepted = tokio::time::timeout(t(5), try_accept_consent(&page))
-                .await.unwrap_or(false);
-            if accepted { break; }
+                .await
+                .unwrap_or(false);
+            if accepted {
+                break;
+            }
         }
         if accepted {
             // Follow the accept round-trip by URL, then wait for the reloaded
@@ -2008,7 +2119,11 @@ async fn fetch_page(session: &BrowserSession, url: &str) -> Result<PageLoad, Str
             }
         }
         let post_url = tokio::time::timeout(t(5), page.url())
-            .await.ok().and_then(|r| r.ok()).flatten().unwrap_or_default();
+            .await
+            .ok()
+            .and_then(|r| r.ok())
+            .flatten()
+            .unwrap_or_default();
         if is_consent_wall_str(&post_url) || html_has_consent_wall(&html) {
             // Capture a snippet of the page HTML to diagnose why acceptance failed.
             let snippet: String = html.chars().take(2000).collect();
@@ -2088,27 +2203,57 @@ const CMP_SELECTORS: &[&str] = &[
 /// Checked before ACCEPT_KEYWORDS to prevent clicking "decline all" buttons
 /// whose text happens to contain an accept keyword fragment.
 const REJECT_KEYWORDS: &[&str] = &[
-    "reject", "decline", "weiger", "refuser", "ablehnen", "rifiuta", "rechazar",
-    "only necessary", "alleen noodzakelijke", "nur notwendige",
-    "manage", "settings", "instellingen", "personnaliser", "preferences",
+    "reject",
+    "decline",
+    "weiger",
+    "refuser",
+    "ablehnen",
+    "rifiuta",
+    "rechazar",
+    "only necessary",
+    "alleen noodzakelijke",
+    "nur notwendige",
+    "manage",
+    "settings",
+    "instellingen",
+    "personnaliser",
+    "preferences",
 ];
 
 /// Button text substrings indicating an "accept all" action, in 6 languages.
 const ACCEPT_KEYWORDS: &[&str] = &[
     // English
-    "accept all", "allow all", "agree and continue", "i accept", "got it",
+    "accept all",
+    "allow all",
+    "agree and continue",
+    "i accept",
+    "got it",
     // Dutch
-    "alles accepteren", "accepteer alles", "akkoord", "ja, ik accepteer",
-    "ik ga akkoord", "alles toestaan",
+    "alles accepteren",
+    "accepteer alles",
+    "akkoord",
+    "ja, ik accepteer",
+    "ik ga akkoord",
+    "alles toestaan",
     // French
-    "tout accepter", "j'accepte", "accepter et fermer", "continuer et accepter",
+    "tout accepter",
+    "j'accepte",
+    "accepter et fermer",
+    "continuer et accepter",
     // German
-    "alle akzeptieren", "alles annehmen", "zustimmen", "einverstanden",
+    "alle akzeptieren",
+    "alles annehmen",
+    "zustimmen",
+    "einverstanden",
     "akzeptieren und weiter",
     // Italian
-    "accetta tutto", "accetto", "acconsento",
+    "accetta tutto",
+    "accetto",
+    "acconsento",
     // Spanish
-    "aceptar todo", "acepto", "aceptar y continuar",
+    "aceptar todo",
+    "acepto",
+    "aceptar y continuar",
 ];
 
 /// Returns `true` if the button text looks like a reject/settings action.
@@ -2160,11 +2305,15 @@ async fn try_accept_consent(page: &chromiumoxide::Page) -> bool {
         } catch(_) {}
         return false;
     })()"#;
-    let dpg_accepted = page.evaluate(dpg_js).await
+    let dpg_accepted = page
+        .evaluate(dpg_js)
+        .await
         .ok()
         .and_then(|r| r.into_value::<bool>().ok())
         .unwrap_or(false);
-    if dpg_accepted { return true; }
+    if dpg_accepted {
+        return true;
+    }
 
     // ── Strategy 1.5: Google / YouTube consent ───────────────────────────────
     // Google serves its GDPR wall inline (see html_has_consent_wall) and ignores
@@ -2176,7 +2325,11 @@ async fn try_accept_consent(page: &chromiumoxide::Page) -> bool {
     if let Ok(Some(url)) = page.url().await {
         if url.contains("google.") || url.contains("youtube.") {
             use chromiumoxide::cdp::browser_protocol::network::CookieParam;
-            let domain = if url.contains("youtube.") { ".youtube.com" } else { ".google.com" };
+            let domain = if url.contains("youtube.") {
+                ".youtube.com"
+            } else {
+                ".google.com"
+            };
             let cookies: Vec<CookieParam> = [
                 // SOCS is Google's current consent cookie; this value records an
                 // "accept all" choice.  CONSENT is the legacy fallback.
@@ -2185,26 +2338,30 @@ async fn try_accept_consent(page: &chromiumoxide::Page) -> bool {
             ]
             .iter()
             .filter_map(|(n, v)| {
-                CookieParam::builder().name(*n).value(*v)
-                    .domain(domain).path("/").build().ok()
+                CookieParam::builder()
+                    .name(*n)
+                    .value(*v)
+                    .domain(domain)
+                    .path("/")
+                    .build()
+                    .ok()
             })
             .collect();
             if !cookies.is_empty() && page.set_cookies(cookies).await.is_ok() {
                 // Reload so the server serves the real page now that consent is set.
-                let _ = tokio::time::timeout(
-                    tokio::time::Duration::from_secs(15),
-                    page.goto(&url),
-                ).await;
+                let _ = tokio::time::timeout(tokio::time::Duration::from_secs(15), page.goto(&url))
+                    .await;
                 return true;
             }
         }
     }
 
     // ── Strategy 2: generic button click ────────────────────────────────────
-    let cmp_sels    = js_array(CMP_SELECTORS);
-    let reject_kws  = js_array(REJECT_KEYWORDS);
-    let accept_kws  = js_array(ACCEPT_KEYWORDS);
-    let js = format!(r#"(function() {{
+    let cmp_sels = js_array(CMP_SELECTORS);
+    let reject_kws = js_array(REJECT_KEYWORDS);
+    let accept_kws = js_array(ACCEPT_KEYWORDS);
+    let js = format!(
+        r#"(function() {{
         const cmpSels   = {cmp_sels};
         const rejectKws = {reject_kws};
         const acceptKws = {accept_kws};
@@ -2244,8 +2401,10 @@ async fn try_accept_consent(page: &chromiumoxide::Page) -> bool {
         }}
 
         return false;
-    }})()"#);
-    page.evaluate(js).await
+    }})()"#
+    );
+    page.evaluate(js)
+        .await
         .ok()
         .and_then(|r| r.into_value::<bool>().ok())
         .unwrap_or(false)
@@ -2272,32 +2431,23 @@ fn is_consent_wall_str(url: &str) -> bool {
 /// sibling `/d` endpoint is *not* usable as a marker: it persists in a footer
 /// privacy link on the accepted page and would cause false positives.)
 fn html_has_consent_wall(html: &str) -> bool {
-    const MARKERS: &[&str] = &[
-        "consent.google.com/save",
-        "consent.youtube.com/save",
-    ];
+    const MARKERS: &[&str] = &["consent.google.com/save", "consent.youtube.com/save"];
     MARKERS.iter().any(|m| html.contains(m))
 }
 
 /// Poll `page.url()` every 250 ms until we are no longer on a consent wall,
 /// or until `budget` elapses.  Returns `true` if we left the wall.
-async fn wait_until_off_consent(
-    page: &chromiumoxide::Page,
-    budget: tokio::time::Duration,
-) -> bool {
+async fn wait_until_off_consent(page: &chromiumoxide::Page, budget: tokio::time::Duration) -> bool {
     let interval = tokio::time::Duration::from_millis(250);
     let deadline = tokio::time::Instant::now() + budget;
     loop {
         tokio::time::sleep(interval).await;
-        let url = tokio::time::timeout(
-            tokio::time::Duration::from_secs(3),
-            page.url(),
-        )
-        .await
-        .ok()
-        .and_then(|r| r.ok())
-        .flatten()
-        .unwrap_or_default();
+        let url = tokio::time::timeout(tokio::time::Duration::from_secs(3), page.url())
+            .await
+            .ok()
+            .and_then(|r| r.ok())
+            .flatten()
+            .unwrap_or_default();
         if !is_consent_wall_str(&url) {
             return true;
         }
@@ -2321,11 +2471,8 @@ async fn wait_for_consent_content_cleared(
     let deadline = tokio::time::Instant::now() + budget;
     let mut last = None;
     loop {
-        if let Ok(Ok(html)) = tokio::time::timeout(
-            tokio::time::Duration::from_secs(15),
-            page.content(),
-        )
-        .await
+        if let Ok(Ok(html)) =
+            tokio::time::timeout(tokio::time::Duration::from_secs(15), page.content()).await
         {
             let cleared = !html_has_consent_wall(&html);
             last = Some(html);
@@ -2340,7 +2487,6 @@ async fn wait_for_consent_content_cleared(
     }
 }
 
-
 /// Poll `page.url()` every 300 ms until the URL stabilises or a consent-wall
 /// URL is detected, up to `budget`.  Returns the final URL seen.
 ///
@@ -2352,19 +2498,16 @@ async fn await_stable_url(page: &chromiumoxide::Page, budget: tokio::time::Durat
     const MIN_WAIT: tokio::time::Duration = tokio::time::Duration::from_millis(1500);
     let poll_interval = tokio::time::Duration::from_millis(300);
     let deadline = tokio::time::Instant::now() + budget;
-    let start    = tokio::time::Instant::now();
+    let start = tokio::time::Instant::now();
     let mut prev_url = String::new();
     loop {
         tokio::time::sleep(poll_interval).await;
-        let url = tokio::time::timeout(
-            tokio::time::Duration::from_secs(3),
-            page.url(),
-        )
-        .await
-        .ok()
-        .and_then(|r| r.ok())
-        .flatten()
-        .unwrap_or_default();
+        let url = tokio::time::timeout(tokio::time::Duration::from_secs(3), page.url())
+            .await
+            .ok()
+            .and_then(|r| r.ok())
+            .flatten()
+            .unwrap_or_default();
 
         if is_consent_wall_str(&url) {
             return url; // Consent wall detected — stop early
@@ -2395,11 +2538,15 @@ mod tests {
             "<html><body><h2>Section</h2><p>Content</p></body></html>",
             "https://example.com",
         );
-        let section = result.iter().find(|e| e.as_obj().map_or(false, |o| o.key == "Section"));
+        let section = result
+            .iter()
+            .find(|e| e.as_obj().map_or(false, |o| o.key == "Section"));
         assert!(section.is_some(), "h2 should become an Obj");
         let children = &section.unwrap().as_obj().unwrap().children;
         assert!(
-            children.iter().any(|c| c.as_str().map_or(false, |s| s.contains("Content"))),
+            children
+                .iter()
+                .any(|c| c.as_str().map_or(false, |s| s.contains("Content"))),
             "paragraph should be a child of the heading, not a sibling"
         );
     }
@@ -2410,14 +2557,20 @@ mod tests {
             "<html><body><h1>Top</h1><h2>Sub</h2><p>Leaf</p></body></html>",
             "https://example.com",
         );
-        let top = result.iter().find(|e| e.as_obj().map_or(false, |o| o.key == "Top"));
+        let top = result
+            .iter()
+            .find(|e| e.as_obj().map_or(false, |o| o.key == "Top"));
         assert!(top.is_some(), "h1 should be at the top level");
         let top_children = &top.unwrap().as_obj().unwrap().children;
-        let sub = top_children.iter().find(|e| e.as_obj().map_or(false, |o| o.key == "Sub"));
+        let sub = top_children
+            .iter()
+            .find(|e| e.as_obj().map_or(false, |o| o.key == "Sub"));
         assert!(sub.is_some(), "h2 should be a child of h1");
         let sub_children = &sub.unwrap().as_obj().unwrap().children;
         assert!(
-            sub_children.iter().any(|c| c.as_str().map_or(false, |s| s.contains("Leaf"))),
+            sub_children
+                .iter()
+                .any(|c| c.as_str().map_or(false, |s| s.contains("Leaf"))),
             "paragraph should be a child of h2"
         );
     }
@@ -2453,11 +2606,16 @@ mod tests {
         // ...and no single string swallows the entire main content.
         fn any_blob(elems: &[FfonElement]) -> bool {
             elems.iter().any(|e| match e {
-                FfonElement::Str(s) => s.contains("First paragraph") && s.contains("Second paragraph"),
+                FfonElement::Str(s) => {
+                    s.contains("First paragraph") && s.contains("Second paragraph")
+                }
                 FfonElement::Obj(o) => any_blob(&o.children),
             })
         }
-        assert!(!any_blob(&result), "content collapsed into one blob: {result:?}");
+        assert!(
+            !any_blob(&result),
+            "content collapsed into one blob: {result:?}"
+        );
     }
 
     #[test]
@@ -2466,8 +2624,12 @@ mod tests {
             "<html><body><p>Hello\n    world\t  here</p></body></html>",
             "https://example.com",
         );
-        assert!(result.iter().any(|e| e.as_str().map_or(false, |s| s == "Hello world here")),
-            "internal whitespace should be collapsed to single spaces");
+        assert!(
+            result
+                .iter()
+                .any(|e| e.as_str().map_or(false, |s| s == "Hello world here")),
+            "internal whitespace should be collapsed to single spaces"
+        );
     }
 
     #[test]
@@ -2483,7 +2645,11 @@ mod tests {
             "<html><body><p>Hello world</p></body></html>",
             "https://example.com",
         );
-        assert!(result.iter().any(|e| e.as_str().map_or(false, |s| s.contains("Hello world"))));
+        assert!(
+            result
+                .iter()
+                .any(|e| e.as_str().map_or(false, |s| s.contains("Hello world")))
+        );
     }
 
     #[test]
@@ -2492,7 +2658,11 @@ mod tests {
             "<html><body><h1>Title</h1></body></html>",
             "https://example.com",
         );
-        assert!(result.iter().any(|e| e.as_obj().map_or(false, |o| o.key.contains("Title"))));
+        assert!(
+            result
+                .iter()
+                .any(|e| e.as_obj().map_or(false, |o| o.key.contains("Title")))
+        );
     }
 
     #[test]
@@ -2507,7 +2677,11 @@ mod tests {
                 assert!(!s.contains("alert"));
             }
         }
-        assert!(result.iter().any(|e| e.as_str().map_or(false, |s| s.contains("visible"))));
+        assert!(
+            result
+                .iter()
+                .any(|e| e.as_str().map_or(false, |s| s.contains("visible")))
+        );
     }
 
     #[test]
@@ -2518,13 +2692,20 @@ mod tests {
         );
         // Landmark elements are now wrapped in a named Obj, so the nav link is
         // nested inside the "navigation" container rather than at the top level.
-        let nav = result.iter().find_map(|e| e.as_obj())
+        let nav = result
+            .iter()
+            .find_map(|e| e.as_obj())
             .filter(|o| o.key.starts_with("navigation"))
             .expect("nav should be wrapped in a navigation Obj");
         let found = nav.children.iter().any(|c| {
-            c.as_obj().map_or(false, |o| o.key.contains("<link>") && o.key.contains("Home"))
+            c.as_obj().map_or(false, |o| {
+                o.key.contains("<link>") && o.key.contains("Home")
+            })
         });
-        assert!(found, "nav link should render inside the navigation Obj, got: {result:?}");
+        assert!(
+            found,
+            "nav link should render inside the navigation Obj, got: {result:?}"
+        );
     }
 
     #[test]
@@ -2534,10 +2715,19 @@ mod tests {
             "https://example.com",
         );
         // The footer's text is now nested inside the "footer" landmark Obj.
-        let footer = result.iter().find_map(|e| e.as_obj()).filter(|o| o.key == "footer")
+        let footer = result
+            .iter()
+            .find_map(|e| e.as_obj())
+            .filter(|o| o.key == "footer")
             .expect("footer should be wrapped in a footer Obj");
-        let found = footer.children.iter().any(|c| c.as_str().map_or(false, |s| s.contains("Copyright")));
-        assert!(found, "footer children should render inside the footer Obj, got: {result:?}");
+        let found = footer
+            .children
+            .iter()
+            .any(|c| c.as_str().map_or(false, |s| s.contains("Copyright")));
+        assert!(
+            found,
+            "footer children should render inside the footer Obj, got: {result:?}"
+        );
     }
 
     #[test]
@@ -2548,7 +2738,9 @@ mod tests {
         );
         // Links inside <p> are now Obj elements with <link> in the key
         let found = result.iter().any(|e| {
-            e.as_obj().map_or(false, |o| o.key.contains("<link>") && o.key.contains("rust-lang.org"))
+            e.as_obj().map_or(false, |o| {
+                o.key.contains("<link>") && o.key.contains("rust-lang.org")
+            })
         });
         assert!(found, "link should be an Obj with <link> tag in key");
     }
@@ -2561,9 +2753,13 @@ mod tests {
         );
         // Links inside <p> are now Obj elements with <link> in the key
         let found = result.iter().any(|e| {
-            e.as_obj().map_or(false, |o| o.key.contains("example.com/page"))
+            e.as_obj()
+                .map_or(false, |o| o.key.contains("example.com/page"))
         });
-        assert!(found, "relative link should be resolved and appear as Obj key");
+        assert!(
+            found,
+            "relative link should be resolved and appear as Obj key"
+        );
     }
 
     #[test]
@@ -2573,9 +2769,9 @@ mod tests {
             "https://example.com",
         );
         // The navigability pass enriches the generic "list" key from its items.
-        let list = result.iter().find(|e| {
-            e.as_obj().map_or(false, |o| o.key.starts_with("list"))
-        });
+        let list = result
+            .iter()
+            .find(|e| e.as_obj().map_or(false, |o| o.key.starts_with("list")));
         assert!(list.is_some());
         let children = &list.unwrap().as_obj().unwrap().children;
         assert_eq!(children.len(), 2);
@@ -2590,7 +2786,8 @@ mod tests {
             "https://example.com",
         );
         let list = result.iter().find(|e| {
-            e.as_obj().map_or(false, |o| o.key.starts_with("ordered list"))
+            e.as_obj()
+                .map_or(false, |o| o.key.starts_with("ordered list"))
         });
         assert!(list.is_some());
         let children = &list.unwrap().as_obj().unwrap().children;
@@ -2604,9 +2801,9 @@ mod tests {
             "<html><body><table><tr><td>A</td><td>B</td></tr></table></body></html>",
             "https://example.com",
         );
-        let row = result.iter().find(|e| {
-            e.as_str().map_or(false, |s| s.contains(" | "))
-        });
+        let row = result
+            .iter()
+            .find(|e| e.as_str().map_or(false, |s| s.contains(" | ")));
         assert!(row.is_some());
         assert!(row.unwrap().as_str().unwrap().contains("A | B"));
     }
@@ -2618,7 +2815,8 @@ mod tests {
             "https://example.com",
         );
         let img = result.iter().find(|e| {
-            e.as_str().map_or(false, |s| s.contains("A diagram") && s.contains("[img]"))
+            e.as_str()
+                .map_or(false, |s| s.contains("A diagram") && s.contains("[img]"))
         });
         assert!(img.is_some());
     }
@@ -2714,9 +2912,13 @@ mod tests {
             "https://example.com",
         );
         let found = result.iter().any(|e| {
-            e.as_obj().map_or(false, |o| o.key.contains("<link>#foo</link>"))
+            e.as_obj()
+                .map_or(false, |o| o.key.contains("<link>#foo</link>"))
         });
-        assert!(found, "fragment link should become an Obj with <link>#foo</link>: {result:?}");
+        assert!(
+            found,
+            "fragment link should become an Obj with <link>#foo</link>: {result:?}"
+        );
     }
 
     #[test]
@@ -2725,10 +2927,15 @@ mod tests {
             "<html><body><h2 id=\"bar\">Section</h2></body></html>",
             "https://example.com",
         );
-        let heading = result.iter().find(|e| e.as_obj().map_or(false, |o| o.key.contains("Section")));
+        let heading = result
+            .iter()
+            .find(|e| e.as_obj().map_or(false, |o| o.key.contains("Section")));
         assert!(heading.is_some(), "heading should exist: {result:?}");
         let key = &heading.unwrap().as_obj().unwrap().key;
-        assert!(key.contains("<id>bar</id>"), "heading key should contain <id>bar</id>: {key}");
+        assert!(
+            key.contains("<id>bar</id>"),
+            "heading key should contain <id>bar</id>: {key}"
+        );
     }
 
     #[test]
@@ -2743,7 +2950,10 @@ mod tests {
             FfonElement::Str(s) => s.contains("<id>x</id>"),
             FfonElement::Obj(o) => o.key.contains("<id>x</id>"),
         });
-        assert!(has_id_tag, "first element inside <main id=x> should have <id>x</id>: {result:?}");
+        assert!(
+            has_id_tag,
+            "first element inside <main id=x> should have <id>x</id>: {result:?}"
+        );
     }
 
     #[test]
@@ -2754,9 +2964,14 @@ mod tests {
         );
         // The list wrapper Obj (not an li) should carry the id tag.
         let list = result.iter().find(|e| {
-            e.as_obj().map_or(false, |o| o.key.contains("list") && o.key.contains("<id>things</id>"))
+            e.as_obj().map_or(false, |o| {
+                o.key.contains("list") && o.key.contains("<id>things</id>")
+            })
         });
-        assert!(list.is_some(), "list wrapper should have <id>things</id>: {result:?}");
+        assert!(
+            list.is_some(),
+            "list wrapper should have <id>things</id>: {result:?}"
+        );
         // Items should NOT have the id tag
         if let Some(FfonElement::Obj(l)) = list {
             let item_has_id = l.children.iter().any(|c| match c {
@@ -2779,7 +2994,8 @@ mod tests {
         );
         // Should contain a link obj pointing to #foo
         let has_link = result.iter().any(|e| {
-            e.as_obj().map_or(false, |o| o.key.contains("<link>#foo</link>"))
+            e.as_obj()
+                .map_or(false, |o| o.key.contains("<link>#foo</link>"))
         });
         assert!(has_link, "should have a navigable link to #foo: {result:?}");
         // Should contain an element tagged with <id>foo</id>
@@ -2787,7 +3003,10 @@ mod tests {
             FfonElement::Str(s) => s.contains("<id>foo</id>"),
             FfonElement::Obj(o) => o.key.contains("<id>foo</id>"),
         });
-        assert!(has_target, "should have a target element with <id>foo</id>: {result:?}");
+        assert!(
+            has_target,
+            "should have a target element with <id>foo</id>: {result:?}"
+        );
     }
 
     // ---- is_consent_wall unit tests ----
@@ -2806,27 +3025,37 @@ mod tests {
 
     #[test]
     fn test_is_consent_wall_detects_generic_consent_path() {
-        assert!(is_consent_wall_str("https://example.com/consent?redirect=/"));
+        assert!(is_consent_wall_str(
+            "https://example.com/consent?redirect=/"
+        ));
     }
 
     #[test]
     fn test_is_consent_wall_detects_cookie_consent_path() {
-        assert!(is_consent_wall_str("https://example.com/page/cookie-consent/accept"));
+        assert!(is_consent_wall_str(
+            "https://example.com/page/cookie-consent/accept"
+        ));
     }
 
     #[test]
     fn test_is_consent_wall_detects_sourcepoint() {
-        assert!(is_consent_wall_str("https://cdn.sp-prod.net/unified/v2/notice.html"));
+        assert!(is_consent_wall_str(
+            "https://cdn.sp-prod.net/unified/v2/notice.html"
+        ));
     }
 
     #[test]
     fn test_is_consent_wall_detects_consent_subdomain() {
-        assert!(is_consent_wall_str("https://consent.youtube.com/m?continue=https%3A%2F%2Fwww.youtube.com%2F"));
+        assert!(is_consent_wall_str(
+            "https://consent.youtube.com/m?continue=https%3A%2F%2Fwww.youtube.com%2F"
+        ));
     }
 
     #[test]
     fn test_is_consent_wall_detects_privacy_mgmt() {
-        assert!(is_consent_wall_str("https://privacy-mgmt.com/cmp?redirect=https://example.com"));
+        assert!(is_consent_wall_str(
+            "https://privacy-mgmt.com/cmp?redirect=https://example.com"
+        ));
     }
 
     #[test]
@@ -2851,7 +3080,8 @@ mod tests {
         // The /d endpoint persists as a footer privacy link on the *accepted*
         // page (verified live: accepted homepage has /d but zero /save), so it
         // must NOT be treated as a wall on its own.
-        let html = r#"<a href="https://consent.google.com/d?continue=https://www.google.com/">More</a>"#;
+        let html =
+            r#"<a href="https://consent.google.com/d?continue=https://www.google.com/">More</a>"#;
         assert!(!html_has_consent_wall(html));
     }
 
@@ -2976,7 +3206,10 @@ mod tests {
     fn test_js_array_escapes_double_quotes() {
         let result = js_array(&[r#"button[data-testid="pur-accept-button"]"#]);
         // Must produce valid JSON (double-quotes escaped)
-        assert!(result.contains(r#"\""#), "embedded quotes must be escaped: {result}");
+        assert!(
+            result.contains(r#"\""#),
+            "embedded quotes must be escaped: {result}"
+        );
     }
 
     // ---- Interstitial detection (bot checks, CAPTCHAs) ----
@@ -2990,7 +3223,10 @@ mod tests {
     fn challenge_notice_detects_cloudflare_block() {
         let html = r#"<html><body><h1>Sorry, you have been blocked</h1></body></html>"#;
         let notice = notice_for(html).expect("Cloudflare block wall should be recognised");
-        assert!(notice.contains("Cloudflare"), "notice should name the vendor: {notice}");
+        assert!(
+            notice.contains("Cloudflare"),
+            "notice should name the vendor: {notice}"
+        );
     }
 
     #[test]
@@ -3001,7 +3237,8 @@ mod tests {
 
     #[test]
     fn challenge_notice_passes_normal_page() {
-        let html = r#"<html><head><title>News</title></head><body><p>Article content</p></body></html>"#;
+        let html =
+            r#"<html><head><title>News</title></head><body><p>Article content</p></body></html>"#;
         assert_eq!(notice_for(html), None);
     }
 
@@ -3020,9 +3257,8 @@ mod tests {
         // A login page carrying a reCAPTCHA box is not an interstitial: it is
         // the page the user asked for, and must not be labelled a bot check.
         let body = "Sign in to your account. ".repeat(60); // well past the text limit
-        let html = format!(
-            r#"<html><body><p>{body}</p><div class="g-recaptcha"></div></body></html>"#
-        );
+        let html =
+            format!(r#"<html><body><p>{body}</p><div class="g-recaptcha"></div></body></html>"#);
         assert_eq!(notice_for(&html), None);
     }
 
@@ -3035,8 +3271,11 @@ mod tests {
         let load = PageLoad::plain(html.to_owned());
         let (elements, _) = page_to_ffon_with_forms(&load, "https://example.com");
         assert!(
-            elements[0].as_str().map_or(false, |s| s.contains("Cloudflare")),
-            "notice should lead the page: {:?}", elements[0]
+            elements[0]
+                .as_str()
+                .map_or(false, |s| s.contains("Cloudflare")),
+            "notice should lead the page: {:?}",
+            elements[0]
         );
         let rendered = format!("{elements:?}");
         assert!(
@@ -3056,8 +3295,16 @@ mod tests {
             notices: vec!["Cookie-consent wall".to_owned()],
         };
         let (elements, _) = page_to_ffon_with_forms(&load, "https://example.com");
-        assert!(elements[0].as_str().map_or(false, |s| s.contains("Cookie-consent wall")));
-        assert!(elements[1].as_str().map_or(false, |s| s.contains("Cloudflare")));
+        assert!(
+            elements[0]
+                .as_str()
+                .map_or(false, |s| s.contains("Cookie-consent wall"))
+        );
+        assert!(
+            elements[1]
+                .as_str()
+                .map_or(false, |s| s.contains("Cloudflare"))
+        );
     }
 
     // Real-browser integration test — requires Chrome/Chromium and network access.
@@ -3072,7 +3319,10 @@ mod tests {
         // Whether or not the site answers with a bot check, the page itself is
         // what gets rendered; a wall only adds a leading notice.
         let (elements, _) = page_to_ffon_with_forms(&load, "https://www.gva.be");
-        assert!(!elements.is_empty(), "expected rendered content, not an error");
+        assert!(
+            !elements.is_empty(),
+            "expected rendered content, not an error"
+        );
         if let Some(notice) = challenge_notice(&load.html, &elements) {
             eprintln!("gva.be answered with an interstitial: {notice}");
         }
@@ -3126,7 +3376,10 @@ mod tests {
         let mut p = WebbrowserProvider::new();
         p.set_current_path("/https://x.com/form_2/q");
         assert_eq!(p.current_path(), "/https://x.com/form_2/q");
-        assert_eq!(extract_form_key(p.current_path()), Some("form_2/q".to_owned()));
+        assert_eq!(
+            extract_form_key(p.current_path()),
+            Some("form_2/q".to_owned())
+        );
     }
 
     #[test]
@@ -3136,14 +3389,23 @@ mod tests {
         assert!(js.contains("\"hello world\""), "value missing: {js}");
         assert!(js.contains("dispatchEvent"), "event dispatch missing");
         // form_index 1 resolves against the first form in document order.
-        assert!(js.contains("document.forms[0]"), "form scoping missing: {js}");
+        assert!(
+            js.contains("document.forms[0]"),
+            "form scoping missing: {js}"
+        );
     }
 
     #[test]
     fn build_fill_js_standalone_resolves_against_document_and_submits() {
         let js = build_fill_js(0, 0, "[name=\"q\"]", "query", true);
-        assert!(js.contains("const root = document;"), "global scope missing: {js}");
-        assert!(js.contains("KeyboardEvent"), "Enter submit missing for standalone: {js}");
+        assert!(
+            js.contains("const root = document;"),
+            "global scope missing: {js}"
+        );
+        assert!(
+            js.contains("KeyboardEvent"),
+            "Enter submit missing for standalone: {js}"
+        );
     }
 
     #[test]
@@ -3156,7 +3418,8 @@ mod tests {
         }
         assert!(p.tick(), "tick should return true when content is ready");
         assert!(
-            p.cached_page.as_ref()
+            p.cached_page
+                .as_ref()
                 .and_then(|c| c.elements.first())
                 .and_then(|e| e.as_str())
                 .map_or(false, |s| s == "result"),
@@ -3184,7 +3447,10 @@ mod tests {
             p.take_navigation_request(),
             Some(sicompass_sdk::NavigationRequest::EnterChildren)
         );
-        assert!(p.take_navigation_request().is_none(), "request must not repeat");
+        assert!(
+            p.take_navigation_request().is_none(),
+            "request must not repeat"
+        );
     }
 
     #[cfg(not(target_os = "windows"))]
@@ -3204,7 +3470,8 @@ mod tests {
         assert!(
             matches!(&items[0], FfonElement::Str(s) if s.contains("https://example.com")),
             "URL bar must be childless while loading so nothing descends into \
-             the previous page: {:?}", items[0]
+             the previous page: {:?}",
+            items[0]
         );
         assert_eq!(items[1].as_str(), Some("Loading…"));
     }
@@ -3245,10 +3512,17 @@ mod tests {
     fn patch_form_field_updates_cached_str() {
         let mut elems = vec![{
             let mut form = FfonElement::new_obj("form_1");
-            form.as_obj_mut().unwrap().push(FfonElement::new_str("q: <input></input>"));
+            form.as_obj_mut()
+                .unwrap()
+                .push(FfonElement::new_str("q: <input></input>"));
             form
         }];
-        let patched = patch_form_field_in_tree(&mut elems, "form_1", "q: <input>", "q: <input>hello</input>");
+        let patched = patch_form_field_in_tree(
+            &mut elems,
+            "form_1",
+            "q: <input>",
+            "q: <input>hello</input>",
+        );
         assert!(patched, "should find and patch the field");
         let child = elems[0].as_obj().unwrap().children[0].as_str().unwrap();
         assert_eq!(child, "q: <input>hello</input>");
@@ -3260,15 +3534,25 @@ mod tests {
         let mut elems = vec![{
             let mut heading = FfonElement::new_obj("Search");
             let mut form = FfonElement::new_obj("form_1");
-            form.as_obj_mut().unwrap().push(FfonElement::new_str("q: <input></input>"));
+            form.as_obj_mut()
+                .unwrap()
+                .push(FfonElement::new_str("q: <input></input>"));
             heading.as_obj_mut().unwrap().push(form);
             heading
         }];
-        let patched = patch_form_field_in_tree(&mut elems, "form_1", "q: <input>", "q: <input>world</input>");
+        let patched = patch_form_field_in_tree(
+            &mut elems,
+            "form_1",
+            "q: <input>",
+            "q: <input>world</input>",
+        );
         assert!(patched);
         let heading_obj = elems[0].as_obj().unwrap();
         let form_obj = heading_obj.children[0].as_obj().unwrap();
-        assert_eq!(form_obj.children[0].as_str().unwrap(), "q: <input>world</input>");
+        assert_eq!(
+            form_obj.children[0].as_str().unwrap(),
+            "q: <input>world</input>"
+        );
     }
 
     #[test]
@@ -3276,34 +3560,52 @@ mod tests {
         // Form has an <id>X</id> prefix on its key — match by suffix.
         let mut elems = vec![{
             let mut form = FfonElement::new_obj("<id>login</id>form_1");
-            form.as_obj_mut().unwrap().push(FfonElement::new_str("email: <input></input>"));
+            form.as_obj_mut()
+                .unwrap()
+                .push(FfonElement::new_str("email: <input></input>"));
             form
         }];
-        let patched = patch_form_field_in_tree(&mut elems, "form_1", "email: <input>", "email: <input>user@x.com</input>");
+        let patched = patch_form_field_in_tree(
+            &mut elems,
+            "form_1",
+            "email: <input>",
+            "email: <input>user@x.com</input>",
+        );
         assert!(patched, "should match by suffix for id-prefixed form keys");
-        assert_eq!(elems[0].as_obj().unwrap().children[0].as_str().unwrap(), "email: <input>user@x.com</input>");
+        assert_eq!(
+            elems[0].as_obj().unwrap().children[0].as_str().unwrap(),
+            "email: <input>user@x.com</input>"
+        );
     }
 
     #[test]
     fn commit_edit_form_field_returns_false_and_patches_cache() {
         // commit_edit for a known form field must return false so the app's
         // unconditional local-FFON update isn't wiped by refresh_current_directory.
-        use sicompass_sdk::provider::Provider;
         use sicompass_sdk::ffon::FormNode;
         use sicompass_sdk::ffon::FormNodeKind;
+        use sicompass_sdk::provider::Provider;
 
         let mut p = WebbrowserProvider::new();
         // Build a minimal cached_page with a form field.
         let mut form = FfonElement::new_obj("form_1");
-        form.as_obj_mut().unwrap().push(FfonElement::new_str("q: <input></input>"));
-        p.cached_page = Some(CachedPage { url: "https://example.com".into(), elements: vec![form] });
-        // Seed form_map with the field.
-        p.form_map.insert("form_1/q".into(), FormNode {
-            css_selector: "#q".into(),
-            kind: FormNodeKind::TextInput,
-            form_index: 1,
-            match_index: 0,
+        form.as_obj_mut()
+            .unwrap()
+            .push(FfonElement::new_str("q: <input></input>"));
+        p.cached_page = Some(CachedPage {
+            url: "https://example.com".into(),
+            elements: vec![form],
         });
+        // Seed form_map with the field.
+        p.form_map.insert(
+            "form_1/q".into(),
+            FormNode {
+                css_selector: "#q".into(),
+                kind: FormNodeKind::TextInput,
+                form_index: 1,
+                match_index: 0,
+            },
+        );
         // Simulate being inside the form field.
         p.push_path("https://example.com");
         p.push_path("form_1");
@@ -3315,7 +3617,11 @@ mod tests {
 
         // cached_page must be patched so re-fetch preserves the value.
         let child = p.cached_page.as_ref().unwrap().elements[0]
-            .as_obj().unwrap().children[0].as_str().unwrap();
+            .as_obj()
+            .unwrap()
+            .children[0]
+            .as_str()
+            .unwrap();
         assert_eq!(child, "q: <input>hello</input>", "cached_page not patched");
     }
 
@@ -3325,18 +3631,24 @@ mod tests {
         use sicompass_sdk::ffon::{FormNode, FormNodeKind};
         let mut map = FormMap::new();
         for k in keys {
-            map.insert((*k).to_owned(), FormNode {
-                css_selector: format!("#{k}"),
-                kind: FormNodeKind::TextInput,
-                form_index: 1,
-                match_index: 0,
-            });
+            map.insert(
+                (*k).to_owned(),
+                FormNode {
+                    css_selector: format!("#{k}"),
+                    kind: FormNodeKind::TextInput,
+                    form_index: 1,
+                    match_index: 0,
+                },
+            );
         }
         map
     }
 
     fn stored_map(pairs: &[(&str, &str)]) -> HashMap<String, String> {
-        pairs.iter().map(|(k, v)| ((*k).to_owned(), (*v).to_owned())).collect()
+        pairs
+            .iter()
+            .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+            .collect()
     }
 
     #[test]
@@ -3375,16 +3687,24 @@ mod tests {
     fn commit_edit_records_typed_value_in_form_field_values() {
         use sicompass_sdk::ffon::{FormNode, FormNodeKind};
         let mut p = WebbrowserProvider::new();
-        p.form_map.insert("form_1/email".into(), FormNode {
-            css_selector: "#email".into(),
-            kind: FormNodeKind::TextInput,
-            form_index: 1,
-            match_index: 0,
-        });
+        p.form_map.insert(
+            "form_1/email".into(),
+            FormNode {
+                css_selector: "#email".into(),
+                kind: FormNodeKind::TextInput,
+                form_index: 1,
+                match_index: 0,
+            },
+        );
         // Build cached_page so patch_cached_form_field has something to update.
         let mut form = FfonElement::new_obj("form_1");
-        form.as_obj_mut().unwrap().push(FfonElement::new_str("email: <input></input>"));
-        p.cached_page = Some(CachedPage { url: "https://x".into(), elements: vec![form] });
+        form.as_obj_mut()
+            .unwrap()
+            .push(FfonElement::new_str("email: <input></input>"));
+        p.cached_page = Some(CachedPage {
+            url: "https://x".into(),
+            elements: vec![form],
+        });
 
         p.push_path("https://x");
         p.push_path("form_1");
@@ -3421,7 +3741,9 @@ mod tests {
         p.current_url = "https://example.com".to_owned();
         p.on_button_press("submit:form_1");
 
-        let err = p.take_error().expect("pending_error should carry single-flight message");
+        let err = p
+            .take_error()
+            .expect("pending_error should carry single-flight message");
         assert!(
             err.contains("already in progress"),
             "unexpected error message: {err}",
@@ -3443,8 +3765,14 @@ mod tests {
         let (elems, map) = html_to_ffon_with_forms(html, "");
         let form = elems[0].as_obj().expect("expected form obj");
         assert_eq!(form.key, "form_1");
-        assert!(map.contains_key("form_1/Search"), "Search field missing from map");
-        assert!(map.contains_key("form_1/Go"), "Submit button missing from map");
+        assert!(
+            map.contains_key("form_1/Search"),
+            "Search field missing from map"
+        );
+        assert!(
+            map.contains_key("form_1/Go"),
+            "Submit button missing from map"
+        );
     }
 
     // Live end-to-end check: exercises the real Linux runtime path
@@ -3466,7 +3794,8 @@ mod tests {
         let loaded = loaded.expect("navigate_and_get_html should not fail");
         assert!(
             loaded.notices.is_empty(),
-            "auto-accept should have cleared the wall, got: {:?}", loaded.notices
+            "auto-accept should have cleared the wall, got: {:?}",
+            loaded.notices
         );
         assert!(
             !html_has_consent_wall(&loaded.html),
@@ -3475,7 +3804,8 @@ mod tests {
         // Post-accept Google homepage exposes the search box (name=\"q\").
         let (_ffon, map) = html_to_ffon_with_forms(&loaded.html, "https://www.google.com/");
         assert!(
-            map.keys().any(|k| k.contains("/q") || k.contains("/Zoek") || k.contains("/Search")),
+            map.keys()
+                .any(|k| k.contains("/q") || k.contains("/Zoek") || k.contains("/Search")),
             "search field not found in form map after clearing consent; keys: {:?}",
             map.keys().collect::<Vec<_>>()
         );
@@ -3488,11 +3818,10 @@ mod tests {
 
 /// Register the web browser with the SDK factory and manifest registries.
 pub fn register() {
-    sicompass_sdk::register_provider_factory("webbrowser", || {
-        Box::new(WebbrowserProvider::new())
-    });
-    sicompass_sdk::register_builtin_manifest(
-        sicompass_sdk::BuiltinManifest::new("webbrowser", "web browser"),
-    );
+    sicompass_sdk::register_provider_factory("webbrowser", || Box::new(WebbrowserProvider::new()));
+    sicompass_sdk::register_builtin_manifest(sicompass_sdk::BuiltinManifest::new(
+        "webbrowser",
+        "web browser",
+    ));
     sicompass_sdk::register_url_fetcher(fetch_url_to_ffon);
 }

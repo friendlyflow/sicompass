@@ -136,12 +136,12 @@ mod imp {
     use super::*;
     use std::io;
 
-    use windows::core::{Interface, HSTRING};
     use windows::Win32::System::Com::{
-        CoCreateInstance, CoInitializeEx, CoUninitialize, IPersistFile, CLSCTX_INPROC_SERVER,
-        COINIT_APARTMENTTHREADED,
+        CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx,
+        CoUninitialize, IPersistFile,
     };
     use windows::Win32::UI::Shell::{IShellLinkW, ShellLink};
+    use windows::core::{HSTRING, Interface};
 
     /// Create the shortcut if [`decide`] says to.
     ///

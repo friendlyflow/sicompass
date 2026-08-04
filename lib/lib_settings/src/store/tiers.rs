@@ -101,8 +101,7 @@ mod tests {
     #[test]
     fn unreachable_server_returns_err() {
         // Port 1 refuses immediately — no hang, no flakiness.
-        let err = request_checkout("http://127.0.0.1:1", "support-annual", "", "")
-            .unwrap_err();
+        let err = request_checkout("http://127.0.0.1:1", "support-annual", "", "").unwrap_err();
         assert!(!err.is_empty());
     }
 }

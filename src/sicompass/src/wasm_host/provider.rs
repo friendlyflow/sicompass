@@ -113,7 +113,13 @@ impl WasmProvider {
         super::audit_component_imports(&component, &allowed_hosts)
             .map_err(|e| format!("{}: {e}", wasm_path.display()))?;
 
-        Self::from_component(&component, plugin_name, settings_section, plugin_dir, allowed_hosts)
+        Self::from_component(
+            &component,
+            plugin_name,
+            settings_section,
+            plugin_dir,
+            allowed_hosts,
+        )
     }
 
     /// Instantiate an already-parsed component. Split out so tests can build a
@@ -165,7 +171,11 @@ impl WasmProvider {
             None
         };
 
-        Ok(WasmProvider { descriptor, dashboard_image, ..me })
+        Ok(WasmProvider {
+            descriptor,
+            dashboard_image,
+            ..me
+        })
     }
 
     /// Ask the guest for its dashboard image and confine the answer.
@@ -176,7 +186,9 @@ impl WasmProvider {
     /// user can read.
     fn resolve_dashboard_image(&self, plugin_dir: &Path) -> Option<String> {
         let rel = self
-            .call("dashboard-image-path", |g, s| g.call_dashboard_image_path(s))
+            .call("dashboard-image-path", |g, s| {
+                g.call_dashboard_image_path(s)
+            })
             .ok()
             .flatten()?;
 
@@ -421,7 +433,12 @@ fn to_sdk_frame(f: wit_types::Frame) -> Option<DashboardFrame> {
     // guest meant would put the screen reader's focus somewhere it never asked for.
     let cursor = f.cursor.filter(|(col, row)| *col < f.cols && *row < f.rows);
 
-    Some(DashboardFrame { cols: f.cols, rows: f.rows, cells, cursor })
+    Some(DashboardFrame {
+        cols: f.cols,
+        rows: f.rows,
+        cells,
+        cursor,
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -451,16 +468,20 @@ impl Provider for WasmProvider {
     }
 
     fn fetch_subtree_children(&mut self) -> Option<Vec<FfonElement>> {
-        self.call("fetch-subtree-children", |g, s| g.call_fetch_subtree_children(s))
-            .ok()
-            .flatten()
-            .map(|blob| ffon::deserialize_binary(&blob))
+        self.call("fetch-subtree-children", |g, s| {
+            g.call_fetch_subtree_children(s)
+        })
+        .ok()
+        .flatten()
+        .map(|blob| ffon::deserialize_binary(&blob))
     }
 
     fn fetch_subtree_parent_key(&mut self) -> Option<String> {
-        self.call("fetch-subtree-parent-key", |g, s| g.call_fetch_subtree_parent_key(s))
-            .ok()
-            .flatten()
+        self.call("fetch-subtree-parent-key", |g, s| {
+            g.call_fetch_subtree_parent_key(s)
+        })
+        .ok()
+        .flatten()
     }
 
     fn sync_ffon_body_children(&mut self, children: &[FfonElement]) {
@@ -590,7 +611,8 @@ impl Provider for WasmProvider {
     // ---- Commands ----------------------------------------------------------
 
     fn commands(&self) -> Vec<String> {
-        self.call("commands", |g, s| g.call_commands(s)).unwrap_or_default()
+        self.call("commands", |g, s| g.call_commands(s))
+            .unwrap_or_default()
     }
 
     fn command_label(&self, cmd: &str) -> String {
@@ -622,19 +644,26 @@ impl Provider for WasmProvider {
     }
 
     fn command_list_items(&self, cmd: &str) -> Vec<ListItem> {
-        self.call("command-list-items", |g, s| g.call_command_list_items(s, cmd))
-            .map(|items| {
-                items
-                    .into_iter()
-                    .map(|i| ListItem { label: i.label, data: i.data })
-                    .collect()
-            })
-            .unwrap_or_default()
+        self.call("command-list-items", |g, s| {
+            g.call_command_list_items(s, cmd)
+        })
+        .map(|items| {
+            items
+                .into_iter()
+                .map(|i| ListItem {
+                    label: i.label,
+                    data: i.data,
+                })
+                .collect()
+        })
+        .unwrap_or_default()
     }
 
     fn execute_command(&mut self, cmd: &str, selection: &str) -> bool {
-        self.call("execute-command", |g, s| g.call_execute_command(s, cmd, selection))
-            .unwrap_or(false)
+        self.call("execute-command", |g, s| {
+            g.call_execute_command(s, cmd, selection)
+        })
+        .unwrap_or(false)
     }
 
     fn create_element(&mut self, key: &str) -> Option<FfonElement> {
@@ -648,11 +677,15 @@ impl Provider for WasmProvider {
     // ---- Interactive callbacks ---------------------------------------------
 
     fn on_radio_change(&mut self, group: &str, value: &str) {
-        let _ = self.call("on-radio-change", |g, s| g.call_on_radio_change(s, group, value));
+        let _ = self.call("on-radio-change", |g, s| {
+            g.call_on_radio_change(s, group, value)
+        });
     }
 
     fn on_button_press(&mut self, function_name: &str) {
-        let _ = self.call("on-button-press", |g, s| g.call_on_button_press(s, function_name));
+        let _ = self.call("on-button-press", |g, s| {
+            g.call_on_button_press(s, function_name)
+        });
     }
 
     fn on_checkbox_change(&mut self, label: &str, checked: bool) {
@@ -666,7 +699,9 @@ impl Provider for WasmProvider {
     }
 
     fn on_setting_change(&mut self, key: &str, value: &str) {
-        let _ = self.call("on-setting-change", |g, s| g.call_on_setting_change(s, key, value));
+        let _ = self.call("on-setting-change", |g, s| {
+            g.call_on_setting_change(s, key, value)
+        });
     }
 
     // ---- Timeline undo/redo ------------------------------------------------
@@ -677,7 +712,9 @@ impl Provider for WasmProvider {
 
     fn take_timeline_entries(&mut self) -> Vec<TimelineEntry> {
         let ops = self
-            .call("take-timeline-entries", |g, s| g.call_take_timeline_entries(s))
+            .call("take-timeline-entries", |g, s| {
+                g.call_take_timeline_entries(s)
+            })
             .unwrap_or_default();
         ops.into_iter()
             .map(|op| TimelineEntry::ProviderOp {
@@ -821,7 +858,9 @@ impl Provider for WasmProvider {
     /// change and has not been made. Recorded here so the next person has the
     /// numbers rather than a hunch.
     fn dashboard_render(&mut self, cols: u16, rows: u16) -> DashboardFrame {
-        match self.call("dashboard-render", |g, s| g.call_dashboard_render(s, cols, rows)) {
+        match self.call("dashboard-render", |g, s| {
+            g.call_dashboard_render(s, cols, rows)
+        }) {
             Ok(frame) => match to_sdk_frame(frame) {
                 Some(f) => f,
                 None => {
@@ -859,7 +898,9 @@ impl Provider for WasmProvider {
     }
 
     fn dashboard_resize(&mut self, rows: u16, cols: u16) {
-        let _ = self.call("dashboard-resize", |g, s| g.call_dashboard_resize(s, rows, cols));
+        let _ = self.call("dashboard-resize", |g, s| {
+            g.call_dashboard_resize(s, rows, cols)
+        });
     }
 
     fn enter_dashboard(&mut self) {
@@ -875,13 +916,16 @@ impl Provider for WasmProvider {
 /// emitted it. Anything else is a host-only variant and is not the guest's to undo.
 fn to_wit_op(entry: &TimelineEntry) -> Option<wit_types::ProviderOp> {
     match entry {
-        TimelineEntry::ProviderOp { command, payload, label, .. } => {
-            Some(wit_types::ProviderOp {
-                command: command.clone(),
-                payload: ffon::serialize_binary(std::slice::from_ref(payload)),
-                label: label.clone(),
-            })
-        }
+        TimelineEntry::ProviderOp {
+            command,
+            payload,
+            label,
+            ..
+        } => Some(wit_types::ProviderOp {
+            command: command.clone(),
+            payload: ffon::serialize_binary(std::slice::from_ref(payload)),
+            label: label.clone(),
+        }),
         _ => None,
     }
 }
@@ -956,7 +1000,10 @@ mod tests {
         let op = to_wit_op(&entry).expect("ProviderOp must convert");
         assert_eq!(op.command, "greet");
         assert_eq!(op.label, "greet world");
-        assert_eq!(first_element(&op.payload), Some(FfonElement::new_str("world")));
+        assert_eq!(
+            first_element(&op.payload),
+            Some(FfonElement::new_str("world"))
+        );
     }
 
     #[test]
@@ -981,7 +1028,11 @@ mod tests {
             ch,
             fg: 0xFFFF_FFFF,
             bg: 0,
-            attrs: wit_types::CellAttrs { bold: false, underline: false, reverse: false },
+            attrs: wit_types::CellAttrs {
+                bold: false,
+                underline: false,
+                reverse: false,
+            },
         }
     }
 
@@ -1040,7 +1091,11 @@ mod tests {
     #[test]
     fn cell_attributes_survive_the_boundary() {
         let mut f = wit_frame(1, 1, 1);
-        f.cells[0].attrs = wit_types::CellAttrs { bold: true, underline: false, reverse: true };
+        f.cells[0].attrs = wit_types::CellAttrs {
+            bold: true,
+            underline: false,
+            reverse: true,
+        };
         f.cells[0].bg = 0x1234_5678;
         let out = to_sdk_frame(f).unwrap();
         assert!(out.cells[0].attrs.bold);
@@ -1072,12 +1127,21 @@ mod tests {
             DashboardKeysym::Char('q'),
             DashboardKeysym::Unknown,
         ];
-        let mapped: Vec<String> = all.iter().map(|k| format!("{:?}", to_wit_keysym(*k))).collect();
+        let mapped: Vec<String> = all
+            .iter()
+            .map(|k| format!("{:?}", to_wit_keysym(*k)))
+            .collect();
         let unique: std::collections::BTreeSet<&String> = mapped.iter().collect();
         assert_eq!(unique.len(), all.len(), "two keysyms collapsed: {mapped:?}");
 
-        assert!(matches!(to_wit_keysym(DashboardKeysym::F(5)), wit_types::Keysym::F(5)));
-        assert!(matches!(to_wit_keysym(DashboardKeysym::Char('q')), wit_types::Keysym::Ch('q')));
+        assert!(matches!(
+            to_wit_keysym(DashboardKeysym::F(5)),
+            wit_types::Keysym::F(5)
+        ));
+        assert!(matches!(
+            to_wit_keysym(DashboardKeysym::Char('q')),
+            wit_types::Keysym::Ch('q')
+        ));
     }
 
     #[test]
@@ -1095,14 +1159,26 @@ mod tests {
 
     #[test]
     fn dashboard_kind_and_request_map_one_to_one() {
-        assert_eq!(to_sdk_kind(wit_types::DashboardKind::None), DashboardKind::None);
-        assert_eq!(to_sdk_kind(wit_types::DashboardKind::Image), DashboardKind::Image);
+        assert_eq!(
+            to_sdk_kind(wit_types::DashboardKind::None),
+            DashboardKind::None
+        );
+        assert_eq!(
+            to_sdk_kind(wit_types::DashboardKind::Image),
+            DashboardKind::Image
+        );
         assert_eq!(
             to_sdk_kind(wit_types::DashboardKind::Interactive),
             DashboardKind::Interactive
         );
-        assert_eq!(to_sdk_request(wit_types::DashboardRequest::Enter), DashboardRequest::Enter);
-        assert_eq!(to_sdk_request(wit_types::DashboardRequest::Leave), DashboardRequest::Leave);
+        assert_eq!(
+            to_sdk_request(wit_types::DashboardRequest::Enter),
+            DashboardRequest::Enter
+        );
+        assert_eq!(
+            to_sdk_request(wit_types::DashboardRequest::Leave),
+            DashboardRequest::Leave
+        );
     }
 
     #[test]

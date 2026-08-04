@@ -70,7 +70,10 @@ impl AccessKitAdapter {
                 NoopActionHandler,
                 NoopDeactivationHandler,
             );
-            return Some(AccessKitAdapter { adapter, registered });
+            return Some(AccessKitAdapter {
+                adapter,
+                registered,
+            });
         }
 
         // ---- Windows (UI Automation) ----------------------------------------
@@ -94,7 +97,9 @@ impl AccessKitAdapter {
             let initial_tree = build_tree(renderer);
             let adapter = accesskit_windows::SubclassingAdapter::new(
                 HWND(hwnd_ptr),
-                ActivationHandlerImpl { initial_tree: Some(initial_tree) },
+                ActivationHandlerImpl {
+                    initial_tree: Some(initial_tree),
+                },
                 NoopActionHandler,
             );
             return Some(AccessKitAdapter { adapter });
@@ -104,9 +109,7 @@ impl AccessKitAdapter {
         #[cfg(target_os = "macos")]
         {
             use sdl3::sys::properties::SDL_GetPointerProperty;
-            use sdl3::sys::video::{
-                SDL_GetWindowProperties, SDL_PROP_WINDOW_COCOA_WINDOW_POINTER,
-            };
+            use sdl3::sys::video::{SDL_GetWindowProperties, SDL_PROP_WINDOW_COCOA_WINDOW_POINTER};
 
             let props = unsafe { SDL_GetWindowProperties(window.raw()) };
             // SDL3 exposes the NSWindow pointer here (not NSView); we pass it
@@ -126,7 +129,9 @@ impl AccessKitAdapter {
             let adapter = unsafe {
                 accesskit_macos::SubclassingAdapter::for_window(
                     ns_window,
-                    ActivationHandlerImpl { initial_tree: Some(initial_tree) },
+                    ActivationHandlerImpl {
+                        initial_tree: Some(initial_tree),
+                    },
                     NoopActionHandler,
                 )
             };
@@ -202,28 +207,28 @@ impl AccessKitAdapter {
 
 fn list_prefix_to_word(prefix: &str) -> Option<&'static str> {
     match prefix {
-        "-"   => Some("minus"),
-        "-p"  => Some("minus p"),
+        "-" => Some("minus"),
+        "-p" => Some("minus p"),
         "-cc" => Some("minus cc"),
-        "-c"  => Some("minus c"),
+        "-c" => Some("minus c"),
         "-rc" => Some("minus rc"),
-        "-b"  => Some("minus b"),
-        "-i"  => Some("minus i"),
-        "-r"  => Some("minus r"),
-        "+"   => Some("plus"),
+        "-b" => Some("minus b"),
+        "-i" => Some("minus i"),
+        "-r" => Some("minus r"),
+        "+" => Some("plus"),
         "+cc" => Some("plus cc"),
-        "+c"  => Some("plus c"),
-        "+l"  => Some("plus l"),
-        "+R"  => Some("plus R"),
-        "+i"  => Some("plus i"),
+        "+c" => Some("plus c"),
+        "+l" => Some("plus l"),
+        "+R" => Some("plus R"),
+        "+i" => Some("plus i"),
         // Timeline-view positioners, which follow the `-` list prefix
         // (e.g. "- > x" → "minus current x"). HEAD is the next ctrl-Z target;
         // redo-branch entries have already been undone. Without these mappings
         // the marker is silently stripped, leaving screenreader users with no
         // way to distinguish current / undone / older entries in the history.
-        ">"        => Some("current"),
-        "\u{00B7}" => Some("undone"),  // ·
-        _     => None,
+        ">" => Some("current"),
+        "\u{00B7}" => Some("undone"), // ·
+        _ => None,
     }
 }
 
@@ -341,14 +346,18 @@ fn build_tree(renderer: &AppRenderer) -> TreeUpdate {
         let raw_idx = if renderer.filtered_list_indices.is_empty() {
             renderer.list_index.min(renderer.total_list.len() - 1)
         } else {
-            renderer.filtered_list_indices
+            renderer
+                .filtered_list_indices
                 .get(renderer.list_index)
                 .copied()
                 .unwrap_or(0)
                 .min(renderer.total_list.len() - 1)
         };
         let raw_label = &renderer.total_list[raw_idx].label;
-        (label_to_speech(raw_label), speech_content(raw_label).to_owned())
+        (
+            label_to_speech(raw_label),
+            speech_content(raw_label).to_owned(),
+        )
     };
     let mut elem = Node::new(Role::ListItem);
     elem.set_label(Box::<str>::from(element_label.as_str()));
@@ -408,7 +417,8 @@ struct ActivationHandlerImpl {
 impl accesskit::ActivationHandler for ActivationHandlerImpl {
     fn request_initial_tree(&mut self) -> Option<TreeUpdate> {
         #[cfg(target_os = "linux")]
-        self.registered.store(true, std::sync::atomic::Ordering::Release);
+        self.registered
+            .store(true, std::sync::atomic::Ordering::Release);
         self.initial_tree.take()
     }
 }
@@ -429,7 +439,6 @@ struct NoopDeactivationHandler;
 impl accesskit::DeactivationHandler for NoopDeactivationHandler {
     fn deactivate_accessibility(&mut self) {}
 }
-
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -537,8 +546,10 @@ mod tests {
 
     const NL_PASSAGE: &str = "Goedemorgen, dit is een belangrijk bericht over de vergadering van volgende week. Laat ons alstublieft weten of u aanwezig kunt zijn want wij moeten de zaal op tijd reserveren.";
     const EN_PASSAGE: &str = "Good morning, this is an important message about next week's meeting. Please let us know whether you will be able to attend because we need to reserve the room in time.";
-    const FR_PASSAGE: &str = "Bonjour, ceci est un message important concernant la réunion de la semaine prochaine.";
-    const DE_PASSAGE: &str = "Guten Morgen, dies ist eine wichtige Nachricht über das Treffen der nächsten Woche.";
+    const FR_PASSAGE: &str =
+        "Bonjour, ceci est un message important concernant la réunion de la semaine prochaine.";
+    const DE_PASSAGE: &str =
+        "Guten Morgen, dies ist eine wichtige Nachricht über das Treffen der nächsten Woche.";
 
     #[test]
     fn detect_language_dutch_passage() {
@@ -637,7 +648,10 @@ mod tests {
         // First item (index 0)
         let r = make_renderer_with_list(&["-i newfile.txt", "+l dir"]);
         let tree = build_tree(&r);
-        assert_eq!(tree.nodes[1].1.label().as_deref(), Some("minus i newfile.txt"));
+        assert_eq!(
+            tree.nodes[1].1.label().as_deref(),
+            Some("minus i newfile.txt")
+        );
         // Second item (index 1)
         let mut r2 = make_renderer_with_list(&["-i newfile.txt", "+l dir"]);
         r2.list_index = 1;
@@ -685,7 +699,11 @@ mod tests {
         r.pending_announcement = Some("search".to_string());
         let tree = build_tree(&r);
         let ui = sicompass_sdk::localize::current_locale();
-        let ann = tree.nodes.iter().find(|(id, _)| *id == ANNOUNCEMENT_ID).unwrap();
+        let ann = tree
+            .nodes
+            .iter()
+            .find(|(id, _)| *id == ANNOUNCEMENT_ID)
+            .unwrap();
         assert_eq!(ann.1.language(), Some(ui.as_str()));
     }
 
@@ -746,7 +764,10 @@ mod tests {
         let mut r = AppRenderer::new();
         r.coordinate = crate::app_state::Coordinate::Insert;
         r.speak_mode_change(Some("filename.txt".to_string()));
-        assert_eq!(announced_text(&r).as_deref(), Some("insert mode - filename.txt"));
+        assert_eq!(
+            announced_text(&r).as_deref(),
+            Some("insert mode - filename.txt")
+        );
     }
 
     #[test]
@@ -806,7 +827,10 @@ mod tests {
         let mut r = AppRenderer::new();
         r.coordinate = crate::app_state::Coordinate::Insert;
         r.speak_mode_change(Some("Documents".to_string()));
-        assert_eq!(announced_text(&r).as_deref(), Some("insert mode - Documents"));
+        assert_eq!(
+            announced_text(&r).as_deref(),
+            Some("insert mode - Documents")
+        );
     }
 
     #[test]

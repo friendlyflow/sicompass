@@ -9,7 +9,9 @@ pub struct CaretState {
 impl CaretState {
     pub const BLINK_INTERVAL_MS: u64 = 400;
 
-    pub fn new() -> Self { CaretState::default() }
+    pub fn new() -> Self {
+        CaretState::default()
+    }
 
     pub fn update(&mut self, now_ms: u64) {
         if now_ms.saturating_sub(self.last_toggle_ms) >= Self::BLINK_INTERVAL_MS {
@@ -29,16 +31,57 @@ mod tests {
     use super::*;
     const I: u64 = CaretState::BLINK_INTERVAL_MS;
 
-    #[test] fn blink_interval_ms_is_400() { assert_eq!(CaretState::BLINK_INTERVAL_MS, 400); }
-    #[test] fn new_not_visible() { assert!(!CaretState::new().visible); }
+    #[test]
+    fn blink_interval_ms_is_400() {
+        assert_eq!(CaretState::BLINK_INTERVAL_MS, 400);
+    }
+    #[test]
+    fn new_not_visible() {
+        assert!(!CaretState::new().visible);
+    }
     /// Mirrors C `test_caretCreate_stores_initial_time`: the new caret has last_toggle_ms = 0,
     /// so update(0) should not trigger a toggle.
-    #[test] fn new_caret_update_at_zero_does_not_toggle() { let mut c = CaretState::new(); c.update(0); assert!(!c.visible); }
-    #[test] fn reset_makes_visible() { let mut c = CaretState::new(); c.reset(0); assert!(c.visible); }
-    #[test] fn no_toggle_before_interval() { let mut c = CaretState::new(); c.reset(0); c.update(I - 1); assert!(c.visible); }
-    #[test] fn toggles_at_interval() { let mut c = CaretState::new(); c.reset(0); c.update(I); assert!(!c.visible); }
-    #[test] fn toggles_past_interval() { let mut c = CaretState::new(); c.reset(0); c.update(I + 100); assert!(!c.visible); }
-    #[test] fn toggles_twice() { let mut c = CaretState::new(); c.reset(0); c.update(I); c.update(I * 2); assert!(c.visible); }
+    #[test]
+    fn new_caret_update_at_zero_does_not_toggle() {
+        let mut c = CaretState::new();
+        c.update(0);
+        assert!(!c.visible);
+    }
+    #[test]
+    fn reset_makes_visible() {
+        let mut c = CaretState::new();
+        c.reset(0);
+        assert!(c.visible);
+    }
+    #[test]
+    fn no_toggle_before_interval() {
+        let mut c = CaretState::new();
+        c.reset(0);
+        c.update(I - 1);
+        assert!(c.visible);
+    }
+    #[test]
+    fn toggles_at_interval() {
+        let mut c = CaretState::new();
+        c.reset(0);
+        c.update(I);
+        assert!(!c.visible);
+    }
+    #[test]
+    fn toggles_past_interval() {
+        let mut c = CaretState::new();
+        c.reset(0);
+        c.update(I + 100);
+        assert!(!c.visible);
+    }
+    #[test]
+    fn toggles_twice() {
+        let mut c = CaretState::new();
+        c.reset(0);
+        c.update(I);
+        c.update(I * 2);
+        assert!(c.visible);
+    }
 
     #[test]
     fn update_updates_last_toggle_time() {

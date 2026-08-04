@@ -156,7 +156,10 @@ pub fn parse_sync_response(json: serde_json::Value, cache: &mut SyncCache) -> bo
             if !cache.invites.contains_key(room_id) {
                 cache.invites.insert(
                     room_id.clone(),
-                    InviteState { display_name, inviter },
+                    InviteState {
+                        display_name,
+                        inviter,
+                    },
                 );
                 changed = true;
             }
@@ -258,8 +261,7 @@ pub fn parse_sync_response(json: serde_json::Value, cache: &mut SyncCache) -> bo
                         .and_then(|v| v.as_str())
                         .unwrap_or("")
                         .to_owned();
-                    if !event_id.is_empty()
-                        && entry.timeline.iter().any(|e| e.event_id == event_id)
+                    if !event_id.is_empty() && entry.timeline.iter().any(|e| e.event_id == event_id)
                     {
                         continue; // duplicate
                     }
@@ -278,7 +280,12 @@ pub fn parse_sync_response(json: serde_json::Value, cache: &mut SyncCache) -> bo
                         .get("origin_server_ts")
                         .and_then(|v| v.as_i64())
                         .unwrap_or(0);
-                    entry.timeline.push(TimelineEvent { event_id, sender, body, origin_server_ts });
+                    entry.timeline.push(TimelineEvent {
+                        event_id,
+                        sender,
+                        body,
+                        origin_server_ts,
+                    });
                     changed = true;
                 }
 
@@ -393,7 +400,11 @@ fn apply_state_event(
                 .and_then(|c| c.get("topic"))
                 .and_then(|t| t.as_str())
             {
-                let new_topic = if topic.is_empty() { None } else { Some(topic.to_owned()) };
+                let new_topic = if topic.is_empty() {
+                    None
+                } else {
+                    Some(topic.to_owned())
+                };
                 if entry.topic != new_topic {
                     entry.topic = new_topic;
                     *changed = true;
@@ -425,8 +436,11 @@ fn apply_state_event(
                 .and_then(|c| c.get("displayname"))
                 .and_then(|d| d.as_str())
                 .map(|s| s.to_owned());
-            let member =
-                Member { user_id: user_id.to_owned(), display_name, membership };
+            let member = Member {
+                user_id: user_id.to_owned(),
+                display_name,
+                membership,
+            };
             entry.members.insert(user_id.to_owned(), member);
             *changed = true;
         }
@@ -546,7 +560,16 @@ impl SyncController {
         running.store(true, Ordering::Relaxed);
 
         self.thread = Some(std::thread::spawn(move || {
-            sync_loop(homeserver, access_token, config_path, user_id, file_lock, cache, notify, running);
+            sync_loop(
+                homeserver,
+                access_token,
+                config_path,
+                user_id,
+                file_lock,
+                cache,
+                notify,
+                running,
+            );
         }));
     }
 
@@ -559,7 +582,9 @@ impl SyncController {
     pub fn stop(&mut self) {
         self.running.store(false, Ordering::Relaxed);
         if let Some(handle) = self.thread.take() {
-            std::thread::spawn(move || { let _ = handle.join(); });
+            std::thread::spawn(move || {
+                let _ = handle.join();
+            });
         }
     }
 
@@ -691,7 +716,11 @@ fn run_sync_session(
 ///
 /// `file_lock` must be the same mutex used by `save_setting` on the main thread
 /// to serialise all read-modify-write cycles on the settings file.
-fn persist_next_batch(config_path: &Option<std::path::PathBuf>, token: &str, file_lock: &Arc<Mutex<()>>) {
+fn persist_next_batch(
+    config_path: &Option<std::path::PathBuf>,
+    token: &str,
+    file_lock: &Arc<Mutex<()>>,
+) {
     use serde_json::{Map, Value};
     let Some(path) = config_path else { return };
     let _guard = lock(file_lock);
@@ -712,7 +741,10 @@ fn persist_next_batch(config_path: &Option<std::path::PathBuf>, token: &str, fil
         .entry("chat client".to_owned())
         .or_insert_with(|| Value::Object(Map::new()));
     if let Value::Object(m) = section {
-        m.insert("chatSyncNextBatch".to_owned(), Value::String(token.to_owned()));
+        m.insert(
+            "chatSyncNextBatch".to_owned(),
+            Value::String(token.to_owned()),
+        );
     }
     if let Ok(json) = serde_json::to_string_pretty(&Value::Object(root)) {
         // Atomic write (temp + rename) so concurrent readers never observe a
@@ -775,7 +807,11 @@ mod tests {
             "s1",
             "!room:server",
             Some("General"),
-            &[("$e1", "@a:s", "hello"), ("$e2", "@b:s", "world"), ("$e3", "@a:s", "!")],
+            &[
+                ("$e1", "@a:s", "hello"),
+                ("$e2", "@b:s", "world"),
+                ("$e3", "@a:s", "!"),
+            ],
         );
         parse_sync_response(json, &mut cache);
         let room = &cache.rooms["!room:server"];
@@ -828,15 +864,19 @@ mod tests {
         let batch1: Vec<(String, String, String)> = (0..150)
             .map(|i| (format!("$e{i}"), "@a:s".to_owned(), format!("msg{i}")))
             .collect();
-        let refs1: Vec<(&str, &str, &str)> =
-            batch1.iter().map(|(a, b, c)| (a.as_str(), b.as_str(), c.as_str())).collect();
+        let refs1: Vec<(&str, &str, &str)> = batch1
+            .iter()
+            .map(|(a, b, c)| (a.as_str(), b.as_str(), c.as_str()))
+            .collect();
         parse_sync_response(make_sync_response("s1", "!r:s", None, &refs1), &mut cache);
 
         let batch2: Vec<(String, String, String)> = (150..250)
             .map(|i| (format!("$e{i}"), "@a:s".to_owned(), format!("msg{i}")))
             .collect();
-        let refs2: Vec<(&str, &str, &str)> =
-            batch2.iter().map(|(a, b, c)| (a.as_str(), b.as_str(), c.as_str())).collect();
+        let refs2: Vec<(&str, &str, &str)> = batch2
+            .iter()
+            .map(|(a, b, c)| (a.as_str(), b.as_str(), c.as_str()))
+            .collect();
         parse_sync_response(make_sync_response("s2", "!r:s", None, &refs2), &mut cache);
 
         assert_eq!(cache.rooms["!r:s"].timeline.len(), MAX_TIMELINE);
@@ -942,7 +982,13 @@ mod tests {
         let cache = Arc::new(Mutex::new(SyncCache::default()));
         let notify = Arc::new(AtomicBool::new(false));
         let mut ctrl = SyncController::new(cache, notify);
-        ctrl.start("http://127.0.0.1:1".to_owned(), "tok".to_owned(), None, String::new(), Arc::new(Mutex::new(())));
+        ctrl.start(
+            "http://127.0.0.1:1".to_owned(),
+            "tok".to_owned(),
+            None,
+            String::new(),
+            Arc::new(Mutex::new(())),
+        );
         assert!(ctrl.is_running());
         ctrl.stop();
         assert!(!ctrl.is_running());
@@ -1188,7 +1234,14 @@ mod tests {
             }
         });
         parse_sync_response(json, &mut cache);
-        assert_eq!(cache.invites["!nameless:server"].display_name, "!nameless:server");
-        assert!(cache.invite_display_to_id.contains_key("[invite] !nameless:server"));
+        assert_eq!(
+            cache.invites["!nameless:server"].display_name,
+            "!nameless:server"
+        );
+        assert!(
+            cache
+                .invite_display_to_id
+                .contains_key("[invite] !nameless:server")
+        );
     }
 }

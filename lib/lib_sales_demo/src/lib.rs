@@ -93,7 +93,10 @@ impl Node {
     }
 
     fn get(&self, key: &str) -> Option<&Node> {
-        self.as_object()?.iter().find(|(k, _)| k == key).map(|(_, v)| v)
+        self.as_object()?
+            .iter()
+            .find(|(k, _)| k == key)
+            .map(|(_, v)| v)
     }
 
     /// Render as the display string the script's `String(x)` produced.
@@ -212,8 +215,12 @@ fn build_display_children(obj: &Node) -> Vec<FfonElement> {
     };
 
     for (key, value) in entries {
-        let Some(raw) = value.as_array() else { continue };
-        let Some(card) = raw.first().and_then(Node::as_str) else { continue };
+        let Some(raw) = value.as_array() else {
+            continue;
+        };
+        let Some(card) = raw.first().and_then(Node::as_str) else {
+            continue;
+        };
         if !is_cardinality(card) {
             continue;
         }
@@ -283,8 +290,12 @@ fn build_item(key: &str, raw: &[Node]) -> FfonElement {
         let mut obj = FfonObject::new(key);
         let mut any = false;
         for entry in raw {
-            let Some(pair) = entry.as_array() else { continue };
-            let Some(card) = pair.first().and_then(Node::as_str) else { continue };
+            let Some(pair) = entry.as_array() else {
+                continue;
+            };
+            let Some(card) = pair.first().and_then(Node::as_str) else {
+                continue;
+            };
             if !is_cardinality(card) {
                 continue;
             }
@@ -293,7 +304,11 @@ fn build_item(key: &str, raw: &[Node]) -> FfonElement {
                 any = true;
             }
         }
-        return if any { FfonElement::Obj(obj) } else { FfonElement::new_str(key) };
+        return if any {
+            FfonElement::Obj(obj)
+        } else {
+            FfonElement::new_str(key)
+        };
     }
 
     FfonElement::new_str(key)
@@ -328,15 +343,18 @@ impl SalesDemoProvider {
         // A parse failure means the embedded asset is malformed, which is a build
         // problem rather than a runtime one; an empty tree renders as an empty view
         // instead of taking the app down.
-        let root = serde_json::from_str::<Node>(EQUIPMENT_JSON)
-            .unwrap_or_else(|e| {
-                eprintln!("sales demo: equipment1.json is malformed: {e}");
-                Node::Object(Vec::new())
-            });
+        let root = serde_json::from_str::<Node>(EQUIPMENT_JSON).unwrap_or_else(|e| {
+            eprintln!("sales demo: equipment1.json is malformed: {e}");
+            Node::Object(Vec::new())
+        });
         let dashboard_image = sicompass_sdk::platform::resolve_repo_asset(DASHBOARD_IMAGE_ASSET)
             .to_string_lossy()
             .into_owned();
-        SalesDemoProvider { root, path: "/".to_owned(), dashboard_image }
+        SalesDemoProvider {
+            root,
+            path: "/".to_owned(),
+            dashboard_image,
+        }
     }
 
     fn path_parts(&self) -> Vec<&str> {
@@ -405,7 +423,11 @@ impl Provider for SalesDemoProvider {
         // Only at the root, matching the script: it emitted `dashboardImage` in the
         // root payload only, and `ScriptProvider` cleared the field on every
         // subsequent fetch.
-        if self.at_root() { Some(&self.dashboard_image) } else { None }
+        if self.at_root() {
+            Some(&self.dashboard_image)
+        } else {
+            None
+        }
     }
 
     /// Build the element an "Add element:" button inserts.
@@ -421,7 +443,10 @@ impl Provider for SalesDemoProvider {
     fn create_element(&mut self, element_key: &str) -> Option<FfonElement> {
         let (key, tagged) = match element_key.strip_prefix("one-opt:") {
             Some(key) => (key, sicompass_sdk::tags::format_one_opt(key)),
-            None => (element_key, sicompass_sdk::tags::format_many_opt(element_key)),
+            None => (
+                element_key,
+                sicompass_sdk::tags::format_many_opt(element_key),
+            ),
         };
 
         if sicompass_sdk::tags::has_input(key) {
@@ -435,7 +460,10 @@ impl Provider for SalesDemoProvider {
         parts.push(key);
         if let Some(node) = raw_at_path(&self.root, &parts) {
             let children = match node.as_array() {
-                Some(items) => items.iter().map(|n| FfonElement::new_str(n.to_display())).collect(),
+                Some(items) => items
+                    .iter()
+                    .map(|n| FfonElement::new_str(n.to_display()))
+                    .collect(),
                 None => build_display_children(node),
             };
             for child in children {
@@ -456,9 +484,7 @@ impl Provider for SalesDemoProvider {
 
 /// Register the sales demo with the SDK factory and manifest registries.
 pub fn register() {
-    sicompass_sdk::register_provider_factory("sales demo", || {
-        Box::new(SalesDemoProvider::new())
-    });
+    sicompass_sdk::register_provider_factory("sales demo", || Box::new(SalesDemoProvider::new()));
     sicompass_sdk::register_builtin_manifest(
         sicompass_sdk::BuiltinManifest::new("sales demo", "sales demo").with_settings(vec![
             sicompass_sdk::SettingDecl::text(
@@ -501,20 +527,37 @@ mod tests {
         // which would reorder a product tree a salesperson reads top to bottom.
         let node: Node =
             serde_json::from_str(r#"{"zebra":1,"apple":2,"middle":3}"#).expect("parses");
-        let keys: Vec<&str> = node.as_object().unwrap().iter().map(|(k, _)| k.as_str()).collect();
-        assert_eq!(keys, vec!["zebra", "apple", "middle"], "keys were reordered");
+        let keys: Vec<&str> = node
+            .as_object()
+            .unwrap()
+            .iter()
+            .map(|(k, _)| k.as_str())
+            .collect();
+        assert_eq!(
+            keys,
+            vec!["zebra", "apple", "middle"],
+            "keys were reordered"
+        );
     }
 
     #[test]
     fn the_real_tree_keeps_its_authored_order() {
         let root: Node = serde_json::from_str(EQUIPMENT_JSON).unwrap();
-        let keys: Vec<&str> = root.as_object().unwrap().iter().map(|(k, _)| k.as_str()).collect();
+        let keys: Vec<&str> = root
+            .as_object()
+            .unwrap()
+            .iter()
+            .map(|(k, _)| k.as_str())
+            .collect();
         // `version` is written first in the asset; alphabetical order would not put
         // it there, so this catches a silent switch back to `serde_json::Value`.
         assert_eq!(keys.first(), Some(&"version"), "got {keys:?}");
         let mut sorted = keys.clone();
         sorted.sort_unstable();
-        assert_ne!(keys, sorted, "the asset happens to be sorted; pick a better assertion");
+        assert_ne!(
+            keys, sorted,
+            "the asset happens to be sorted; pick a better assertion"
+        );
     }
 
     // --- fetch, ported from the bun tests ---
@@ -528,7 +571,9 @@ mod tests {
     #[test]
     fn the_root_offers_a_dashboard_image() {
         let p = provider();
-        let path = p.dashboard_image_path().expect("root should offer an image");
+        let path = p
+            .dashboard_image_path()
+            .expect("root should offer an image");
         assert!(path.ends_with(".webp"), "got {path}");
     }
 
@@ -542,7 +587,11 @@ mod tests {
         let asset = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../..")
             .join(DASHBOARD_IMAGE_ASSET);
-        assert!(asset.exists(), "the diagram is missing at {}", asset.display());
+        assert!(
+            asset.exists(),
+            "the diagram is missing at {}",
+            asset.display()
+        );
     }
 
     #[test]
@@ -551,7 +600,9 @@ mod tests {
         // directory part comes from `resolve_repo_asset` and depends on where the
         // binary runs from, exactly as it does for `lib_tutorial`'s assets.
         let p = provider();
-        let path = p.dashboard_image_path().expect("root should offer an image");
+        let path = p
+            .dashboard_image_path()
+            .expect("root should offer an image");
         assert!(
             path.ends_with("115-Draw-through-Air-Handling-Unit-Diagram-1.webp"),
             "got {path}"
@@ -574,7 +625,10 @@ mod tests {
             .into_iter()
             .filter(|e| e.as_obj().is_none_or(|o| o.key != "Add element:"))
             .collect();
-        assert!(!non_add.is_empty(), "expected mandatory entries outside Add element:");
+        assert!(
+            !non_add.is_empty(),
+            "expected mandatory entries outside Add element:"
+        );
     }
 
     #[test]
@@ -609,15 +663,22 @@ mod tests {
         )
         .unwrap();
 
-        let elem = p.create_element("heating").expect("a button must produce an element");
-        let obj = elem.as_obj().expect("a node with children, not a bare label");
+        let elem = p
+            .create_element("heating")
+            .expect("a button must produce an element");
+        let obj = elem
+            .as_obj()
+            .expect("a node with children, not a bare label");
 
         // Tagged so the app knows the cardinality rule that applies to it.
         assert!(obj.key.contains("heating"), "got {:?}", obj.key);
         assert_ne!(obj.key, "heating", "the key should carry a cardinality tag");
 
         // Pre-filled from the tree, so adding "heating" brings its options along.
-        assert!(!obj.children.is_empty(), "the added node should carry its children");
+        assert!(
+            !obj.children.is_empty(),
+            "the added node should carry its children"
+        );
     }
 
     #[test]
@@ -633,7 +694,10 @@ mod tests {
 
         let one_key = &one.as_obj().unwrap().key;
         let many_key = &many.as_obj().unwrap().key;
-        assert_ne!(one_key, many_key, "one-opt and many-opt must tag differently");
+        assert_ne!(
+            one_key, many_key,
+            "one-opt and many-opt must tag differently"
+        );
         assert!(one_key.contains("roof") && many_key.contains("roof"));
     }
 
@@ -641,15 +705,22 @@ mod tests {
     fn adding_an_element_that_is_an_input_field_yields_a_bare_string() {
         // An entry that is itself an input has nothing to expand into.
         let mut p = provider();
-        let elem = p.create_element("<input>serial</input>").expect("still produces an element");
-        assert!(elem.as_str().is_some(), "an input entry should be a plain string");
+        let elem = p
+            .create_element("<input>serial</input>")
+            .expect("still produces an element");
+        assert!(
+            elem.as_str().is_some(),
+            "an input entry should be a plain string"
+        );
     }
 
     #[test]
     fn adding_an_unknown_element_still_produces_a_node() {
         // The user pressed a button; producing nothing would look like a dead key.
         let mut p = provider();
-        let elem = p.create_element("nonexistent").expect("should not return None");
+        let elem = p
+            .create_element("nonexistent")
+            .expect("should not return None");
         assert!(elem.as_obj().is_some_and(|o| o.children.is_empty()));
     }
 
@@ -700,7 +771,10 @@ mod tests {
 
         p.push_path(&key);
         assert_eq!(p.current_path(), format!("/{key}"));
-        assert!(!p.fetch().is_empty(), "navigating into {key:?} produced nothing");
+        assert!(
+            !p.fetch().is_empty(),
+            "navigating into {key:?} produced nothing"
+        );
     }
 
     #[test]
@@ -709,15 +783,17 @@ mod tests {
         // value appears on screen, yet descending into it yields nothing — the
         // script behaved the same way (`typeof content !== "object"` stops the
         // walk). Easy to "fix" into a behaviour change, so pin it.
-        let root: Node =
-            serde_json::from_str(r#"{"version":["one mand","accoflo 0.1"]}"#).unwrap();
+        let root: Node = serde_json::from_str(r#"{"version":["one mand","accoflo 0.1"]}"#).unwrap();
 
         let rendered = build_display_children(&root);
         let obj = rendered[0].as_obj().expect("renders as a section");
         assert_eq!(obj.key, "version");
         assert_eq!(obj.children[0].as_str(), Some("accoflo 0.1"));
 
-        assert!(raw_at_path(&root, &["version"]).is_none(), "must not be navigable");
+        assert!(
+            raw_at_path(&root, &["version"]).is_none(),
+            "must not be navigable"
+        );
     }
 
     #[test]
@@ -732,7 +808,11 @@ mod tests {
         p.pop_path();
         assert_eq!(p.current_path(), "/");
         p.pop_path();
-        assert_eq!(p.current_path(), "/", "popping at the root should stay there");
+        assert_eq!(
+            p.current_path(),
+            "/",
+            "popping at the root should stay there"
+        );
     }
 
     #[test]
@@ -745,10 +825,8 @@ mod tests {
 
     #[test]
     fn a_leaf_list_renders_as_its_options() {
-        let root: Node = serde_json::from_str(
-            r#"{"paint":["one mand",["black","grey"]]}"#,
-        )
-        .unwrap();
+        let root: Node =
+            serde_json::from_str(r#"{"paint":["one mand",["black","grey"]]}"#).unwrap();
         let node = raw_at_path(&root, &["paint"]).expect("path exists");
         let opts: Vec<String> = node
             .as_array()
@@ -761,8 +839,7 @@ mod tests {
 
     #[test]
     fn a_leaf_list_is_not_navigable_any_deeper() {
-        let root: Node =
-            serde_json::from_str(r#"{"paint":["one mand",["black"]]}"#).unwrap();
+        let root: Node = serde_json::from_str(r#"{"paint":["one mand",["black"]]}"#).unwrap();
         assert!(raw_at_path(&root, &["paint", "black"]).is_none());
     }
 
@@ -790,18 +867,24 @@ mod tests {
 
         // `one opt` carries the prefix so the app knows it may be added once;
         // `many opt` does not.
-        assert!(labels.contains(&"<button>one-opt:a</button>a"), "got {labels:?}");
+        assert!(
+            labels.contains(&"<button>one-opt:a</button>a"),
+            "got {labels:?}"
+        );
         assert!(labels.contains(&"<button>b</button>b"), "got {labels:?}");
 
         // The mandatory entry stays outside the section.
-        assert!(children.iter().any(|e| e.as_obj().is_some_and(|o| o.key == "c")));
+        assert!(
+            children
+                .iter()
+                .any(|e| e.as_obj().is_some_and(|o| o.key == "c"))
+        );
     }
 
     #[test]
     fn the_pair_list_shape_is_flattened_to_children() {
         // Shape B, used by `version`: [[cardinality, value], ...].
-        let raw: Node =
-            serde_json::from_str(r#"[["one mand","1.0"],["one mand","2.0"]]"#).unwrap();
+        let raw: Node = serde_json::from_str(r#"[["one mand","1.0"],["one mand","2.0"]]"#).unwrap();
         let item = build_item("version", raw.as_array().unwrap());
         let obj = item.as_obj().expect("should render as a section");
         let values: Vec<&str> = obj.children.iter().filter_map(|c| c.as_str()).collect();
@@ -811,9 +894,15 @@ mod tests {
     #[test]
     fn an_entry_with_no_content_degrades_to_a_label() {
         let raw: Node = serde_json::from_str(r#"["one mand"]"#).unwrap();
-        assert_eq!(build_item("bare", raw.as_array().unwrap()).as_str(), Some("bare"));
+        assert_eq!(
+            build_item("bare", raw.as_array().unwrap()).as_str(),
+            Some("bare")
+        );
 
         let empty: Node = serde_json::from_str("[]").unwrap();
-        assert_eq!(build_item("empty", empty.as_array().unwrap()).as_str(), Some("empty"));
+        assert_eq!(
+            build_item("empty", empty.as_array().unwrap()).as_str(),
+            Some("empty")
+        );
     }
 }

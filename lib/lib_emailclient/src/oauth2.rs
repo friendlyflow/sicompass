@@ -7,7 +7,10 @@ use reqwest::blocking::Client;
 use serde::Deserialize;
 use std::io::{Read, Write};
 use std::net::TcpListener;
-use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 use std::time::{Duration, Instant};
 
 const GOOGLE_AUTH_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
@@ -103,15 +106,20 @@ pub fn start(
         error: format!("failed to start local server: {e}"),
         ..Default::default()
     })?;
-    listener.set_nonblocking(true).map_err(|e| OAuth2TokenResult {
-        error: format!("failed to set listener non-blocking: {e}"),
-        ..Default::default()
-    })?;
+    listener
+        .set_nonblocking(true)
+        .map_err(|e| OAuth2TokenResult {
+            error: format!("failed to set listener non-blocking: {e}"),
+            ..Default::default()
+        })?;
 
-    let port = listener.local_addr().map_err(|e| OAuth2TokenResult {
-        error: format!("failed to get listener address: {e}"),
-        ..Default::default()
-    })?.port();
+    let port = listener
+        .local_addr()
+        .map_err(|e| OAuth2TokenResult {
+            error: format!("failed to get listener address: {e}"),
+            ..Default::default()
+        })?
+        .port();
     let redirect_uri = format!("http://localhost:{port}");
 
     let auth_url = format!(
@@ -186,7 +194,8 @@ pub fn refresh_token(client_id: &str, client_secret: &str, refresh_tok: &str) ->
         };
     }
 
-    let client = match Client::new().post(GOOGLE_TOKEN_URL)
+    let client = match Client::new()
+        .post(GOOGLE_TOKEN_URL)
         .form(&[
             ("client_id", client_id),
             ("client_secret", client_secret),
@@ -200,7 +209,7 @@ pub fn refresh_token(client_id: &str, client_secret: &str, refresh_tok: &str) ->
             return OAuth2TokenResult {
                 error: format!("token refresh failed: {e}"),
                 ..Default::default()
-            }
+            };
         }
     };
 
@@ -236,40 +245,44 @@ fn accept_and_exchange(
                 let mut buf = [0u8; 4096];
                 let n = match stream.read(&mut buf) {
                     Ok(n) => n,
-                    Err(_) => return OAuth2TokenResult {
-                        error: "failed to read redirect request".to_owned(),
-                        ..Default::default()
-                    },
+                    Err(_) => {
+                        return OAuth2TokenResult {
+                            error: "failed to read redirect request".to_owned(),
+                            ..Default::default()
+                        };
+                    }
                 };
                 let request = match std::str::from_utf8(&buf[..n]) {
                     Ok(s) => s,
-                    Err(_) => return OAuth2TokenResult {
-                        error: "invalid UTF-8 in redirect request".to_owned(),
-                        ..Default::default()
-                    },
+                    Err(_) => {
+                        return OAuth2TokenResult {
+                            error: "invalid UTF-8 in redirect request".to_owned(),
+                            ..Default::default()
+                        };
+                    }
                 };
 
                 let first_line = request.lines().next().unwrap_or("");
 
                 // Always send a response so the browser tab closes cleanly.
-                let (status, body) = if first_line.contains("error=") || !first_line.contains("code=") {
-                    (
-                        "400 Bad Request",
-                        "<html><body><h2>Authentication failed</h2>\
+                let (status, body) =
+                    if first_line.contains("error=") || !first_line.contains("code=") {
+                        (
+                            "400 Bad Request",
+                            "<html><body><h2>Authentication failed</h2>\
                          <p>You can close this tab and return to sicompass.</p>\
                          </body></html>",
-                    )
-                } else {
-                    (
-                        "200 OK",
-                        "<html><body><h2>Authentication successful</h2>\
+                        )
+                    } else {
+                        (
+                            "200 OK",
+                            "<html><body><h2>Authentication successful</h2>\
                          <p>You can close this tab and return to sicompass.</p>\
                          </body></html>",
-                    )
-                };
-                let response = format!(
-                    "HTTP/1.1 {status}\r\nContent-Type: text/html\r\n\r\n{body}"
-                );
+                        )
+                    };
+                let response =
+                    format!("HTTP/1.1 {status}\r\nContent-Type: text/html\r\n\r\n{body}");
                 let _ = stream.write_all(response.as_bytes());
 
                 if first_line.contains("error=") {
@@ -281,10 +294,12 @@ fn accept_and_exchange(
 
                 let code = match extract_query_param(first_line, "code") {
                     Some(c) => c,
-                    None => return OAuth2TokenResult {
-                        error: "no authorization code in redirect".to_owned(),
-                        ..Default::default()
-                    },
+                    None => {
+                        return OAuth2TokenResult {
+                            error: "no authorization code in redirect".to_owned(),
+                            ..Default::default()
+                        };
+                    }
                 };
 
                 return exchange_code(&code, client_id, client_secret, redirect_uri);
@@ -305,7 +320,10 @@ fn accept_and_exchange(
 fn extract_query_param(get_line: &str, param: &str) -> Option<String> {
     // GET /?code=XXXX&... HTTP/1.1
     let query_start = get_line.find('?')?;
-    let query_end = get_line[query_start..].find(' ').map(|i| query_start + i).unwrap_or(get_line.len());
+    let query_end = get_line[query_start..]
+        .find(' ')
+        .map(|i| query_start + i)
+        .unwrap_or(get_line.len());
     let query = &get_line[query_start + 1..query_end];
     for part in query.split('&') {
         if let Some(value) = part.strip_prefix(&format!("{param}=")) {
@@ -337,7 +355,7 @@ fn exchange_code(
             return OAuth2TokenResult {
                 error: format!("token exchange failed: {e}"),
                 ..Default::default()
-            }
+            };
         }
     };
 
@@ -360,7 +378,7 @@ fn parse_token_response(response: reqwest::blocking::Response) -> OAuth2TokenRes
             return OAuth2TokenResult {
                 error: format!("failed to read response: {e}"),
                 ..Default::default()
-            }
+            };
         }
     };
 
@@ -370,7 +388,7 @@ fn parse_token_response(response: reqwest::blocking::Response) -> OAuth2TokenRes
             return OAuth2TokenResult {
                 error: format!("invalid JSON response: {e}"),
                 ..Default::default()
-            }
+            };
         }
     };
 
@@ -404,8 +422,9 @@ fn percent_encode(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for b in s.bytes() {
         match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9'
-            | b'-' | b'_' | b'.' | b'~' => out.push(b as char),
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char)
+            }
             _ => out.push_str(&format!("%{b:02X}")),
         }
     }
@@ -500,7 +519,8 @@ mod tests {
         tx.send(OAuth2TokenResult {
             error: "login cancelled".to_owned(),
             ..Default::default()
-        }).unwrap();
+        })
+        .unwrap();
         // Now poll should return Some.
         let result = handle.poll().unwrap();
         assert!(!result.success);

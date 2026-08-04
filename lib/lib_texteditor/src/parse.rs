@@ -14,11 +14,9 @@ use sicompass_sdk::tags;
 pub fn parse_file_ext(contents: &str, ext: &str) -> Vec<FfonElement> {
     match ext.to_ascii_lowercase().as_str() {
         "py" | "pyw" | "pyi" => parse_python(contents),
-        "c" | "h" | "cpp" | "cxx" | "cc" | "hpp" | "hxx"
-        | "js" | "jsx" | "mjs" | "cjs"
-        | "ts" | "tsx"
-        | "java" | "go" | "cs" | "swift" | "kt" | "kts"
-        | "rs" | "php" | "css" | "scss" | "less" => parse_cbrace(contents),
+        "c" | "h" | "cpp" | "cxx" | "cc" | "hpp" | "hxx" | "js" | "jsx" | "mjs" | "cjs" | "ts"
+        | "tsx" | "java" | "go" | "cs" | "swift" | "kt" | "kts" | "rs" | "php" | "css" | "scss"
+        | "less" => parse_cbrace(contents),
         _ => parse_file(contents),
     }
 }
@@ -62,7 +60,9 @@ fn parse_ffon_block(lines: &[&str], i: &mut usize, inside_braces: bool) -> Vec<F
         let line = lines[*i].trim();
 
         if line == "}" {
-            if inside_braces { *i += 1; }
+            if inside_braces {
+                *i += 1;
+            }
             return result;
         }
         if line.is_empty() {
@@ -158,7 +158,9 @@ fn parse_cbrace_block(lines: &[&str], i: &mut usize, top_level: bool) -> Vec<Ffo
             while *i < lines.len() {
                 let cl_src = *i;
                 let cl = lines[*i].trim();
-                if !cl.starts_with('}') { break; }
+                if !cl.starts_with('}') {
+                    break;
+                }
                 *i += 1;
                 if cl.ends_with('{') {
                     let cont_key = format!("{}{}", tags::format_src(cl_src), cl);
@@ -173,12 +175,20 @@ fn parse_cbrace_block(lines: &[&str], i: &mut usize, top_level: bool) -> Vec<Ffo
                         result.push(cont);
                     }
                 } else {
-                    result.push(FfonElement::new_str(format!("{}{}", tags::format_src(cl_src), cl)));
+                    result.push(FfonElement::new_str(format!(
+                        "{}{}",
+                        tags::format_src(cl_src),
+                        cl
+                    )));
                     break;
                 }
             }
         } else {
-            result.push(FfonElement::new_str(format!("{}{}", tags::format_src(src_line), line)));
+            result.push(FfonElement::new_str(format!(
+                "{}{}",
+                tags::format_src(src_line),
+                line
+            )));
         }
     }
     result
@@ -224,8 +234,14 @@ fn parse_python_block(lines: &[&str], i: &mut usize, base_indent: usize) -> Vec<
         if stripped.ends_with(':') {
             // Look ahead (skipping blanks) to find the child indent level.
             let mut j = *i;
-            while j < lines.len() && lines[j].trim().is_empty() { j += 1; }
-            let child_indent = if j < lines.len() { measure_indent(lines[j]) } else { 0 };
+            while j < lines.len() && lines[j].trim().is_empty() {
+                j += 1;
+            }
+            let child_indent = if j < lines.len() {
+                measure_indent(lines[j])
+            } else {
+                0
+            };
 
             let children = if child_indent > indent {
                 parse_python_block(lines, i, child_indent)
@@ -244,7 +260,11 @@ fn parse_python_block(lines: &[&str], i: &mut usize, base_indent: usize) -> Vec<
                 result.push(obj);
             }
         } else {
-            result.push(FfonElement::new_str(format!("{}{}", tags::format_src(src_line), stripped)));
+            result.push(FfonElement::new_str(format!(
+                "{}{}",
+                tags::format_src(src_line),
+                stripped
+            )));
         }
     }
     result
@@ -299,7 +319,10 @@ mod tests {
         let elements = parse_file("section:\n{\n  child\n}");
         assert_eq!(elements.len(), 1);
         assert!(elements[0].is_obj());
-        assert_eq!(strip_src(elements[0].as_obj().unwrap().key.as_str()), "section:");
+        assert_eq!(
+            strip_src(elements[0].as_obj().unwrap().key.as_str()),
+            "section:"
+        );
     }
 
     #[test]
@@ -365,10 +388,30 @@ mod tests {
         // Each source line gets its own element, blanks included, and the
         // `<src=N>` annotations match the file line indices 1:1.
         let elements = parse_file("alpha\n\nbeta\ngamma");
-        assert_eq!(elements[0].as_str().map(|s| tags::extract_src(s).map(|(n,_)| n)), Some(Some(0)));
-        assert_eq!(elements[1].as_str().map(|s| tags::extract_src(s).map(|(n,_)| n)), Some(Some(1)));
-        assert_eq!(elements[2].as_str().map(|s| tags::extract_src(s).map(|(n,_)| n)), Some(Some(2)));
-        assert_eq!(elements[3].as_str().map(|s| tags::extract_src(s).map(|(n,_)| n)), Some(Some(3)));
+        assert_eq!(
+            elements[0]
+                .as_str()
+                .map(|s| tags::extract_src(s).map(|(n, _)| n)),
+            Some(Some(0))
+        );
+        assert_eq!(
+            elements[1]
+                .as_str()
+                .map(|s| tags::extract_src(s).map(|(n, _)| n)),
+            Some(Some(1))
+        );
+        assert_eq!(
+            elements[2]
+                .as_str()
+                .map(|s| tags::extract_src(s).map(|(n, _)| n)),
+            Some(Some(2))
+        );
+        assert_eq!(
+            elements[3]
+                .as_str()
+                .map(|s| tags::extract_src(s).map(|(n, _)| n)),
+            Some(Some(3))
+        );
     }
 
     // --- C-brace parser ---
@@ -418,8 +461,14 @@ mod tests {
         let elements = parse_file_ext(src, "c");
         // if Obj, else Obj (continuation), then the closing "}"
         assert_eq!(elements.len(), 3);
-        assert_eq!(strip_src(elements[0].as_obj().unwrap().key.as_str()), "if (x) {");
-        assert_eq!(strip_src(elements[1].as_obj().unwrap().key.as_str()), "} else {");
+        assert_eq!(
+            strip_src(elements[0].as_obj().unwrap().key.as_str()),
+            "if (x) {"
+        );
+        assert_eq!(
+            strip_src(elements[1].as_obj().unwrap().key.as_str()),
+            "} else {"
+        );
         assert_eq!(strip_src(elements[2].as_str().unwrap()), "}");
     }
 
@@ -473,8 +522,14 @@ mod tests {
         let src = "if True:\n    a = 1\nelse:\n    b = 2\n";
         let elements = parse_file_ext(src, "py");
         assert_eq!(elements.len(), 2);
-        assert_eq!(strip_src(elements[0].as_obj().unwrap().key.as_str()), "if True:");
-        assert_eq!(strip_src(elements[1].as_obj().unwrap().key.as_str()), "else:");
+        assert_eq!(
+            strip_src(elements[0].as_obj().unwrap().key.as_str()),
+            "if True:"
+        );
+        assert_eq!(
+            strip_src(elements[1].as_obj().unwrap().key.as_str()),
+            "else:"
+        );
     }
 
     // --- navigate_path with src annotations ---

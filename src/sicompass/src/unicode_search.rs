@@ -3,7 +3,9 @@
 use unicode_normalization::UnicodeNormalization;
 
 pub fn contains_normalised(haystack: &str, needle: &str) -> bool {
-    if needle.is_empty() { return true; }
+    if needle.is_empty() {
+        return true;
+    }
     let h: String = haystack.nfc().collect::<String>().to_lowercase();
     let n: String = needle.nfc().collect::<String>().to_lowercase();
     h.contains(&n)
@@ -18,7 +20,9 @@ pub fn contains_normalised(haystack: &str, needle: &str) -> bool {
 /// for Latin, Cyrillic, Greek, etc.) this equals the byte offset in the
 /// original string.
 pub fn find_normalised_byte_pos(haystack: &str, needle: &str) -> Option<usize> {
-    if needle.is_empty() { return Some(0); }
+    if needle.is_empty() {
+        return Some(0);
+    }
     let h_norm: String = haystack.nfc().collect::<String>().to_lowercase();
     let n_norm: String = needle.nfc().collect::<String>().to_lowercase();
     h_norm.find(&n_norm)
@@ -27,26 +31,51 @@ pub fn find_normalised_byte_pos(haystack: &str, needle: &str) -> Option<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test] fn empty_needle() { assert!(contains_normalised("anything", "")); }
-    #[test] fn empty_haystack_nonempty_needle() { assert!(!contains_normalised("", "abc")); }
-    #[test] fn ascii_match() { assert!(contains_normalised("hello world", "world")); }
-    #[test] fn case_insensitive() { assert!(contains_normalised("Hello", "hello")); }
-    #[test] fn no_match() { assert!(!contains_normalised("hello", "xyz")); }
-    #[test] fn nfc_roundtrip() {
+    #[test]
+    fn empty_needle() {
+        assert!(contains_normalised("anything", ""));
+    }
+    #[test]
+    fn empty_haystack_nonempty_needle() {
+        assert!(!contains_normalised("", "abc"));
+    }
+    #[test]
+    fn ascii_match() {
+        assert!(contains_normalised("hello world", "world"));
+    }
+    #[test]
+    fn case_insensitive() {
+        assert!(contains_normalised("Hello", "hello"));
+    }
+    #[test]
+    fn no_match() {
+        assert!(!contains_normalised("hello", "xyz"));
+    }
+    #[test]
+    fn nfc_roundtrip() {
         assert!(contains_normalised("\u{00e9}", "e\u{0301}"));
         assert!(contains_normalised("e\u{0301}", "\u{00e9}"));
     }
 
-    #[test] fn uppercase_needle() { assert!(contains_normalised("hello world", "HELLO")); }
-    #[test] fn exact_match() { assert!(contains_normalised("hello", "hello")); }
-    #[test] fn unicode_case_fold() {
+    #[test]
+    fn uppercase_needle() {
+        assert!(contains_normalised("hello world", "HELLO"));
+    }
+    #[test]
+    fn exact_match() {
+        assert!(contains_normalised("hello", "hello"));
+    }
+    #[test]
+    fn unicode_case_fold() {
         // "CAFÉ" should match "café"
         assert!(contains_normalised("café", "CAFÉ"));
     }
-    #[test] fn unicode_accent_resume() {
+    #[test]
+    fn unicode_accent_resume() {
         assert!(contains_normalised("Résumé", "résumé"));
     }
-    #[test] fn partial_no_match() {
+    #[test]
+    fn partial_no_match() {
         // needle longer than haystack
         assert!(!contains_normalised("hel", "hello"));
     }

@@ -3,7 +3,9 @@
 //! Mirrors `main.c` (setup) and the Vulkan parts of `render.c` in the C code.
 //! Phase 3: clear-to-colour pass.  Shader pipelines (text/rect/image) are Phase 4.
 
-use crate::app_state::{AppState, SiError, MAX_FRAMES_IN_FLIGHT, WINDOW_TITLE, WINDOW_WIDTH, WINDOW_HEIGHT};
+use crate::app_state::{
+    AppState, MAX_FRAMES_IN_FLIGHT, SiError, WINDOW_HEIGHT, WINDOW_TITLE, WINDOW_WIDTH,
+};
 use ash::vk;
 use ash::vk::Handle as _;
 use std::ffi::{CStr, CString};
@@ -17,17 +19,21 @@ pub(crate) unsafe fn find_memory_type(
     physical_device: vk::PhysicalDevice,
     type_filter: u32,
     properties: vk::MemoryPropertyFlags,
-) -> Option<u32> { unsafe {
-    let props = instance.get_physical_device_memory_properties(physical_device);
-    for i in 0..props.memory_type_count {
-        if (type_filter & (1 << i)) != 0
-            && props.memory_types[i as usize].property_flags.contains(properties)
-        {
-            return Some(i);
+) -> Option<u32> {
+    unsafe {
+        let props = instance.get_physical_device_memory_properties(physical_device);
+        for i in 0..props.memory_type_count {
+            if (type_filter & (1 << i)) != 0
+                && props.memory_types[i as usize]
+                    .property_flags
+                    .contains(properties)
+            {
+                return Some(i);
+            }
         }
+        None
     }
-    None
-}}
+}
 
 pub(crate) unsafe fn create_buffer(
     device: &ash::Device,
@@ -36,22 +42,25 @@ pub(crate) unsafe fn create_buffer(
     size: vk::DeviceSize,
     usage: vk::BufferUsageFlags,
     properties: vk::MemoryPropertyFlags,
-) -> Result<(vk::Buffer, vk::DeviceMemory), SiError> { unsafe {
-    let buf_info = vk::BufferCreateInfo::default()
-        .size(size)
-        .usage(usage)
-        .sharing_mode(vk::SharingMode::EXCLUSIVE);
-    let buffer = device.create_buffer(&buf_info, None)?;
-    let req = device.get_buffer_memory_requirements(buffer);
-    let mem_type = find_memory_type(instance, physical_device, req.memory_type_bits, properties)
-        .ok_or_else(|| SiError::Other("No suitable memory type for buffer".into()))?;
-    let alloc = vk::MemoryAllocateInfo::default()
-        .allocation_size(req.size)
-        .memory_type_index(mem_type);
-    let memory = device.allocate_memory(&alloc, None)?;
-    device.bind_buffer_memory(buffer, memory, 0)?;
-    Ok((buffer, memory))
-}}
+) -> Result<(vk::Buffer, vk::DeviceMemory), SiError> {
+    unsafe {
+        let buf_info = vk::BufferCreateInfo::default()
+            .size(size)
+            .usage(usage)
+            .sharing_mode(vk::SharingMode::EXCLUSIVE);
+        let buffer = device.create_buffer(&buf_info, None)?;
+        let req = device.get_buffer_memory_requirements(buffer);
+        let mem_type =
+            find_memory_type(instance, physical_device, req.memory_type_bits, properties)
+                .ok_or_else(|| SiError::Other("No suitable memory type for buffer".into()))?;
+        let alloc = vk::MemoryAllocateInfo::default()
+            .allocation_size(req.size)
+            .memory_type_index(mem_type);
+        let memory = device.allocate_memory(&alloc, None)?;
+        device.bind_buffer_memory(buffer, memory, 0)?;
+        Ok((buffer, memory))
+    }
+}
 
 pub(crate) unsafe fn create_image_helper(
     device: &ash::Device,
@@ -63,58 +72,71 @@ pub(crate) unsafe fn create_image_helper(
     tiling: vk::ImageTiling,
     usage: vk::ImageUsageFlags,
     properties: vk::MemoryPropertyFlags,
-) -> Result<(vk::Image, vk::DeviceMemory), SiError> { unsafe {
-    let img_info = vk::ImageCreateInfo::default()
-        .image_type(vk::ImageType::TYPE_2D)
-        .extent(vk::Extent3D { width, height, depth: 1 })
-        .mip_levels(1)
-        .array_layers(1)
-        .format(format)
-        .tiling(tiling)
-        .initial_layout(vk::ImageLayout::UNDEFINED)
-        .usage(usage)
-        .sharing_mode(vk::SharingMode::EXCLUSIVE)
-        .samples(vk::SampleCountFlags::TYPE_1);
-    let image = device.create_image(&img_info, None)?;
-    let req = device.get_image_memory_requirements(image);
-    let mem_type = find_memory_type(instance, physical_device, req.memory_type_bits, properties)
-        .ok_or_else(|| SiError::Other("No suitable memory type for image".into()))?;
-    let alloc = vk::MemoryAllocateInfo::default()
-        .allocation_size(req.size)
-        .memory_type_index(mem_type);
-    let memory = device.allocate_memory(&alloc, None)?;
-    device.bind_image_memory(image, memory, 0)?;
-    Ok((image, memory))
-}}
+) -> Result<(vk::Image, vk::DeviceMemory), SiError> {
+    unsafe {
+        let img_info = vk::ImageCreateInfo::default()
+            .image_type(vk::ImageType::TYPE_2D)
+            .extent(vk::Extent3D {
+                width,
+                height,
+                depth: 1,
+            })
+            .mip_levels(1)
+            .array_layers(1)
+            .format(format)
+            .tiling(tiling)
+            .initial_layout(vk::ImageLayout::UNDEFINED)
+            .usage(usage)
+            .sharing_mode(vk::SharingMode::EXCLUSIVE)
+            .samples(vk::SampleCountFlags::TYPE_1);
+        let image = device.create_image(&img_info, None)?;
+        let req = device.get_image_memory_requirements(image);
+        let mem_type =
+            find_memory_type(instance, physical_device, req.memory_type_bits, properties)
+                .ok_or_else(|| SiError::Other("No suitable memory type for image".into()))?;
+        let alloc = vk::MemoryAllocateInfo::default()
+            .allocation_size(req.size)
+            .memory_type_index(mem_type);
+        let memory = device.allocate_memory(&alloc, None)?;
+        device.bind_image_memory(image, memory, 0)?;
+        Ok((image, memory))
+    }
+}
 
 unsafe fn begin_single_time_commands(
     device: &ash::Device,
     command_pool: vk::CommandPool,
-) -> vk::CommandBuffer { unsafe {
-    let alloc = vk::CommandBufferAllocateInfo::default()
-        .command_pool(command_pool)
-        .level(vk::CommandBufferLevel::PRIMARY)
-        .command_buffer_count(1);
-    let cb = device.allocate_command_buffers(&alloc).unwrap()[0];
-    let begin = vk::CommandBufferBeginInfo::default()
-        .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
-    device.begin_command_buffer(cb, &begin).unwrap();
-    cb
-}}
+) -> vk::CommandBuffer {
+    unsafe {
+        let alloc = vk::CommandBufferAllocateInfo::default()
+            .command_pool(command_pool)
+            .level(vk::CommandBufferLevel::PRIMARY)
+            .command_buffer_count(1);
+        let cb = device.allocate_command_buffers(&alloc).unwrap()[0];
+        let begin = vk::CommandBufferBeginInfo::default()
+            .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
+        device.begin_command_buffer(cb, &begin).unwrap();
+        cb
+    }
+}
 
 unsafe fn end_single_time_commands(
     device: &ash::Device,
     command_pool: vk::CommandPool,
     cb: vk::CommandBuffer,
     queue: vk::Queue,
-) { unsafe {
-    device.end_command_buffer(cb).unwrap();
-    let cbs = [cb];
-    let submit = vk::SubmitInfo::default().command_buffers(&cbs);
-    device.queue_submit(queue, &[submit], vk::Fence::null()).unwrap();
-    device.queue_wait_idle(queue).unwrap();
-    device.free_command_buffers(command_pool, &cbs);
-}}
+) {
+    unsafe {
+        device.end_command_buffer(cb).unwrap();
+        let cbs = [cb];
+        let submit = vk::SubmitInfo::default().command_buffers(&cbs);
+        device
+            .queue_submit(queue, &[submit], vk::Fence::null())
+            .unwrap();
+        device.queue_wait_idle(queue).unwrap();
+        device.free_command_buffers(command_pool, &cbs);
+    }
+}
 
 pub(crate) unsafe fn transition_image_layout(
     device: &ash::Device,
@@ -123,56 +145,64 @@ pub(crate) unsafe fn transition_image_layout(
     image: vk::Image,
     old_layout: vk::ImageLayout,
     new_layout: vk::ImageLayout,
-) { unsafe {
-    let cb = begin_single_time_commands(device, command_pool);
+) {
+    unsafe {
+        let cb = begin_single_time_commands(device, command_pool);
 
-    let (src_access, dst_access, src_stage, dst_stage) = match (old_layout, new_layout) {
-        (vk::ImageLayout::UNDEFINED, vk::ImageLayout::TRANSFER_DST_OPTIMAL) => (
-            vk::AccessFlags::empty(),
-            vk::AccessFlags::TRANSFER_WRITE,
-            vk::PipelineStageFlags::TOP_OF_PIPE,
-            vk::PipelineStageFlags::TRANSFER,
-        ),
-        (vk::ImageLayout::TRANSFER_DST_OPTIMAL, vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL) => (
-            vk::AccessFlags::TRANSFER_WRITE,
-            vk::AccessFlags::SHADER_READ,
-            vk::PipelineStageFlags::TRANSFER,
-            vk::PipelineStageFlags::FRAGMENT_SHADER,
-        ),
-        // Re-upload into an already-sampled image (dynamic glyph atlas): the
-        // shader must finish reading before the transfer overwrites texels.
-        (vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL, vk::ImageLayout::TRANSFER_DST_OPTIMAL) => (
-            vk::AccessFlags::SHADER_READ,
-            vk::AccessFlags::TRANSFER_WRITE,
-            vk::PipelineStageFlags::FRAGMENT_SHADER,
-            vk::PipelineStageFlags::TRANSFER,
-        ),
-        _ => panic!("transition_image_layout: unsupported layout pair"),
-    };
+        let (src_access, dst_access, src_stage, dst_stage) = match (old_layout, new_layout) {
+            (vk::ImageLayout::UNDEFINED, vk::ImageLayout::TRANSFER_DST_OPTIMAL) => (
+                vk::AccessFlags::empty(),
+                vk::AccessFlags::TRANSFER_WRITE,
+                vk::PipelineStageFlags::TOP_OF_PIPE,
+                vk::PipelineStageFlags::TRANSFER,
+            ),
+            (vk::ImageLayout::TRANSFER_DST_OPTIMAL, vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL) => (
+                vk::AccessFlags::TRANSFER_WRITE,
+                vk::AccessFlags::SHADER_READ,
+                vk::PipelineStageFlags::TRANSFER,
+                vk::PipelineStageFlags::FRAGMENT_SHADER,
+            ),
+            // Re-upload into an already-sampled image (dynamic glyph atlas): the
+            // shader must finish reading before the transfer overwrites texels.
+            (vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL, vk::ImageLayout::TRANSFER_DST_OPTIMAL) => (
+                vk::AccessFlags::SHADER_READ,
+                vk::AccessFlags::TRANSFER_WRITE,
+                vk::PipelineStageFlags::FRAGMENT_SHADER,
+                vk::PipelineStageFlags::TRANSFER,
+            ),
+            _ => panic!("transition_image_layout: unsupported layout pair"),
+        };
 
-    let barrier = vk::ImageMemoryBarrier::default()
-        .old_layout(old_layout)
-        .new_layout(new_layout)
-        .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
-        .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
-        .image(image)
-        .subresource_range(
-            vk::ImageSubresourceRange::default()
-                .aspect_mask(vk::ImageAspectFlags::COLOR)
-                .base_mip_level(0).level_count(1)
-                .base_array_layer(0).layer_count(1),
-        )
-        .src_access_mask(src_access)
-        .dst_access_mask(dst_access);
+        let barrier = vk::ImageMemoryBarrier::default()
+            .old_layout(old_layout)
+            .new_layout(new_layout)
+            .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+            .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+            .image(image)
+            .subresource_range(
+                vk::ImageSubresourceRange::default()
+                    .aspect_mask(vk::ImageAspectFlags::COLOR)
+                    .base_mip_level(0)
+                    .level_count(1)
+                    .base_array_layer(0)
+                    .layer_count(1),
+            )
+            .src_access_mask(src_access)
+            .dst_access_mask(dst_access);
 
-    device.cmd_pipeline_barrier(
-        cb, src_stage, dst_stage,
-        vk::DependencyFlags::empty(),
-        &[], &[], &[barrier],
-    );
+        device.cmd_pipeline_barrier(
+            cb,
+            src_stage,
+            dst_stage,
+            vk::DependencyFlags::empty(),
+            &[],
+            &[],
+            &[barrier],
+        );
 
-    end_single_time_commands(device, command_pool, cb, queue);
-}}
+        end_single_time_commands(device, command_pool, cb, queue);
+    }
+}
 
 pub(crate) unsafe fn copy_buffer_to_image(
     device: &ash::Device,
@@ -182,39 +212,51 @@ pub(crate) unsafe fn copy_buffer_to_image(
     image: vk::Image,
     width: u32,
     height: u32,
-) { unsafe {
-    let cb = begin_single_time_commands(device, command_pool);
-    let region = vk::BufferImageCopy::default()
-        .image_subresource(
-            vk::ImageSubresourceLayers::default()
-                .aspect_mask(vk::ImageAspectFlags::COLOR)
-                .mip_level(0)
-                .base_array_layer(0)
-                .layer_count(1),
-        )
-        .image_extent(vk::Extent3D { width, height, depth: 1 });
-    device.cmd_copy_buffer_to_image(
-        cb, buffer, image, vk::ImageLayout::TRANSFER_DST_OPTIMAL, &[region],
-    );
-    end_single_time_commands(device, command_pool, cb, queue);
-}}
+) {
+    unsafe {
+        let cb = begin_single_time_commands(device, command_pool);
+        let region = vk::BufferImageCopy::default()
+            .image_subresource(
+                vk::ImageSubresourceLayers::default()
+                    .aspect_mask(vk::ImageAspectFlags::COLOR)
+                    .mip_level(0)
+                    .base_array_layer(0)
+                    .layer_count(1),
+            )
+            .image_extent(vk::Extent3D {
+                width,
+                height,
+                depth: 1,
+            });
+        device.cmd_copy_buffer_to_image(
+            cb,
+            buffer,
+            image,
+            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+            &[region],
+        );
+        end_single_time_commands(device, command_pool, cb, queue);
+    }
+}
 
 pub(crate) unsafe fn create_shader_module(
     device: &ash::Device,
     code: &[u8],
-) -> Result<vk::ShaderModule, SiError> { unsafe {
-    // SPIR-V words must be 4-byte aligned
-    let code_u32: Vec<u32> = code
-        .chunks(4)
-        .map(|c| {
-            let mut b = [0u8; 4];
-            b[..c.len()].copy_from_slice(c);
-            u32::from_le_bytes(b)
-        })
-        .collect();
-    let info = vk::ShaderModuleCreateInfo::default().code(&code_u32);
-    Ok(device.create_shader_module(&info, None)?)
-}}
+) -> Result<vk::ShaderModule, SiError> {
+    unsafe {
+        // SPIR-V words must be 4-byte aligned
+        let code_u32: Vec<u32> = code
+            .chunks(4)
+            .map(|c| {
+                let mut b = [0u8; 4];
+                b[..c.len()].copy_from_slice(c);
+                u32::from_le_bytes(b)
+            })
+            .collect();
+        let info = vk::ShaderModuleCreateInfo::default().code(&code_u32);
+        Ok(device.create_shader_module(&info, None)?)
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Validation layers
@@ -500,29 +542,31 @@ unsafe fn find_queue_families(
     surface_loader: &ash::khr::surface::Instance,
     physical_device: vk::PhysicalDevice,
     surface: vk::SurfaceKHR,
-) -> Option<QueueFamilies> { unsafe {
-    let props = instance.get_physical_device_queue_family_properties(physical_device);
-    let mut graphics = None;
-    let mut present = None;
-    for (i, p) in props.iter().enumerate() {
-        if p.queue_flags.contains(vk::QueueFlags::GRAPHICS) {
-            graphics = Some(i as u32);
+) -> Option<QueueFamilies> {
+    unsafe {
+        let props = instance.get_physical_device_queue_family_properties(physical_device);
+        let mut graphics = None;
+        let mut present = None;
+        for (i, p) in props.iter().enumerate() {
+            if p.queue_flags.contains(vk::QueueFlags::GRAPHICS) {
+                graphics = Some(i as u32);
+            }
+            if surface_loader
+                .get_physical_device_surface_support(physical_device, i as u32, surface)
+                .unwrap_or(false)
+            {
+                present = Some(i as u32);
+            }
+            if graphics.is_some() && present.is_some() {
+                break;
+            }
         }
-        if surface_loader
-            .get_physical_device_surface_support(physical_device, i as u32, surface)
-            .unwrap_or(false)
-        {
-            present = Some(i as u32);
-        }
-        if graphics.is_some() && present.is_some() {
-            break;
-        }
+        Some(QueueFamilies {
+            graphics: graphics?,
+            present: present?,
+        })
     }
-    Some(QueueFamilies {
-        graphics: graphics?,
-        present: present?,
-    })
-}}
+}
 
 // ---------------------------------------------------------------------------
 // Swap-chain helpers
@@ -538,15 +582,21 @@ unsafe fn query_swapchain_support(
     surface_loader: &ash::khr::surface::Instance,
     physical_device: vk::PhysicalDevice,
     surface: vk::SurfaceKHR,
-) -> Result<SwapchainSupport, vk::Result> { unsafe {
-    let capabilities = surface_loader
-        .get_physical_device_surface_capabilities(physical_device, surface)?;
-    let formats = surface_loader
-        .get_physical_device_surface_formats(physical_device, surface)?;
-    let present_modes = surface_loader
-        .get_physical_device_surface_present_modes(physical_device, surface)?;
-    Ok(SwapchainSupport { capabilities, formats, present_modes })
-}}
+) -> Result<SwapchainSupport, vk::Result> {
+    unsafe {
+        let capabilities =
+            surface_loader.get_physical_device_surface_capabilities(physical_device, surface)?;
+        let formats =
+            surface_loader.get_physical_device_surface_formats(physical_device, surface)?;
+        let present_modes =
+            surface_loader.get_physical_device_surface_present_modes(physical_device, surface)?;
+        Ok(SwapchainSupport {
+            capabilities,
+            formats,
+            present_modes,
+        })
+    }
+}
 
 fn choose_surface_format(formats: &[vk::SurfaceFormatKHR]) -> vk::SurfaceFormatKHR {
     formats
@@ -587,33 +637,35 @@ unsafe fn is_device_suitable(
     surface_loader: &ash::khr::surface::Instance,
     device: vk::PhysicalDevice,
     surface: vk::SurfaceKHR,
-) -> bool { unsafe {
-    // Must have graphics + present queues
-    if find_queue_families(instance, surface_loader, device, surface).is_none() {
-        return false;
-    }
-    // Must support required extensions
-    let Ok(ext_props) = instance.enumerate_device_extension_properties(device) else {
-        return false;
-    };
-    for required in DEVICE_EXTENSIONS {
-        if !ext_props.iter().any(|e| {
-            CStr::from_bytes_until_nul(&e.extension_name.map(|b| b as u8))
-                .ok()
-                .map_or(false, |n| n == *required)
-        }) {
+) -> bool {
+    unsafe {
+        // Must have graphics + present queues
+        if find_queue_families(instance, surface_loader, device, surface).is_none() {
             return false;
         }
+        // Must support required extensions
+        let Ok(ext_props) = instance.enumerate_device_extension_properties(device) else {
+            return false;
+        };
+        for required in DEVICE_EXTENSIONS {
+            if !ext_props.iter().any(|e| {
+                CStr::from_bytes_until_nul(&e.extension_name.map(|b| b as u8))
+                    .ok()
+                    .map_or(false, |n| n == *required)
+            }) {
+                return false;
+            }
+        }
+        // Swapchain must be adequate (at least one format and one present mode)
+        let Ok(sc) = query_swapchain_support(surface_loader, device, surface) else {
+            return false;
+        };
+        if sc.formats.is_empty() || sc.present_modes.is_empty() {
+            return false;
+        }
+        true
     }
-    // Swapchain must be adequate (at least one format and one present mode)
-    let Ok(sc) = query_swapchain_support(surface_loader, device, surface) else {
-        return false;
-    };
-    if sc.formats.is_empty() || sc.present_modes.is_empty() {
-        return false;
-    }
-    true
-}}
+}
 
 // ---------------------------------------------------------------------------
 // Swapchain creation (also used in recreate)
@@ -637,132 +689,141 @@ unsafe fn create_swapchain(
     present_family: u32,
     window: &sdl3::video::Window,
     old_swapchain: vk::SwapchainKHR,
-) -> Result<SwapchainBundle, SiError> { unsafe {
-    let support = query_swapchain_support(surface_loader, physical_device, surface)?;
-    let fmt = choose_surface_format(&support.formats);
-    let mode = choose_present_mode(&support.present_modes);
-    let extent = choose_extent(&support.capabilities, window);
+) -> Result<SwapchainBundle, SiError> {
+    unsafe {
+        let support = query_swapchain_support(surface_loader, physical_device, surface)?;
+        let fmt = choose_surface_format(&support.formats);
+        let mode = choose_present_mode(&support.present_modes);
+        let extent = choose_extent(&support.capabilities, window);
 
-    let mut image_count = support.capabilities.min_image_count + 1;
-    if support.capabilities.max_image_count > 0 {
-        image_count = image_count.min(support.capabilities.max_image_count);
-    }
+        let mut image_count = support.capabilities.min_image_count + 1;
+        if support.capabilities.max_image_count > 0 {
+            image_count = image_count.min(support.capabilities.max_image_count);
+        }
 
-    let queue_families = [graphics_family, present_family];
-    let (sharing_mode, qf_slice): (vk::SharingMode, &[u32]) = if graphics_family == present_family {
-        (vk::SharingMode::EXCLUSIVE, &[])
-    } else {
-        (vk::SharingMode::CONCURRENT, &queue_families)
-    };
+        let queue_families = [graphics_family, present_family];
+        let (sharing_mode, qf_slice): (vk::SharingMode, &[u32]) =
+            if graphics_family == present_family {
+                (vk::SharingMode::EXCLUSIVE, &[])
+            } else {
+                (vk::SharingMode::CONCURRENT, &queue_families)
+            };
 
-    let create_info = vk::SwapchainCreateInfoKHR::default()
-        .surface(surface)
-        .min_image_count(image_count)
-        .image_format(fmt.format)
-        .image_color_space(fmt.color_space)
-        .image_extent(extent)
-        .image_array_layers(1)
-        .image_usage(vk::ImageUsageFlags::COLOR_ATTACHMENT)
-        .image_sharing_mode(sharing_mode)
-        .queue_family_indices(qf_slice)
-        .pre_transform(support.capabilities.current_transform)
-        .composite_alpha(vk::CompositeAlphaFlagsKHR::OPAQUE)
-        .present_mode(mode)
-        .clipped(true)
-        .old_swapchain(old_swapchain);
+        let create_info = vk::SwapchainCreateInfoKHR::default()
+            .surface(surface)
+            .min_image_count(image_count)
+            .image_format(fmt.format)
+            .image_color_space(fmt.color_space)
+            .image_extent(extent)
+            .image_array_layers(1)
+            .image_usage(vk::ImageUsageFlags::COLOR_ATTACHMENT)
+            .image_sharing_mode(sharing_mode)
+            .queue_family_indices(qf_slice)
+            .pre_transform(support.capabilities.current_transform)
+            .composite_alpha(vk::CompositeAlphaFlagsKHR::OPAQUE)
+            .present_mode(mode)
+            .clipped(true)
+            .old_swapchain(old_swapchain);
 
-    let swapchain = swapchain_loader.create_swapchain(&create_info, None)?;
-    let images = swapchain_loader.get_swapchain_images(swapchain)?;
+        let swapchain = swapchain_loader.create_swapchain(&create_info, None)?;
+        let images = swapchain_loader.get_swapchain_images(swapchain)?;
 
-    let image_views: Vec<vk::ImageView> = images
-        .iter()
-        .map(|&img| {
-            let view_info = vk::ImageViewCreateInfo::default()
-                .image(img)
-                .view_type(vk::ImageViewType::TYPE_2D)
-                .format(fmt.format)
-                .subresource_range(
-                    vk::ImageSubresourceRange::default()
-                        .aspect_mask(vk::ImageAspectFlags::COLOR)
-                        .base_mip_level(0)
-                        .level_count(1)
-                        .base_array_layer(0)
-                        .layer_count(1),
-                );
-            device.create_image_view(&view_info, None)
+        let image_views: Vec<vk::ImageView> = images
+            .iter()
+            .map(|&img| {
+                let view_info = vk::ImageViewCreateInfo::default()
+                    .image(img)
+                    .view_type(vk::ImageViewType::TYPE_2D)
+                    .format(fmt.format)
+                    .subresource_range(
+                        vk::ImageSubresourceRange::default()
+                            .aspect_mask(vk::ImageAspectFlags::COLOR)
+                            .base_mip_level(0)
+                            .level_count(1)
+                            .base_array_layer(0)
+                            .layer_count(1),
+                    );
+                device.create_image_view(&view_info, None)
+            })
+            .collect::<Result<_, _>>()?;
+
+        Ok(SwapchainBundle {
+            swapchain,
+            images,
+            format: fmt.format,
+            extent,
+            image_views,
         })
-        .collect::<Result<_, _>>()?;
-
-    Ok(SwapchainBundle {
-        swapchain,
-        images,
-        format: fmt.format,
-        extent,
-        image_views,
-    })
-}}
+    }
+}
 
 unsafe fn create_render_pass(
     device: &ash::Device,
     format: vk::Format,
-) -> Result<vk::RenderPass, SiError> { unsafe {
-    let attachment = vk::AttachmentDescription::default()
-        .format(format)
-        .samples(vk::SampleCountFlags::TYPE_1)
-        .load_op(vk::AttachmentLoadOp::CLEAR)
-        .store_op(vk::AttachmentStoreOp::STORE)
-        .stencil_load_op(vk::AttachmentLoadOp::DONT_CARE)
-        .stencil_store_op(vk::AttachmentStoreOp::DONT_CARE)
-        .initial_layout(vk::ImageLayout::UNDEFINED)
-        .final_layout(vk::ImageLayout::PRESENT_SRC_KHR);
+) -> Result<vk::RenderPass, SiError> {
+    unsafe {
+        let attachment = vk::AttachmentDescription::default()
+            .format(format)
+            .samples(vk::SampleCountFlags::TYPE_1)
+            .load_op(vk::AttachmentLoadOp::CLEAR)
+            .store_op(vk::AttachmentStoreOp::STORE)
+            .stencil_load_op(vk::AttachmentLoadOp::DONT_CARE)
+            .stencil_store_op(vk::AttachmentStoreOp::DONT_CARE)
+            .initial_layout(vk::ImageLayout::UNDEFINED)
+            .final_layout(vk::ImageLayout::PRESENT_SRC_KHR);
 
-    let color_ref = [vk::AttachmentReference::default()
-        .attachment(0)
-        .layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)];
+        let color_ref = [vk::AttachmentReference::default()
+            .attachment(0)
+            .layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)];
 
-    let subpass = vk::SubpassDescription::default()
-        .pipeline_bind_point(vk::PipelineBindPoint::GRAPHICS)
-        .color_attachments(&color_ref);
+        let subpass = vk::SubpassDescription::default()
+            .pipeline_bind_point(vk::PipelineBindPoint::GRAPHICS)
+            .color_attachments(&color_ref);
 
-    let dependency = vk::SubpassDependency::default()
-        .src_subpass(vk::SUBPASS_EXTERNAL)
-        .dst_subpass(0)
-        .src_stage_mask(vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT)
-        .src_access_mask(vk::AccessFlags::empty())
-        .dst_stage_mask(vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT)
-        .dst_access_mask(vk::AccessFlags::COLOR_ATTACHMENT_WRITE);
+        let dependency = vk::SubpassDependency::default()
+            .src_subpass(vk::SUBPASS_EXTERNAL)
+            .dst_subpass(0)
+            .src_stage_mask(vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT)
+            .src_access_mask(vk::AccessFlags::empty())
+            .dst_stage_mask(vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT)
+            .dst_access_mask(vk::AccessFlags::COLOR_ATTACHMENT_WRITE);
 
-    let attachments = [attachment];
-    let subpasses = [subpass];
-    let dependencies = [dependency];
-    let rp_info = vk::RenderPassCreateInfo::default()
-        .attachments(&attachments)
-        .subpasses(&subpasses)
-        .dependencies(&dependencies);
+        let attachments = [attachment];
+        let subpasses = [subpass];
+        let dependencies = [dependency];
+        let rp_info = vk::RenderPassCreateInfo::default()
+            .attachments(&attachments)
+            .subpasses(&subpasses)
+            .dependencies(&dependencies);
 
-    Ok(device.create_render_pass(&rp_info, None)?)
-}}
+        Ok(device.create_render_pass(&rp_info, None)?)
+    }
+}
 
 unsafe fn create_framebuffers(
     device: &ash::Device,
     render_pass: vk::RenderPass,
     image_views: &[vk::ImageView],
     extent: vk::Extent2D,
-) -> Result<Vec<vk::Framebuffer>, SiError> { unsafe {
-    image_views
-        .iter()
-        .map(|&view| {
-            let attachments = [view];
-            let fb_info = vk::FramebufferCreateInfo::default()
-                .render_pass(render_pass)
-                .attachments(&attachments)
-                .width(extent.width)
-                .height(extent.height)
-                .layers(1);
-            device.create_framebuffer(&fb_info, None).map_err(SiError::from)
-        })
-        .collect()
-}}
+) -> Result<Vec<vk::Framebuffer>, SiError> {
+    unsafe {
+        image_views
+            .iter()
+            .map(|&view| {
+                let attachments = [view];
+                let fb_info = vk::FramebufferCreateInfo::default()
+                    .render_pass(render_pass)
+                    .attachments(&attachments)
+                    .width(extent.width)
+                    .height(extent.height)
+                    .layers(1);
+                device
+                    .create_framebuffer(&fb_info, None)
+                    .map_err(SiError::from)
+            })
+            .collect()
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Public: full app construction
@@ -804,7 +865,10 @@ pub fn build_app() -> Result<AppState, SiError> {
         Ok((mut pixels, w, h)) => match crate::icon::icon_surface(&mut pixels, w, h) {
             Ok(surface) => {
                 if !window.set_icon(&*surface) {
-                    eprintln!("warning: could not set the window icon: {}", sdl3::get_error());
+                    eprintln!(
+                        "warning: could not set the window icon: {}",
+                        sdl3::get_error()
+                    );
                 }
             }
             Err(e) => eprintln!("warning: could not build the window icon surface: {e}"),
@@ -823,8 +887,8 @@ pub fn build_app() -> Result<AppState, SiError> {
         std::sync::atomic::AtomicI32::new(init_h as i32),
     ));
     {
-        use std::sync::atomic::Ordering;
         use sdl3::video::HitTestResult;
+        use std::sync::atomic::Ordering;
         let size = hit_test_win_pt.clone();
         let on_left = crate::app_state::controls_on_left();
         // Resize-border thickness in logical points.
@@ -913,10 +977,7 @@ pub fn build_app() -> Result<AppState, SiError> {
         instance_flags |= vk::InstanceCreateFlags::ENUMERATE_PORTABILITY_KHR;
     }
 
-    let layer_names_raw: Vec<*const i8> = VALIDATION_LAYERS
-        .iter()
-        .map(|s| s.as_ptr())
-        .collect();
+    let layer_names_raw: Vec<*const i8> = VALIDATION_LAYERS.iter().map(|s| s.as_ptr()).collect();
 
     let instance_info = vk::InstanceCreateInfo::default()
         .application_info(&app_info)
@@ -970,9 +1031,7 @@ pub fn build_app() -> Result<AppState, SiError> {
         let total = devices.len();
         devices
             .into_iter()
-            .find(|&pd| {
-                is_device_suitable(&instance, &surface_loader, pd, surface)
-            })
+            .find(|&pd| is_device_suitable(&instance, &surface_loader, pd, surface))
             // Report how many devices were seen. "None at all" (a driver or
             // loader problem) and "some, but none usable" (a capability
             // problem) need completely different fixes, and the old message
@@ -1032,10 +1091,8 @@ pub fn build_app() -> Result<AppState, SiError> {
 
     let device = unsafe { instance.create_device(physical_device, &device_info, None)? };
 
-    let graphics_queue =
-        unsafe { device.get_device_queue(queue_families.graphics, 0) };
-    let present_queue =
-        unsafe { device.get_device_queue(queue_families.present, 0) };
+    let graphics_queue = unsafe { device.get_device_queue(queue_families.graphics, 0) };
+    let present_queue = unsafe { device.get_device_queue(queue_families.present, 0) };
 
     // ---- Swapchain ----------------------------------------------------------
     let swapchain_loader = ash::khr::swapchain::Device::new(&instance, &device);
@@ -1075,8 +1132,7 @@ pub fn build_app() -> Result<AppState, SiError> {
 
     // ---- Sync objects -------------------------------------------------------
     let sem_info = vk::SemaphoreCreateInfo::default();
-    let fence_info =
-        vk::FenceCreateInfo::default().flags(vk::FenceCreateFlags::SIGNALED);
+    let fence_info = vk::FenceCreateInfo::default().flags(vk::FenceCreateFlags::SIGNALED);
 
     let image_available = [
         unsafe { device.create_semaphore(&sem_info, None)? },
@@ -1086,10 +1142,9 @@ pub fn build_app() -> Result<AppState, SiError> {
         unsafe { device.create_semaphore(&sem_info, None)? },
         unsafe { device.create_semaphore(&sem_info, None)? },
     ];
-    let in_flight = [
-        unsafe { device.create_fence(&fence_info, None)? },
-        unsafe { device.create_fence(&fence_info, None)? },
-    ];
+    let in_flight = [unsafe { device.create_fence(&fence_info, None)? }, unsafe {
+        device.create_fence(&fence_info, None)?
+    }];
 
     Ok(AppState {
         _sdl: sdl,
@@ -1188,9 +1243,13 @@ pub fn recreate_swapchain(app: &mut AppState) {
         app.swapchain_extent = sc.extent;
         app.swapchain_image_views = sc.image_views;
 
-        app.framebuffers =
-            create_framebuffers(&app.device, app.render_pass, &app.swapchain_image_views, app.swapchain_extent)
-                .expect("recreate framebuffers failed");
+        app.framebuffers = create_framebuffers(
+            &app.device,
+            app.render_pass,
+            &app.swapchain_image_views,
+            app.swapchain_extent,
+        )
+        .expect("recreate framebuffers failed");
     }
 }
 
@@ -1260,14 +1319,17 @@ pub fn draw_frame(app: &mut AppState) {
             })
             .clear_values(&clear_values);
 
-        app.device.cmd_begin_render_pass(cb, &rp_begin, vk::SubpassContents::INLINE);
+        app.device
+            .cmd_begin_render_pass(cb, &rp_begin, vk::SubpassContents::INLINE);
 
         // Dynamic viewport + scissor (required for pipelines with dynamic state)
         let viewport = vk::Viewport {
-            x: 0.0, y: 0.0,
+            x: 0.0,
+            y: 0.0,
             width: app.swapchain_extent.width as f32,
             height: app.swapchain_extent.height as f32,
-            min_depth: 0.0, max_depth: 1.0,
+            min_depth: 0.0,
+            max_depth: 1.0,
         };
         app.device.cmd_set_viewport(cb, 0, &[viewport]);
         let scissor = vk::Rect2D {
@@ -1322,8 +1384,7 @@ pub fn draw_frame(app: &mut AppState) {
             .queue_present(app.present_queue, &present_info);
 
         match present_result {
-            Err(vk::Result::ERROR_OUT_OF_DATE_KHR)
-            | Ok(true /* suboptimal */) => {
+            Err(vk::Result::ERROR_OUT_OF_DATE_KHR) | Ok(true /* suboptimal */) => {
                 app.framebuffer_resized = false;
                 recreate_swapchain(app);
             }
@@ -1376,8 +1437,7 @@ pub fn cleanup(app: &mut AppState) {
         for &iv in &app.swapchain_image_views {
             app.device.destroy_image_view(iv, None);
         }
-        app.swapchain_loader
-            .destroy_swapchain(app.swapchain, None);
+        app.swapchain_loader.destroy_swapchain(app.swapchain, None);
 
         app.device.destroy_device(None);
 
@@ -1401,8 +1461,7 @@ unsafe extern "system" fn vulkan_debug_callback(
     data: *const vk::DebugUtilsMessengerCallbackDataEXT,
     _user: *mut std::ffi::c_void,
 ) -> vk::Bool32 {
-    let msg = unsafe { CStr::from_ptr((*data).p_message) }
-        .to_string_lossy();
+    let msg = unsafe { CStr::from_ptr((*data).p_message) }.to_string_lossy();
     if severity.contains(vk::DebugUtilsMessageSeverityFlagsEXT::ERROR) {
         eprintln!("[VK ERROR] {msg}");
     } else {

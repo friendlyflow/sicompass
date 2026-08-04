@@ -78,10 +78,12 @@ pub fn set_provider_path(renderer: &mut AppRenderer, path: &str) {
 /// is an absolute OS path that can't be rebuilt from display keys, and their
 /// search results never leave the current directory anyway.
 pub fn sync_inmemory_provider_path_to_cursor(renderer: &mut AppRenderer) {
-    use sicompass_sdk::ffon::{get_ffon_at_id, IdArray};
+    use sicompass_sdk::ffon::{IdArray, get_ffon_at_id};
     use sicompass_sdk::tags;
 
-    let Some(idx) = renderer.current_id.get(0) else { return };
+    let Some(idx) = renderer.current_id.get(0) else {
+        return;
+    };
     let is_fs = renderer
         .providers
         .get(idx)
@@ -158,7 +160,9 @@ pub fn refresh_current_directory(renderer: &mut AppRenderer) {
         Some(i) => i,
         None => return,
     };
-    if idx >= renderer.providers.len() || idx >= renderer.ffon.len() { return; }
+    if idx >= renderer.providers.len() || idx >= renderer.ffon.len() {
+        return;
+    }
 
     let mut children = renderer.providers[idx].fetch();
     if let Some(err) = renderer.providers[idx].take_error() {
@@ -267,8 +271,11 @@ fn locate_child_by_name(
     id: &sicompass_sdk::ffon::IdArray,
     name: &str,
 ) -> Option<usize> {
-    sicompass_sdk::ffon::get_ffon_at_id(ffon, id)
-        .and_then(|slice| slice.iter().position(|e| element_nav_name(elem_raw(e)) == name))
+    sicompass_sdk::ffon::get_ffon_at_id(ffon, id).and_then(|slice| {
+        slice
+            .iter()
+            .position(|e| element_nav_name(elem_raw(e)) == name)
+    })
 }
 
 /// Rebuild a filesystem provider's tree from the filesystem root down to its
@@ -292,7 +299,9 @@ pub(crate) fn rebuild_path_from_root(renderer: &mut AppRenderer) -> bool {
     use sicompass_sdk::ffon::{FfonElement, IdArray};
     use std::path::Component;
 
-    let Some(idx) = renderer.current_id.get(0) else { return false };
+    let Some(idx) = renderer.current_id.get(0) else {
+        return false;
+    };
     if idx >= renderer.providers.len() || idx >= renderer.ffon.len() {
         return false;
     }
@@ -437,9 +446,7 @@ pub fn refresh_visible_path(renderer: &mut AppRenderer) {
         let preserved: Option<(String, Vec<FfonElement>)> = if k < depth {
             let seg = segments[k - 2].clone();
             sicompass_sdk::ffon::get_ffon_at_id(&renderer.ffon, &level_id)
-                .and_then(|slice| {
-                    slice.iter().find(|e| element_nav_name(elem_raw(e)) == seg)
-                })
+                .and_then(|slice| slice.iter().find(|e| element_nav_name(elem_raw(e)) == seg))
                 .and_then(|e| e.as_obj())
                 .map(|o| (seg, o.children.clone()))
         } else {
@@ -486,7 +493,11 @@ pub fn refresh_visible_path(renderer: &mut AppRenderer) {
     new_id.push(idx);
     for k in 2..=depth {
         new_id.push(0);
-        let name = if k < depth { &segments[k - 2] } else { &leaf_name };
+        let name = if k < depth {
+            &segments[k - 2]
+        } else {
+            &leaf_name
+        };
         let pos = locate_child_by_name(&renderer.ffon, &new_id, name).unwrap_or(0);
         new_id.set_last(pos);
     }
@@ -550,17 +561,21 @@ pub fn dispatch_refresh_command(renderer: &mut AppRenderer) {
         Some(i) => i,
         None => return,
     };
-    let has_refresh = renderer.providers
+    let has_refresh = renderer
+        .providers
         .get(idx)
         .map(|p| p.commands().iter().any(|c| c == "refresh"))
         .unwrap_or(false);
-    if !has_refresh { return; }
+    if !has_refresh {
+        return;
+    }
     let _ = handle_command(renderer, "refresh", "", 0);
 }
 
 /// Re-fetch only if the active provider requests it (`needs_refresh()`).
 pub fn refresh_if_needed(renderer: &mut AppRenderer) {
-    let needs = renderer.providers
+    let needs = renderer
+        .providers
         .get(renderer.current_id.get(0).unwrap_or(usize::MAX))
         .map(|p| p.needs_refresh())
         .unwrap_or(false);
@@ -622,7 +637,13 @@ pub fn delete_item_by_name(renderer: &mut AppRenderer, name: &str) -> bool {
 /// Copy an item via the active provider.
 ///
 /// Parameters mirror C `providerCopyItem`: source dir, source name, dest dir, dest name.
-pub fn copy_item(renderer: &mut AppRenderer, src_dir: &str, src_name: &str, dest_dir: &str, dest_name: &str) -> bool {
+pub fn copy_item(
+    renderer: &mut AppRenderer,
+    src_dir: &str,
+    src_name: &str,
+    dest_dir: &str,
+    dest_name: &str,
+) -> bool {
     let idx = match renderer.current_id.get(0) {
         Some(i) => i,
         None => return false,
@@ -729,23 +750,21 @@ pub fn command_list_items(
         Some(i) => i,
         None => return Vec::new(),
     };
-    renderer.providers
+    renderer
+        .providers
         .get_mut(idx)
         .map(|p| p.command_list_items(command))
         .unwrap_or_default()
 }
 
 /// Execute a command with the selected list item.
-pub fn execute_command(
-    renderer: &mut AppRenderer,
-    command: &str,
-    selected_item: &str,
-) -> bool {
+pub fn execute_command(renderer: &mut AppRenderer, command: &str, selected_item: &str) -> bool {
     let idx = match renderer.current_id.get(0) {
         Some(i) => i,
         None => return false,
     };
-    let ok = renderer.providers
+    let ok = renderer
+        .providers
         .get_mut(idx)
         .map(|p| p.execute_command(command, selected_item))
         .unwrap_or(false);
@@ -760,10 +779,7 @@ pub fn execute_command(
 /// `provider_idx` is the originator's index — always use the provider that ran
 /// the command, not `renderer.current_id.get(0)`, which may differ after a
 /// navigation or context switch.
-pub(crate) fn push_provider_descriptor_if_present(
-    renderer: &mut AppRenderer,
-    provider_idx: usize,
-) {
+pub(crate) fn push_provider_descriptor_if_present(renderer: &mut AppRenderer, provider_idx: usize) {
     push_provider_entries_if_present(renderer, provider_idx);
 }
 
@@ -817,10 +833,7 @@ pub(crate) fn drain_provider_entries(
     n
 }
 
-pub(crate) fn push_provider_entries_if_present(
-    renderer: &mut AppRenderer,
-    provider_idx: usize,
-) {
+pub(crate) fn push_provider_entries_if_present(renderer: &mut AppRenderer, provider_idx: usize) {
     let _ = drain_provider_entries(renderer, provider_idx, None);
 }
 
@@ -892,7 +905,7 @@ fn patch_provider_entry(
 
 /// Delete the currently selected item via the active provider.
 pub fn delete_item(renderer: &mut AppRenderer) -> bool {
-    use sicompass_sdk::ffon::{get_ffon_at_id, FfonElement};
+    use sicompass_sdk::ffon::{FfonElement, get_ffon_at_id};
 
     // Capture the actual element the user is deleting, before mutating the
     // tree. Its raw key (not stripped) is passed to the provider so providers
@@ -917,7 +930,8 @@ pub fn delete_item(renderer: &mut AppRenderer) -> bool {
         Some(i) => i,
         None => return false,
     };
-    let ok = renderer.providers
+    let ok = renderer
+        .providers
         .get_mut(provider_idx)
         .map(|p| p.delete_item(&name))
         .unwrap_or(false);
@@ -937,7 +951,10 @@ pub fn delete_item(renderer: &mut AppRenderer) -> bool {
 pub fn is_in_email_compose_body(renderer: &AppRenderer) -> bool {
     let path = current_path(renderer);
     let compose_roots = ["compose", "reply", "reply all", "forward"];
-    let has_compose = path.trim_matches('/').split('/').any(|s| compose_roots.contains(&s));
+    let has_compose = path
+        .trim_matches('/')
+        .split('/')
+        .any(|s| compose_roots.contains(&s));
     has_compose && path.split('/').any(|s| s.starts_with("Body:"))
 }
 
@@ -954,8 +971,9 @@ pub fn current_element_old_content(renderer: &AppRenderer) -> String {
     };
     let idx = renderer.current_id.last().unwrap_or(0);
     match arr.get(idx) {
-        Some(sicompass_sdk::ffon::FfonElement::Str(s)) =>
-            tags::extract_input(s).unwrap_or_default(),
+        Some(sicompass_sdk::ffon::FfonElement::Str(s)) => {
+            tags::extract_input(s).unwrap_or_default()
+        }
         Some(sicompass_sdk::ffon::FfonElement::Obj(o)) => o.key.clone(),
         None => String::new(),
     }
@@ -977,9 +995,15 @@ pub fn notify_checkbox_changed(
     use sicompass_sdk::timeline::TimelineEntry;
 
     let (label, checked) = if tags::has_checkbox_checked(new_elem_text) {
-        (tags::extract_checkbox_checked(new_elem_text).unwrap_or_default(), true)
+        (
+            tags::extract_checkbox_checked(new_elem_text).unwrap_or_default(),
+            true,
+        )
     } else if tags::has_checkbox(new_elem_text) {
-        (tags::extract_checkbox(new_elem_text).unwrap_or_default(), false)
+        (
+            tags::extract_checkbox(new_elem_text).unwrap_or_default(),
+            false,
+        )
     } else {
         return;
     };
@@ -998,8 +1022,7 @@ pub fn notify_checkbox_changed(
 
     let after = {
         let idx = renderer.current_id.last().unwrap_or(0);
-        match get_ffon_at_id(&renderer.ffon, &renderer.current_id)
-            .and_then(|a| a.get(idx).cloned())
+        match get_ffon_at_id(&renderer.ffon, &renderer.current_id).and_then(|a| a.get(idx).cloned())
         {
             Some(e) => e,
             None => return,
@@ -1026,14 +1049,18 @@ static AUTH_REGISTRY: Mutex<Vec<(String, String)>> = Mutex::new(Vec::new());
 /// Register a URL origin → API key mapping for Bearer auth.
 /// Equivalent to `providerRegisterAuth` in the C code.
 pub fn register_auth(origin: &str, api_key: &str) {
-    AUTH_REGISTRY.lock().unwrap().push((origin.to_owned(), api_key.to_owned()));
+    AUTH_REGISTRY
+        .lock()
+        .unwrap()
+        .push((origin.to_owned(), api_key.to_owned()));
 }
 
 /// Find an API key for a URL by prefix match.
 /// Equivalent to `findApiKeyForUrl` in the C code.
 pub fn find_api_key_for_url(url: &str) -> Option<String> {
     let registry = AUTH_REGISTRY.lock().unwrap();
-    registry.iter()
+    registry
+        .iter()
         .find(|(origin, _)| url.starts_with(origin.as_str()))
         .map(|(_, key)| key.clone())
 }
@@ -1108,9 +1135,7 @@ pub fn notify_radio_changed(
     // snapshot and emit a Structural::Replace at the parent id.
     let parent_after = {
         let idx = parent_id.last().unwrap_or(0);
-        match get_ffon_at_id(&renderer.ffon, &parent_id)
-            .and_then(|a| a.get(idx).cloned())
-        {
+        match get_ffon_at_id(&renderer.ffon, &parent_id).and_then(|a| a.get(idx).cloned()) {
             Some(e) => e,
             None => return,
         }
@@ -1141,7 +1166,10 @@ pub fn notify_button_pressed(renderer: &mut AppRenderer) {
 
     let current_id = renderer.current_id.clone();
     let depth = current_id.depth();
-    let provider_idx = match current_id.get(0) { Some(i) => i, None => return };
+    let provider_idx = match current_id.get(0) {
+        Some(i) => i,
+        None => return,
+    };
 
     // Extract button function name from the current string element.
     let function_name: String = {
@@ -1198,15 +1226,19 @@ pub fn notify_button_pressed(renderer: &mut AppRenderer) {
                     p.pop_path();
                 }
 
-                let new_elem = renderer.providers.get_mut(provider_idx)
+                let new_elem = renderer
+                    .providers
+                    .get_mut(provider_idx)
                     .and_then(|p| p.create_element(&function_name));
 
                 if let Some(new_elem) = new_elem {
                     // Insert new_elem before "Add element:" in grandparent's children.
                     {
                         if let Some(slice) = get_ffon_at_id_mut(&mut renderer.ffon, &grand_id) {
-                            if let Some(obj) = slice.get_mut(grand_idx).and_then(|e| e.as_obj_mut()) {
-                                obj.children.insert(insert_idx.min(obj.children.len()), new_elem);
+                            if let Some(obj) = slice.get_mut(grand_idx).and_then(|e| e.as_obj_mut())
+                            {
+                                obj.children
+                                    .insert(insert_idx.min(obj.children.len()), new_elem);
                             }
                         }
                     }
@@ -1232,7 +1264,9 @@ pub fn notify_button_pressed(renderer: &mut AppRenderer) {
                         // Clone "Add element:": remove the clone at add_elem_pos.
                         {
                             if let Some(slice) = get_ffon_at_id_mut(&mut renderer.ffon, &grand_id) {
-                                if let Some(obj) = slice.get_mut(grand_idx).and_then(|e| e.as_obj_mut()) {
+                                if let Some(obj) =
+                                    slice.get_mut(grand_idx).and_then(|e| e.as_obj_mut())
+                                {
                                     if add_elem_pos < obj.children.len() {
                                         obj.children.remove(add_elem_pos);
                                     }
@@ -1249,17 +1283,27 @@ pub fn notify_button_pressed(renderer: &mut AppRenderer) {
                                     .unwrap_or(0)
                             };
                             remove_one_opt_button_and_maybe_section(
-                                &mut renderer.ffon, &grand_id, grand_idx, last_idx, &function_name,
+                                &mut renderer.ffon,
+                                &grand_id,
+                                grand_idx,
+                                last_idx,
+                                &function_name,
                             );
                         }
                     } else if is_one_opt {
                         // Original "Add element:": remove button and section if empty.
                         let removed_all = remove_one_opt_button_and_maybe_section(
-                            &mut renderer.ffon, &grand_id, grand_idx, add_elem_pos, &function_name,
+                            &mut renderer.ffon,
+                            &grand_id,
+                            grand_idx,
+                            add_elem_pos,
+                            &function_name,
                         );
                         if removed_all {
                             if let Some(slice) = get_ffon_at_id_mut(&mut renderer.ffon, &grand_id) {
-                                if let Some(obj) = slice.get_mut(grand_idx).and_then(|e| e.as_obj_mut()) {
+                                if let Some(obj) =
+                                    slice.get_mut(grand_idx).and_then(|e| e.as_obj_mut())
+                                {
                                     if add_elem_pos < obj.children.len() {
                                         obj.children.remove(add_elem_pos);
                                     }
@@ -1295,14 +1339,25 @@ fn remove_one_opt_button_and_maybe_section(
 ) -> bool {
     use sicompass_sdk::tags;
 
-    let Some(slice) = get_ffon_at_id_mut(ffon, grand_id) else { return false };
-    let Some(grand_obj) = slice.get_mut(grand_idx).and_then(|e| e.as_obj_mut()) else { return false };
-    let Some(add_elem_obj) = grand_obj.children.get_mut(add_elem_idx).and_then(|e| e.as_obj_mut()) else { return false };
+    let Some(slice) = get_ffon_at_id_mut(ffon, grand_id) else {
+        return false;
+    };
+    let Some(grand_obj) = slice.get_mut(grand_idx).and_then(|e| e.as_obj_mut()) else {
+        return false;
+    };
+    let Some(add_elem_obj) = grand_obj
+        .children
+        .get_mut(add_elem_idx)
+        .and_then(|e| e.as_obj_mut())
+    else {
+        return false;
+    };
 
     if let Some(btn_idx) = add_elem_obj.children.iter().position(|e| {
         e.as_str()
             .and_then(|s| tags::extract_button_function_name(s))
-            .as_deref() == Some(function_name)
+            .as_deref()
+            == Some(function_name)
     }) {
         add_elem_obj.children.remove(btn_idx);
     }
@@ -1327,7 +1382,9 @@ pub fn navigate_to_path(
 ) -> bool {
     use sicompass_sdk::ffon::{FfonElement, IdArray, get_ffon_at_id};
 
-    if root_idx >= renderer.providers.len() { return false; }
+    if root_idx >= renderer.providers.len() {
+        return false;
+    }
 
     // On Windows, absolute paths start with a drive letter ("C:\...") or UNC
     // ("\\...").  Walking component-by-component from the "/" sentinel root
@@ -1337,8 +1394,8 @@ pub fn navigate_to_path(
     #[cfg(windows)]
     {
         let b = absolute_dir.as_bytes();
-        let is_windows_absolute = (b.len() >= 2 && b[1] == b':')
-            || (b.len() >= 2 && b[0] == b'\\' && b[1] == b'\\');
+        let is_windows_absolute =
+            (b.len() >= 2 && b[1] == b':') || (b.len() >= 2 && b[0] == b'\\' && b[1] == b'\\');
         if is_windows_absolute {
             renderer.providers[root_idx].set_current_path(absolute_dir);
             let children = renderer.providers[root_idx].fetch();
@@ -1352,10 +1409,14 @@ pub fn navigate_to_path(
             nav_id.push(0);
             renderer.current_id = nav_id;
             if !target_filename.is_empty() {
-                let found = get_ffon_at_id(&renderer.ffon, &renderer.current_id)
-                    .and_then(|slice| {
+                let found =
+                    get_ffon_at_id(&renderer.ffon, &renderer.current_id).and_then(|slice| {
                         slice.iter().enumerate().find_map(|(i, e)| {
-                            if element_nav_name(elem_raw(e)) == target_filename { Some(i) } else { None }
+                            if element_nav_name(elem_raw(e)) == target_filename {
+                                Some(i)
+                            } else {
+                                None
+                            }
                         })
                     });
                 if let Some(i) = found {
@@ -1385,23 +1446,33 @@ pub fn navigate_to_path(
     // Split on both '/' and '\' to match C's strtok_r(start, "/\\").
     let path_stripped = absolute_dir.trim_start_matches('/');
     for component in path_stripped.split(|c| c == '/' || c == '\\') {
-        if component.is_empty() { continue; }
+        if component.is_empty() {
+            continue;
+        }
 
         // Find component in current level
         let found_idx = {
             let arr = get_ffon_at_id(&renderer.ffon, &renderer.current_id);
             arr.and_then(|slice| {
                 slice.iter().enumerate().find_map(|(i, e)| {
-                    if element_nav_name(elem_raw(e)) == component { Some(i) } else { None }
+                    if element_nav_name(elem_raw(e)) == component {
+                        Some(i)
+                    } else {
+                        None
+                    }
                 })
             })
         };
 
-        let Some(idx) = found_idx else { return false; };
+        let Some(idx) = found_idx else {
+            return false;
+        };
         renderer.current_id.set_last(idx);
 
         // Navigate right into this component (lazy-fetch child level)
-        if !navigate_right(renderer) { return false; }
+        if !navigate_right(renderer) {
+            return false;
+        }
     }
 
     // If target_filename specified, find and select it
@@ -1410,7 +1481,11 @@ pub fn navigate_to_path(
             let arr = get_ffon_at_id(&renderer.ffon, &renderer.current_id);
             arr.and_then(|slice| {
                 slice.iter().enumerate().find_map(|(i, e)| {
-                    if element_nav_name(elem_raw(e)) == target_filename { Some(i) } else { None }
+                    if element_nav_name(elem_raw(e)) == target_filename {
+                        Some(i)
+                    } else {
+                        None
+                    }
                 })
             })
         };
@@ -1434,7 +1509,10 @@ pub fn navigate_right(renderer: &mut AppRenderer) -> bool {
     use sicompass_sdk::tags;
 
     let idx = renderer.current_id.last().unwrap_or(0);
-    let root_idx = match renderer.current_id.get(0) { Some(i) => i, None => return false };
+    let root_idx = match renderer.current_id.get(0) {
+        Some(i) => i,
+        None => return false,
+    };
 
     // Get the element name (must be an Obj to navigate into)
     let (segment, is_obj) = {
@@ -1447,7 +1525,9 @@ pub fn navigate_right(renderer: &mut AppRenderer) -> bool {
             _ => return false,
         }
     };
-    if !is_obj { return false; }
+    if !is_obj {
+        return false;
+    }
 
     // Push path to provider and fetch children
     if let Some(p) = renderer.providers.get_mut(root_idx) {
@@ -1484,7 +1564,9 @@ pub(crate) fn get_ffon_at_id_mut<'a>(
 ) -> Option<&'a mut Vec<sicompass_sdk::ffon::FfonElement>> {
     use sicompass_sdk::ffon::FfonElement;
     let depth = id.depth();
-    if depth == 0 { return None; }
+    if depth == 0 {
+        return None;
+    }
     if depth == 1 {
         return Some(ffon);
     }
@@ -1552,20 +1634,38 @@ mod tests {
     }
 
     impl Provider for MockProvider {
-        fn name(&self) -> &str { &self.name }
-        fn fetch(&mut self) -> Vec<FfonElement> { self.items.clone() }
-        fn path_is_filesystem(&self) -> bool { self.fs }
-        fn set_current_path(&mut self, path: &str) { self.path = path.to_owned(); }
+        fn name(&self) -> &str {
+            &self.name
+        }
+        fn fetch(&mut self) -> Vec<FfonElement> {
+            self.items.clone()
+        }
+        fn path_is_filesystem(&self) -> bool {
+            self.fs
+        }
+        fn set_current_path(&mut self, path: &str) {
+            self.path = path.to_owned();
+        }
         fn push_path(&mut self, seg: &str) {
-            if self.path == "/" { self.path = format!("/{seg}"); }
-            else { self.path.push('/'); self.path.push_str(seg); }
+            if self.path == "/" {
+                self.path = format!("/{seg}");
+            } else {
+                self.path.push('/');
+                self.path.push_str(seg);
+            }
         }
         fn pop_path(&mut self) {
             if let Some(s) = self.path.rfind('/') {
-                if s == 0 { self.path = "/".to_owned(); } else { self.path.truncate(s); }
+                if s == 0 {
+                    self.path = "/".to_owned();
+                } else {
+                    self.path.truncate(s);
+                }
             }
         }
-        fn current_path(&self) -> &str { &self.path }
+        fn current_path(&self) -> &str {
+            &self.path
+        }
         fn commit_edit(&mut self, old: &str, new: &str) -> bool {
             self.last_commit = Some((old.to_owned(), new.to_owned()));
             self.commit_ok
@@ -1582,8 +1682,16 @@ mod tests {
             self.last_delete = Some(name.to_owned());
             self.delete_ok
         }
-        fn commands(&self) -> Vec<String> { self.cmds.clone() }
-        fn handle_command(&mut self, cmd: &str, _key: &str, _ty: i32, _err: &mut String) -> Option<FfonElement> {
+        fn commands(&self) -> Vec<String> {
+            self.cmds.clone()
+        }
+        fn handle_command(
+            &mut self,
+            cmd: &str,
+            _key: &str,
+            _ty: i32,
+            _err: &mut String,
+        ) -> Option<FfonElement> {
             self.last_command = Some(cmd.to_owned());
             None
         }
@@ -1597,10 +1705,16 @@ mod tests {
         let mut r = AppRenderer::new();
         // Build a minimal FFON tree mirroring what filebrowser would set up
         let mut root = FfonElement::new_obj(p.name().to_owned());
-        for item in p.items.iter() { root.as_obj_mut().unwrap().push(item.clone()); }
+        for item in p.items.iter() {
+            root.as_obj_mut().unwrap().push(item.clone());
+        }
         r.ffon = vec![root];
         r.providers = vec![Box::new(p)];
-        r.current_id = { let mut id = IdArray::new(); id.push(0); id };
+        r.current_id = {
+            let mut id = IdArray::new();
+            id.push(0);
+            id
+        };
         r
     }
 
@@ -1637,7 +1751,11 @@ mod tests {
     #[test]
     fn get_active_provider_ref_none_when_no_providers() {
         let mut r = AppRenderer::new();
-        r.current_id = { let mut id = IdArray::new(); id.push(0); id };
+        r.current_id = {
+            let mut id = IdArray::new();
+            id.push(0);
+            id
+        };
         assert!(get_active_provider_ref(&r).is_none());
     }
 
@@ -1686,7 +1804,13 @@ mod tests {
         r.ffon = vec![root];
         r.providers = vec![Box::new(p)];
         // Cursor jumped (via search) to the button: provider 0 / playground 0 / button 0.
-        r.current_id = { let mut id = IdArray::new(); id.push(0); id.push(0); id.push(0); id };
+        r.current_id = {
+            let mut id = IdArray::new();
+            id.push(0);
+            id.push(0);
+            id.push(0);
+            id
+        };
 
         sync_inmemory_provider_path_to_cursor(&mut r);
         assert_eq!(current_path(&r), "/Interactive playground");
@@ -1702,11 +1826,19 @@ mod tests {
         let mut r = AppRenderer::new();
         let mut root = FfonElement::new_obj("files");
         let mut dir = FfonElement::new_obj("Downloads");
-        dir.as_obj_mut().unwrap().push(FfonElement::new_str("file.txt"));
+        dir.as_obj_mut()
+            .unwrap()
+            .push(FfonElement::new_str("file.txt"));
         root.as_obj_mut().unwrap().push(dir);
         r.ffon = vec![root];
         r.providers = vec![Box::new(p)];
-        r.current_id = { let mut id = IdArray::new(); id.push(0); id.push(0); id.push(0); id };
+        r.current_id = {
+            let mut id = IdArray::new();
+            id.push(0);
+            id.push(0);
+            id.push(0);
+            id
+        };
 
         sync_inmemory_provider_path_to_cursor(&mut r);
         assert_eq!(current_path(&r), "/home/nico");
@@ -1732,7 +1864,11 @@ mod tests {
     #[test]
     fn commit_edit_returns_false_when_no_provider() {
         let mut r = AppRenderer::new();
-        r.current_id = { let mut id = IdArray::new(); id.push(0); id };
+        r.current_id = {
+            let mut id = IdArray::new();
+            id.push(0);
+            id
+        };
         assert!(!commit_edit(&mut r, "old", "new"));
     }
 
@@ -1749,7 +1885,11 @@ mod tests {
     #[test]
     fn create_directory_returns_false_when_no_provider() {
         let mut r = AppRenderer::new();
-        r.current_id = { let mut id = IdArray::new(); id.push(0); id };
+        r.current_id = {
+            let mut id = IdArray::new();
+            id.push(0);
+            id
+        };
         assert!(!create_directory(&mut r, "dir"));
     }
 
@@ -1781,13 +1921,14 @@ mod tests {
         let p0 = MockProvider::new("alpha", vec![]);
         let p1 = MockProvider::new("beta", vec![]);
         let mut r = AppRenderer::new();
-        r.ffon = vec![
-            FfonElement::new_obj("alpha"),
-            FfonElement::new_obj("beta"),
-        ];
+        r.ffon = vec![FfonElement::new_obj("alpha"), FfonElement::new_obj("beta")];
         r.providers = vec![Box::new(p0), Box::new(p1)];
         // Select provider at index 1
-        r.current_id = { let mut id = IdArray::new(); id.push(1); id };
+        r.current_id = {
+            let mut id = IdArray::new();
+            id.push(1);
+            id
+        };
         let name = get_active_provider_ref(&r).map(|p| p.name().to_owned());
         assert_eq!(name, Some("beta".to_owned()));
     }
@@ -1812,7 +1953,11 @@ mod tests {
     #[test]
     fn create_file_returns_false_when_no_provider() {
         let mut r = AppRenderer::new();
-        r.current_id = { let mut id = IdArray::new(); id.push(0); id };
+        r.current_id = {
+            let mut id = IdArray::new();
+            id.push(0);
+            id
+        };
         assert!(!create_file(&mut r, "f.txt"));
     }
 
@@ -1828,7 +1973,11 @@ mod tests {
     #[test]
     fn delete_item_by_name_returns_false_when_no_provider() {
         let mut r = AppRenderer::new();
-        r.current_id = { let mut id = IdArray::new(); id.push(0); id };
+        r.current_id = {
+            let mut id = IdArray::new();
+            id.push(0);
+            id
+        };
         assert!(!delete_item_by_name(&mut r, "f.txt"));
     }
 
@@ -1861,7 +2010,11 @@ mod tests {
     #[test]
     fn execute_command_returns_false_when_no_provider() {
         let mut r = AppRenderer::new();
-        r.current_id = { let mut id = IdArray::new(); id.push(0); id };
+        r.current_id = {
+            let mut id = IdArray::new();
+            id.push(0);
+            id
+        };
         assert!(!execute_command(&mut r, "open", "f"));
     }
 
@@ -1889,8 +2042,14 @@ mod tests {
         clear_auth_registry();
         register_auth("https://a.com", "key_a");
         register_auth("https://b.com", "key_b");
-        assert_eq!(find_api_key_for_url("https://a.com/path").as_deref(), Some("key_a"));
-        assert_eq!(find_api_key_for_url("https://b.com/path").as_deref(), Some("key_b"));
+        assert_eq!(
+            find_api_key_for_url("https://a.com/path").as_deref(),
+            Some("key_a")
+        );
+        assert_eq!(
+            find_api_key_for_url("https://b.com/path").as_deref(),
+            Some("key_b")
+        );
         clear_auth_registry();
     }
 
@@ -1913,15 +2072,33 @@ mod tests {
     impl RefreshTrackingProvider {
         fn new(cmds: Vec<String>) -> (Self, std::sync::Arc<std::sync::Mutex<Option<String>>>) {
             let last_command = std::sync::Arc::new(std::sync::Mutex::new(None));
-            (RefreshTrackingProvider { cmds, last_command: last_command.clone() }, last_command)
+            (
+                RefreshTrackingProvider {
+                    cmds,
+                    last_command: last_command.clone(),
+                },
+                last_command,
+            )
         }
     }
 
     impl Provider for RefreshTrackingProvider {
-        fn name(&self) -> &str { "tracking" }
-        fn fetch(&mut self) -> Vec<FfonElement> { vec![FfonElement::new_str("item")] }
-        fn commands(&self) -> Vec<String> { self.cmds.clone() }
-        fn handle_command(&mut self, cmd: &str, _: &str, _: i32, _: &mut String) -> Option<FfonElement> {
+        fn name(&self) -> &str {
+            "tracking"
+        }
+        fn fetch(&mut self) -> Vec<FfonElement> {
+            vec![FfonElement::new_str("item")]
+        }
+        fn commands(&self) -> Vec<String> {
+            self.cmds.clone()
+        }
+        fn handle_command(
+            &mut self,
+            cmd: &str,
+            _: &str,
+            _: i32,
+            _: &mut String,
+        ) -> Option<FfonElement> {
             *self.last_command.lock().unwrap() = Some(cmd.to_owned());
             None
         }
@@ -1930,10 +2107,16 @@ mod tests {
     fn make_renderer_with_tracking(p: RefreshTrackingProvider) -> AppRenderer {
         let mut r = AppRenderer::new();
         let mut root = FfonElement::new_obj("tracking");
-        root.as_obj_mut().unwrap().push(FfonElement::new_str("item"));
+        root.as_obj_mut()
+            .unwrap()
+            .push(FfonElement::new_str("item"));
         r.ffon = vec![root];
         r.providers = vec![Box::new(p)];
-        r.current_id = { let mut id = IdArray::new(); id.push(0); id };
+        r.current_id = {
+            let mut id = IdArray::new();
+            id.push(0);
+            id
+        };
         r
     }
 

@@ -119,14 +119,27 @@ mod tests {
         let term = manifests.iter().find(|m| m.name == "terminal");
         assert!(term.is_some(), "terminal manifest should be registered");
         let term = term.unwrap();
-        assert!(!term.always_enabled, "terminal should not be always_enabled");
-        assert!(!term.enable_default, "terminal should be opt-in (default off)");
-        assert!(!term.settings.is_empty(), "terminal should declare at least one setting");
+        assert!(
+            !term.always_enabled,
+            "terminal should not be always_enabled"
+        );
+        assert!(
+            !term.enable_default,
+            "terminal should be opt-in (default off)"
+        );
+        assert!(
+            !term.settings.is_empty(),
+            "terminal should declare at least one setting"
+        );
         let keys: Vec<&str> = term.settings.iter().map(|s| s.key.as_str()).collect();
-        assert!(keys.contains(&"shellProgram"),
-            "terminal manifest must include shellProgram setting; got {keys:?}");
-        assert!(keys.contains(&"autoEnterDashboard"),
-            "terminal manifest must include autoEnterDashboard setting; got {keys:?}");
+        assert!(
+            keys.contains(&"shellProgram"),
+            "terminal manifest must include shellProgram setting; got {keys:?}"
+        );
+        assert!(
+            keys.contains(&"autoEnterDashboard"),
+            "terminal manifest must include autoEnterDashboard setting; got {keys:?}"
+        );
     }
 
     #[test]
@@ -145,8 +158,14 @@ mod tests {
             .iter()
             .find(|m| m.name == "claude")
             .expect("claude manifest should be registered");
-        assert!(!claude.always_enabled, "claude should not be always_enabled");
-        assert!(!claude.enable_default, "claude should be opt-in (default off)");
+        assert!(
+            !claude.always_enabled,
+            "claude should not be always_enabled"
+        );
+        assert!(
+            !claude.enable_default,
+            "claude should be opt-in (default off)"
+        );
         let keys: Vec<&str> = claude.settings.iter().map(|s| s.key.as_str()).collect();
         assert!(
             keys.contains(&"claudeBinary"),
@@ -170,7 +189,10 @@ mod tests {
         let manifests = sicompass_sdk::builtin_manifests();
         let fb = manifests.iter().find(|m| m.name == "filebrowser");
         assert!(fb.is_some(), "filebrowser manifest should be registered");
-        assert!(fb.unwrap().always_enabled, "filebrowser should be always_enabled");
+        assert!(
+            fb.unwrap().always_enabled,
+            "filebrowser should be always_enabled"
+        );
     }
 
     #[test]

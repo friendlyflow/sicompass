@@ -33,15 +33,14 @@ mod interactive_detect;
 
 use std::path::{Path, PathBuf};
 
+use emulator::{Emulator, encode_dashboard_key};
 use interactive_detect::{InteractiveDetector, InteractiveEvent};
-use emulator::{encode_dashboard_key, Emulator};
-use sicompass_sdk::{
-    platform, register_builtin_manifest, register_provider_factory, BuiltinManifest,
-    DashboardFrame, DashboardKey, DashboardKind, DashboardRequest, FfonElement, Provider,
-    SettingDecl,
-};
 use sicompass_sdk::localize;
-use sicompass_shell::{default_program, Shell, ShellConfig};
+use sicompass_sdk::{
+    BuiltinManifest, DashboardFrame, DashboardKey, DashboardKind, DashboardRequest, FfonElement,
+    Provider, SettingDecl, platform, register_builtin_manifest, register_provider_factory,
+};
+use sicompass_shell::{Shell, ShellConfig, default_program};
 use std::sync::OnceLock;
 
 /// Register this crate's translation bundles with the SDK localizer.
@@ -256,9 +255,7 @@ impl TerminalProvider {
                 self.pending_dashboard_request = Some(DashboardRequest::Enter);
                 self.auto_entered_dashboard = true;
             }
-            InteractiveEvent::Leave
-                if self.in_dashboard && self.auto_entered_dashboard =>
-            {
+            InteractiveEvent::Leave if self.in_dashboard && self.auto_entered_dashboard => {
                 self.pending_dashboard_request = Some(DashboardRequest::Leave);
             }
             // Ignore Enter while already in dashboard and Leave when the user
@@ -275,9 +272,7 @@ impl TerminalProvider {
     }
 
     fn trim_command_history_in_memory(&mut self) {
-        if self.command_history_size > 0
-            && self.command_history.len() > self.command_history_size
-        {
+        if self.command_history_size > 0 && self.command_history.len() > self.command_history_size {
             let drop = self.command_history.len() - self.command_history_size;
             self.command_history.drain(..drop);
         }
@@ -300,8 +295,12 @@ impl TerminalProvider {
             return;
         }
         self.command_history_loaded = true;
-        let Some(path) = self.resolve_command_history_path() else { return };
-        let Ok(content) = std::fs::read_to_string(&path) else { return };
+        let Some(path) = self.resolve_command_history_path() else {
+            return;
+        };
+        let Ok(content) = std::fs::read_to_string(&path) else {
+            return;
+        };
         let mut lines: Vec<String> = content
             .lines()
             .filter(|l| !l.is_empty())
@@ -324,7 +323,9 @@ impl TerminalProvider {
         self.command_history.push(line.clone());
         self.trim_command_history_in_memory();
 
-        let Some(path) = self.resolve_command_history_path() else { return };
+        let Some(path) = self.resolve_command_history_path() else {
+            return;
+        };
         if let Some(parent) = path.parent() {
             sicompass_sdk::platform::make_dirs(parent);
         }
@@ -337,8 +338,7 @@ impl TerminalProvider {
             let _ = writeln!(f, "{}", line);
         }
         self.appends_since_compact += 1;
-        if self.command_history_size > 0
-            && self.appends_since_compact >= self.command_history_size
+        if self.command_history_size > 0 && self.appends_since_compact >= self.command_history_size
         {
             self.compact_command_history_file(&path);
         }
@@ -384,7 +384,10 @@ impl TerminalProvider {
             }
         }
         names.sort_by(|a, b| natord::compare_ignore_case(a, b));
-        names.into_iter().map(|n| FfonElement::new_obj(&n)).collect()
+        names
+            .into_iter()
+            .map(|n| FfonElement::new_obj(&n))
+            .collect()
     }
 
     /// Swap to the shell view, running in whichever folder the user browsed to.
@@ -420,7 +423,9 @@ impl TerminalProvider {
         // went, but *not* recorded in the ↑-recall history: they never typed it.
         let line = format!("cd {}", quote_for_shell(&self.browse_path));
         let prompt = self.current_prompt();
-        let Some(shell) = self.shell.as_mut() else { return };
+        let Some(shell) = self.shell.as_mut() else {
+            return;
+        };
         if shell.write_line(&line).is_err() {
             return;
         }
@@ -456,7 +461,11 @@ impl TerminalProvider {
     fn sync_shell_path(&mut self, prefer_parsed: bool) {
         let parsed = self.cwd.clone();
         let live = Some(PathBuf::from(self.shell_cwd()));
-        let order = if prefer_parsed { [parsed, live] } else { [live, parsed] };
+        let order = if prefer_parsed {
+            [parsed, live]
+        } else {
+            [live, parsed]
+        };
         for candidate in order {
             match candidate {
                 Some(p) if p.is_dir() => {
@@ -636,7 +645,11 @@ impl Provider for TerminalProvider {
     /// Linux only). The app uses this to confirm before Ctrl+W kills the shell.
     fn is_busy(&self) -> bool {
         self.in_dashboard
-            || self.shell.as_ref().map(|s| s.foreground_busy()).unwrap_or(false)
+            || self
+                .shell
+                .as_ref()
+                .map(|s| s.foreground_busy())
+                .unwrap_or(false)
     }
 
     fn fetch(&mut self) -> Vec<FfonElement> {
@@ -1070,7 +1083,13 @@ fn hostname_short() -> String {
     let raw = std::process::Command::new("hostname")
         .output()
         .ok()
-        .and_then(|o| if o.status.success() { String::from_utf8(o.stdout).ok() } else { None })
+        .and_then(|o| {
+            if o.status.success() {
+                String::from_utf8(o.stdout).ok()
+            } else {
+                None
+            }
+        })
         .map(|s| s.trim().to_owned())
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| std::env::var("HOSTNAME").unwrap_or_else(|_| "host".to_owned()));
@@ -1092,7 +1111,11 @@ fn expand_home(value: &str) -> PathBuf {
     };
     if let Some(rest) = rest {
         if let Some(home) = platform::home_dir() {
-            return if rest.is_empty() { home } else { home.join(rest) };
+            return if rest.is_empty() {
+                home
+            } else {
+                home.join(rest)
+            };
         }
     }
     PathBuf::from(value)
@@ -1201,7 +1224,9 @@ fn collapse_home(cwd: &str) -> String {
 }
 
 fn collapse_home_with(cwd: &str, home: Option<&Path>) -> String {
-    let Some(home) = home else { return cwd.to_owned(); };
+    let Some(home) = home else {
+        return cwd.to_owned();
+    };
     let cwd_path = std::path::Path::new(cwd);
     if cwd_path == home {
         return "~".to_owned();
@@ -1238,8 +1263,13 @@ fn decode_terminal_output(bytes: &[u8]) -> String {
                 // ST (`ESC \`) or BEL.
                 Some(']') | Some('P') | Some('^') | Some('_') => {
                     while let Some(nc) = chars.next() {
-                        if nc == '\x07' { break; }
-                        if nc == '\x1b' { let _ = chars.next(); break; }
+                        if nc == '\x07' {
+                            break;
+                        }
+                        if nc == '\x1b' {
+                            let _ = chars.next();
+                            break;
+                        }
                     }
                 }
                 // nF escape sequences (charset designators like `ESC ( B`,
@@ -1361,8 +1391,10 @@ mod tests {
 
         // Once the shell is running the tab switcher can label the tab as
         // "{pid} - {breadcrumb}".
-        assert!(p.process_id().is_some(),
-            "shell PID should be exposed once the shell is running");
+        assert!(
+            p.process_id().is_some(),
+            "shell PID should be exposed once the shell is running"
+        );
     }
 
     #[test]
@@ -1401,7 +1433,11 @@ mod tests {
         em.feed(b"\x1b[?1049l");
         let before = p.entries.len();
         p.leave_dashboard();
-        assert_eq!(p.entries.len(), before, "blank primary screen flushes nothing");
+        assert_eq!(
+            p.entries.len(),
+            before,
+            "blank primary screen flushes nothing"
+        );
     }
 
     #[test]
@@ -1438,8 +1474,7 @@ mod tests {
         p.command_history_path = Some(path);
         let elems = p.fetch();
         let slot = elems.last().unwrap().as_obj().unwrap();
-        let kids: Vec<&str> =
-            slot.children.iter().filter_map(|e| e.as_str()).collect();
+        let kids: Vec<&str> = slot.children.iter().filter_map(|e| e.as_str()).collect();
         // Newest first, each a `<button>` Str.
         assert_eq!(
             kids,
@@ -1460,8 +1495,7 @@ mod tests {
         p.command_history_path = Some(path);
         let elems = p.fetch();
         let slot = elems.last().unwrap().as_obj().unwrap();
-        let kids: Vec<&str> =
-            slot.children.iter().filter_map(|e| e.as_str()).collect();
+        let kids: Vec<&str> = slot.children.iter().filter_map(|e| e.as_str()).collect();
         // No de-duplication — raw chronological history, reversed.
         assert_eq!(
             kids,
@@ -1738,7 +1772,11 @@ mod tests {
         assert_eq!(p.entries.len(), 1, "leaving the view is not a teardown");
 
         p.handle_command(CMD_SHELL, "", 0, &mut err);
-        assert_eq!(p.fetch().len(), 3, "scrollback resumes: cmd + output + slot");
+        assert_eq!(
+            p.fetch().len(),
+            3,
+            "scrollback resumes: cmd + output + slot"
+        );
     }
 
     #[test]
@@ -1789,7 +1827,11 @@ mod tests {
             }
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
-        assert_eq!(redrew, Some(false), "output captured, but no redraw asked for");
+        assert_eq!(
+            redrew,
+            Some(false),
+            "output captured, but no redraw asked for"
+        );
         assert!(!p.entries[0].output.is_empty(), "output is still captured");
     }
 
@@ -1807,10 +1849,7 @@ mod tests {
     #[test]
     fn quote_for_shell_wraps_and_escapes() {
         assert_eq!(quote_for_shell(Path::new("/tmp/a b")), "'/tmp/a b'");
-        assert_eq!(
-            quote_for_shell(Path::new("/tmp/it's")),
-            r"'/tmp/it'\''s'",
-        );
+        assert_eq!(quote_for_shell(Path::new("/tmp/it's")), r"'/tmp/it'\''s'",);
     }
 
     #[test]
@@ -1826,8 +1865,6 @@ mod tests {
         p.on_setting_change("shellProgram", "/bin/dash");
         assert_eq!(p.shell_program, "/bin/dash");
     }
-
-
 
     #[test]
     fn on_setting_change_updates_command_history_size() {
@@ -2097,7 +2134,10 @@ mod tests {
         assert_eq!(elems.len(), 1);
         let key = &elems[0].as_obj().unwrap().key;
         assert!(key.ends_with("> <input></input>"), "got {key:?}");
-        assert!(!key.contains('@'), "Windows prompt should omit user@host; got {key:?}");
+        assert!(
+            !key.contains('@'),
+            "Windows prompt should omit user@host; got {key:?}"
+        );
     }
 
     #[cfg(unix)]
@@ -2117,7 +2157,13 @@ mod tests {
         assert_eq!(elems[0].as_str(), Some("user@host:/tmp$ ls"));
         assert_eq!(elems[1].as_str(), Some("file1"));
         assert_eq!(elems[2].as_str(), Some("file2"));
-        assert!(elems[3].as_obj().unwrap().key.ends_with("$ <input></input>"));
+        assert!(
+            elems[3]
+                .as_obj()
+                .unwrap()
+                .key
+                .ends_with("$ <input></input>")
+        );
     }
 
     #[cfg(unix)]
@@ -2125,8 +2171,14 @@ mod tests {
     fn collapse_home_replaces_leading_home_with_tilde() {
         let home = Path::new("/home/nico");
         assert_eq!(collapse_home_with("/home/nico", Some(home)), "~");
-        assert_eq!(collapse_home_with("/home/nico/projects", Some(home)), "~/projects");
-        assert_eq!(collapse_home_with("/home/nicolae", Some(home)), "/home/nicolae"); // not a prefix match
+        assert_eq!(
+            collapse_home_with("/home/nico/projects", Some(home)),
+            "~/projects"
+        );
+        assert_eq!(
+            collapse_home_with("/home/nicolae", Some(home)),
+            "/home/nicolae"
+        ); // not a prefix match
         assert_eq!(collapse_home_with("/tmp", Some(home)), "/tmp");
     }
 
@@ -2136,9 +2188,15 @@ mod tests {
         let home = Path::new("C:\\Users\\nico");
         assert_eq!(collapse_home_with("C:\\Users\\nico", Some(home)), "~");
         // Backslash-separated subpath gets re-emitted with `/`.
-        assert_eq!(collapse_home_with("C:\\Users\\nico\\projects", Some(home)), "~/projects");
+        assert_eq!(
+            collapse_home_with("C:\\Users\\nico\\projects", Some(home)),
+            "~/projects"
+        );
         // Sibling dir that just shares a prefix must NOT collapse.
-        assert_eq!(collapse_home_with("C:\\Users\\nicolae", Some(home)), "C:\\Users\\nicolae");
+        assert_eq!(
+            collapse_home_with("C:\\Users\\nicolae", Some(home)),
+            "C:\\Users\\nicolae"
+        );
         assert_eq!(collapse_home_with("C:\\Temp", Some(home)), "C:\\Temp");
     }
 
@@ -2396,20 +2454,31 @@ mod tests {
             p.tick();
             let frame = p.dashboard_render(80, 24);
             // Scan all cells for the marker as a contiguous string.
-            let row_text: Vec<String> = (0..frame.rows).map(|r| {
-                (0..frame.cols).map(|c| frame.cell(c, r).ch).collect::<String>()
-            }).collect();
-            if row_text.iter().any(|line| line.contains("dashboard-it-marker")) {
+            let row_text: Vec<String> = (0..frame.rows)
+                .map(|r| {
+                    (0..frame.cols)
+                        .map(|c| frame.cell(c, r).ch)
+                        .collect::<String>()
+                })
+                .collect();
+            if row_text
+                .iter()
+                .any(|line| line.contains("dashboard-it-marker"))
+            {
                 saw = true;
                 break;
             }
             thread::sleep(Duration::from_millis(20));
         }
-        assert!(saw, "expected marker in emulator grid; rows: {:#?}",
-            (0..p.emulator.as_ref().unwrap().rows()).map(|r| {
-                let f = p.emulator.as_ref().unwrap().snapshot();
-                (0..f.cols).map(|c| f.cell(c, r).ch).collect::<String>()
-            }).collect::<Vec<_>>(),
+        assert!(
+            saw,
+            "expected marker in emulator grid; rows: {:#?}",
+            (0..p.emulator.as_ref().unwrap().rows())
+                .map(|r| {
+                    let f = p.emulator.as_ref().unwrap().snapshot();
+                    (0..f.cols).map(|c| f.cell(c, r).ch).collect::<String>()
+                })
+                .collect::<Vec<_>>(),
         );
     }
 
@@ -2435,7 +2504,12 @@ mod tests {
         let mut saw_output = false;
         while Instant::now() < deadline {
             if p.tick() {
-                if p.entries.last().unwrap().output.contains("terminal-it-test") {
+                if p.entries
+                    .last()
+                    .unwrap()
+                    .output
+                    .contains("terminal-it-test")
+                {
                     saw_output = true;
                     break;
                 }
@@ -2455,19 +2529,36 @@ mod tests {
         // the submitted command, the last must be the `<input>` slot Obj, and
         // somewhere in between the echoed marker must appear.
         assert!(elems.len() >= 2);
-        assert!(elems[0].as_str().map_or(false, |s| s.ends_with("echo terminal-it-test")),
-            "first element should end with command; got {:?}", elems[0].as_str());
-        assert!(elems.last().and_then(|e| e.as_obj())
-            .map_or(false, |o| o.key.ends_with("<input></input>")),
-            "last element should be the +i input slot; got {:?}", elems.last());
-        assert!(elems.iter().any(|e| e.as_str().map_or(false, |s| s.contains("terminal-it-test"))));
+        assert!(
+            elems[0]
+                .as_str()
+                .map_or(false, |s| s.ends_with("echo terminal-it-test")),
+            "first element should end with command; got {:?}",
+            elems[0].as_str()
+        );
+        assert!(
+            elems
+                .last()
+                .and_then(|e| e.as_obj())
+                .map_or(false, |o| o.key.ends_with("<input></input>")),
+            "last element should be the +i input slot; got {:?}",
+            elems.last()
+        );
+        assert!(
+            elems
+                .iter()
+                .any(|e| e.as_str().map_or(false, |s| s.contains("terminal-it-test")))
+        );
         // The committed command landed in the recall history → slot children
         // are `<button>` Strs.
-        assert!(elems.last().and_then(|e| e.as_obj())
-            .map_or(false, |o| o.children.iter()
+        assert!(
+            elems.last().and_then(|e| e.as_obj()).map_or(false, |o| o
+                .children
+                .iter()
                 .any(|c| c.as_str()
                     == Some("<button>echo terminal-it-test</button>echo terminal-it-test"))),
-            "committed command should appear as a history button child");
+            "committed command should appear as a history button child"
+        );
     }
 
     #[test]

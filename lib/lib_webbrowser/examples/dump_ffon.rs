@@ -10,7 +10,7 @@
 //! landmark groups (navigation / main content / footer / complementary) show up
 //! as named Obj nodes wrapping their children.
 
-use sicompass_sdk::ffon::{html_to_ffon_with_forms, FfonElement};
+use sicompass_sdk::ffon::{FfonElement, html_to_ffon_with_forms};
 
 fn print_tree(elems: &[FfonElement], depth: usize) {
     for e in elems {

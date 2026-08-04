@@ -6,11 +6,9 @@
 use crate::app_state::{AppRenderer, CommandPhase, Coordinate, RenderListItem};
 use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
 use nucleo_matcher::{Config, Matcher, Utf32Str};
-use sicompass_sdk::ffon::{get_ffon_at_id, FfonElement, FfonObject, IdArray};
+use sicompass_sdk::ffon::{FfonElement, FfonObject, IdArray, get_ffon_at_id};
 use sicompass_sdk::tags;
-use sicompass_sdk::timeline::{
-    ChatOpKind, FsSideEffect, ImapOpKind, TimelineEntry,
-};
+use sicompass_sdk::timeline::{ChatOpKind, FsSideEffect, ImapOpKind, TimelineEntry};
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -36,7 +34,9 @@ pub fn create_list_extended_search(renderer: &mut AppRenderer) {
     let mut items: Vec<crate::app_state::RenderListItem> = Vec::new();
     collect_items_recursive(arr, &base_id, "", false, &mut items);
     renderer.total_list = items;
-    renderer.list_index = renderer.list_index.min(renderer.total_list.len().saturating_sub(1));
+    renderer.list_index = renderer
+        .list_index
+        .min(renderer.total_list.len().saturating_sub(1));
 }
 
 /// Recursively collect all FFON elements with breadcrumb paths.
@@ -61,7 +61,11 @@ fn collect_items_recursive(
         out.push(crate::app_state::RenderListItem {
             id: item_id.clone(),
             label,
-            data: if breadcrumb.is_empty() { None } else { Some(breadcrumb.to_owned()) },
+            data: if breadcrumb.is_empty() {
+                None
+            } else {
+                Some(breadcrumb.to_owned())
+            },
             nav_path: None,
             ext_prefix,
         });
@@ -78,7 +82,13 @@ fn collect_items_recursive(
                 let mut child_id = item_id.clone();
                 child_id.push(0);
                 let child_parent_has_radio = sicompass_sdk::tags::has_radio(&obj.key);
-                collect_items_recursive(&obj.children, &child_id, &new_bc, child_parent_has_radio, out);
+                collect_items_recursive(
+                    &obj.children,
+                    &child_id,
+                    &new_bc,
+                    child_parent_has_radio,
+                    out,
+                );
             }
         }
     }
@@ -153,7 +163,12 @@ fn collect_scroll_items_recursive(
                 let mut child_id = item_id.clone();
                 child_id.push(0);
                 let child_parent_has_radio = tags::has_radio(&obj.key);
-                collect_scroll_items_recursive(&obj.children, &child_id, child_parent_has_radio, out);
+                collect_scroll_items_recursive(
+                    &obj.children,
+                    &child_id,
+                    child_parent_has_radio,
+                    out,
+                );
             }
         }
     }
@@ -167,9 +182,7 @@ pub fn create_list_current_layer(renderer: &mut AppRenderer) {
     renderer.error_message.clear();
 
     match renderer.coordinate {
-        Coordinate::General
-        | Coordinate::Insert
-        | Coordinate::SimpleSearch => {}
+        Coordinate::General | Coordinate::Insert | Coordinate::SimpleSearch => {}
         Coordinate::ExtendedSearch => {
             create_list_extended_search(renderer);
             return;
@@ -225,8 +238,7 @@ pub fn create_list_current_layer(renderer: &mut AppRenderer) {
         // In the Ctrl+O open flow, hide non-.json files (directories still shown).
         if filter_json {
             if let FfonElement::Str(s) = elem {
-                let name = tags::extract_input(s)
-                    .unwrap_or_else(|| s.clone());
+                let name = tags::extract_input(s).unwrap_or_else(|| s.clone());
                 if !name.ends_with(".json") {
                     continue;
                 }
@@ -243,7 +255,13 @@ pub fn create_list_current_layer(renderer: &mut AppRenderer) {
             _ => None,
         };
 
-        items.push(RenderListItem { id: item_id, label, data, nav_path: None, ext_prefix: None });
+        items.push(RenderListItem {
+            id: item_id,
+            label,
+            data,
+            nav_path: None,
+            ext_prefix: None,
+        });
     }
 
     // Restore list_index to the item matching current_id.last()
@@ -376,14 +394,20 @@ fn build_str_label(s: &str, parent_has_radio: bool) -> String {
     let (prefix, content): (&str, String) = if tags::has_image(s) {
         ("-p", tags::strip_display(s))
     } else if tags::has_checkbox_checked(s) {
-        ("-cc", tags::extract_checkbox_checked(s)
-            .unwrap_or_else(|| tags::strip_display(s)))
+        (
+            "-cc",
+            tags::extract_checkbox_checked(s).unwrap_or_else(|| tags::strip_display(s)),
+        )
     } else if tags::has_checkbox(s) {
-        ("-c", tags::extract_checkbox(s)
-            .unwrap_or_else(|| tags::strip_display(s)))
+        (
+            "-c",
+            tags::extract_checkbox(s).unwrap_or_else(|| tags::strip_display(s)),
+        )
     } else if tags::has_checked(s) {
-        ("-rc", tags::extract_checked(s)
-            .unwrap_or_else(|| tags::strip_display(s)))
+        (
+            "-rc",
+            tags::extract_checked(s).unwrap_or_else(|| tags::strip_display(s)),
+        )
     } else if tags::has_button(s) {
         ("-b", tags::strip_display(s))
     } else if tags::has_password(s) {
@@ -439,25 +463,26 @@ fn build_obj_label(obj: &FfonObject) -> String {
     }
 
     if tags::has_checkbox_checked(key) {
-        let content = tags::extract_checkbox_checked(key)
-            .unwrap_or_else(|| tags::strip_display(key));
+        let content =
+            tags::extract_checkbox_checked(key).unwrap_or_else(|| tags::strip_display(key));
         return format!("+cc {content}");
     } else if tags::has_checkbox(key) {
-        let content = tags::extract_checkbox(key)
-            .unwrap_or_else(|| tags::strip_display(key));
+        let content = tags::extract_checkbox(key).unwrap_or_else(|| tags::strip_display(key));
         return format!("+c {content}");
     } else if tags::has_link(key) {
         return format!("+l {}", tags::strip_display(key));
     } else if tags::has_radio(key) {
-        let group = tags::extract_radio(key)
-            .unwrap_or_else(|| tags::strip_display(key));
-        let state = obj.children.iter().find_map(|c| match c {
-            FfonElement::Str(s) if tags::has_checked(s) => Some(
-                tags::extract_checked(s)
-                    .unwrap_or_else(|| tags::strip_display(s)),
-            ),
-            _ => None,
-        }).unwrap_or_default();
+        let group = tags::extract_radio(key).unwrap_or_else(|| tags::strip_display(key));
+        let state = obj
+            .children
+            .iter()
+            .find_map(|c| match c {
+                FfonElement::Str(s) if tags::has_checked(s) => {
+                    Some(tags::extract_checked(s).unwrap_or_else(|| tags::strip_display(s)))
+                }
+                _ => None,
+            })
+            .unwrap_or_default();
         return format!("+R {group} [{state}]");
     } else if tags::has_password(key) {
         return format!("+i {}", masked_password_display(key));
@@ -744,10 +769,7 @@ fn render_nav_path(path: &str, is_fs: bool, fallback: &str) -> String {
 /// fallback when a Navigate entry has no path (cursor at depth 1, outside
 /// any provider's path zone), and `path_is_filesystem` drives slash vs
 /// breadcrumb rendering.
-pub fn timeline_entry_label(
-    entry: &TimelineEntry,
-    providers: &[TimelineProviderInfo],
-) -> String {
+pub fn timeline_entry_label(entry: &TimelineEntry, providers: &[TimelineProviderInfo]) -> String {
     match entry {
         TimelineEntry::Navigate {
             kind,
@@ -851,11 +873,9 @@ fn fs_summary(
             format!("{}", original_path.display())
         }
         FsSideEffect::None => match (before, after) {
-            (Some(b), Some(a)) => format!(
-                "{} > {}",
-                ffon_str_snippet(b, 30),
-                ffon_str_snippet(a, 30)
-            ),
+            (Some(b), Some(a)) => {
+                format!("{} > {}", ffon_str_snippet(b, 30), ffon_str_snippet(a, 30))
+            }
             (None, Some(a)) => ffon_str_snippet(a, 60),
             (Some(b), None) => ffon_str_snippet(b, 60),
             (None, None) => String::new(),
@@ -865,10 +885,14 @@ fn fs_summary(
 
 fn imap_op_summary(op: &ImapOpKind) -> String {
     match op {
-        ImapOpKind::Trash { msg_id, src_folder, .. } => {
+        ImapOpKind::Trash {
+            msg_id, src_folder, ..
+        } => {
             format!("Trash {} from {}", msg_id, src_folder)
         }
-        ImapOpKind::Archive { msg_id, src_folder, .. } => {
+        ImapOpKind::Archive {
+            msg_id, src_folder, ..
+        } => {
             format!("Archive {} from {}", msg_id, src_folder)
         }
         ImapOpKind::Move {
@@ -876,10 +900,20 @@ fn imap_op_summary(op: &ImapOpKind) -> String {
             src_folder,
             dst_folder,
         } => format!("Move {} {} > {}", msg_id, src_folder, dst_folder),
-        ImapOpKind::SetSeen { msg_uid, folder, new, .. } => {
+        ImapOpKind::SetSeen {
+            msg_uid,
+            folder,
+            new,
+            ..
+        } => {
             format!("SetSeen uid={} {} > {}", msg_uid, folder, new)
         }
-        ImapOpKind::SetFlagged { msg_uid, folder, new, .. } => {
+        ImapOpKind::SetFlagged {
+            msg_uid,
+            folder,
+            new,
+            ..
+        } => {
             format!("SetFlagged uid={} {} > {}", msg_uid, folder, new)
         }
     }
@@ -890,10 +924,14 @@ fn chat_op_summary(op: &ChatOpKind) -> String {
         ChatOpKind::LeaveRoom { room_id } => format!("LeaveRoom {}", room_id),
         ChatOpKind::AcceptInvite { room_id } => format!("AcceptInvite {}", room_id),
         ChatOpKind::RejectInvite { room_id } => format!("RejectInvite {}", room_id),
-        ChatOpKind::KickMember { room_id, user_id, .. } => {
+        ChatOpKind::KickMember {
+            room_id, user_id, ..
+        } => {
             format!("KickMember {} from {}", user_id, room_id)
         }
-        ChatOpKind::BanMember { room_id, user_id, .. } => {
+        ChatOpKind::BanMember {
+            room_id, user_id, ..
+        } => {
             format!("BanMember {} from {}", user_id, room_id)
         }
         ChatOpKind::PostMessage { room_id, body, .. } => {
@@ -924,7 +962,11 @@ fn format_meta_hints(hints: &[String]) -> Vec<String> {
             None => (h.as_str(), ""),
         })
         .collect();
-    let width = split.iter().map(|(k, _)| k.chars().count()).max().unwrap_or(0);
+    let width = split
+        .iter()
+        .map(|(k, _)| k.chars().count())
+        .max()
+        .unwrap_or(0);
     split
         .iter()
         .map(|(key, desc)| {
@@ -946,7 +988,13 @@ fn build_meta_list(renderer: &mut AppRenderer) {
         .map(|(i, label)| {
             let mut id = IdArray::new();
             id.push(i);
-            RenderListItem { id, label, data: None, nav_path: None, ext_prefix: None }
+            RenderListItem {
+                id,
+                label,
+                data: None,
+                nav_path: None,
+                ext_prefix: None,
+            }
         })
         .collect();
     renderer.total_list = items;
@@ -992,10 +1040,17 @@ fn build_command_list(renderer: &mut AppRenderer) {
             // announced as a button); the stable action key lives in `nav_path`
             // (see `WindowAction::key` / `from_key`). The maximize label tracks
             // the live window state so it reads "restore" when maximized.
-            let max_label = if renderer.window_is_maximized { "restore" } else { "maximize" };
+            let max_label = if renderer.window_is_maximized {
+                "restore"
+            } else {
+                "maximize"
+            };
             let entries = [
                 (crate::app_state::WindowAction::Minimize.key(), "minimize"),
-                (crate::app_state::WindowAction::MaximizeToggle.key(), max_label),
+                (
+                    crate::app_state::WindowAction::MaximizeToggle.key(),
+                    max_label,
+                ),
                 (crate::app_state::WindowAction::Close.key(), "close"),
             ];
             let items: Vec<RenderListItem> = entries
@@ -1032,7 +1087,11 @@ fn build_command_list(renderer: &mut AppRenderer) {
                         // because the renderer treats a non-None `data` field as an
                         // image path and attempts to load it as a texture.
                         data: None,
-                        nav_path: if li.data.is_empty() { None } else { Some(li.data) },
+                        nav_path: if li.data.is_empty() {
+                            None
+                        } else {
+                            Some(li.data)
+                        },
                         ext_prefix: None,
                     }
                 })
@@ -1055,7 +1114,11 @@ mod tests {
     fn make_renderer_with_ffon(ffon: Vec<FfonElement>) -> AppRenderer {
         let mut r = AppRenderer::new();
         r.ffon = ffon;
-        r.current_id = { let mut id = IdArray::new(); id.push(0); id };
+        r.current_id = {
+            let mut id = IdArray::new();
+            id.push(0);
+            id
+        };
         r
     }
 
@@ -1098,7 +1161,9 @@ mod tests {
     #[test]
     fn list_root_shows_provider() {
         let mut root = FfonElement::new_obj("tutorial");
-        root.as_obj_mut().unwrap().push(FfonElement::new_str("item 0"));
+        root.as_obj_mut()
+            .unwrap()
+            .push(FfonElement::new_str("item 0"));
 
         let mut r = make_renderer_with_ffon(vec![root]);
         create_list_current_layer(&mut r);
@@ -1110,11 +1175,20 @@ mod tests {
     #[test]
     fn list_depth2_shows_children() {
         let mut root = FfonElement::new_obj("tutorial");
-        root.as_obj_mut().unwrap().push(FfonElement::new_str("Hello"));
-        root.as_obj_mut().unwrap().push(FfonElement::new_str("World"));
+        root.as_obj_mut()
+            .unwrap()
+            .push(FfonElement::new_str("Hello"));
+        root.as_obj_mut()
+            .unwrap()
+            .push(FfonElement::new_str("World"));
 
         let mut r = make_renderer_with_ffon(vec![root]);
-        r.current_id = { let mut id = IdArray::new(); id.push(0); id.push(0); id };
+        r.current_id = {
+            let mut id = IdArray::new();
+            id.push(0);
+            id.push(0);
+            id
+        };
         create_list_current_layer(&mut r);
 
         assert_eq!(r.total_list.len(), 2);
@@ -1126,11 +1200,19 @@ mod tests {
     fn obj_element_gets_plus_prefix() {
         let mut root = FfonElement::new_obj("provider");
         let mut section = FfonElement::new_obj("Section");
-        section.as_obj_mut().unwrap().push(FfonElement::new_str("child"));
+        section
+            .as_obj_mut()
+            .unwrap()
+            .push(FfonElement::new_str("child"));
         root.as_obj_mut().unwrap().push(section);
 
         let mut r = make_renderer_with_ffon(vec![root]);
-        r.current_id = { let mut id = IdArray::new(); id.push(0); id.push(0); id };
+        r.current_id = {
+            let mut id = IdArray::new();
+            id.push(0);
+            id.push(0);
+            id
+        };
         create_list_current_layer(&mut r);
 
         assert_eq!(r.total_list.len(), 1);
@@ -1140,10 +1222,17 @@ mod tests {
     #[test]
     fn str_element_gets_minus_prefix() {
         let mut root = FfonElement::new_obj("provider");
-        root.as_obj_mut().unwrap().push(FfonElement::new_str("leaf item"));
+        root.as_obj_mut()
+            .unwrap()
+            .push(FfonElement::new_str("leaf item"));
 
         let mut r = make_renderer_with_ffon(vec![root]);
-        r.current_id = { let mut id = IdArray::new(); id.push(0); id.push(0); id };
+        r.current_id = {
+            let mut id = IdArray::new();
+            id.push(0);
+            id.push(0);
+            id
+        };
         create_list_current_layer(&mut r);
 
         assert_eq!(r.total_list.len(), 1);
@@ -1153,12 +1242,23 @@ mod tests {
     #[test]
     fn filter_by_search_string() {
         let mut root = FfonElement::new_obj("provider");
-        root.as_obj_mut().unwrap().push(FfonElement::new_str("apple"));
-        root.as_obj_mut().unwrap().push(FfonElement::new_str("banana"));
-        root.as_obj_mut().unwrap().push(FfonElement::new_str("apricot"));
+        root.as_obj_mut()
+            .unwrap()
+            .push(FfonElement::new_str("apple"));
+        root.as_obj_mut()
+            .unwrap()
+            .push(FfonElement::new_str("banana"));
+        root.as_obj_mut()
+            .unwrap()
+            .push(FfonElement::new_str("apricot"));
 
         let mut r = make_renderer_with_ffon(vec![root]);
-        r.current_id = { let mut id = IdArray::new(); id.push(0); id.push(0); id };
+        r.current_id = {
+            let mut id = IdArray::new();
+            id.push(0);
+            id.push(0);
+            id
+        };
         create_list_current_layer(&mut r);
         populate_list_current_layer(&mut r, "ap");
 
@@ -1169,15 +1269,30 @@ mod tests {
     /// provider > [alpha, Section > [beta, gamma], delta], cursor inside provider.
     fn make_scroll_renderer() -> AppRenderer {
         let mut root = FfonElement::new_obj("provider");
-        root.as_obj_mut().unwrap().push(FfonElement::new_str("alpha"));
+        root.as_obj_mut()
+            .unwrap()
+            .push(FfonElement::new_str("alpha"));
         let mut section = FfonElement::new_obj("Section");
-        section.as_obj_mut().unwrap().push(FfonElement::new_str("beta"));
-        section.as_obj_mut().unwrap().push(FfonElement::new_str("gamma"));
+        section
+            .as_obj_mut()
+            .unwrap()
+            .push(FfonElement::new_str("beta"));
+        section
+            .as_obj_mut()
+            .unwrap()
+            .push(FfonElement::new_str("gamma"));
         root.as_obj_mut().unwrap().push(section);
-        root.as_obj_mut().unwrap().push(FfonElement::new_str("delta"));
+        root.as_obj_mut()
+            .unwrap()
+            .push(FfonElement::new_str("delta"));
 
         let mut r = make_renderer_with_ffon(vec![root]);
-        r.current_id = { let mut id = IdArray::new(); id.push(0); id.push(0); id };
+        r.current_id = {
+            let mut id = IdArray::new();
+            id.push(0);
+            id.push(0);
+            id
+        };
         r.coordinate = Coordinate::Scroll;
         r
     }
@@ -1204,19 +1319,41 @@ mod tests {
         let mut r = make_scroll_renderer();
         create_list_scroll(&mut r);
 
-        assert_eq!(r.total_list[0].ext_prefix.as_deref(), Some("layer: 1 list: 1/3"));
-        assert_eq!(r.total_list[1].ext_prefix.as_deref(), Some("layer: 1 list: 2/3"));
-        assert_eq!(r.total_list[2].ext_prefix.as_deref(), Some("layer: 2 list: 1/2"));
-        assert_eq!(r.total_list[3].ext_prefix.as_deref(), Some("layer: 2 list: 2/2"));
-        assert_eq!(r.total_list[4].ext_prefix.as_deref(), Some("layer: 1 list: 3/3"));
+        assert_eq!(
+            r.total_list[0].ext_prefix.as_deref(),
+            Some("layer: 1 list: 1/3")
+        );
+        assert_eq!(
+            r.total_list[1].ext_prefix.as_deref(),
+            Some("layer: 1 list: 2/3")
+        );
+        assert_eq!(
+            r.total_list[2].ext_prefix.as_deref(),
+            Some("layer: 2 list: 1/2")
+        );
+        assert_eq!(
+            r.total_list[3].ext_prefix.as_deref(),
+            Some("layer: 2 list: 2/2")
+        );
+        assert_eq!(
+            r.total_list[4].ext_prefix.as_deref(),
+            Some("layer: 1 list: 3/3")
+        );
     }
 
     #[test]
     fn create_list_scroll_carries_image_data() {
         let mut root = FfonElement::new_obj("provider");
-        root.as_obj_mut().unwrap().push(FfonElement::new_str("<image>/pic.png</image>"));
+        root.as_obj_mut()
+            .unwrap()
+            .push(FfonElement::new_str("<image>/pic.png</image>"));
         let mut r = make_renderer_with_ffon(vec![root]);
-        r.current_id = { let mut id = IdArray::new(); id.push(0); id.push(0); id };
+        r.current_id = {
+            let mut id = IdArray::new();
+            id.push(0);
+            id.push(0);
+            id
+        };
         r.coordinate = Coordinate::Scroll;
         create_list_scroll(&mut r);
 
@@ -1229,10 +1366,19 @@ mod tests {
         // Image elements expose their path via `ext_prefix` (the `data` slot
         // holds the breadcrumb) so general-mode search can render the image.
         let mut root = FfonElement::new_obj("provider");
-        root.as_obj_mut().unwrap().push(FfonElement::new_str("plain"));
-        root.as_obj_mut().unwrap().push(FfonElement::new_str("<image>/pic.png</image>"));
+        root.as_obj_mut()
+            .unwrap()
+            .push(FfonElement::new_str("plain"));
+        root.as_obj_mut()
+            .unwrap()
+            .push(FfonElement::new_str("<image>/pic.png</image>"));
         let mut r = make_renderer_with_ffon(vec![root]);
-        r.current_id = { let mut id = IdArray::new(); id.push(0); id.push(0); id };
+        r.current_id = {
+            let mut id = IdArray::new();
+            id.push(0);
+            id.push(0);
+            id
+        };
         create_list_extended_search(&mut r);
 
         assert_eq!(r.total_list.len(), 2);
@@ -1275,20 +1421,29 @@ mod tests {
     fn i_placeholder_str_label_is_i() {
         // I_PLACEHOLDER must render as plain `"i"`, not `"-i "` —
         // the "i " prefix before the empty <input> tag is the sentinel.
-        assert_eq!(build_str_label(sicompass_sdk::placeholders::I_PLACEHOLDER, false), "i");
+        assert_eq!(
+            build_str_label(sicompass_sdk::placeholders::I_PLACEHOLDER, false),
+            "i"
+        );
     }
 
     #[test]
     fn ci_placeholder_str_label_is_ci() {
         // CI_PLACEHOLDER (editor file-content insert sentinel) renders as plain `"ci"`.
-        assert_eq!(build_str_label(sicompass_sdk::placeholders::CI_PLACEHOLDER, false), "ci");
+        assert_eq!(
+            build_str_label(sicompass_sdk::placeholders::CI_PLACEHOLDER, false),
+            "ci"
+        );
     }
 
     #[test]
     fn file_content_str_label_emits_minus_ci() {
         // <input><src=N>...</input> (file-content line) → `-ci <text>`.
         let label = build_str_label("<input><src=5>line text</input>", false);
-        assert!(label.starts_with("-ci "), "expected `-ci ` prefix, got {label:?}");
+        assert!(
+            label.starts_with("-ci "),
+            "expected `-ci ` prefix, got {label:?}"
+        );
         assert!(label.contains("line text"));
     }
 
@@ -1298,7 +1453,10 @@ mod tests {
             key: "<dir><input>folder</input>".to_owned(),
             children: vec![],
         });
-        assert!(label.starts_with("+di "), "expected `+di ` prefix, got {label:?}");
+        assert!(
+            label.starts_with("+di "),
+            "expected `+di ` prefix, got {label:?}"
+        );
         assert!(label.contains("folder"));
     }
 
@@ -1308,7 +1466,10 @@ mod tests {
             key: "<file><input>thing.txt</input>".to_owned(),
             children: vec![],
         });
-        assert!(label.starts_with("+fi "), "expected `+fi ` prefix, got {label:?}");
+        assert!(
+            label.starts_with("+fi "),
+            "expected `+fi ` prefix, got {label:?}"
+        );
         assert!(label.contains("thing.txt"));
     }
 
@@ -1318,7 +1479,10 @@ mod tests {
             key: "<input><src=3>section</input>".to_owned(),
             children: vec![],
         });
-        assert!(label.starts_with("+ci "), "expected `+ci ` prefix, got {label:?}");
+        assert!(
+            label.starts_with("+ci "),
+            "expected `+ci ` prefix, got {label:?}"
+        );
         assert!(label.contains("section"));
     }
 
@@ -1398,8 +1562,7 @@ mod tests {
     #[test]
     fn live_input_history_children_render_with_minus_b() {
         // History children are `<button>` Strs → `-b` list prefix.
-        assert!(build_str_label("<button>git status</button>git status", false)
-            .starts_with("-b "));
+        assert!(build_str_label("<button>git status</button>git status", false).starts_with("-b "));
     }
 
     fn make_renderer_with_items(items: &[&str]) -> AppRenderer {
@@ -1408,7 +1571,12 @@ mod tests {
             root.as_obj_mut().unwrap().push(FfonElement::new_str(item));
         }
         let mut r = make_renderer_with_ffon(vec![root]);
-        r.current_id = { let mut id = IdArray::new(); id.push(0); id.push(0); id };
+        r.current_id = {
+            let mut id = IdArray::new();
+            id.push(0);
+            id.push(0);
+            id
+        };
         create_list_current_layer(&mut r);
         r
     }
@@ -1418,8 +1586,19 @@ mod tests {
         let mut r = make_renderer_with_items(&["a", "b"]);
         assert_eq!(r.total_list.len(), 2);
         // Replace ffon and rebuild
-        r.ffon = vec![{ let mut root = FfonElement::new_obj("p"); root.as_obj_mut().unwrap().push(FfonElement::new_str("only")); root }];
-        r.current_id = { let mut id = IdArray::new(); id.push(0); id.push(0); id };
+        r.ffon = vec![{
+            let mut root = FfonElement::new_obj("p");
+            root.as_obj_mut()
+                .unwrap()
+                .push(FfonElement::new_str("only"));
+            root
+        }];
+        r.current_id = {
+            let mut id = IdArray::new();
+            id.push(0);
+            id.push(0);
+            id
+        };
         create_list_current_layer(&mut r);
         assert_eq!(r.total_list.len(), 1);
     }
@@ -1479,10 +1658,15 @@ mod tests {
         let mut r = make_renderer_with_items(&["Documents", "Downloads", "Desktop"]);
         populate_list_current_layer(&mut r, "dcmt");
         assert!(r.filtered_list_indices.len() >= 1);
-        let labels: Vec<&str> = r.filtered_list_indices.iter()
+        let labels: Vec<&str> = r
+            .filtered_list_indices
+            .iter()
             .map(|&i| r.total_list[i].label.as_str())
             .collect();
-        assert!(labels.iter().any(|l| l.contains("Documents")), "expected Documents in {labels:?}");
+        assert!(
+            labels.iter().any(|l| l.contains("Documents")),
+            "expected Documents in {labels:?}"
+        );
     }
 
     #[test]
@@ -1493,8 +1677,10 @@ mod tests {
         assert_eq!(r.filtered_list_indices.len(), 2);
         // "doc" is an exact match — should rank first
         let first_label = &r.total_list[r.filtered_list_indices[0]].label;
-        assert!(first_label.contains("doc") && !first_label.contains("xdocx"),
-            "expected exact match first, got {first_label}");
+        assert!(
+            first_label.contains("doc") && !first_label.contains("xdocx"),
+            "expected exact match first, got {first_label}"
+        );
     }
 
     #[test]
@@ -1621,9 +1807,21 @@ mod tests {
             provider_info("Email Client", false),
         ];
         let s = timeline_entry_label(&entry, &providers);
-        assert!(s.contains("File Browser"), "expected origin provider name in {:?}", s);
-        assert!(s.contains("Email Client"), "expected destination provider name in {:?}", s);
-        assert!(!s.contains("?"), "no `?` when provider names are available: {:?}", s);
+        assert!(
+            s.contains("File Browser"),
+            "expected origin provider name in {:?}",
+            s
+        );
+        assert!(
+            s.contains("Email Client"),
+            "expected destination provider name in {:?}",
+            s
+        );
+        assert!(
+            !s.contains("?"),
+            "no `?` when provider names are available: {:?}",
+            s
+        );
     }
 
     #[test]
@@ -1641,7 +1839,10 @@ mod tests {
         let providers = vec![provider_info("file browser", true)];
         let s = timeline_entry_label(&entry, &providers);
         assert!(s.contains("/home/nico"), "fs paths render verbatim: {s}");
-        assert!(s.contains("/home/nico/Documents"), "fs paths keep slashes: {s}");
+        assert!(
+            s.contains("/home/nico/Documents"),
+            "fs paths keep slashes: {s}"
+        );
         // The outer from→to join is ` > ` for every Navigate label, but the
         // *segments inside an fs path* must NOT be breadcrumb-split.
         assert!(
@@ -1665,11 +1866,23 @@ mod tests {
         let providers = vec![provider_info("settings", false)];
         let s = timeline_entry_label(&entry, &providers);
         // No leading slashes, no `/section/item` separator — replaced with `›`.
-        assert!(!s.contains("/Available"), "non-fs paths must drop leading slash: {s}");
-        assert!(!s.contains(":/Email"), "non-fs paths must replace `/` with breadcrumb: {s}");
-        assert!(s.contains("Available programs:"), "breadcrumb keeps segment text: {s}");
+        assert!(
+            !s.contains("/Available"),
+            "non-fs paths must drop leading slash: {s}"
+        );
+        assert!(
+            !s.contains(":/Email"),
+            "non-fs paths must replace `/` with breadcrumb: {s}"
+        );
+        assert!(
+            s.contains("Available programs:"),
+            "breadcrumb keeps segment text: {s}"
+        );
         assert!(s.contains("Email"), "breadcrumb keeps tail segment: {s}");
-        assert!(s.contains(" > "), "non-fs descent uses ` > ` separator: {s}");
+        assert!(
+            s.contains(" > "),
+            "non-fs descent uses ` > ` separator: {s}"
+        );
     }
 
     #[test]
@@ -1688,7 +1901,13 @@ mod tests {
         };
         let providers = vec![provider_info("settings", false)];
         let s = timeline_entry_label(&entry, &providers);
-        assert!(s.contains("settings"), "root non-fs path falls back to display_name: {s}");
-        assert!(!s.contains('/'), "root non-fs path must not render a bare slash: {s}");
+        assert!(
+            s.contains("settings"),
+            "root non-fs path falls back to display_name: {s}"
+        );
+        assert!(
+            !s.contains('/'),
+            "root non-fs path must not render a bare slash: {s}"
+        );
     }
 }

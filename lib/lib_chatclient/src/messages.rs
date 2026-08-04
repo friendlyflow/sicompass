@@ -1,8 +1,8 @@
 //! Matrix message sending and history pagination for ChatClientProvider.
 
-use std::sync::atomic::Ordering;
-use super::{ChatClientProvider, encode_room_id, TXN_COUNTER};
 use super::sync;
+use super::{ChatClientProvider, TXN_COUNTER, encode_room_id};
+use std::sync::atomic::Ordering;
 
 impl ChatClientProvider {
     pub(crate) fn send_message(&self, room_display_key: &str, body_text: &str) -> bool {
@@ -29,10 +29,7 @@ impl ChatClientProvider {
             .unwrap_or(false)
     }
 
-    pub(crate) fn do_fetch_older_messages(
-        &self,
-        room_display_key: &str,
-    ) -> Result<usize, String> {
+    pub(crate) fn do_fetch_older_messages(&self, room_display_key: &str) -> Result<usize, String> {
         let (room_id, from_token) = {
             let cache = self.cache();
             let room_id = cache
@@ -66,9 +63,15 @@ impl ChatClientProvider {
                 .to_owned());
         }
         let body: serde_json::Value = resp.json().map_err(|e| e.to_string())?;
-        let new_prev = body.get("end").and_then(|v| v.as_str()).map(|s| s.to_owned());
-        let events =
-            body.get("chunk").and_then(|c| c.as_array()).cloned().unwrap_or_default();
+        let new_prev = body
+            .get("end")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_owned());
+        let events = body
+            .get("chunk")
+            .and_then(|c| c.as_array())
+            .cloned()
+            .unwrap_or_default();
         let mut new_events: Vec<sync::TimelineEvent> = events
             .iter()
             .filter_map(|ev| {
@@ -76,15 +79,21 @@ impl ChatClientProvider {
                     return None;
                 }
                 let event_id = ev.get("event_id").and_then(|v| v.as_str())?.to_owned();
-                let sender =
-                    ev.get("sender").and_then(|v| v.as_str()).unwrap_or("?").to_owned();
+                let sender = ev
+                    .get("sender")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("?")
+                    .to_owned();
                 let body_text = ev
                     .get("content")
                     .and_then(|c| c.get("body"))
                     .and_then(|v| v.as_str())
                     .unwrap_or("(media)")
                     .to_owned();
-                let ts = ev.get("origin_server_ts").and_then(|v| v.as_i64()).unwrap_or(0);
+                let ts = ev
+                    .get("origin_server_ts")
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(0);
                 Some(sync::TimelineEvent {
                     event_id,
                     sender,

@@ -26,8 +26,8 @@ mod session;
 use std::path::PathBuf;
 
 use sicompass_sdk::{
-    register_builtin_manifest, register_provider_factory, BuiltinManifest, FfonElement, Provider,
-    SettingDecl,
+    BuiltinManifest, FfonElement, Provider, SettingDecl, register_builtin_manifest,
+    register_provider_factory,
 };
 
 use render::Conversation;
@@ -285,8 +285,7 @@ impl Provider for ClaudeProvider {
                 };
             }
             "claudeExtraArgs" => {
-                self.extra_args =
-                    value.split_whitespace().map(str::to_owned).collect();
+                self.extra_args = value.split_whitespace().map(str::to_owned).collect();
             }
             "claudeStreamPartial" => {
                 self.include_partial = matches!(value, "true" | "1" | "on");
@@ -299,26 +298,24 @@ impl Provider for ClaudeProvider {
 /// Register the Claude provider with the SDK factory and manifest registries.
 pub fn register() {
     register_provider_factory("claude", || Box::new(ClaudeProvider::new()));
-    register_builtin_manifest(
-        BuiltinManifest::new("claude", "claude").with_settings(vec![
-            SettingDecl::text("claude", "claude binary path", "claudeBinary", "claude"),
-            SettingDecl::radio(
-                "claude",
-                "permission mode",
-                "claudePermissionMode",
-                &["default", "acceptEdits", "plan", "bypassPermissions"],
-                "default",
-            ),
-            SettingDecl::text("claude", "model override", "claudeModel", ""),
-            SettingDecl::text("claude", "extra CLI args", "claudeExtraArgs", ""),
-            SettingDecl::checkbox(
-                "claude",
-                "stream responses token-by-token",
-                "claudeStreamPartial",
-                true,
-            ),
-        ]),
-    );
+    register_builtin_manifest(BuiltinManifest::new("claude", "claude").with_settings(vec![
+        SettingDecl::text("claude", "claude binary path", "claudeBinary", "claude"),
+        SettingDecl::radio(
+            "claude",
+            "permission mode",
+            "claudePermissionMode",
+            &["default", "acceptEdits", "plan", "bypassPermissions"],
+            "default",
+        ),
+        SettingDecl::text("claude", "model override", "claudeModel", ""),
+        SettingDecl::text("claude", "extra CLI args", "claudeExtraArgs", ""),
+        SettingDecl::checkbox(
+            "claude",
+            "stream responses token-by-token",
+            "claudeStreamPartial",
+            true,
+        ),
+    ]));
 }
 
 #[cfg(test)]
@@ -410,7 +407,14 @@ mod tests {
         let mut p = ClaudeProvider::new();
         p.program = "definitely-not-claude-xyz-9000".to_owned();
         let out = p.fetch();
-        assert!(out.last().unwrap().as_obj().unwrap().key.contains("<input>"));
+        assert!(
+            out.last()
+                .unwrap()
+                .as_obj()
+                .unwrap()
+                .key
+                .contains("<input>")
+        );
     }
 
     #[test]

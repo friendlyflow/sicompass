@@ -55,7 +55,8 @@ pub fn verify_entry(
     trusted_pubkey_b64: Option<&str>,
     sig_b64: Option<&str>,
 ) -> Result<(), String> {
-    let got = sha256_hex_of(entry_path).map_err(|e| format!("hash {}: {e}", entry_path.display()))?;
+    let got =
+        sha256_hex_of(entry_path).map_err(|e| format!("hash {}: {e}", entry_path.display()))?;
     if !got.eq_ignore_ascii_case(expected_sha256_hex) {
         return Err(format!(
             "sha256 mismatch: expected {expected_sha256_hex}, got {got}"
@@ -79,14 +80,18 @@ pub fn verify_entry(
 fn verify_ed25519(entry_path: &Path, pk_b64: &str, sig_b64: &str) -> Result<(), String> {
     use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 
-    let pk_bytes = B64.decode(pk_b64).map_err(|e| format!("pubkey base64: {e}"))?;
+    let pk_bytes = B64
+        .decode(pk_b64)
+        .map_err(|e| format!("pubkey base64: {e}"))?;
     let pk_bytes: [u8; 32] = pk_bytes
         .as_slice()
         .try_into()
         .map_err(|_| "pubkey must be 32 bytes".to_string())?;
     let pk = VerifyingKey::from_bytes(&pk_bytes).map_err(|e| format!("pubkey: {e}"))?;
 
-    let sig_bytes = B64.decode(sig_b64).map_err(|e| format!("sig base64: {e}"))?;
+    let sig_bytes = B64
+        .decode(sig_b64)
+        .map_err(|e| format!("sig base64: {e}"))?;
     let sig_bytes: [u8; 64] = sig_bytes
         .as_slice()
         .try_into()
@@ -99,7 +104,8 @@ fn verify_ed25519(entry_path: &Path, pk_b64: &str, sig_b64: &str) -> Result<(), 
         .read_to_end(&mut data)
         .map_err(|e| format!("read {}: {e}", entry_path.display()))?;
 
-    pk.verify(&data, &sig).map_err(|e| format!("ed25519 verify: {e}"))
+    pk.verify(&data, &sig)
+        .map_err(|e| format!("ed25519 verify: {e}"))
 }
 
 #[cfg(test)]
@@ -119,7 +125,10 @@ mod tests {
         let f = write_file(b"abc");
         let got = sha256_hex_of(f.path()).unwrap();
         // Known SHA-256("abc")
-        assert_eq!(got, "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+        assert_eq!(
+            got,
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
     }
 
     #[test]

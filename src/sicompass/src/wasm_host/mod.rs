@@ -113,10 +113,15 @@ impl HostState {
         // guest named a host location whichever platform we are on, so check the
         // components too and report both the same way.
         let rooted = candidate.components().any(|c| {
-            matches!(c, std::path::Component::Prefix(_) | std::path::Component::RootDir)
+            matches!(
+                c,
+                std::path::Component::Prefix(_) | std::path::Component::RootDir
+            )
         });
         if candidate.is_absolute() || rooted {
-            return Err(format!("`{rel}` is absolute; plugin paths must be relative"));
+            return Err(format!(
+                "`{rel}` is absolute; plugin paths must be relative"
+            ));
         }
         if candidate
             .components()
@@ -204,7 +209,10 @@ pub fn engine() -> &'static Engine {
         .get_or_init(|| {
             let engine = Engine::new(&engine_config()).expect("build the wasm engine");
             let ticker = limits::EpochTicker::spawn(&engine);
-            EngineHandle { engine, _ticker: ticker }
+            EngineHandle {
+                engine,
+                _ticker: ticker,
+            }
         })
         .engine
 }
@@ -440,8 +448,7 @@ fn component_cache() -> &'static std::sync::Mutex<HashMap<ComponentKey, Componen
 /// the store level, not the component level, so sharing the compiled artifact costs
 /// nothing in sandboxing terms.
 pub fn load_component(path: &Path) -> Result<Component, String> {
-    let meta = std::fs::metadata(path)
-        .map_err(|e| format!("read {}: {e}", path.display()))?;
+    let meta = std::fs::metadata(path).map_err(|e| format!("read {}: {e}", path.display()))?;
     let key: ComponentKey = (path.to_path_buf(), meta.modified().ok(), meta.len());
 
     if let Ok(cache) = component_cache().lock()
@@ -542,7 +549,10 @@ mod tests {
             let err = s
                 .confine(attempt)
                 .expect_err(&format!("`{attempt}` should have been rejected"));
-            assert!(err.contains("escapes"), "unexpected error for {attempt}: {err}");
+            assert!(
+                err.contains("escapes"),
+                "unexpected error for {attempt}: {err}"
+            );
         }
     }
 
@@ -582,7 +592,10 @@ mod tests {
         let path = dir.path().join("junk.wasm");
         std::fs::write(&path, b"not wasm at all").unwrap();
         let err = load_err(&path);
-        assert!(err.contains("not a valid WASM component"), "unexpected: {err}");
+        assert!(
+            err.contains("not a valid WASM component"),
+            "unexpected: {err}"
+        );
     }
 
     #[test]
@@ -611,7 +624,10 @@ mod tests {
         let meta = std::fs::metadata(&path).unwrap();
         let second: ComponentKey = (path.clone(), meta.modified().ok(), meta.len());
 
-        assert_ne!(first, second, "an in-place rewrite must produce a different key");
+        assert_ne!(
+            first, second,
+            "an in-place rewrite must produce a different key"
+        );
     }
 
     #[test]
@@ -690,8 +706,7 @@ mod tests {
 
     #[test]
     fn the_spaces_stripped_section_fallback_works() {
-        let json = serde_json::json!({ "chatclient": { "homeserver": "matrix.org" } })
-            .to_string();
+        let json = serde_json::json!({ "chatclient": { "homeserver": "matrix.org" } }).to_string();
         let root: serde_json::Value = serde_json::from_str(&json).unwrap();
         let section = "chat client";
         let compact: String = section.chars().filter(|&c| c != ' ').collect();
@@ -703,8 +718,16 @@ mod tests {
     fn import_tables_match_the_wit_interfaces() {
         // These tables drive the install-time capability audit, so they must not
         // drift from the WIT. The vendored-WIT test checks the other direction.
-        assert!(HOST_IMPORTS.iter().all(|(i, _)| *i == "sicompass:plugin/host"));
-        assert!(NET_IMPORTS.iter().all(|(i, _)| *i == "sicompass:plugin/net"));
+        assert!(
+            HOST_IMPORTS
+                .iter()
+                .all(|(i, _)| *i == "sicompass:plugin/host")
+        );
+        assert!(
+            NET_IMPORTS
+                .iter()
+                .all(|(i, _)| *i == "sicompass:plugin/net")
+        );
         assert_eq!(HOST_IMPORTS.len(), 4);
         assert_eq!(NET_IMPORTS.len(), 2);
     }

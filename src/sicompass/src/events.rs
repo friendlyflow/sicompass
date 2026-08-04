@@ -16,10 +16,18 @@ mod tests {
     use super::*;
     use crate::app_state::AppRenderer;
 
-    fn no_mod() -> Mod { Mod::empty() }
-    fn ctrl()   -> Mod { Mod::LCTRLMOD }
-    fn shift()  -> Mod { Mod::LSHIFTMOD }
-    fn ctrl_shift() -> Mod { Mod::LCTRLMOD | Mod::LSHIFTMOD }
+    fn no_mod() -> Mod {
+        Mod::empty()
+    }
+    fn ctrl() -> Mod {
+        Mod::LCTRLMOD
+    }
+    fn shift() -> Mod {
+        Mod::LSHIFTMOD
+    }
+    fn ctrl_shift() -> Mod {
+        Mod::LCTRLMOD | Mod::LSHIFTMOD
+    }
 
     // --- Tab ---
 
@@ -35,10 +43,17 @@ mod tests {
     fn make_renderer_inside_provider() -> AppRenderer {
         use sicompass_sdk::ffon::{FfonElement, IdArray};
         let mut root = FfonElement::new_obj("provider");
-        root.as_obj_mut().unwrap().push(FfonElement::new_str("item"));
+        root.as_obj_mut()
+            .unwrap()
+            .push(FfonElement::new_str("item"));
         let mut r = AppRenderer::new();
         r.ffon = vec![root];
-        r.current_id = { let mut id = IdArray::new(); id.push(0); id.push(0); id };
+        r.current_id = {
+            let mut id = IdArray::new();
+            id.push(0);
+            id.push(0);
+            id
+        };
         list::create_list_current_layer(&mut r);
         r
     }
@@ -323,7 +338,8 @@ mod tests {
 /// switch/new/close handlers already call `persist_tabs` via `after_tab_change`).
 pub fn dispatch_key(r: &mut AppRenderer, keycode: Option<Keycode>, keymod: Mod) -> bool {
     tracing::debug!(
-        ?keycode, ?keymod,
+        ?keycode,
+        ?keymod,
         mode = r.coordinate.as_str(),
         "dispatch_key"
     );
@@ -338,8 +354,9 @@ pub fn dispatch_key(r: &mut AppRenderer, keycode: Option<Keycode>, keymod: Mod) 
     // for the active tab and must stay untouched here.
     let new_id = r.current_id.clone();
     let new_path = crate::app_state::active_provider_path(r);
-    let snap_changed = r.tabs.get(r.active_tab)
-        .map_or(false, |s| s.current_id != new_id || s.provider_path != new_path);
+    let snap_changed = r.tabs.get(r.active_tab).map_or(false, |s| {
+        s.current_id != new_id || s.provider_path != new_path
+    });
     if let Some(slot) = r.tabs.get_mut(r.active_tab) {
         slot.current_id = new_id;
         slot.provider_path = new_path;
@@ -468,7 +485,9 @@ pub fn apply_navigation_requests(r: &mut AppRenderer) -> bool {
             }
         }
     }
-    let Some(NavigationRequest::EnterChildren) = active_request else { return false; };
+    let Some(NavigationRequest::EnterChildren) = active_request else {
+        return false;
+    };
     // Only from the provider's own top level. Depth 1 is the root list of
     // providers, where the move would enter a provider the user never opened;
     // deeper than 2 the user is already inside the content the request is

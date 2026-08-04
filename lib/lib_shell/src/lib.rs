@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
+use portable_pty::{CommandBuilder, MasterPty, PtySize, native_pty_system};
 
 /// Configuration for spawning a [`Shell`].
 #[derive(Debug, Clone)]
@@ -86,7 +86,9 @@ impl Shell {
         // shell-agnostic, so it works for shells without `exec -a` (fish/dash)
         // too. If the link can't be created, fall back to the real program.
         let mut title_link_dir: Option<PathBuf> = None;
-        let program_for_cmd: String = match cfg.title.as_deref()
+        let program_for_cmd: String = match cfg
+            .title
+            .as_deref()
             .and_then(|t| resolve_program(&cfg.program).map(|p| (p, t)))
             .and_then(|(p, t)| make_title_link(&p, t))
         {
@@ -253,16 +255,19 @@ impl Shell {
     pub fn foreground_busy(&self) -> bool {
         #[cfg(target_os = "linux")]
         {
-            let Some(pid) = self.pid() else { return false; };
-            let Ok(content) = std::fs::read_to_string(format!("/proc/{}/stat", pid))
-            else {
+            let Some(pid) = self.pid() else {
+                return false;
+            };
+            let Ok(content) = std::fs::read_to_string(format!("/proc/{}/stat", pid)) else {
                 return false;
             };
             // `comm` (field 2) is parenthesized and may itself contain spaces
             // or parens, so split after the final ')'. The remaining
             // whitespace-separated fields are state, ppid, pgrp, session,
             // tty_nr, tpgid, … → pgrp at index 2, tpgid at index 5.
-            let Some(rparen) = content.rfind(')') else { return false; };
+            let Some(rparen) = content.rfind(')') else {
+                return false;
+            };
             let fields: Vec<&str> = content[rparen + 1..].split_whitespace().collect();
             let pgrp = fields.get(2).and_then(|s| s.parse::<i32>().ok());
             let tpgid = fields.get(5).and_then(|s| s.parse::<i32>().ok());
@@ -355,8 +360,7 @@ fn make_title_link(program: &Path, title: &str) -> Option<(PathBuf, PathBuf)> {
     static COUNTER: AtomicU64 = AtomicU64::new(0);
 
     let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-    let dir = std::env::temp_dir()
-        .join(format!("sicompass-shell-{}-{}", std::process::id(), n));
+    let dir = std::env::temp_dir().join(format!("sicompass-shell-{}-{}", std::process::id(), n));
     std::fs::create_dir_all(&dir).ok()?;
 
     #[cfg(windows)]
@@ -403,8 +407,7 @@ fn make_title_link(program: &Path, title: &str) -> Option<(PathBuf, PathBuf)> {
 /// programs with embedded resources (no `.mui`) simply have nothing to copy.
 #[cfg(windows)]
 fn copy_mui_siblings(program: &Path, link_dir: &Path, link_name: &str) {
-    let (Some(src_dir), Some(src_file)) = (program.parent(), program.file_name())
-    else {
+    let (Some(src_dir), Some(src_file)) = (program.parent(), program.file_name()) else {
         return;
     };
     let Some(src_file) = src_file.to_str() else {
@@ -471,7 +474,9 @@ mod tests {
             ..Default::default()
         };
         let mut shell = Shell::spawn(cfg).expect("spawn /bin/sh");
-        shell.write_line("echo sicompass-shell-test").expect("write");
+        shell
+            .write_line("echo sicompass-shell-test")
+            .expect("write");
 
         let mut acc: Vec<u8> = Vec::new();
         let deadline = Instant::now() + Duration::from_secs(5);
@@ -648,7 +653,9 @@ mod tests {
     #[test]
     fn make_title_link_creates_symlink_to_program() {
         let target = std::path::Path::new("/bin/sh");
-        if !target.exists() { return; }
+        if !target.exists() {
+            return;
+        }
         let (dir, link) = make_title_link(target, "sicompass-shell")
             .expect("symlink should be creatable in temp dir");
         assert!(link.exists(), "link should exist");
@@ -662,8 +669,10 @@ mod tests {
         // Absolute path that exists resolves to itself.
         #[cfg(unix)]
         if std::path::Path::new("/bin/sh").exists() {
-            assert_eq!(resolve_program("/bin/sh").unwrap(),
-                std::path::PathBuf::from("/bin/sh"));
+            assert_eq!(
+                resolve_program("/bin/sh").unwrap(),
+                std::path::PathBuf::from("/bin/sh")
+            );
         }
         // A clearly-missing absolute path resolves to None.
         assert!(resolve_program("/definitely/not/here/xyzzy").is_none());
@@ -690,8 +699,7 @@ mod tests {
                 }
             }
             if Instant::now() >= deadline {
-                let comm = std::fs::read_to_string(format!("/proc/{pid}/comm"))
-                    .unwrap_or_default();
+                let comm = std::fs::read_to_string(format!("/proc/{pid}/comm")).unwrap_or_default();
                 panic!("comm never became the title; comm={comm:?}");
             }
             thread::sleep(Duration::from_millis(20));

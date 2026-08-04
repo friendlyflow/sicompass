@@ -106,18 +106,18 @@ impl TextEditorProvider {
     /// payload prefix records the position; the rest is the inserted lines
     /// joined by `\n`, so undo can remove exactly them and redo splice back.
     fn push_insert_lines_entry(&mut self, clamp: usize, lines: &[String]) {
-        let payload_text =
-            format!("{}{}", tags::format_src(clamp), lines.join("\n"));
-        self.pending_timeline_entries.push(TimelineEntry::ProviderOp {
-            provider_idx: 0, // patched by app
-            command: "texteditor.insert_lines".to_owned(),
-            payload: FfonElement::new_str(payload_text),
-            label: if lines.len() == 1 {
-                format!("insert line {}", clamp + 1)
-            } else {
-                format!("insert {} lines at {}", lines.len(), clamp + 1)
-            },
-        });
+        let payload_text = format!("{}{}", tags::format_src(clamp), lines.join("\n"));
+        self.pending_timeline_entries
+            .push(TimelineEntry::ProviderOp {
+                provider_idx: 0, // patched by app
+                command: "texteditor.insert_lines".to_owned(),
+                payload: FfonElement::new_str(payload_text),
+                label: if lines.len() == 1 {
+                    format!("insert line {}", clamp + 1)
+                } else {
+                    format!("insert {} lines at {}", lines.len(), clamp + 1)
+                },
+            });
     }
 
     fn sync_path_str(&mut self) {
@@ -150,7 +150,9 @@ impl TextEditorProvider {
             Err(_) => return vec![],
         };
         entries.sort_by(|a, b| {
-            a.0.cmp(&b.0).reverse().then(a.1.to_lowercase().cmp(&b.1.to_lowercase()))
+            a.0.cmp(&b.0)
+                .reverse()
+                .then(a.1.to_lowercase().cmp(&b.1.to_lowercase()))
         });
         entries
             .into_iter()
@@ -170,7 +172,8 @@ impl TextEditorProvider {
             Ok(s) => s,
             Err(_) => return false,
         };
-        let ext = self.current_fs_path
+        let ext = self
+            .current_fs_path
             .extension()
             .and_then(|e| e.to_str())
             .unwrap_or("");
@@ -223,7 +226,8 @@ impl TextEditorProvider {
         // vector slot maps to exactly one file line.
         self.source_lines = content.lines().map(str::to_owned).collect();
         // Rebuild cache from the just-written content.
-        let ext = self.current_fs_path
+        let ext = self
+            .current_fs_path
             .extension()
             .and_then(|e| e.to_str())
             .unwrap_or("");
@@ -238,12 +242,12 @@ impl TextEditorProvider {
         if old_name.is_empty() || new_name.is_empty() || old_name == new_name {
             return false;
         }
-        let old_path = self.current_fs_path.join(
-            old_name.trim_end_matches('/').trim_end_matches('\\'),
-        );
-        let new_path = self.current_fs_path.join(
-            new_name.trim_end_matches('/').trim_end_matches('\\'),
-        );
+        let old_path = self
+            .current_fs_path
+            .join(old_name.trim_end_matches('/').trim_end_matches('\\'));
+        let new_path = self
+            .current_fs_path
+            .join(new_name.trim_end_matches('/').trim_end_matches('\\'));
         std::fs::rename(&old_path, &new_path).is_ok()
     }
 }
@@ -281,7 +285,9 @@ impl Default for TextEditorProvider {
 
 #[async_trait::async_trait]
 impl Provider for TextEditorProvider {
-    fn name(&self) -> &str { "texteditor" }
+    fn name(&self) -> &str {
+        "texteditor"
+    }
 
     fn display_name(&self) -> String {
         register_translations();
@@ -375,10 +381,8 @@ impl Provider for TextEditorProvider {
     fn commit_edit(&mut self, old: &str, new: &str) -> bool {
         // Unwrap <input>...</input> wrappers that may be present (e.g. from
         // undo/redo paths where FsRename passes element keys verbatim).
-        let old_inner = tags::extract_input(old)
-            .unwrap_or_else(|| old.to_owned());
-        let new_inner = tags::extract_input(new)
-            .unwrap_or_else(|| new.to_owned());
+        let old_inner = tags::extract_input(old).unwrap_or_else(|| old.to_owned());
+        let new_inner = tags::extract_input(new).unwrap_or_else(|| new.to_owned());
 
         // ── Case 1: in-file line REPLACE ────────────────────────────────────
         // old_inner starts with <src=N>: edit the Nth source line.
@@ -430,7 +434,8 @@ impl Provider for TextEditorProvider {
             };
             let new_lines = build_indented_lines(&new_text, &indent);
             let clamp = insert_idx.min(self.source_lines.len());
-            self.source_lines.splice(clamp..clamp, new_lines.iter().cloned());
+            self.source_lines
+                .splice(clamp..clamp, new_lines.iter().cloned());
             if !self.flush_source_lines() {
                 return false;
             }
@@ -450,7 +455,8 @@ impl Provider for TextEditorProvider {
             }
             let new_lines = build_indented_lines(&new_text, "");
             let pos = self.source_lines.len();
-            self.source_lines.splice(pos..pos, new_lines.iter().cloned());
+            self.source_lines
+                .splice(pos..pos, new_lines.iter().cloned());
             if !self.flush_source_lines() {
                 return false;
             }
@@ -480,12 +486,16 @@ impl Provider for TextEditorProvider {
     // ---- File operations ---------------------------------------------------
 
     fn create_file(&mut self, name: &str) -> bool {
-        if name.is_empty() || self.is_in_file_view() { return false; }
+        if name.is_empty() || self.is_in_file_view() {
+            return false;
+        }
         std::fs::File::create(self.current_fs_path.join(name)).is_ok()
     }
 
     fn create_directory(&mut self, name: &str) -> bool {
-        if name.is_empty() || self.is_in_file_view() { return false; }
+        if name.is_empty() || self.is_in_file_view() {
+            return false;
+        }
         std::fs::create_dir(self.current_fs_path.join(name)).is_ok()
     }
 
@@ -504,24 +514,24 @@ impl Provider for TextEditorProvider {
             if !self.flush_source_lines() {
                 return false;
             }
-            let payload = FfonElement::new_str(format!(
-                "{}{}",
-                tags::format_src(line_idx),
-                verbatim,
-            ));
-            self.pending_timeline_entries.push(TimelineEntry::ProviderOp {
-                provider_idx: 0, // patched by app
-                command: "texteditor.delete_line".to_owned(),
-                payload,
-                label: format!("delete line {}", line_idx + 1),
-            });
+            let payload =
+                FfonElement::new_str(format!("{}{}", tags::format_src(line_idx), verbatim,));
+            self.pending_timeline_entries
+                .push(TimelineEntry::ProviderOp {
+                    provider_idx: 0, // patched by app
+                    command: "texteditor.delete_line".to_owned(),
+                    payload,
+                    label: format!("delete line {}", line_idx + 1),
+                });
             return true;
         }
 
         // Directory view: move file/folder to OS trash.
         let clean = tags::strip_display(name);
         let clean = clean.trim_end_matches('/').trim_end_matches('\\');
-        if clean.is_empty() { return false; }
+        if clean.is_empty() {
+            return false;
+        }
         let full = self.current_fs_path.join(clean);
         // Snapshot before trashing so an undo can restore even if the OS trash
         // is later emptied (see `sicompass_sdk::fs_trash`).
@@ -553,12 +563,16 @@ impl Provider for TextEditorProvider {
     async fn undo(&mut self, entry: &TimelineEntry, error: &mut String) {
         register_translations();
         match entry {
-            TimelineEntry::FsOp { op: FsOpKind::Delete, side_effect, .. } => {
+            TimelineEntry::FsOp {
+                op: FsOpKind::Delete,
+                side_effect,
+                ..
+            } => {
                 sicompass_sdk::fs_trash::restore_side_effect(side_effect, error);
             }
-            TimelineEntry::ProviderOp { command, payload, .. }
-                if command == "texteditor.delete_line" =>
-            {
+            TimelineEntry::ProviderOp {
+                command, payload, ..
+            } if command == "texteditor.delete_line" => {
                 if let Some((idx, verbatim)) = decode_line_payload(payload) {
                     self.ensure_file_loaded();
                     let clamp = idx.min(self.source_lines.len());
@@ -568,9 +582,9 @@ impl Provider for TextEditorProvider {
                     }
                 }
             }
-            TimelineEntry::ProviderOp { command, payload, .. }
-                if command == "texteditor.insert_lines" =>
-            {
+            TimelineEntry::ProviderOp {
+                command, payload, ..
+            } if command == "texteditor.insert_lines" => {
                 // Undo a line insert: remove the inserted lines back off disk.
                 if let Some((idx, joined)) = decode_line_payload(payload) {
                     let count = joined.split('\n').count();
@@ -590,7 +604,11 @@ impl Provider for TextEditorProvider {
     async fn redo(&mut self, entry: &TimelineEntry, error: &mut String) {
         register_translations();
         match entry {
-            TimelineEntry::FsOp { op: FsOpKind::Delete, side_effect, .. } => {
+            TimelineEntry::FsOp {
+                op: FsOpKind::Delete,
+                side_effect,
+                ..
+            } => {
                 // Re-trash at the absolute original path recorded in the side
                 // effect; the cursor may have moved since the delete.
                 let path: Option<&Path> = match side_effect {
@@ -603,13 +621,14 @@ impl Provider for TextEditorProvider {
                     if let Err(e) = trash::delete(path) {
                         let mut args = localize::Args::new();
                         args.set("err", e.to_string());
-                        *error = localize::t_args("texteditor-error-redo-delete-trash-failed", &args);
+                        *error =
+                            localize::t_args("texteditor-error-redo-delete-trash-failed", &args);
                     }
                 }
             }
-            TimelineEntry::ProviderOp { command, payload, .. }
-                if command == "texteditor.delete_line" =>
-            {
+            TimelineEntry::ProviderOp {
+                command, payload, ..
+            } if command == "texteditor.delete_line" => {
                 if let Some((idx, _)) = decode_line_payload(payload) {
                     self.ensure_file_loaded();
                     if idx < self.source_lines.len() {
@@ -620,14 +639,13 @@ impl Provider for TextEditorProvider {
                     }
                 }
             }
-            TimelineEntry::ProviderOp { command, payload, .. }
-                if command == "texteditor.insert_lines" =>
-            {
+            TimelineEntry::ProviderOp {
+                command, payload, ..
+            } if command == "texteditor.insert_lines" => {
                 // Redo a line insert: splice the recorded lines back in.
                 if let Some((idx, joined)) = decode_line_payload(payload) {
                     self.ensure_file_loaded();
-                    let lines: Vec<String> =
-                        joined.split('\n').map(str::to_owned).collect();
+                    let lines: Vec<String> = joined.split('\n').map(str::to_owned).collect();
                     let clamp = idx.min(self.source_lines.len());
                     self.source_lines.splice(clamp..clamp, lines);
                     if !self.flush_source_lines() {
@@ -665,15 +683,21 @@ impl Provider for TextEditorProvider {
 
     // ---- Settings ----------------------------------------------------------
 
-    fn stable_root_key(&self) -> bool { true }
+    fn stable_root_key(&self) -> bool {
+        true
+    }
 
     fn at_root(&self) -> bool {
         self.current_fs_path == self.root_path() && self.ffon_sub_path.is_empty()
     }
 
-    fn has_editor_semantics(&self) -> bool { true }
+    fn has_editor_semantics(&self) -> bool {
+        true
+    }
 
-    fn path_is_filesystem(&self) -> bool { true }
+    fn path_is_filesystem(&self) -> bool {
+        true
+    }
 
     fn needs_refresh(&self) -> bool {
         self.refresh_pending
@@ -749,10 +773,12 @@ pub fn register() {
     let home = home_dir();
     register_provider_factory("texteditor", || Box::new(TextEditorProvider::new()));
     register_builtin_manifest(
-        BuiltinManifest::new("texteditor", "text editor")
-            .with_settings(vec![
-                SettingDecl::text("text editor", "text editor path", "textEditorPath", &home),
-            ]),
+        BuiltinManifest::new("texteditor", "text editor").with_settings(vec![SettingDecl::text(
+            "text editor",
+            "text editor path",
+            "textEditorPath",
+            &home,
+        )]),
     );
 }
 
@@ -810,7 +836,10 @@ mod tests {
         let mut p = TextEditorProvider::new();
         assert!(!p.needs_refresh());
         p.on_setting_change("textEditorPath", "/tmp/newpath");
-        assert!(p.needs_refresh(), "changing the path must set refresh_pending");
+        assert!(
+            p.needs_refresh(),
+            "changing the path must set refresh_pending"
+        );
     }
 
     #[test]
@@ -853,12 +882,18 @@ mod tests {
         let path_at_section = p.current_path().to_string();
 
         assert_ne!(path_at_file, path_at_section);
-        assert!(path_at_section.contains("section:"),
-            "current_path should include the FFON segment, got: {}", path_at_section);
+        assert!(
+            path_at_section.contains("section:"),
+            "current_path should include the FFON segment, got: {}",
+            path_at_section
+        );
 
         p.pop_path();
-        assert_eq!(p.current_path(), path_at_file,
-            "popping the FFON segment must restore the file path");
+        assert_eq!(
+            p.current_path(),
+            path_at_file,
+            "popping the FFON segment must restore the file path"
+        );
     }
 
     #[test]
@@ -896,15 +931,23 @@ mod tests {
                 FfonElement::Obj(o) => o.key.as_str(),
                 FfonElement::Str(s) => s.as_str(),
             };
-            if key == I_PLACEHOLDER { continue; }
-            assert!(tags::has_input(key),
-                "directory entry '{}' must be wrapped in <input>", key);
+            if key == I_PLACEHOLDER {
+                continue;
+            }
+            assert!(
+                tags::has_input(key),
+                "directory entry '{}' must be wrapped in <input>",
+                key
+            );
         }
         // File and directory names must appear somewhere
-        let all_text: Vec<String> = items.iter().map(|e| match e {
-            FfonElement::Obj(o) => o.key.clone(),
-            FfonElement::Str(s) => s.clone(),
-        }).collect();
+        let all_text: Vec<String> = items
+            .iter()
+            .map(|e| match e {
+                FfonElement::Obj(o) => o.key.clone(),
+                FfonElement::Str(s) => s.clone(),
+            })
+            .collect();
         assert!(all_text.iter().any(|n| n.contains("hello.txt")));
         assert!(all_text.iter().any(|n| n.contains("subdir")));
     }
@@ -925,15 +968,26 @@ mod tests {
                 FfonElement::Obj(o) => o.key.as_str(),
                 FfonElement::Str(s) => s.as_str(),
             };
-            if key == I_PLACEHOLDER { continue; }
+            if key == I_PLACEHOLDER {
+                continue;
+            }
             if key.contains("subdir") {
                 assert!(tags::has_dir(key), "subdir entry must carry <dir>: {key}");
-                assert!(!tags::has_file(key), "subdir entry must not carry <file>: {key}");
+                assert!(
+                    !tags::has_file(key),
+                    "subdir entry must not carry <file>: {key}"
+                );
                 saw_dir = true;
             }
             if key.contains("hello.txt") {
-                assert!(tags::has_file(key), "hello.txt entry must carry <file>: {key}");
-                assert!(!tags::has_dir(key), "hello.txt entry must not carry <dir>: {key}");
+                assert!(
+                    tags::has_file(key),
+                    "hello.txt entry must carry <file>: {key}"
+                );
+                assert!(
+                    !tags::has_dir(key),
+                    "hello.txt entry must not carry <dir>: {key}"
+                );
                 saw_file = true;
             }
         }
@@ -960,8 +1014,11 @@ mod tests {
             };
             assert!(tags::has_input(key), "element must have <input> wrapper");
             let inner = tags::extract_input(key).unwrap();
-            assert!(tags::extract_src(&inner).is_some(),
-                "inner content must have <src=N>, got: {}", inner);
+            assert!(
+                tags::extract_src(&inner).is_some(),
+                "inner content must have <src=N>, got: {}",
+                inner
+            );
         }
     }
 
@@ -1326,13 +1383,20 @@ mod tests {
         let entries = p.take_timeline_entries();
         assert_eq!(entries.len(), 1);
         match &entries[0] {
-            TimelineEntry::FsOp { op, side_effect, before, .. } => {
+            TimelineEntry::FsOp {
+                op,
+                side_effect,
+                before,
+                ..
+            } => {
                 assert_eq!(*op, FsOpKind::Delete);
                 // The text editor lists files as navigable `Obj`s, so the
                 // restore element must be an `Obj` (not a bare `Str`).
                 assert!(matches!(before, Some(FfonElement::Obj(_))));
                 match side_effect {
-                    FsSideEffect::TrashedFile { content_snapshot, .. } => {
+                    FsSideEffect::TrashedFile {
+                        content_snapshot, ..
+                    } => {
                         assert_eq!(content_snapshot, b"important content");
                     }
                     other => panic!("expected TrashedFile, got {other:?}"),
@@ -1356,7 +1420,12 @@ mod tests {
         let entries = p.take_timeline_entries();
         assert_eq!(entries.len(), 1);
         match &entries[0] {
-            TimelineEntry::FsOp { op, side_effect, before, .. } => {
+            TimelineEntry::FsOp {
+                op,
+                side_effect,
+                before,
+                ..
+            } => {
                 assert_eq!(*op, FsOpKind::Delete);
                 assert!(matches!(before, Some(FfonElement::Obj(_))));
                 assert!(matches!(side_effect, FsSideEffect::TrashedDir { .. }));
@@ -1488,7 +1557,10 @@ mod tests {
         let entries = p.take_timeline_entries();
         let mut err = String::new();
         sicompass_sdk::block_on(p.undo(&entries[0], &mut err));
-        assert_eq!(std::fs::read_to_string(&file).unwrap(), "alpha\nbeta\ngamma");
+        assert_eq!(
+            std::fs::read_to_string(&file).unwrap(),
+            "alpha\nbeta\ngamma"
+        );
         sicompass_sdk::block_on(p.redo(&entries[0], &mut err));
         assert!(err.is_empty(), "redo error: {err}");
         assert_eq!(std::fs::read_to_string(&file).unwrap(), "alpha\ngamma");
@@ -1531,7 +1603,10 @@ mod tests {
 
         let old = format!("<input>{}</input>", tags::format_src_insert(1));
         assert!(p.commit_edit(&old, "beta"));
-        assert_eq!(std::fs::read_to_string(&file).unwrap(), "alpha\nbeta\ngamma");
+        assert_eq!(
+            std::fs::read_to_string(&file).unwrap(),
+            "alpha\nbeta\ngamma"
+        );
 
         let entries = p.take_timeline_entries();
         assert_eq!(entries.len(), 1);
@@ -1578,7 +1653,10 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&file).unwrap(), "alpha\ngamma");
         sicompass_sdk::block_on(p.redo(&entries[0], &mut err));
         assert!(err.is_empty(), "redo error: {err}");
-        assert_eq!(std::fs::read_to_string(&file).unwrap(), "alpha\nbeta\ngamma");
+        assert_eq!(
+            std::fs::read_to_string(&file).unwrap(),
+            "alpha\nbeta\ngamma"
+        );
     }
 
     #[test]
@@ -1594,14 +1672,20 @@ mod tests {
 
         let old = format!("<input>{}</input>", tags::format_src_insert(1));
         assert!(p.commit_edit(&old, "b1\nb2"));
-        assert_eq!(std::fs::read_to_string(&file).unwrap(), "alpha\nb1\nb2\ngamma");
+        assert_eq!(
+            std::fs::read_to_string(&file).unwrap(),
+            "alpha\nb1\nb2\ngamma"
+        );
 
         let entries = p.take_timeline_entries();
         let mut err = String::new();
         sicompass_sdk::block_on(p.undo(&entries[0], &mut err));
         assert_eq!(std::fs::read_to_string(&file).unwrap(), "alpha\ngamma");
         sicompass_sdk::block_on(p.redo(&entries[0], &mut err));
-        assert_eq!(std::fs::read_to_string(&file).unwrap(), "alpha\nb1\nb2\ngamma");
+        assert_eq!(
+            std::fs::read_to_string(&file).unwrap(),
+            "alpha\nb1\nb2\ngamma"
+        );
         assert!(err.is_empty(), "undo/redo error: {err}");
     }
 

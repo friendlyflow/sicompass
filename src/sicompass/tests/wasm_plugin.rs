@@ -61,7 +61,8 @@ fn a_real_component_loads_and_reports_its_identity() {
     // descriptor arriving empty.
     let version = p.version().expect("the fixture reports a version");
     assert!(
-        version.split('.').count() >= 2 && version.chars().next().is_some_and(|c| c.is_ascii_digit()),
+        version.split('.').count() >= 2
+            && version.chars().next().is_some_and(|c| c.is_ascii_digit()),
         "implausible version from the guest: {version:?}"
     );
 
@@ -78,7 +79,9 @@ fn fetch_returns_a_decodable_ffon_tree() {
     // mismatched across the boundary this would come back as garbage or empty.
     let obj = elems[0].as_obj().expect("first element should be an Obj");
     assert!(
-        obj.children.iter().any(|c| c.as_str().is_some_and(|s| s.contains("current path"))),
+        obj.children
+            .iter()
+            .any(|c| c.as_str().is_some_and(|s| s.contains("current path"))),
         "expected a `current path` line, got {:?}",
         obj.children
     );
@@ -111,7 +114,11 @@ fn a_plugin_without_allowed_hosts_gets_no_network_import() {
     // instantiates fine with the `net` interface unlinked. This is the common case:
     // most plugins need no network and structurally cannot reach one.
     let p = WasmProvider::open(&hello_wasm(), "hello", "hello", &fixture_dir(), Vec::new());
-    assert!(p.is_ok(), "should instantiate without network: {:?}", p.err());
+    assert!(
+        p.is_ok(),
+        "should instantiate without network: {:?}",
+        p.err()
+    );
 }
 
 #[test]
@@ -123,7 +130,11 @@ fn declaring_allowed_hosts_still_instantiates() {
         &fixture_dir(),
         vec!["example.com".to_owned()],
     );
-    assert!(p.is_ok(), "should instantiate with network linked: {:?}", p.err());
+    assert!(
+        p.is_ok(),
+        "should instantiate with network linked: {:?}",
+        p.err()
+    );
 }
 
 #[test]
@@ -180,7 +191,10 @@ fn the_component_imports_nothing_outside_the_host_capability_set() {
 
     // Guard against the walk silently matching nothing and the test passing
     // vacuously — the whole check would then be worthless.
-    assert!(saw_a_function_import, "no function imports found; the walk is wrong");
+    assert!(
+        saw_a_function_import,
+        "no function imports found; the walk is wrong"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -197,7 +211,9 @@ fn an_infinite_loop_in_a_guest_is_stopped() {
     assert!(!ok, "a trapped call must not report success");
 
     assert!(p.is_poisoned(), "a runaway plugin must be disabled");
-    let err = p.take_error().expect("the trap should surface as an error row");
+    let err = p
+        .take_error()
+        .expect("the trap should surface as an error row");
     assert!(err.contains("hello"), "error should name the plugin: {err}");
 
     // Deliberately not asserting *which* limit fired. Both are real, and which one
@@ -233,7 +249,10 @@ fn a_poisoned_plugin_stays_inert_instead_of_returning_garbage() {
     assert!(p.is_poisoned());
     let _ = p.take_error();
 
-    assert!(p.fetch().is_empty(), "a poisoned plugin must not return data");
+    assert!(
+        p.fetch().is_empty(),
+        "a poisoned plugin must not return data"
+    );
     assert!(p.commands().is_empty());
     assert!(!p.commit_edit("a", "b"));
     assert!(!p.create_file("x"));
@@ -260,7 +279,10 @@ fn one_plugin_trapping_does_not_affect_another_instance() {
     assert!(doomed.is_poisoned());
 
     assert!(!healthy.is_poisoned());
-    assert!(!healthy.fetch().is_empty(), "the healthy instance still works");
+    assert!(
+        !healthy.fetch().is_empty(),
+        "the healthy instance still works"
+    );
     assert!(healthy.take_error().is_none());
 }
 
@@ -317,7 +339,11 @@ fn command_list_items_cross_the_boundary() {
     let p = open_hello();
     let items = p.command_list_items("greet");
     assert_eq!(items.len(), 2, "got {items:?}");
-    assert!(items.iter().any(|i| i.label == "world" && i.data == "world"));
+    assert!(
+        items
+            .iter()
+            .any(|i| i.label == "world" && i.data == "world")
+    );
 }
 
 #[test]
@@ -329,7 +355,12 @@ fn executing_a_command_emits_an_undoable_timeline_entry() {
     assert_eq!(entries.len(), 1, "got {entries:?}");
 
     match &entries[0] {
-        TimelineEntry::ProviderOp { command, payload, label, .. } => {
+        TimelineEntry::ProviderOp {
+            command,
+            payload,
+            label,
+            ..
+        } => {
             assert_eq!(command, "greet");
             assert_eq!(label, "greet world");
             assert_eq!(payload, &FfonElement::new_str("world"));
@@ -401,8 +432,14 @@ fn row_text(frame: &sicompass_sdk::DashboardFrame, row: u16) -> String {
 #[test]
 fn the_fixture_opts_into_an_interactive_dashboard() {
     let p = open_hello();
-    assert_eq!(p.dashboard_kind(), sicompass_sdk::DashboardKind::Interactive);
-    assert!(p.manual_dashboard_entry_allowed(), "pressing `d` should work");
+    assert_eq!(
+        p.dashboard_kind(),
+        sicompass_sdk::DashboardKind::Interactive
+    );
+    assert!(
+        p.manual_dashboard_entry_allowed(),
+        "pressing `d` should work"
+    );
     // Interactive and Image are mutually exclusive; no static image here.
     assert!(p.dashboard_image_path().is_none());
 }
@@ -424,8 +461,14 @@ fn dashboard_render_returns_a_frame_matching_the_requested_grid() {
         "row 0 was {:?}",
         row_text(&frame, 0)
     );
-    assert!(row_text(&frame, 1).contains("60x10"), "guest should see the grid size");
-    assert!(p.take_error().is_none(), "a well-behaved frame should raise nothing");
+    assert!(
+        row_text(&frame, 1).contains("60x10"),
+        "guest should see the grid size"
+    );
+    assert!(
+        p.take_error().is_none(),
+        "a well-behaved frame should raise nothing"
+    );
 }
 
 #[test]
@@ -434,10 +477,18 @@ fn the_guest_sees_frames_advance_and_the_cursor_is_carried_across() {
     p.enter_dashboard();
 
     let first = p.dashboard_render(40, 8);
-    assert!(row_text(&first, 2).contains("frames rendered: 1"), "{:?}", row_text(&first, 2));
+    assert!(
+        row_text(&first, 2).contains("frames rendered: 1"),
+        "{:?}",
+        row_text(&first, 2)
+    );
 
     let second = p.dashboard_render(40, 8);
-    assert!(row_text(&second, 2).contains("frames rendered: 2"), "{:?}", row_text(&second, 2));
+    assert!(
+        row_text(&second, 2).contains("frames rendered: 2"),
+        "{:?}",
+        row_text(&second, 2)
+    );
 
     // The guest parks the cursor where typed text lands, so focus is somewhere
     // deliberate rather than wherever the renderer defaults to.
@@ -451,7 +502,11 @@ fn typed_text_reaches_the_guest_and_shows_up_in_the_next_frame() {
 
     p.dashboard_text("abc");
     let frame = p.dashboard_render(60, 8);
-    assert!(row_text(&frame, 5).contains("last input: abc"), "{:?}", row_text(&frame, 5));
+    assert!(
+        row_text(&frame, 5).contains("last input: abc"),
+        "{:?}",
+        row_text(&frame, 5)
+    );
 
     // Backspace is a non-printable key, so it arrives through `dashboard_key`.
     let consumed = p.dashboard_key(sicompass_sdk::DashboardKey {
@@ -463,7 +518,11 @@ fn typed_text_reaches_the_guest_and_shows_up_in_the_next_frame() {
     assert!(consumed, "the guest should consume Backspace");
 
     let frame = p.dashboard_render(60, 8);
-    assert!(row_text(&frame, 5).contains("last input: ab"), "{:?}", row_text(&frame, 5));
+    assert!(
+        row_text(&frame, 5).contains("last input: ab"),
+        "{:?}",
+        row_text(&frame, 5)
+    );
 }
 
 #[test]
@@ -491,7 +550,11 @@ fn a_paste_is_delivered_distinctly_from_typed_text() {
     p.enter_dashboard();
     p.dashboard_paste("pasted");
     let frame = p.dashboard_render(60, 8);
-    assert!(row_text(&frame, 5).contains("pasted"), "{:?}", row_text(&frame, 5));
+    assert!(
+        row_text(&frame, 5).contains("pasted"),
+        "{:?}",
+        row_text(&frame, 5)
+    );
 }
 
 #[test]
@@ -502,7 +565,11 @@ fn resize_is_forwarded_and_the_next_frame_uses_the_new_size() {
 
     let frame = p.dashboard_render(30, 12);
     assert_eq!((frame.cols, frame.rows), (30, 12));
-    assert!(row_text(&frame, 1).contains("30x12"), "{:?}", row_text(&frame, 1));
+    assert!(
+        row_text(&frame, 1).contains("30x12"),
+        "{:?}",
+        row_text(&frame, 1)
+    );
 }
 
 #[test]
@@ -561,15 +628,20 @@ fn profile_startup_cost() {
     let t = std::time::Instant::now();
     let component = wasm_host::load_component(&hello_wasm()).expect("fixture compiles");
     let compile = t.elapsed();
-    println!("  load_component         {:>10.2?}   ({} KiB of wasm)", compile, bytes.len() / 1024);
+    println!(
+        "  load_component         {:>10.2?}   ({} KiB of wasm)",
+        compile,
+        bytes.len() / 1024
+    );
 
     // Instantiating an already-compiled component, plus init + describe.
     let mut instantiate = std::time::Duration::ZERO;
     const N: u32 = 5;
     for _ in 0..N {
         let t = std::time::Instant::now();
-        let p = WasmProvider::from_component(&component, "hello", "hello", &fixture_dir(), Vec::new())
-            .expect("instantiates");
+        let p =
+            WasmProvider::from_component(&component, "hello", "hello", &fixture_dir(), Vec::new())
+                .expect("instantiates");
         instantiate += t.elapsed();
         std::hint::black_box(&p);
     }
@@ -608,7 +680,11 @@ fn profile_dashboard_render_cost() {
 
     const FRAMES: u32 = 600; // ~10s of wall clock at 60fps
 
-    let backend = if wasm_host::uses_jit() { "cranelift (jit)" } else { "pulley (no-jit)" };
+    let backend = if wasm_host::uses_jit() {
+        "cranelift (jit)"
+    } else {
+        "pulley (no-jit)"
+    };
     println!("\ndashboard_render on {backend}\n");
 
     // Sweep grid sizes. If cost tracks cell count the expense is per-cell — guest
@@ -646,7 +722,10 @@ fn profile_dashboard_render_cost() {
     for _ in 0..FRAMES {
         std::hint::black_box(p.tick());
     }
-    println!("\n  poll() (small payload)     {:>12.3?}/call", started.elapsed() / FRAMES);
+    println!(
+        "\n  poll() (small payload)     {:>12.3?}/call",
+        started.elapsed() / FRAMES
+    );
     println!(
         "\n  60fps budget is 16.67ms per frame for *everything* — Vulkan, text \
          shaping and AccessKit included.\n"
@@ -720,12 +799,21 @@ fn a_network_using_plugin_is_refused_when_it_declares_no_allowed_hosts() {
     // enabling it, so it must not load at all.
     // `WasmProvider` is not `Debug` (it owns a wasmtime `Store`), so match rather
     // than `expect_err`.
-    let err = match WasmProvider::open(&net_wasm(), "net-demo", "net demo", &fixture_dir(), Vec::new()) {
+    let err = match WasmProvider::open(
+        &net_wasm(),
+        "net-demo",
+        "net demo",
+        &fixture_dir(),
+        Vec::new(),
+    ) {
         Err(e) => e,
         Ok(_) => panic!("a net-importing plugin with no allowedHosts must be refused"),
     };
 
-    assert!(err.contains("allowedHosts"), "the error should say what is missing: {err}");
+    assert!(
+        err.contains("allowedHosts"),
+        "the error should say what is missing: {err}"
+    );
     assert!(err.contains("network"), "{err}");
 }
 
@@ -740,7 +828,11 @@ fn the_same_plugin_loads_once_it_declares_its_hosts() {
         &fixture_dir(),
         vec!["example.com".to_owned()],
     );
-    assert!(p.is_ok(), "should load once allowedHosts is declared: {:?}", p.err());
+    assert!(
+        p.is_ok(),
+        "should load once allowedHosts is declared: {:?}",
+        p.err()
+    );
 }
 
 #[test]

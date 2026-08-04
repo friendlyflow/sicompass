@@ -28,11 +28,7 @@ use sicompass_sdk::tags;
 
 const GENERAL: &[Coordinate] = &[Coordinate::General];
 
-const INSERT: &[Coordinate] = &[
-    Coordinate::Insert,
-    Coordinate::Normal,
-    Coordinate::Visual,
-];
+const INSERT: &[Coordinate] = &[Coordinate::Insert, Coordinate::Normal, Coordinate::Visual];
 
 const SEARCH: &[Coordinate] = &[Coordinate::SimpleSearch, Coordinate::ExtendedSearch];
 
@@ -104,9 +100,13 @@ pub struct Shortcut {
 // Predicates
 // ---------------------------------------------------------------------------
 
-fn always(_: &AppRenderer) -> bool { true }
+fn always(_: &AppRenderer) -> bool {
+    true
+}
 
-fn more_than_one_tab(r: &AppRenderer) -> bool { r.tabs.len() > 1 }
+fn more_than_one_tab(r: &AppRenderer) -> bool {
+    r.tabs.len() > 1
+}
 
 /// True when the background updater has staged an app update ready for
 /// `Ctrl+U` to apply. Keeps the keybind invisible at all other times so
@@ -129,7 +129,9 @@ fn at_root(r: &AppRenderer) -> bool {
 /// True when the focused element is an Obj with children (can navigate into with Right).
 fn focused_has_children(r: &AppRenderer) -> bool {
     use sicompass_sdk::ffon::FfonElement;
-    let Some(slice) = get_ffon_at_id(&r.ffon, &r.current_id) else { return false };
+    let Some(slice) = get_ffon_at_id(&r.ffon, &r.current_id) else {
+        return false;
+    };
     let idx = r.current_id.last().unwrap_or(0);
     matches!(slice.get(idx), Some(FfonElement::Obj(o)) if !o.children.is_empty())
 }
@@ -139,7 +141,8 @@ fn not_at_root_and_no_input_children(r: &AppRenderer) -> bool {
 }
 
 fn active_provider_name(r: &AppRenderer) -> Option<&str> {
-    r.current_id.get(0)
+    r.current_id
+        .get(0)
         .and_then(|i| r.providers.get(i))
         .map(|p| p.name())
 }
@@ -172,21 +175,24 @@ fn is_filebrowser(r: &AppRenderer) -> bool {
 }
 
 fn is_editor(r: &AppRenderer) -> bool {
-    r.current_id.get(0)
+    r.current_id
+        .get(0)
         .and_then(|i| r.providers.get(i))
         .map(|p| p.has_editor_semantics())
         .unwrap_or(false)
 }
 
 fn has_dashboard(r: &AppRenderer) -> bool {
-    r.current_id.get(0)
+    r.current_id
+        .get(0)
         .and_then(|i| r.providers.get(i))
         .and_then(|p| p.dashboard_image_path())
         .is_some()
 }
 
 fn supports_config_files(r: &AppRenderer) -> bool {
-    r.current_id.get(0)
+    r.current_id
+        .get(0)
         .and_then(|i| r.providers.get(i))
         .map(|p| p.supports_config_files())
         .unwrap_or(false)
@@ -201,12 +207,16 @@ fn supports_config_files_hint(r: &AppRenderer) -> bool {
 /// Used to gate Ctrl+D / Delete key so they only act as message-delete in the
 /// email client and remain inert (or fall through to other handlers) elsewhere.
 fn avail_provider_has_delete(r: &AppRenderer) -> bool {
-    crate::provider::get_commands(r).iter().any(|c| c == "delete")
+    crate::provider::get_commands(r)
+        .iter()
+        .any(|c| c == "delete")
 }
 
 /// True when the focused container's children contain an `<input>` element.
 fn children_have_input(r: &AppRenderer) -> bool {
-    let Some(slice) = get_ffon_at_id(&r.ffon, &r.current_id) else { return false };
+    let Some(slice) = get_ffon_at_id(&r.ffon, &r.current_id) else {
+        return false;
+    };
     slice.iter().any(|elem| {
         let key = match elem {
             sicompass_sdk::ffon::FfonElement::Str(s) => s.as_str(),
@@ -218,7 +228,9 @@ fn children_have_input(r: &AppRenderer) -> bool {
 
 /// True when the focused element is a button.
 fn focused_is_button(r: &AppRenderer) -> bool {
-    let Some(slice) = get_ffon_at_id(&r.ffon, &r.current_id) else { return false };
+    let Some(slice) = get_ffon_at_id(&r.ffon, &r.current_id) else {
+        return false;
+    };
     let idx = r.current_id.last().unwrap_or(0);
     slice.get(idx).is_some_and(|e| {
         let k = match e {
@@ -231,7 +243,9 @@ fn focused_is_button(r: &AppRenderer) -> bool {
 
 /// True when the focused element is a hyperlink.
 fn focused_is_link(r: &AppRenderer) -> bool {
-    let Some(slice) = get_ffon_at_id(&r.ffon, &r.current_id) else { return false };
+    let Some(slice) = get_ffon_at_id(&r.ffon, &r.current_id) else {
+        return false;
+    };
     let idx = r.current_id.last().unwrap_or(0);
     slice.get(idx).is_some_and(|e| {
         let k = match e {
@@ -247,7 +261,9 @@ fn focused_is_link(r: &AppRenderer) -> bool {
 /// `<input>` (it just renders masked), so the `i`/`a` insert shortcuts must
 /// treat it as editable.
 fn focused_is_input(r: &AppRenderer) -> bool {
-    let Some(slice) = get_ffon_at_id(&r.ffon, &r.current_id) else { return false };
+    let Some(slice) = get_ffon_at_id(&r.ffon, &r.current_id) else {
+        return false;
+    };
     let idx = r.current_id.last().unwrap_or(0);
     slice.get(idx).is_some_and(|e| {
         let k = match e {
@@ -278,7 +294,10 @@ fn in_email_compose_body(r: &AppRenderer) -> bool {
 fn in_email_compose(r: &AppRenderer) -> bool {
     let path = crate::provider::current_path(r);
     let compose_roots = ["compose", "reply", "reply all", "forward"];
-    let has_compose = path.trim_matches('/').split('/').any(|s| compose_roots.contains(&s));
+    let has_compose = path
+        .trim_matches('/')
+        .split('/')
+        .any(|s| compose_roots.contains(&s));
     has_compose && not_at_root(r)
 }
 
@@ -289,10 +308,14 @@ fn has_add_element_sibling(r: &AppRenderer) -> bool {
     let siblings: &[FfonElement] = if r.current_id.depth() <= 1 {
         &r.ffon
     } else {
-        let Some(s) = get_ffon_at_id(&r.ffon, &r.current_id) else { return false };
+        let Some(s) = get_ffon_at_id(&r.ffon, &r.current_id) else {
+            return false;
+        };
         s
     };
-    siblings.iter().any(|e| matches!(e, FfonElement::Obj(o) if o.key == "Add element:"))
+    siblings
+        .iter()
+        .any(|e| matches!(e, FfonElement::Obj(o) if o.key == "Add element:"))
 }
 
 /// Structural editing is available for filebrowser, email compose body,
@@ -333,19 +356,25 @@ fn avail_file_clipboard(r: &AppRenderer) -> bool {
 
 /// Ctrl+C copy target — any focused FFON element exists (root list included).
 fn avail_copy(r: &AppRenderer) -> bool {
-    let Some(slice) = get_ffon_at_id(&r.ffon, &r.current_id) else { return false };
+    let Some(slice) = get_ffon_at_id(&r.ffon, &r.current_id) else {
+        return false;
+    };
     slice.get(r.current_id.last().unwrap_or(0)).is_some()
 }
 
 /// Ctrl+Shift+C — advertised only when the focused element has an underlying
 /// value distinct from its display text (link URL, image path, input value).
 fn avail_copy_value(r: &AppRenderer) -> bool {
-    let Some(slice) = get_ffon_at_id(&r.ffon, &r.current_id) else { return false };
+    let Some(slice) = get_ffon_at_id(&r.ffon, &r.current_id) else {
+        return false;
+    };
     let idx = r.current_id.last().unwrap_or(0);
     let Some(raw) = slice.get(idx).map(|e| match e {
         sicompass_sdk::ffon::FfonElement::Str(s) => s.as_str(),
         sicompass_sdk::ffon::FfonElement::Obj(o) => o.key.as_str(),
-    }) else { return false };
+    }) else {
+        return false;
+    };
     tags::has_link(raw) || tags::has_image(raw) || tags::has_input(raw)
 }
 
@@ -373,7 +402,6 @@ fn avail_editor_edit(r: &AppRenderer) -> bool {
     not_at_root(r) && is_editor(r)
 }
 
-
 // ---------------------------------------------------------------------------
 // Handler wrappers (for History param or mode-specific disambiguation)
 // ---------------------------------------------------------------------------
@@ -387,216 +415,608 @@ fn delete_editor(r: &mut AppRenderer) {
 // ---------------------------------------------------------------------------
 
 pub static SHORTCUTS: &[Shortcut] = &[
-
     // ---- Escape (all meaningful modes) -----------------------------------
     // Hint only inside providers; dispatch fires everywhere.
     // In the terminal's shell view Escape returns to the folder listing rather
     // than popping a level, so it advertises that instead of the generic "Back".
     // Same handler either way — only the hint differs.
-    Shortcut { key: Keycode::Escape, key2: None, ctrl: false, shift: false,
+    Shortcut {
+        key: Keycode::Escape,
+        key2: None,
+        ctrl: false,
+        shift: false,
         modes: &[Coordinate::General],
-        label: "Esc    Folders", is_available: terminal_shell, handle: handlers::handle_escape },
-    Shortcut { key: Keycode::Escape, key2: None, ctrl: false, shift: false,
-        modes: &[Coordinate::General,
-                 Coordinate::Insert, Coordinate::Normal,
-                 Coordinate::Visual,
-                 Coordinate::SimpleSearch, Coordinate::ExtendedSearch,
-                 Coordinate::Command, Coordinate::Scroll, Coordinate::ScrollSearch, Coordinate::ScrollPrefixSearch,
-                 Coordinate::InputSearch, Coordinate::Meta, Coordinate::TimelineView, Coordinate::Dashboard,
-                 Coordinate::ConfirmCloseTab, Coordinate::TabSwitcher],
-        label: "Esc    Back", is_available: not_at_root, handle: handlers::handle_escape },
-    Shortcut { key: Keycode::Escape, key2: None, ctrl: false, shift: false,
-        modes: &[Coordinate::General,
-                 Coordinate::Insert, Coordinate::Normal,
-                 Coordinate::Visual,
-                 Coordinate::SimpleSearch, Coordinate::ExtendedSearch,
-                 Coordinate::Command, Coordinate::Scroll, Coordinate::ScrollSearch, Coordinate::ScrollPrefixSearch,
-                 Coordinate::InputSearch, Coordinate::Meta, Coordinate::TimelineView, Coordinate::Dashboard,
-                 Coordinate::ConfirmCloseTab, Coordinate::TabSwitcher],
-        label: "", is_available: always, handle: handlers::handle_escape },
-
+        label: "Esc    Folders",
+        is_available: terminal_shell,
+        handle: handlers::handle_escape,
+    },
+    Shortcut {
+        key: Keycode::Escape,
+        key2: None,
+        ctrl: false,
+        shift: false,
+        modes: &[
+            Coordinate::General,
+            Coordinate::Insert,
+            Coordinate::Normal,
+            Coordinate::Visual,
+            Coordinate::SimpleSearch,
+            Coordinate::ExtendedSearch,
+            Coordinate::Command,
+            Coordinate::Scroll,
+            Coordinate::ScrollSearch,
+            Coordinate::ScrollPrefixSearch,
+            Coordinate::InputSearch,
+            Coordinate::Meta,
+            Coordinate::TimelineView,
+            Coordinate::Dashboard,
+            Coordinate::ConfirmCloseTab,
+            Coordinate::TabSwitcher,
+        ],
+        label: "Esc    Back",
+        is_available: not_at_root,
+        handle: handlers::handle_escape,
+    },
+    Shortcut {
+        key: Keycode::Escape,
+        key2: None,
+        ctrl: false,
+        shift: false,
+        modes: &[
+            Coordinate::General,
+            Coordinate::Insert,
+            Coordinate::Normal,
+            Coordinate::Visual,
+            Coordinate::SimpleSearch,
+            Coordinate::ExtendedSearch,
+            Coordinate::Command,
+            Coordinate::Scroll,
+            Coordinate::ScrollSearch,
+            Coordinate::ScrollPrefixSearch,
+            Coordinate::InputSearch,
+            Coordinate::Meta,
+            Coordinate::TimelineView,
+            Coordinate::Dashboard,
+            Coordinate::ConfirmCloseTab,
+            Coordinate::TabSwitcher,
+        ],
+        label: "",
+        is_available: always,
+        handle: handlers::handle_escape,
+    },
     // ---- Up / K ----------------------------------------------------------
-    Shortcut { key: Keycode::Up, key2: Some(Keycode::K), ctrl: false, shift: false,
+    Shortcut {
+        key: Keycode::Up,
+        key2: Some(Keycode::K),
+        ctrl: false,
+        shift: false,
         modes: NAV_UP_DOWN,
-        label: "Up     Previous", is_available: always, handle: handlers::handle_up },
-    Shortcut { key: Keycode::Up, key2: None, ctrl: false, shift: false,
+        label: "Up     Previous",
+        is_available: always,
+        handle: handlers::handle_up,
+    },
+    Shortcut {
+        key: Keycode::Up,
+        key2: None,
+        ctrl: false,
+        shift: false,
         modes: &[Coordinate::InputSearch],
-        label: "Up     Prev match", is_available: always, handle: handlers::handle_input_search_up },
-    Shortcut { key: Keycode::Up, key2: None, ctrl: false, shift: false,
+        label: "Up     Prev match",
+        is_available: always,
+        handle: handlers::handle_input_search_up,
+    },
+    Shortcut {
+        key: Keycode::Up,
+        key2: None,
+        ctrl: false,
+        shift: false,
         modes: INSERT,
-        label: "Up     Previous", is_available: always, handle: handlers::handle_up_insert },
-    Shortcut { key: Keycode::Up, key2: None, ctrl: false, shift: true,
+        label: "Up     Previous",
+        is_available: always,
+        handle: handlers::handle_up_insert,
+    },
+    Shortcut {
+        key: Keycode::Up,
+        key2: None,
+        ctrl: false,
+        shift: true,
         modes: INSERT,
-        label: "Shift+Up Select up", is_available: always, handle: handlers::handle_shift_up_insert },
-
+        label: "Shift+Up Select up",
+        is_available: always,
+        handle: handlers::handle_shift_up_insert,
+    },
     // ---- Down / J --------------------------------------------------------
-    Shortcut { key: Keycode::Down, key2: Some(Keycode::J), ctrl: false, shift: false,
+    Shortcut {
+        key: Keycode::Down,
+        key2: Some(Keycode::J),
+        ctrl: false,
+        shift: false,
         modes: NAV_UP_DOWN,
-        label: "Down   Next", is_available: always, handle: handlers::handle_down },
-    Shortcut { key: Keycode::Down, key2: None, ctrl: false, shift: false,
+        label: "Down   Next",
+        is_available: always,
+        handle: handlers::handle_down,
+    },
+    Shortcut {
+        key: Keycode::Down,
+        key2: None,
+        ctrl: false,
+        shift: false,
         modes: &[Coordinate::InputSearch],
-        label: "Down   Next match", is_available: always, handle: handlers::handle_input_search_down },
-    Shortcut { key: Keycode::Down, key2: None, ctrl: false, shift: false,
+        label: "Down   Next match",
+        is_available: always,
+        handle: handlers::handle_input_search_down,
+    },
+    Shortcut {
+        key: Keycode::Down,
+        key2: None,
+        ctrl: false,
+        shift: false,
         modes: INSERT,
-        label: "Down   Next", is_available: always, handle: handlers::handle_down_insert },
-    Shortcut { key: Keycode::Down, key2: None, ctrl: false, shift: true,
+        label: "Down   Next",
+        is_available: always,
+        handle: handlers::handle_down_insert,
+    },
+    Shortcut {
+        key: Keycode::Down,
+        key2: None,
+        ctrl: false,
+        shift: true,
         modes: INSERT,
-        label: "Shift+Down Select dn", is_available: always, handle: handlers::handle_shift_down_insert },
-
+        label: "Shift+Down Select dn",
+        is_available: always,
+        handle: handlers::handle_shift_down_insert,
+    },
     // ---- Right / L -------------------------------------------------------
-    Shortcut { key: Keycode::Right, key2: Some(Keycode::L), ctrl: false, shift: false,
+    Shortcut {
+        key: Keycode::Right,
+        key2: Some(Keycode::L),
+        ctrl: false,
+        shift: false,
         modes: GENERAL,
-        label: "Right  Open", is_available: focused_has_children, handle: handlers::handle_right },
-    Shortcut { key: Keycode::Right, key2: Some(Keycode::L), ctrl: false, shift: false,
+        label: "Right  Open",
+        is_available: focused_has_children,
+        handle: handlers::handle_right,
+    },
+    Shortcut {
+        key: Keycode::Right,
+        key2: Some(Keycode::L),
+        ctrl: false,
+        shift: false,
         modes: GENERAL,
-        label: "", is_available: always, handle: handlers::handle_right },
-    Shortcut { key: Keycode::Right, key2: None, ctrl: false, shift: false,
+        label: "",
+        is_available: always,
+        handle: handlers::handle_right,
+    },
+    Shortcut {
+        key: Keycode::Right,
+        key2: None,
+        ctrl: false,
+        shift: false,
         modes: SEARCH,
-        label: "Right  Navigate", is_available: always, handle: handlers::handle_search_right },
-    Shortcut { key: Keycode::Right, key2: None, ctrl: false, shift: false,
+        label: "Right  Navigate",
+        is_available: always,
+        handle: handlers::handle_search_right,
+    },
+    Shortcut {
+        key: Keycode::Right,
+        key2: None,
+        ctrl: false,
+        shift: false,
         modes: INSERT,
-        label: "Right  Cursor right", is_available: always, handle: handlers::handle_text_cursor_right },
-    Shortcut { key: Keycode::Right, key2: None, ctrl: false, shift: false,
+        label: "Right  Cursor right",
+        is_available: always,
+        handle: handlers::handle_text_cursor_right,
+    },
+    Shortcut {
+        key: Keycode::Right,
+        key2: None,
+        ctrl: false,
+        shift: false,
         modes: &[Coordinate::Command],
-        label: "Right  Cursor right", is_available: always, handle: handlers::handle_command_right },
-    Shortcut { key: Keycode::Right, key2: None, ctrl: false, shift: false,
-        modes: &[Coordinate::ScrollSearch, Coordinate::ScrollPrefixSearch, Coordinate::InputSearch],
-        label: "Right  Cursor right", is_available: always, handle: handlers::handle_text_cursor_right },
-    Shortcut { key: Keycode::Right, key2: None, ctrl: false, shift: true,
+        label: "Right  Cursor right",
+        is_available: always,
+        handle: handlers::handle_command_right,
+    },
+    Shortcut {
+        key: Keycode::Right,
+        key2: None,
+        ctrl: false,
+        shift: false,
+        modes: &[
+            Coordinate::ScrollSearch,
+            Coordinate::ScrollPrefixSearch,
+            Coordinate::InputSearch,
+        ],
+        label: "Right  Cursor right",
+        is_available: always,
+        handle: handlers::handle_text_cursor_right,
+    },
+    Shortcut {
+        key: Keycode::Right,
+        key2: None,
+        ctrl: false,
+        shift: true,
         modes: TEXT,
-        label: "Shift+Right Select right", is_available: always, handle: handlers::handle_shift_right },
-
+        label: "Shift+Right Select right",
+        is_available: always,
+        handle: handlers::handle_shift_right,
+    },
     // ---- Left / H --------------------------------------------------------
-    Shortcut { key: Keycode::Left, key2: Some(Keycode::H), ctrl: false, shift: false,
+    Shortcut {
+        key: Keycode::Left,
+        key2: Some(Keycode::H),
+        ctrl: false,
+        shift: false,
         modes: GENERAL,
-        label: "Left   Back", is_available: left_goes_back, handle: handlers::handle_left },
-    Shortcut { key: Keycode::Left, key2: Some(Keycode::H), ctrl: false, shift: false,
+        label: "Left   Back",
+        is_available: left_goes_back,
+        handle: handlers::handle_left,
+    },
+    Shortcut {
+        key: Keycode::Left,
+        key2: Some(Keycode::H),
+        ctrl: false,
+        shift: false,
         modes: GENERAL,
-        label: "", is_available: always, handle: handlers::handle_left },
-    Shortcut { key: Keycode::Left, key2: None, ctrl: false, shift: false,
+        label: "",
+        is_available: always,
+        handle: handlers::handle_left,
+    },
+    Shortcut {
+        key: Keycode::Left,
+        key2: None,
+        ctrl: false,
+        shift: false,
         modes: SEARCH,
-        label: "Left   Navigate", is_available: always, handle: handlers::handle_search_left },
-    Shortcut { key: Keycode::Left, key2: None, ctrl: false, shift: false,
+        label: "Left   Navigate",
+        is_available: always,
+        handle: handlers::handle_search_left,
+    },
+    Shortcut {
+        key: Keycode::Left,
+        key2: None,
+        ctrl: false,
+        shift: false,
         modes: INSERT,
-        label: "Left   Cursor left", is_available: always, handle: handlers::handle_text_cursor_left },
-    Shortcut { key: Keycode::Left, key2: None, ctrl: false, shift: false,
+        label: "Left   Cursor left",
+        is_available: always,
+        handle: handlers::handle_text_cursor_left,
+    },
+    Shortcut {
+        key: Keycode::Left,
+        key2: None,
+        ctrl: false,
+        shift: false,
         modes: &[Coordinate::Command],
-        label: "Left   Cursor left", is_available: always, handle: handlers::handle_text_cursor_left },
-    Shortcut { key: Keycode::Left, key2: None, ctrl: false, shift: false,
-        modes: &[Coordinate::ScrollSearch, Coordinate::ScrollPrefixSearch, Coordinate::InputSearch],
-        label: "Left   Cursor left", is_available: always, handle: handlers::handle_text_cursor_left },
-    Shortcut { key: Keycode::Left, key2: None, ctrl: false, shift: true,
+        label: "Left   Cursor left",
+        is_available: always,
+        handle: handlers::handle_text_cursor_left,
+    },
+    Shortcut {
+        key: Keycode::Left,
+        key2: None,
+        ctrl: false,
+        shift: false,
+        modes: &[
+            Coordinate::ScrollSearch,
+            Coordinate::ScrollPrefixSearch,
+            Coordinate::InputSearch,
+        ],
+        label: "Left   Cursor left",
+        is_available: always,
+        handle: handlers::handle_text_cursor_left,
+    },
+    Shortcut {
+        key: Keycode::Left,
+        key2: None,
+        ctrl: false,
+        shift: true,
         modes: TEXT,
-        label: "Shift+Left Select left", is_available: always, handle: handlers::handle_shift_left },
-
+        label: "Shift+Left Select left",
+        is_available: always,
+        handle: handlers::handle_shift_left,
+    },
     // ---- PageUp / PageDown -----------------------------------------------
     // Hint only inside providers; dispatch fires everywhere.
-    Shortcut { key: Keycode::PageUp, key2: None, ctrl: false, shift: false,
-        modes: &[Coordinate::General,
-                 Coordinate::SimpleSearch, Coordinate::ExtendedSearch,
-                 Coordinate::Command, Coordinate::Scroll, Coordinate::ScrollSearch, Coordinate::ScrollPrefixSearch],
-        label: "PgUp   Page up", is_available: not_at_root, handle: handlers::handle_page_up },
-    Shortcut { key: Keycode::PageUp, key2: None, ctrl: false, shift: false,
-        modes: &[Coordinate::General,
-                 Coordinate::SimpleSearch, Coordinate::ExtendedSearch,
-                 Coordinate::Command, Coordinate::Scroll, Coordinate::ScrollSearch, Coordinate::ScrollPrefixSearch],
-        label: "", is_available: always, handle: handlers::handle_page_up },
-    Shortcut { key: Keycode::PageDown, key2: None, ctrl: false, shift: false,
-        modes: &[Coordinate::General,
-                 Coordinate::SimpleSearch, Coordinate::ExtendedSearch,
-                 Coordinate::Command, Coordinate::Scroll, Coordinate::ScrollSearch, Coordinate::ScrollPrefixSearch],
-        label: "PgDn   Page dn", is_available: not_at_root, handle: handlers::handle_page_down },
-    Shortcut { key: Keycode::PageDown, key2: None, ctrl: false, shift: false,
-        modes: &[Coordinate::General,
-                 Coordinate::SimpleSearch, Coordinate::ExtendedSearch,
-                 Coordinate::Command, Coordinate::Scroll, Coordinate::ScrollSearch, Coordinate::ScrollPrefixSearch],
-        label: "", is_available: always, handle: handlers::handle_page_down },
-
+    Shortcut {
+        key: Keycode::PageUp,
+        key2: None,
+        ctrl: false,
+        shift: false,
+        modes: &[
+            Coordinate::General,
+            Coordinate::SimpleSearch,
+            Coordinate::ExtendedSearch,
+            Coordinate::Command,
+            Coordinate::Scroll,
+            Coordinate::ScrollSearch,
+            Coordinate::ScrollPrefixSearch,
+        ],
+        label: "PgUp   Page up",
+        is_available: not_at_root,
+        handle: handlers::handle_page_up,
+    },
+    Shortcut {
+        key: Keycode::PageUp,
+        key2: None,
+        ctrl: false,
+        shift: false,
+        modes: &[
+            Coordinate::General,
+            Coordinate::SimpleSearch,
+            Coordinate::ExtendedSearch,
+            Coordinate::Command,
+            Coordinate::Scroll,
+            Coordinate::ScrollSearch,
+            Coordinate::ScrollPrefixSearch,
+        ],
+        label: "",
+        is_available: always,
+        handle: handlers::handle_page_up,
+    },
+    Shortcut {
+        key: Keycode::PageDown,
+        key2: None,
+        ctrl: false,
+        shift: false,
+        modes: &[
+            Coordinate::General,
+            Coordinate::SimpleSearch,
+            Coordinate::ExtendedSearch,
+            Coordinate::Command,
+            Coordinate::Scroll,
+            Coordinate::ScrollSearch,
+            Coordinate::ScrollPrefixSearch,
+        ],
+        label: "PgDn   Page dn",
+        is_available: not_at_root,
+        handle: handlers::handle_page_down,
+    },
+    Shortcut {
+        key: Keycode::PageDown,
+        key2: None,
+        ctrl: false,
+        shift: false,
+        modes: &[
+            Coordinate::General,
+            Coordinate::SimpleSearch,
+            Coordinate::ExtendedSearch,
+            Coordinate::Command,
+            Coordinate::Scroll,
+            Coordinate::ScrollSearch,
+            Coordinate::ScrollPrefixSearch,
+        ],
+        label: "",
+        is_available: always,
+        handle: handlers::handle_page_down,
+    },
     // ---- Home / End (no modifier) ----------------------------------------
     // Hint only inside providers; dispatch fires everywhere.
-    Shortcut { key: Keycode::Home, key2: None, ctrl: false, shift: false,
-        modes: &[Coordinate::General,
-                 Coordinate::Insert, Coordinate::Normal,
-                 Coordinate::Visual,
-                 Coordinate::SimpleSearch, Coordinate::ExtendedSearch,
-                 Coordinate::Command, Coordinate::Scroll, Coordinate::ScrollSearch, Coordinate::ScrollPrefixSearch,
-                 Coordinate::InputSearch],
-        label: "Home   First", is_available: not_at_root, handle: handlers::handle_home },
-    Shortcut { key: Keycode::Home, key2: None, ctrl: false, shift: false,
-        modes: &[Coordinate::General,
-                 Coordinate::Insert, Coordinate::Normal,
-                 Coordinate::Visual,
-                 Coordinate::SimpleSearch, Coordinate::ExtendedSearch,
-                 Coordinate::Command, Coordinate::Scroll, Coordinate::ScrollSearch, Coordinate::ScrollPrefixSearch,
-                 Coordinate::InputSearch],
-        label: "", is_available: always, handle: handlers::handle_home },
-    Shortcut { key: Keycode::End, key2: None, ctrl: false, shift: false,
-        modes: &[Coordinate::General,
-                 Coordinate::Insert, Coordinate::Normal,
-                 Coordinate::Visual,
-                 Coordinate::SimpleSearch, Coordinate::ExtendedSearch,
-                 Coordinate::Command, Coordinate::Scroll, Coordinate::ScrollSearch, Coordinate::ScrollPrefixSearch,
-                 Coordinate::InputSearch],
-        label: "End    Last", is_available: not_at_root, handle: handlers::handle_end },
-    Shortcut { key: Keycode::End, key2: None, ctrl: false, shift: false,
-        modes: &[Coordinate::General,
-                 Coordinate::Insert, Coordinate::Normal,
-                 Coordinate::Visual,
-                 Coordinate::SimpleSearch, Coordinate::ExtendedSearch,
-                 Coordinate::Command, Coordinate::Scroll, Coordinate::ScrollSearch, Coordinate::ScrollPrefixSearch,
-                 Coordinate::InputSearch],
-        label: "", is_available: always, handle: handlers::handle_end },
-
+    Shortcut {
+        key: Keycode::Home,
+        key2: None,
+        ctrl: false,
+        shift: false,
+        modes: &[
+            Coordinate::General,
+            Coordinate::Insert,
+            Coordinate::Normal,
+            Coordinate::Visual,
+            Coordinate::SimpleSearch,
+            Coordinate::ExtendedSearch,
+            Coordinate::Command,
+            Coordinate::Scroll,
+            Coordinate::ScrollSearch,
+            Coordinate::ScrollPrefixSearch,
+            Coordinate::InputSearch,
+        ],
+        label: "Home   First",
+        is_available: not_at_root,
+        handle: handlers::handle_home,
+    },
+    Shortcut {
+        key: Keycode::Home,
+        key2: None,
+        ctrl: false,
+        shift: false,
+        modes: &[
+            Coordinate::General,
+            Coordinate::Insert,
+            Coordinate::Normal,
+            Coordinate::Visual,
+            Coordinate::SimpleSearch,
+            Coordinate::ExtendedSearch,
+            Coordinate::Command,
+            Coordinate::Scroll,
+            Coordinate::ScrollSearch,
+            Coordinate::ScrollPrefixSearch,
+            Coordinate::InputSearch,
+        ],
+        label: "",
+        is_available: always,
+        handle: handlers::handle_home,
+    },
+    Shortcut {
+        key: Keycode::End,
+        key2: None,
+        ctrl: false,
+        shift: false,
+        modes: &[
+            Coordinate::General,
+            Coordinate::Insert,
+            Coordinate::Normal,
+            Coordinate::Visual,
+            Coordinate::SimpleSearch,
+            Coordinate::ExtendedSearch,
+            Coordinate::Command,
+            Coordinate::Scroll,
+            Coordinate::ScrollSearch,
+            Coordinate::ScrollPrefixSearch,
+            Coordinate::InputSearch,
+        ],
+        label: "End    Last",
+        is_available: not_at_root,
+        handle: handlers::handle_end,
+    },
+    Shortcut {
+        key: Keycode::End,
+        key2: None,
+        ctrl: false,
+        shift: false,
+        modes: &[
+            Coordinate::General,
+            Coordinate::Insert,
+            Coordinate::Normal,
+            Coordinate::Visual,
+            Coordinate::SimpleSearch,
+            Coordinate::ExtendedSearch,
+            Coordinate::Command,
+            Coordinate::Scroll,
+            Coordinate::ScrollSearch,
+            Coordinate::ScrollPrefixSearch,
+            Coordinate::InputSearch,
+        ],
+        label: "",
+        is_available: always,
+        handle: handlers::handle_end,
+    },
     // ---- Home / End (Ctrl) -----------------------------------------------
-    Shortcut { key: Keycode::Home, key2: None, ctrl: true, shift: false,
-        modes: &[Coordinate::SimpleSearch, Coordinate::ExtendedSearch, Coordinate::Command],
-        label: "Ctrl+Home Line start", is_available: always, handle: handlers::handle_ctrl_home },
-    Shortcut { key: Keycode::End, key2: None, ctrl: true, shift: false,
-        modes: &[Coordinate::SimpleSearch, Coordinate::ExtendedSearch, Coordinate::Command],
-        label: "Ctrl+End  Line end", is_available: always, handle: handlers::handle_ctrl_end },
-
+    Shortcut {
+        key: Keycode::Home,
+        key2: None,
+        ctrl: true,
+        shift: false,
+        modes: &[
+            Coordinate::SimpleSearch,
+            Coordinate::ExtendedSearch,
+            Coordinate::Command,
+        ],
+        label: "Ctrl+Home Line start",
+        is_available: always,
+        handle: handlers::handle_ctrl_home,
+    },
+    Shortcut {
+        key: Keycode::End,
+        key2: None,
+        ctrl: true,
+        shift: false,
+        modes: &[
+            Coordinate::SimpleSearch,
+            Coordinate::ExtendedSearch,
+            Coordinate::Command,
+        ],
+        label: "Ctrl+End  Line end",
+        is_available: always,
+        handle: handlers::handle_ctrl_end,
+    },
     // ---- Home / End (Shift) ---------------------------------------------
-    Shortcut { key: Keycode::Home, key2: None, ctrl: false, shift: true,
+    Shortcut {
+        key: Keycode::Home,
+        key2: None,
+        ctrl: false,
+        shift: true,
         modes: TEXT,
-        label: "Shift+Home Sel. start", is_available: always, handle: handlers::handle_shift_home },
-    Shortcut { key: Keycode::End, key2: None, ctrl: false, shift: true,
+        label: "Shift+Home Sel. start",
+        is_available: always,
+        handle: handlers::handle_shift_home,
+    },
+    Shortcut {
+        key: Keycode::End,
+        key2: None,
+        ctrl: false,
+        shift: true,
         modes: TEXT,
-        label: "Shift+End  Sel. end", is_available: always, handle: handlers::handle_shift_end },
-
+        label: "Shift+End  Sel. end",
+        is_available: always,
+        handle: handlers::handle_shift_end,
+    },
     // ---- Tab -------------------------------------------------------------
-    Shortcut { key: Keycode::Tab, key2: None, ctrl: false, shift: false,
+    Shortcut {
+        key: Keycode::Tab,
+        key2: None,
+        ctrl: false,
+        shift: false,
         modes: GENERAL,
-        label: "Tab    Search", is_available: always, handle: handlers::handle_tab },
+        label: "Tab    Search",
+        is_available: always,
+        handle: handlers::handle_tab,
+    },
     // Insert Tab
-    Shortcut { key: Keycode::Tab, key2: None, ctrl: false, shift: false,
+    Shortcut {
+        key: Keycode::Tab,
+        key2: None,
+        ctrl: false,
+        shift: false,
         modes: &[Coordinate::Insert],
-        label: "Tab    Next field", is_available: always, handle: handlers::handle_tab },
+        label: "Tab    Next field",
+        is_available: always,
+        handle: handlers::handle_tab,
+    },
     // Scroll mode: Tab → prefix search
-    Shortcut { key: Keycode::Tab, key2: None, ctrl: false, shift: false,
+    Shortcut {
+        key: Keycode::Tab,
+        key2: None,
+        ctrl: false,
+        shift: false,
         modes: &[Coordinate::Scroll],
-        label: "Tab    Prefix search", is_available: always, handle: handlers::handle_tab },
-
+        label: "Tab    Prefix search",
+        is_available: always,
+        handle: handlers::handle_tab,
+    },
     // ---- Backspace -------------------------------------------------------
-    Shortcut { key: Keycode::Backspace, key2: None, ctrl: false, shift: false,
+    Shortcut {
+        key: Keycode::Backspace,
+        key2: None,
+        ctrl: false,
+        shift: false,
         modes: &[Coordinate::General],
-        label: "Bspc   Backspace", is_available: not_at_root, handle: handlers::handle_backspace },
-    Shortcut { key: Keycode::Backspace, key2: None, ctrl: false, shift: false,
-        modes: &[Coordinate::General,
-                 Coordinate::Insert, Coordinate::Normal,
-                 Coordinate::Visual,
-                 Coordinate::SimpleSearch, Coordinate::ExtendedSearch,
-                 Coordinate::Command, Coordinate::ScrollSearch, Coordinate::ScrollPrefixSearch, Coordinate::InputSearch,
-                 Coordinate::TabSwitcher],
-        label: "Bspc   Backspace", is_available: always, handle: handlers::handle_backspace },
-
+        label: "Bspc   Backspace",
+        is_available: not_at_root,
+        handle: handlers::handle_backspace,
+    },
+    Shortcut {
+        key: Keycode::Backspace,
+        key2: None,
+        ctrl: false,
+        shift: false,
+        modes: &[
+            Coordinate::General,
+            Coordinate::Insert,
+            Coordinate::Normal,
+            Coordinate::Visual,
+            Coordinate::SimpleSearch,
+            Coordinate::ExtendedSearch,
+            Coordinate::Command,
+            Coordinate::ScrollSearch,
+            Coordinate::ScrollPrefixSearch,
+            Coordinate::InputSearch,
+            Coordinate::TabSwitcher,
+        ],
+        label: "Bspc   Backspace",
+        is_available: always,
+        handle: handlers::handle_backspace,
+    },
     // ---- Delete (forward) ------------------------------------------------
-    Shortcut { key: Keycode::Delete, key2: None, ctrl: false, shift: false,
-        modes: &[Coordinate::Insert, Coordinate::Normal,
-                 Coordinate::Visual,
-                 Coordinate::SimpleSearch, Coordinate::ExtendedSearch,
-                 Coordinate::Command, Coordinate::ScrollSearch, Coordinate::ScrollPrefixSearch, Coordinate::InputSearch],
-        label: "Del    Delete fwd", is_available: always, handle: handlers::handle_delete_forward },
-
+    Shortcut {
+        key: Keycode::Delete,
+        key2: None,
+        ctrl: false,
+        shift: false,
+        modes: &[
+            Coordinate::Insert,
+            Coordinate::Normal,
+            Coordinate::Visual,
+            Coordinate::SimpleSearch,
+            Coordinate::ExtendedSearch,
+            Coordinate::Command,
+            Coordinate::ScrollSearch,
+            Coordinate::ScrollPrefixSearch,
+            Coordinate::InputSearch,
+        ],
+        label: "Del    Delete fwd",
+        is_available: always,
+        handle: handlers::handle_delete_forward,
+    },
     // ---- Return ----------------------------------------------------------
     // General: Enter → append — editor providers only, at any depth. Listed
     // first so it takes priority over the `handle_enter_general` rows below
@@ -604,394 +1024,955 @@ pub static SHORTCUTS: &[Shortcut] = &[
     // `avail_enter_op`'s `not_at_root`). In non-editor providers Enter never
     // appends: it falls through to the activate/follow-link/op rows, and is
     // inert at root.
-    Shortcut { key: Keycode::Return, key2: Some(Keycode::KpEnter), ctrl: false, shift: false,
+    Shortcut {
+        key: Keycode::Return,
+        key2: Some(Keycode::KpEnter),
+        ctrl: false,
+        shift: false,
         modes: &[Coordinate::General],
-        label: "Enter  Append", is_available: is_editor, handle: handlers::handle_append },
+        label: "Enter  Append",
+        is_available: is_editor,
+        handle: handlers::handle_append,
+    },
     // General: Enter → activate element
-    Shortcut { key: Keycode::Return, key2: Some(Keycode::KpEnter), ctrl: false, shift: false,
+    Shortcut {
+        key: Keycode::Return,
+        key2: Some(Keycode::KpEnter),
+        ctrl: false,
+        shift: false,
         modes: &[Coordinate::General],
-        label: "Enter  Follow link", is_available: avail_enter_follow_link,
-        handle: handlers::handle_enter_general },
-    Shortcut { key: Keycode::Return, key2: Some(Keycode::KpEnter), ctrl: false, shift: false,
+        label: "Enter  Follow link",
+        is_available: avail_enter_follow_link,
+        handle: handlers::handle_enter_general,
+    },
+    Shortcut {
+        key: Keycode::Return,
+        key2: Some(Keycode::KpEnter),
+        ctrl: false,
+        shift: false,
         modes: &[Coordinate::General],
-        label: "Enter  Activate", is_available: avail_enter_activate,
-        handle: handlers::handle_enter_general },
-    Shortcut { key: Keycode::Return, key2: Some(Keycode::KpEnter), ctrl: false, shift: false,
+        label: "Enter  Activate",
+        is_available: avail_enter_activate,
+        handle: handlers::handle_enter_general,
+    },
+    Shortcut {
+        key: Keycode::Return,
+        key2: Some(Keycode::KpEnter),
+        ctrl: false,
+        shift: false,
         modes: &[Coordinate::General],
-        label: "Enter  Open", is_available: avail_enter_op,
-        handle: handlers::handle_enter_general },
+        label: "Enter  Open",
+        is_available: avail_enter_op,
+        handle: handlers::handle_enter_general,
+    },
     // Search: Enter → go to the highlighted element in General mode (never
     // activates it — a checkbox/radio is toggled by a second Enter once the
     // cursor has landed).
-    Shortcut { key: Keycode::Return, key2: Some(Keycode::KpEnter), ctrl: false, shift: false,
+    Shortcut {
+        key: Keycode::Return,
+        key2: Some(Keycode::KpEnter),
+        ctrl: false,
+        shift: false,
         modes: SEARCH,
-        label: "Enter  Go to element", is_available: always, handle: handlers::handle_enter_search },
+        label: "Enter  Go to element",
+        is_available: always,
+        handle: handlers::handle_enter_search,
+    },
     // Command: Enter → execute command
-    Shortcut { key: Keycode::Return, key2: Some(Keycode::KpEnter), ctrl: false, shift: false,
+    Shortcut {
+        key: Keycode::Return,
+        key2: Some(Keycode::KpEnter),
+        ctrl: false,
+        shift: false,
         modes: &[Coordinate::Command],
-        label: "Enter  Execute", is_available: always, handle: handlers::handle_enter_command },
+        label: "Enter  Execute",
+        is_available: always,
+        handle: handlers::handle_enter_command,
+    },
     // Scroll modes: Enter → go to the highlighted element in General mode
-    Shortcut { key: Keycode::Return, key2: Some(Keycode::KpEnter), ctrl: false, shift: false,
-        modes: &[Coordinate::Scroll, Coordinate::ScrollSearch, Coordinate::ScrollPrefixSearch],
-        label: "Enter  Go to element", is_available: always, handle: handlers::handle_enter_scroll },
+    Shortcut {
+        key: Keycode::Return,
+        key2: Some(Keycode::KpEnter),
+        ctrl: false,
+        shift: false,
+        modes: &[
+            Coordinate::Scroll,
+            Coordinate::ScrollSearch,
+            Coordinate::ScrollPrefixSearch,
+        ],
+        label: "Enter  Go to element",
+        is_available: always,
+        handle: handlers::handle_enter_scroll,
+    },
     // Input search: Enter → back to Insert with the caret at the current match
-    Shortcut { key: Keycode::Return, key2: Some(Keycode::KpEnter), ctrl: false, shift: false,
+    Shortcut {
+        key: Keycode::Return,
+        key2: Some(Keycode::KpEnter),
+        ctrl: false,
+        shift: false,
         modes: &[Coordinate::InputSearch],
-        label: "Enter  Go to match", is_available: always, handle: handlers::handle_enter_input_search },
+        label: "Enter  Go to match",
+        is_available: always,
+        handle: handlers::handle_enter_input_search,
+    },
     // Close-tab confirmation: Enter → activate highlighted button
-    Shortcut { key: Keycode::Return, key2: Some(Keycode::KpEnter), ctrl: false, shift: false,
+    Shortcut {
+        key: Keycode::Return,
+        key2: Some(Keycode::KpEnter),
+        ctrl: false,
+        shift: false,
         modes: &[Coordinate::ConfirmCloseTab],
-        label: "Enter  Confirm", is_available: always, handle: handlers::handle_enter_confirm_close_tab },
+        label: "Enter  Confirm",
+        is_available: always,
+        handle: handlers::handle_enter_confirm_close_tab,
+    },
     // Tab switcher: Enter → switch to highlighted tab
-    Shortcut { key: Keycode::Return, key2: Some(Keycode::KpEnter), ctrl: false, shift: false,
+    Shortcut {
+        key: Keycode::Return,
+        key2: Some(Keycode::KpEnter),
+        ctrl: false,
+        shift: false,
         modes: &[Coordinate::TabSwitcher],
-        label: "Enter  Switch", is_available: always, handle: handlers::handle_enter_tab_switcher },
+        label: "Enter  Switch",
+        is_available: always,
+        handle: handlers::handle_enter_tab_switcher,
+    },
     // Insert modes: Ctrl+Return → newline
-    Shortcut { key: Keycode::Return, key2: Some(Keycode::KpEnter), ctrl: true, shift: false,
+    Shortcut {
+        key: Keycode::Return,
+        key2: Some(Keycode::KpEnter),
+        ctrl: true,
+        shift: false,
         modes: &[Coordinate::Insert],
-        label: "Ctrl+Enter Newline", is_available: always, handle: handlers::handle_ctrl_enter_insert },
+        label: "Ctrl+Enter Newline",
+        is_available: always,
+        handle: handlers::handle_ctrl_enter_insert,
+    },
     // Normal: Return → commit + escape (no disk write)
-    Shortcut { key: Keycode::Return, key2: Some(Keycode::KpEnter), ctrl: false, shift: false,
+    Shortcut {
+        key: Keycode::Return,
+        key2: Some(Keycode::KpEnter),
+        ctrl: false,
+        shift: false,
         modes: &[Coordinate::Normal],
-        label: "Enter  Confirm", is_available: always, handle: handlers::handle_return_in_normal },
+        label: "Enter  Confirm",
+        is_available: always,
+        handle: handlers::handle_return_in_normal,
+    },
     // Insert / Insert: Return → commit edit (disk write via provider)
-    Shortcut { key: Keycode::Return, key2: Some(Keycode::KpEnter), ctrl: false, shift: false,
+    Shortcut {
+        key: Keycode::Return,
+        key2: Some(Keycode::KpEnter),
+        ctrl: false,
+        shift: false,
         modes: &[Coordinate::Insert],
-        label: "Enter  Confirm", is_available: always, handle: handlers::handle_enter_insert },
-
+        label: "Enter  Confirm",
+        is_available: always,
+        handle: handlers::handle_enter_insert,
+    },
     // ---- Colon / Semicolon+Shift (command mode entry) --------------------
     // `handle_colon` branches on the provider itself; these rows differ only in
     // the hint they advertise. The terminal has no command palette — its `:`
     // opens a shell in the focused folder — so it gets its own label. Inside the
     // shell no row matches, so `:` does not dispatch at all: Escape is the only
     // way back to the folders.
-    Shortcut { key: Keycode::Semicolon, key2: None, ctrl: false, shift: true,
+    Shortcut {
+        key: Keycode::Semicolon,
+        key2: None,
+        ctrl: false,
+        shift: true,
         modes: &[Coordinate::General],
-        label: ":      Shell", is_available: terminal_browsing, handle: handlers::handle_colon },
-    Shortcut { key: Keycode::Semicolon, key2: None, ctrl: false, shift: true,
+        label: ":      Shell",
+        is_available: terminal_browsing,
+        handle: handlers::handle_colon,
+    },
+    Shortcut {
+        key: Keycode::Semicolon,
+        key2: None,
+        ctrl: false,
+        shift: true,
         modes: &[Coordinate::General],
-        label: ":      Command", is_available: not_terminal, handle: handlers::handle_colon },
-    Shortcut { key: Keycode::Colon, key2: None, ctrl: false, shift: false,
+        label: ":      Command",
+        is_available: not_terminal,
+        handle: handlers::handle_colon,
+    },
+    Shortcut {
+        key: Keycode::Colon,
+        key2: None,
+        ctrl: false,
+        shift: false,
         modes: &[Coordinate::General],
-        label: ":      Shell", is_available: terminal_browsing, handle: handlers::handle_colon },
-    Shortcut { key: Keycode::Colon, key2: None, ctrl: false, shift: false,
+        label: ":      Shell",
+        is_available: terminal_browsing,
+        handle: handlers::handle_colon,
+    },
+    Shortcut {
+        key: Keycode::Colon,
+        key2: None,
+        ctrl: false,
+        shift: false,
         modes: &[Coordinate::General],
-        label: ":      Command", is_available: not_terminal, handle: handlers::handle_colon },
-
+        label: ":      Command",
+        is_available: not_terminal,
+        handle: handlers::handle_colon,
+    },
     // ---- I / A (enter insert/append mode) --------------------------------
     // Editor provider: i/a enter Insert so commit_edit fires on Enter → writes to disk.
     // These rows must precede the generic avail_insert_on_input rows to take priority.
-    Shortcut { key: Keycode::I, key2: None, ctrl: false, shift: false,
+    Shortcut {
+        key: Keycode::I,
+        key2: None,
+        ctrl: false,
+        shift: false,
         modes: &[Coordinate::General],
-        label: "I      Edit", is_available: avail_editor_edit, handle: handlers::handle_editor_provider_i },
-    Shortcut { key: Keycode::A, key2: None, ctrl: false, shift: false,
+        label: "I      Edit",
+        is_available: avail_editor_edit,
+        handle: handlers::handle_editor_provider_i,
+    },
+    Shortcut {
+        key: Keycode::A,
+        key2: None,
+        ctrl: false,
+        shift: false,
         modes: &[Coordinate::General],
-        label: "A      Append", is_available: avail_editor_edit, handle: handlers::handle_editor_provider_a },
+        label: "A      Append",
+        is_available: avail_editor_edit,
+        handle: handlers::handle_editor_provider_a,
+    },
     // Generic i/a for filebrowser and other providers with <input> elements.
-    Shortcut { key: Keycode::I, key2: None, ctrl: false, shift: false,
+    Shortcut {
+        key: Keycode::I,
+        key2: None,
+        ctrl: false,
+        shift: false,
         modes: GENERAL,
-        label: "I      Edit input", is_available: avail_i_edit_hint, handle: handlers::handle_i },
-    Shortcut { key: Keycode::I, key2: None, ctrl: false, shift: false,
+        label: "I      Edit input",
+        is_available: avail_i_edit_hint,
+        handle: handlers::handle_i,
+    },
+    Shortcut {
+        key: Keycode::I,
+        key2: None,
+        ctrl: false,
+        shift: false,
         modes: GENERAL,
-        label: "I      Edit input", is_available: avail_insert_on_input, handle: handlers::handle_i },
-    Shortcut { key: Keycode::A, key2: None, ctrl: false, shift: false,
+        label: "I      Edit input",
+        is_available: avail_insert_on_input,
+        handle: handlers::handle_i,
+    },
+    Shortcut {
+        key: Keycode::A,
+        key2: None,
+        ctrl: false,
+        shift: false,
         modes: GENERAL,
-        label: "A      Append", is_available: avail_a_edit_hint, handle: handlers::handle_a },
-    Shortcut { key: Keycode::A, key2: None, ctrl: false, shift: false,
+        label: "A      Append",
+        is_available: avail_a_edit_hint,
+        handle: handlers::handle_a,
+    },
+    Shortcut {
+        key: Keycode::A,
+        key2: None,
+        ctrl: false,
+        shift: false,
         modes: GENERAL,
-        label: "A      Append", is_available: avail_insert_on_input, handle: handlers::handle_a },
-
+        label: "A      Append",
+        is_available: avail_insert_on_input,
+        handle: handlers::handle_a,
+    },
     // ---- Ctrl+I / Ctrl+A (structural insert/append) ----------------------
     // General: insert/append placeholder
-    Shortcut { key: Keycode::I, key2: None, ctrl: true, shift: false,
+    Shortcut {
+        key: Keycode::I,
+        key2: None,
+        ctrl: true,
+        shift: false,
         modes: &[Coordinate::General],
-        label: "Ctrl+I Insert before", is_available: avail_structural_edit,
-        handle: handlers::handle_ctrl_i_general },
-    Shortcut { key: Keycode::A, key2: None, ctrl: true, shift: false,
+        label: "Ctrl+I Insert before",
+        is_available: avail_structural_edit,
+        handle: handlers::handle_ctrl_i_general,
+    },
+    Shortcut {
+        key: Keycode::A,
+        key2: None,
+        ctrl: true,
+        shift: false,
         modes: &[Coordinate::General],
-        label: "Ctrl+A Insert after", is_available: avail_structural_edit,
-        handle: handlers::handle_ctrl_a_general },
+        label: "Ctrl+A Insert after",
+        is_available: avail_structural_edit,
+        handle: handlers::handle_ctrl_a_general,
+    },
     // General, editor provider: custom insert/append (file-line or dir-placeholder).
     // Must precede the generic ctrl_i_editor / ctrl_a_editor rows.
-    Shortcut { key: Keycode::I, key2: None, ctrl: true, shift: false,
+    Shortcut {
+        key: Keycode::I,
+        key2: None,
+        ctrl: true,
+        shift: false,
         modes: &[Coordinate::General],
-        label: "Ctrl+I Insert before", is_available: avail_editor_edit,
-        handle: handlers::handle_editor_ctrl_i },
-    Shortcut { key: Keycode::A, key2: None, ctrl: true, shift: false,
+        label: "Ctrl+I Insert before",
+        is_available: avail_editor_edit,
+        handle: handlers::handle_editor_ctrl_i,
+    },
+    Shortcut {
+        key: Keycode::A,
+        key2: None,
+        ctrl: true,
+        shift: false,
         modes: &[Coordinate::General],
-        label: "Ctrl+A Insert after", is_available: avail_editor_edit,
-        handle: handlers::handle_editor_ctrl_a },
+        label: "Ctrl+A Insert after",
+        is_available: avail_editor_edit,
+        handle: handlers::handle_editor_ctrl_a,
+    },
     // Insert: Ctrl+Shift+I/A — escape, insert/append, re-enter insert
-    Shortcut { key: Keycode::I, key2: None, ctrl: true, shift: true,
+    Shortcut {
+        key: Keycode::I,
+        key2: None,
+        ctrl: true,
+        shift: true,
         modes: &[Coordinate::Insert],
-        label: "Ctrl+Shift+I Insert before", is_available: avail_structural_edit,
-        handle: handlers::handle_ctrl_shift_i_insert },
-    Shortcut { key: Keycode::A, key2: None, ctrl: true, shift: true,
+        label: "Ctrl+Shift+I Insert before",
+        is_available: avail_structural_edit,
+        handle: handlers::handle_ctrl_shift_i_insert,
+    },
+    Shortcut {
+        key: Keycode::A,
+        key2: None,
+        ctrl: true,
+        shift: true,
         modes: &[Coordinate::Insert],
-        label: "Ctrl+Shift+A Insert after", is_available: avail_structural_edit,
-        handle: handlers::handle_ctrl_shift_a_insert },
+        label: "Ctrl+Shift+A Insert after",
+        is_available: avail_structural_edit,
+        handle: handlers::handle_ctrl_shift_a_insert,
+    },
     // Search/Insert/Command: Ctrl+A → select all
-    Shortcut { key: Keycode::A, key2: None, ctrl: true, shift: false,
+    Shortcut {
+        key: Keycode::A,
+        key2: None,
+        ctrl: true,
+        shift: false,
         modes: TEXT,
-        label: "Ctrl+A Select all", is_available: always, handle: handlers::handle_select_all },
-
+        label: "Ctrl+A Select all",
+        is_available: always,
+        handle: handlers::handle_select_all,
+    },
     // ---- D ---------------------------------------------------------------
-    Shortcut { key: Keycode::D, key2: None, ctrl: false, shift: false,
+    Shortcut {
+        key: Keycode::D,
+        key2: None,
+        ctrl: false,
+        shift: false,
         modes: &[Coordinate::General],
-        label: "D      Dashboard", is_available: has_dashboard,
-        handle: handlers::handle_dashboard },
-    Shortcut { key: Keycode::D, key2: None, ctrl: false, shift: false,
+        label: "D      Dashboard",
+        is_available: has_dashboard,
+        handle: handlers::handle_dashboard,
+    },
+    Shortcut {
+        key: Keycode::D,
+        key2: None,
+        ctrl: false,
+        shift: false,
         modes: &[Coordinate::General],
-        label: "", is_available: always, handle: handlers::handle_dashboard },
-
+        label: "",
+        is_available: always,
+        handle: handlers::handle_dashboard,
+    },
     // ---- S (enter scroll mode) -------------------------------------------
     // Suppressed for editor providers (which manage their own buffer view).
-    Shortcut { key: Keycode::S, key2: None, ctrl: false, shift: false,
+    Shortcut {
+        key: Keycode::S,
+        key2: None,
+        ctrl: false,
+        shift: false,
         modes: &[Coordinate::General],
-        label: "S      Scroll", is_available: avail_scroll_key, handle: handlers::handle_s },
-
+        label: "S      Scroll",
+        is_available: avail_scroll_key,
+        handle: handlers::handle_s,
+    },
     // ---- M (enter meta/hint screen) --------------------------------------
     // General mode only — including when the active provider is an editor
     // (after Escape from Insert).
-    Shortcut { key: Keycode::M, key2: None, ctrl: false, shift: false,
+    Shortcut {
+        key: Keycode::M,
+        key2: None,
+        ctrl: false,
+        shift: false,
         modes: &[Coordinate::General],
-        label: "M      Meta", is_available: always, handle: handlers::handle_meta },
-
+        label: "M      Meta",
+        is_available: always,
+        handle: handlers::handle_meta,
+    },
     // ---- Z (per-tab Timeline inspection view) ----------------------------
     // General mode only. Ctrl+Z / Ctrl+Shift+Z (undo/redo) are bound below.
-    Shortcut { key: Keycode::Z, key2: None, ctrl: false, shift: false,
+    Shortcut {
+        key: Keycode::Z,
+        key2: None,
+        ctrl: false,
+        shift: false,
         modes: &[Coordinate::General],
-        label: "Z      Timeline", is_available: always, handle: handlers::handle_z },
-
+        label: "Z      Timeline",
+        is_available: always,
+        handle: handlers::handle_z,
+    },
     // ---- W (whereami: speak the focus position) --------------------------
     // General mode only. Announces the header line plus the breadcrumb path to
     // the current focus. Plain `w` only — Ctrl+W (close tab) is bound below.
-    Shortcut { key: Keycode::W, key2: None, ctrl: false, shift: false,
+    Shortcut {
+        key: Keycode::W,
+        key2: None,
+        ctrl: false,
+        shift: false,
         modes: &[Coordinate::General],
-        label: "w      Where am I", is_available: always, handle: handlers::handle_speak_position },
-
+        label: "w      Where am I",
+        is_available: always,
+        handle: handlers::handle_speak_position,
+    },
     // ---- Ctrl+D / Delete key → provider delete command (email message delete) ----
     // These must come before the editor/filebrowser Ctrl+D rows so they win when
     // the active provider advertises "delete" (e.g. email client in folder/message view).
-    Shortcut { key: Keycode::D, key2: None, ctrl: true, shift: false,
+    Shortcut {
+        key: Keycode::D,
+        key2: None,
+        ctrl: true,
+        shift: false,
         modes: &[Coordinate::General],
-        label: "Ctrl+D Delete", is_available: avail_provider_has_delete,
-        handle: handlers::invoke_provider_delete },
-    Shortcut { key: Keycode::Delete, key2: None, ctrl: false, shift: false,
+        label: "Ctrl+D Delete",
+        is_available: avail_provider_has_delete,
+        handle: handlers::invoke_provider_delete,
+    },
+    Shortcut {
+        key: Keycode::Delete,
+        key2: None,
+        ctrl: false,
+        shift: false,
         modes: &[Coordinate::General],
-        label: "Del    Delete", is_available: avail_provider_has_delete,
-        handle: handlers::invoke_provider_delete },
-
+        label: "Del    Delete",
+        is_available: avail_provider_has_delete,
+        handle: handlers::invoke_provider_delete,
+    },
     // ---- Ctrl+D / Delete in General for editor provider -----------
     // Routes to handle_file_delete so the provider's delete_item is called (writes to disk).
     // Must precede the generic delete_editor rows so editor provider wins.
-    Shortcut { key: Keycode::D, key2: None, ctrl: true, shift: false,
+    Shortcut {
+        key: Keycode::D,
+        key2: None,
+        ctrl: true,
+        shift: false,
         modes: &[Coordinate::General],
-        label: "Ctrl+D Delete", is_available: avail_editor_edit,
-        handle: handlers::handle_file_delete },
-    Shortcut { key: Keycode::Delete, key2: None, ctrl: false, shift: false,
+        label: "Ctrl+D Delete",
+        is_available: avail_editor_edit,
+        handle: handlers::handle_file_delete,
+    },
+    Shortcut {
+        key: Keycode::Delete,
+        key2: None,
+        ctrl: false,
+        shift: false,
         modes: &[Coordinate::General],
-        label: "Del    Delete", is_available: avail_editor_edit,
-        handle: handlers::handle_file_delete },
-
+        label: "Del    Delete",
+        is_available: avail_editor_edit,
+        handle: handlers::handle_file_delete,
+    },
     // ---- Ctrl+D (delete FFON element in General) ------------------
     // Only fires for compose body / has_add_element_sibling providers.
     // Filebrowser/editor have dedicated file-delete rows above.
-    Shortcut { key: Keycode::D, key2: None, ctrl: true, shift: false,
+    Shortcut {
+        key: Keycode::D,
+        key2: None,
+        ctrl: true,
+        shift: false,
         modes: &[Coordinate::General],
-        label: "Ctrl+D Delete", is_available: avail_ffon_delete,
-        handle: delete_editor },
+        label: "Ctrl+D Delete",
+        is_available: avail_ffon_delete,
+        handle: delete_editor,
+    },
     // General Ctrl+D → compose body element delete (before filebrowser entry)
-    Shortcut { key: Keycode::D, key2: None, ctrl: true, shift: false,
+    Shortcut {
+        key: Keycode::D,
+        key2: None,
+        ctrl: true,
+        shift: false,
         modes: &[Coordinate::General],
-        label: "Ctrl+D Delete", is_available: avail_compose_body_edit,
-        handle: handlers::handle_delete_body_element },
+        label: "Ctrl+D Delete",
+        is_available: avail_compose_body_edit,
+        handle: handlers::handle_delete_body_element,
+    },
     // General Ctrl+D → file delete
-    Shortcut { key: Keycode::D, key2: None, ctrl: true, shift: false,
+    Shortcut {
+        key: Keycode::D,
+        key2: None,
+        ctrl: true,
+        shift: false,
         modes: &[Coordinate::General],
-        label: "Ctrl+D Delete", is_available: avail_file_delete, handle: handlers::handle_file_delete },
-
+        label: "Ctrl+D Delete",
+        is_available: avail_file_delete,
+        handle: handlers::handle_file_delete,
+    },
     // ---- Delete key (file delete in General) --------------------
     // Compose body delete (before filebrowser entry)
-    Shortcut { key: Keycode::Delete, key2: None, ctrl: false, shift: false,
+    Shortcut {
+        key: Keycode::Delete,
+        key2: None,
+        ctrl: false,
+        shift: false,
         modes: &[Coordinate::General],
-        label: "Del    Delete", is_available: avail_compose_body_edit,
-        handle: handlers::handle_delete_body_element },
-    Shortcut { key: Keycode::Delete, key2: None, ctrl: false, shift: false,
+        label: "Del    Delete",
+        is_available: avail_compose_body_edit,
+        handle: handlers::handle_delete_body_element,
+    },
+    Shortcut {
+        key: Keycode::Delete,
+        key2: None,
+        ctrl: false,
+        shift: false,
         modes: &[Coordinate::General],
-        label: "Del    Delete", is_available: avail_file_delete,
-        handle: handlers::handle_file_delete },
-
+        label: "Del    Delete",
+        is_available: avail_file_delete,
+        handle: handlers::handle_file_delete,
+    },
     // ---- Ctrl+X / C / V -------------------------------------------------
     // General: compose body clipboard (before filebrowser entries)
-    Shortcut { key: Keycode::X, key2: None, ctrl: true, shift: false,
+    Shortcut {
+        key: Keycode::X,
+        key2: None,
+        ctrl: true,
+        shift: false,
         modes: &[Coordinate::General],
-        label: "Ctrl+X Cut", is_available: avail_compose_body_edit,
-        handle: handlers::handle_ctrl_x },
-    Shortcut { key: Keycode::C, key2: None, ctrl: true, shift: false,
+        label: "Ctrl+X Cut",
+        is_available: avail_compose_body_edit,
+        handle: handlers::handle_ctrl_x,
+    },
+    Shortcut {
+        key: Keycode::C,
+        key2: None,
+        ctrl: true,
+        shift: false,
         modes: &[Coordinate::General],
-        label: "Ctrl+C Copy", is_available: avail_compose_body_edit,
-        handle: handlers::handle_ctrl_c },
-    Shortcut { key: Keycode::V, key2: None, ctrl: true, shift: false,
+        label: "Ctrl+C Copy",
+        is_available: avail_compose_body_edit,
+        handle: handlers::handle_ctrl_c,
+    },
+    Shortcut {
+        key: Keycode::V,
+        key2: None,
+        ctrl: true,
+        shift: false,
         modes: &[Coordinate::General],
-        label: "Ctrl+V Paste", is_available: avail_compose_body_edit,
-        handle: handlers::handle_ctrl_v },
+        label: "Ctrl+V Paste",
+        is_available: avail_compose_body_edit,
+        handle: handlers::handle_ctrl_v,
+    },
     // General: filebrowser file clipboard (show hint)
-    Shortcut { key: Keycode::X, key2: None, ctrl: true, shift: false,
+    Shortcut {
+        key: Keycode::X,
+        key2: None,
+        ctrl: true,
+        shift: false,
         modes: &[Coordinate::General],
-        label: "Ctrl+X Cut", is_available: avail_file_clipboard,
-        handle: handlers::handle_ctrl_x },
-    Shortcut { key: Keycode::V, key2: None, ctrl: true, shift: false,
+        label: "Ctrl+X Cut",
+        is_available: avail_file_clipboard,
+        handle: handlers::handle_ctrl_x,
+    },
+    Shortcut {
+        key: Keycode::V,
+        key2: None,
+        ctrl: true,
+        shift: false,
         modes: &[Coordinate::General],
-        label: "Ctrl+V Paste", is_available: avail_file_clipboard,
-        handle: handlers::handle_ctrl_v },
+        label: "Ctrl+V Paste",
+        is_available: avail_file_clipboard,
+        handle: handlers::handle_ctrl_v,
+    },
     // Copy: available for any focused element (all providers, root included).
-    Shortcut { key: Keycode::C, key2: None, ctrl: true, shift: false,
+    Shortcut {
+        key: Keycode::C,
+        key2: None,
+        ctrl: true,
+        shift: false,
         modes: &[Coordinate::General],
-        label: "Ctrl+C Copy", is_available: avail_copy,
-        handle: handlers::handle_ctrl_c },
+        label: "Ctrl+C Copy",
+        is_available: avail_copy,
+        handle: handlers::handle_ctrl_c,
+    },
     // Copy underlying value (link URL / image path / input value).
-    Shortcut { key: Keycode::C, key2: None, ctrl: true, shift: true,
+    Shortcut {
+        key: Keycode::C,
+        key2: None,
+        ctrl: true,
+        shift: true,
         modes: &[Coordinate::General],
-        label: "Ctrl+Shift+C Copy URL/value", is_available: avail_copy_value,
-        handle: handlers::handle_ctrl_shift_c },
+        label: "Ctrl+Shift+C Copy URL/value",
+        is_available: avail_copy_value,
+        handle: handlers::handle_ctrl_shift_c,
+    },
     // General + text modes: clipboard (dispatch always, hint for structural contexts)
-    Shortcut { key: Keycode::X, key2: None, ctrl: true, shift: false,
+    Shortcut {
+        key: Keycode::X,
+        key2: None,
+        ctrl: true,
+        shift: false,
         modes: &[Coordinate::General],
-        label: "Ctrl+X Cut", is_available: avail_structural_edit,
-        handle: handlers::handle_ctrl_x },
-    Shortcut { key: Keycode::X, key2: None, ctrl: true, shift: false,
+        label: "Ctrl+X Cut",
+        is_available: avail_structural_edit,
+        handle: handlers::handle_ctrl_x,
+    },
+    Shortcut {
+        key: Keycode::X,
+        key2: None,
+        ctrl: true,
+        shift: false,
         modes: TEXT,
-        label: "Ctrl+X Cut", is_available: always, handle: handlers::handle_ctrl_x },
-    Shortcut { key: Keycode::C, key2: None, ctrl: true, shift: false,
+        label: "Ctrl+X Cut",
+        is_available: always,
+        handle: handlers::handle_ctrl_x,
+    },
+    Shortcut {
+        key: Keycode::C,
+        key2: None,
+        ctrl: true,
+        shift: false,
         modes: TEXT,
-        label: "Ctrl+C Copy", is_available: always, handle: handlers::handle_ctrl_c },
-    Shortcut { key: Keycode::V, key2: None, ctrl: true, shift: false,
+        label: "Ctrl+C Copy",
+        is_available: always,
+        handle: handlers::handle_ctrl_c,
+    },
+    Shortcut {
+        key: Keycode::V,
+        key2: None,
+        ctrl: true,
+        shift: false,
         modes: &[Coordinate::General],
-        label: "Ctrl+V Paste", is_available: avail_structural_edit,
-        handle: handlers::handle_ctrl_v },
-    Shortcut { key: Keycode::V, key2: None, ctrl: true, shift: false,
+        label: "Ctrl+V Paste",
+        is_available: avail_structural_edit,
+        handle: handlers::handle_ctrl_v,
+    },
+    Shortcut {
+        key: Keycode::V,
+        key2: None,
+        ctrl: true,
+        shift: false,
         modes: TEXT,
-        label: "Ctrl+V Paste", is_available: always, handle: handlers::handle_ctrl_v },
-
+        label: "Ctrl+V Paste",
+        is_available: always,
+        handle: handlers::handle_ctrl_v,
+    },
     // ---- Ctrl+F (extended search) ----------------------------------------
-    Shortcut { key: Keycode::F, key2: None, ctrl: true, shift: false,
-        modes: &[Coordinate::General,
-                 Coordinate::Insert, Coordinate::Normal,
-                 Coordinate::Visual,
-                 Coordinate::SimpleSearch, Coordinate::ExtendedSearch,
-                 Coordinate::Command, Coordinate::Scroll, Coordinate::ScrollSearch, Coordinate::ScrollPrefixSearch,
-                 Coordinate::InputSearch],
-        label: "Ctrl+F Extended search", is_available: always,
-        handle: handlers::handle_ctrl_f },
-
+    Shortcut {
+        key: Keycode::F,
+        key2: None,
+        ctrl: true,
+        shift: false,
+        modes: &[
+            Coordinate::General,
+            Coordinate::Insert,
+            Coordinate::Normal,
+            Coordinate::Visual,
+            Coordinate::SimpleSearch,
+            Coordinate::ExtendedSearch,
+            Coordinate::Command,
+            Coordinate::Scroll,
+            Coordinate::ScrollSearch,
+            Coordinate::ScrollPrefixSearch,
+            Coordinate::InputSearch,
+        ],
+        label: "Ctrl+F Extended search",
+        is_available: always,
+        handle: handlers::handle_ctrl_f,
+    },
     // ---- Ctrl+Z / Ctrl+Shift+Z (undo / redo) ----------------------------
-    Shortcut { key: Keycode::Z, key2: None, ctrl: true, shift: false,
+    Shortcut {
+        key: Keycode::Z,
+        key2: None,
+        ctrl: true,
+        shift: false,
         modes: &[Coordinate::General],
-        label: "Ctrl+Z Undo", is_available: not_at_root, handle: handlers::handle_undo },
-    Shortcut { key: Keycode::Z, key2: None, ctrl: true, shift: false,
+        label: "Ctrl+Z Undo",
+        is_available: not_at_root,
+        handle: handlers::handle_undo,
+    },
+    Shortcut {
+        key: Keycode::Z,
+        key2: None,
+        ctrl: true,
+        shift: false,
         modes: UNDO_MODES_ALL,
-        label: "Ctrl+Z Undo", is_available: always, handle: handlers::handle_undo },
-    Shortcut { key: Keycode::Z, key2: None, ctrl: true, shift: true,
+        label: "Ctrl+Z Undo",
+        is_available: always,
+        handle: handlers::handle_undo,
+    },
+    Shortcut {
+        key: Keycode::Z,
+        key2: None,
+        ctrl: true,
+        shift: true,
         modes: &[Coordinate::General],
-        label: "Ctrl+Shift+Z Redo", is_available: not_at_root, handle: handlers::handle_redo },
-    Shortcut { key: Keycode::Z, key2: None, ctrl: true, shift: true,
+        label: "Ctrl+Shift+Z Redo",
+        is_available: not_at_root,
+        handle: handlers::handle_redo,
+    },
+    Shortcut {
+        key: Keycode::Z,
+        key2: None,
+        ctrl: true,
+        shift: true,
         modes: UNDO_MODES_ALL,
-        label: "Ctrl+Shift+Z Redo", is_available: always, handle: handlers::handle_redo },
-
+        label: "Ctrl+Shift+Z Redo",
+        is_available: always,
+        handle: handlers::handle_redo,
+    },
     // ---- Ctrl+U (apply staged self-update) -------------------------------
     // Visible only when a staged update is actually pending; the header
     // banner is the discoverability hint.
-    Shortcut { key: Keycode::U, key2: None, ctrl: true, shift: false,
+    Shortcut {
+        key: Keycode::U,
+        key2: None,
+        ctrl: true,
+        shift: false,
         modes: GENERAL,
         label: "Ctrl+U Install update",
         is_available: update_pending,
-        handle: handlers::handle_apply_update },
-
+        handle: handlers::handle_apply_update,
+    },
     // ---- F5 (refresh) ----------------------------------------------------
-    Shortcut { key: Keycode::F5, key2: None, ctrl: false, shift: false,
+    Shortcut {
+        key: Keycode::F5,
+        key2: None,
+        ctrl: false,
+        shift: false,
         modes: &[Coordinate::General],
-        label: "F5     Refresh", is_available: always, handle: handlers::handle_f5 },
-    Shortcut { key: Keycode::F5, key2: None, ctrl: false, shift: false,
+        label: "F5     Refresh",
+        is_available: always,
+        handle: handlers::handle_f5,
+    },
+    Shortcut {
+        key: Keycode::F5,
+        key2: None,
+        ctrl: false,
+        shift: false,
         modes: &[Coordinate::General],
-        label: "F5     Refresh", is_available: always, handle: handlers::handle_f5 },
-
+        label: "F5     Refresh",
+        is_available: always,
+        handle: handlers::handle_f5,
+    },
     // ---- Tab management (Ctrl+T / Ctrl+W / Ctrl+Tab / Ctrl+Shift+Tab / Ctrl+1..9)
-    Shortcut { key: Keycode::T, key2: None, ctrl: true, shift: false,
+    Shortcut {
+        key: Keycode::T,
+        key2: None,
+        ctrl: true,
+        shift: false,
         modes: GENERAL,
-        label: "Ctrl+T New tab", is_available: always, handle: handlers::handle_tab_new },
-    Shortcut { key: Keycode::W, key2: None, ctrl: true, shift: false,
+        label: "Ctrl+T New tab",
+        is_available: always,
+        handle: handlers::handle_tab_new,
+    },
+    Shortcut {
+        key: Keycode::W,
+        key2: None,
+        ctrl: true,
+        shift: false,
         modes: GENERAL,
-        label: "Ctrl+W Close tab", is_available: more_than_one_tab,
-        handle: handlers::handle_tab_close },
+        label: "Ctrl+W Close tab",
+        is_available: more_than_one_tab,
+        handle: handlers::handle_tab_close,
+    },
     // Ctrl+Tab / Ctrl+Shift+Tab open the held MRU switcher and walk it; they
     // stay active inside TabSwitcher so repeated taps keep advancing. Releasing
     // Ctrl commits (handled via Event::KeyUp, not the shortcut table).
-    Shortcut { key: Keycode::Tab, key2: None, ctrl: true, shift: false,
+    Shortcut {
+        key: Keycode::Tab,
+        key2: None,
+        ctrl: true,
+        shift: false,
         modes: &[Coordinate::General, Coordinate::TabSwitcher],
-        label: "Ctrl+Tab Next tab", is_available: more_than_one_tab,
-        handle: handlers::handle_ctrl_tab },
-    Shortcut { key: Keycode::Tab, key2: None, ctrl: true, shift: true,
+        label: "Ctrl+Tab Next tab",
+        is_available: more_than_one_tab,
+        handle: handlers::handle_ctrl_tab,
+    },
+    Shortcut {
+        key: Keycode::Tab,
+        key2: None,
+        ctrl: true,
+        shift: true,
         modes: &[Coordinate::General, Coordinate::TabSwitcher],
-        label: "Ctrl+Shift+Tab Prev tab", is_available: more_than_one_tab,
-        handle: handlers::handle_ctrl_shift_tab },
+        label: "Ctrl+Shift+Tab Prev tab",
+        is_available: more_than_one_tab,
+        handle: handlers::handle_ctrl_shift_tab,
+    },
     // t (general mode) — open the sticky MRU tab switcher palette.
-    Shortcut { key: Keycode::T, key2: None, ctrl: false, shift: false,
+    Shortcut {
+        key: Keycode::T,
+        key2: None,
+        ctrl: false,
+        shift: false,
         modes: GENERAL,
-        label: "t      Switch tab", is_available: more_than_one_tab,
-        handle: handlers::handle_t_tab_switcher },
+        label: "t      Switch tab",
+        is_available: more_than_one_tab,
+        handle: handlers::handle_t_tab_switcher,
+    },
     // c (general mode) — open the window-controls palette (minimize/maximize/close).
-    Shortcut { key: Keycode::C, key2: None, ctrl: false, shift: false,
+    Shortcut {
+        key: Keycode::C,
+        key2: None,
+        ctrl: false,
+        shift: false,
         modes: GENERAL,
-        label: "c      Controls", is_available: always,
-        handle: handlers::handle_controls },
+        label: "c      Controls",
+        is_available: always,
+        handle: handlers::handle_controls,
+    },
     // Ctrl+1..9 — labels empty (Ctrl+Tab/Ctrl+Shift+Tab already advertise tab nav)
-    Shortcut { key: Keycode::_1, key2: None, ctrl: true, shift: false,
-        modes: GENERAL, label: "", is_available: always, handle: handlers::handle_tab_select_1 },
-    Shortcut { key: Keycode::_2, key2: None, ctrl: true, shift: false,
-        modes: GENERAL, label: "", is_available: always, handle: handlers::handle_tab_select_2 },
-    Shortcut { key: Keycode::_3, key2: None, ctrl: true, shift: false,
-        modes: GENERAL, label: "", is_available: always, handle: handlers::handle_tab_select_3 },
-    Shortcut { key: Keycode::_4, key2: None, ctrl: true, shift: false,
-        modes: GENERAL, label: "", is_available: always, handle: handlers::handle_tab_select_4 },
-    Shortcut { key: Keycode::_5, key2: None, ctrl: true, shift: false,
-        modes: GENERAL, label: "", is_available: always, handle: handlers::handle_tab_select_5 },
-    Shortcut { key: Keycode::_6, key2: None, ctrl: true, shift: false,
-        modes: GENERAL, label: "", is_available: always, handle: handlers::handle_tab_select_6 },
-    Shortcut { key: Keycode::_7, key2: None, ctrl: true, shift: false,
-        modes: GENERAL, label: "", is_available: always, handle: handlers::handle_tab_select_7 },
-    Shortcut { key: Keycode::_8, key2: None, ctrl: true, shift: false,
-        modes: GENERAL, label: "", is_available: always, handle: handlers::handle_tab_select_8 },
-    Shortcut { key: Keycode::_9, key2: None, ctrl: true, shift: false,
-        modes: GENERAL, label: "", is_available: always, handle: handlers::handle_tab_select_9 },
-
+    Shortcut {
+        key: Keycode::_1,
+        key2: None,
+        ctrl: true,
+        shift: false,
+        modes: GENERAL,
+        label: "",
+        is_available: always,
+        handle: handlers::handle_tab_select_1,
+    },
+    Shortcut {
+        key: Keycode::_2,
+        key2: None,
+        ctrl: true,
+        shift: false,
+        modes: GENERAL,
+        label: "",
+        is_available: always,
+        handle: handlers::handle_tab_select_2,
+    },
+    Shortcut {
+        key: Keycode::_3,
+        key2: None,
+        ctrl: true,
+        shift: false,
+        modes: GENERAL,
+        label: "",
+        is_available: always,
+        handle: handlers::handle_tab_select_3,
+    },
+    Shortcut {
+        key: Keycode::_4,
+        key2: None,
+        ctrl: true,
+        shift: false,
+        modes: GENERAL,
+        label: "",
+        is_available: always,
+        handle: handlers::handle_tab_select_4,
+    },
+    Shortcut {
+        key: Keycode::_5,
+        key2: None,
+        ctrl: true,
+        shift: false,
+        modes: GENERAL,
+        label: "",
+        is_available: always,
+        handle: handlers::handle_tab_select_5,
+    },
+    Shortcut {
+        key: Keycode::_6,
+        key2: None,
+        ctrl: true,
+        shift: false,
+        modes: GENERAL,
+        label: "",
+        is_available: always,
+        handle: handlers::handle_tab_select_6,
+    },
+    Shortcut {
+        key: Keycode::_7,
+        key2: None,
+        ctrl: true,
+        shift: false,
+        modes: GENERAL,
+        label: "",
+        is_available: always,
+        handle: handlers::handle_tab_select_7,
+    },
+    Shortcut {
+        key: Keycode::_8,
+        key2: None,
+        ctrl: true,
+        shift: false,
+        modes: GENERAL,
+        label: "",
+        is_available: always,
+        handle: handlers::handle_tab_select_8,
+    },
+    Shortcut {
+        key: Keycode::_9,
+        key2: None,
+        ctrl: true,
+        shift: false,
+        modes: GENERAL,
+        label: "",
+        is_available: always,
+        handle: handlers::handle_tab_select_9,
+    },
     // ---- Ctrl+S / Ctrl+Shift+S / Ctrl+O (config file ops) ---------------
     // Hints only inside providers; dispatch fires anywhere the provider supports it.
-    Shortcut { key: Keycode::S, key2: None, ctrl: true, shift: false,
+    Shortcut {
+        key: Keycode::S,
+        key2: None,
+        ctrl: true,
+        shift: false,
         modes: &[Coordinate::General],
-        label: "Ctrl+S Save", is_available: supports_config_files_hint,
-        handle: handlers::handle_save_provider_config },
-    Shortcut { key: Keycode::S, key2: None, ctrl: true, shift: false,
+        label: "Ctrl+S Save",
+        is_available: supports_config_files_hint,
+        handle: handlers::handle_save_provider_config,
+    },
+    Shortcut {
+        key: Keycode::S,
+        key2: None,
+        ctrl: true,
+        shift: false,
         modes: &[Coordinate::General],
-        label: "", is_available: supports_config_files,
-        handle: handlers::handle_save_provider_config },
-    Shortcut { key: Keycode::S, key2: None, ctrl: true, shift: true,
+        label: "",
+        is_available: supports_config_files,
+        handle: handlers::handle_save_provider_config,
+    },
+    Shortcut {
+        key: Keycode::S,
+        key2: None,
+        ctrl: true,
+        shift: true,
         modes: &[Coordinate::General],
-        label: "Ctrl+Shift+S Save as", is_available: supports_config_files_hint,
-        handle: handlers::handle_save_as_provider_config },
-    Shortcut { key: Keycode::S, key2: None, ctrl: true, shift: true,
+        label: "Ctrl+Shift+S Save as",
+        is_available: supports_config_files_hint,
+        handle: handlers::handle_save_as_provider_config,
+    },
+    Shortcut {
+        key: Keycode::S,
+        key2: None,
+        ctrl: true,
+        shift: true,
         modes: &[Coordinate::General],
-        label: "", is_available: supports_config_files,
-        handle: handlers::handle_save_as_provider_config },
-    Shortcut { key: Keycode::O, key2: None, ctrl: true, shift: false,
+        label: "",
+        is_available: supports_config_files,
+        handle: handlers::handle_save_as_provider_config,
+    },
+    Shortcut {
+        key: Keycode::O,
+        key2: None,
+        ctrl: true,
+        shift: false,
         modes: &[Coordinate::General],
-        label: "Ctrl+O Open", is_available: supports_config_files_hint,
-        handle: handlers::handle_file_browser_open },
-    Shortcut { key: Keycode::O, key2: None, ctrl: true, shift: false,
+        label: "Ctrl+O Open",
+        is_available: supports_config_files_hint,
+        handle: handlers::handle_file_browser_open,
+    },
+    Shortcut {
+        key: Keycode::O,
+        key2: None,
+        ctrl: true,
+        shift: false,
         modes: &[Coordinate::General],
-        label: "", is_available: supports_config_files,
-        handle: handlers::handle_file_browser_open },
-
+        label: "",
+        is_available: supports_config_files,
+        handle: handlers::handle_file_browser_open,
+    },
 ];
 
 // ---------------------------------------------------------------------------
@@ -1008,9 +1989,9 @@ const DASHBOARD_CTRL_C_EXIT_MS: u64 = 1000;
 /// Returns `true` if the application should quit (same semantics as `events::dispatch_key`).
 pub fn dispatch_key(r: &mut AppRenderer, keycode: Option<Keycode>, keymod: Mod) -> bool {
     let Some(k) = keycode else { return false };
-    let ctrl  = keymod.intersects(Mod::LCTRLMOD  | Mod::RCTRLMOD);
+    let ctrl = keymod.intersects(Mod::LCTRLMOD | Mod::RCTRLMOD);
     let shift = keymod.intersects(Mod::LSHIFTMOD | Mod::RSHIFTMOD);
-    let alt   = keymod.intersects(Mod::LALTMOD   | Mod::RALTMOD);
+    let alt = keymod.intersects(Mod::LALTMOD | Mod::RALTMOD);
 
     // Interactive-dashboard fast-path: forward every key to the active
     // provider verbatim — including Escape (vim's normal mode etc.) and
@@ -1019,9 +2000,7 @@ pub fn dispatch_key(r: &mut AppRenderer, keycode: Option<Keycode>, keymod: Mod) 
     // variant ignores keystrokes entirely, so we gate on
     // `active_dashboard_is_interactive`; image dashboards still exit on Esc
     // via the SHORTCUTS table further down.
-    if r.coordinate == Coordinate::Dashboard
-        && handlers::active_dashboard_is_interactive(r)
-    {
+    if r.coordinate == Coordinate::Dashboard && handlers::active_dashboard_is_interactive(r) {
         // Ctrl+Shift+V pastes the clipboard into the dashboard program. The
         // app reads the system clipboard here (the provider has no windowing
         // access) and hands the text to `dashboard_paste`, which brackets it
@@ -1053,7 +2032,12 @@ pub fn dispatch_key(r: &mut AppRenderer, keycode: Option<Keycode>, keymod: Mod) 
             // Fall through: forward this first Ctrl+C to the program as 0x03.
         }
         if let Some(keysym) = sdl_keycode_to_dashboard_keysym(k) {
-            let key = sicompass_sdk::DashboardKey { keysym, ctrl, shift, alt };
+            let key = sicompass_sdk::DashboardKey {
+                keysym,
+                ctrl,
+                shift,
+                alt,
+            };
             if let Some(p) = crate::provider::get_active_provider(r) {
                 if p.dashboard_key(key) {
                     r.needs_redraw = true;
@@ -1069,15 +2053,32 @@ pub fn dispatch_key(r: &mut AppRenderer, keycode: Option<Keycode>, keymod: Mod) 
         match r.coordinate {
             Coordinate::General => {
                 const ALLOWED: &[Keycode] = &[
-                    Keycode::Up, Keycode::K, Keycode::Down, Keycode::J,
-                    Keycode::Right, Keycode::L, Keycode::Left, Keycode::H,
-                    Keycode::PageUp, Keycode::PageDown, Keycode::Home, Keycode::End,
-                    Keycode::Return, Keycode::KpEnter, Keycode::Escape,
-                    Keycode::Backspace, Keycode::Tab, Keycode::F,
+                    Keycode::Up,
+                    Keycode::K,
+                    Keycode::Down,
+                    Keycode::J,
+                    Keycode::Right,
+                    Keycode::L,
+                    Keycode::Left,
+                    Keycode::H,
+                    Keycode::PageUp,
+                    Keycode::PageDown,
+                    Keycode::Home,
+                    Keycode::End,
+                    Keycode::Return,
+                    Keycode::KpEnter,
+                    Keycode::Escape,
+                    Keycode::Backspace,
+                    Keycode::Tab,
+                    Keycode::F,
                 ];
-                if !ALLOWED.contains(&k) { return false; }
+                if !ALLOWED.contains(&k) {
+                    return false;
+                }
                 // Ctrl+F allowed; other ctrl combos blocked.
-                if ctrl && k != Keycode::F { return false; }
+                if ctrl && k != Keycode::F {
+                    return false;
+                }
             }
             Coordinate::SimpleSearch | Coordinate::ExtendedSearch => {
                 if ctrl && matches!(k, Keycode::X | Keycode::V | Keycode::Z) {
@@ -1089,10 +2090,18 @@ pub fn dispatch_key(r: &mut AppRenderer, keycode: Option<Keycode>, keymod: Mod) 
     }
 
     for s in SHORTCUTS {
-        if s.ctrl != ctrl || s.shift != shift { continue; }
-        if s.key != k && s.key2 != Some(k) { continue; }
-        if !s.modes.contains(&r.coordinate) { continue; }
-        if !(s.is_available)(r) { continue; }
+        if s.ctrl != ctrl || s.shift != shift {
+            continue;
+        }
+        if s.key != k && s.key2 != Some(k) {
+            continue;
+        }
+        if !s.modes.contains(&r.coordinate) {
+            continue;
+        }
+        if !(s.is_available)(r) {
+            continue;
+        }
         (s.handle)(r);
         return false;
     }
@@ -1116,14 +2125,18 @@ pub(crate) fn label_fluent_key(label: &str) -> String {
     let mut prev_dash = true; // suppress the leading boundary
     for c in label.chars() {
         if c.is_ascii_alphanumeric() {
-            for lc in c.to_lowercase() { key.push(lc); }
+            for lc in c.to_lowercase() {
+                key.push(lc);
+            }
             prev_dash = false;
         } else if !prev_dash {
             key.push('-');
             prev_dash = true;
         }
     }
-    if key.ends_with('-') { key.pop(); }
+    if key.ends_with('-') {
+        key.pop();
+    }
     key
 }
 
@@ -1132,14 +2145,14 @@ pub fn register_translations() {
     use std::sync::OnceLock;
     static ONCE: OnceLock<()> = OnceLock::new();
     ONCE.get_or_init(|| {
-        let _ = sicompass_sdk::localize::register_bundle(
-            "en-US", include_str!("../locales/en-US.ftl"));
-        let _ = sicompass_sdk::localize::register_bundle(
-            "nl-BE", include_str!("../locales/nl-BE.ftl"));
-        let _ = sicompass_sdk::localize::register_bundle(
-            "fr-BE", include_str!("../locales/fr-BE.ftl"));
-        let _ = sicompass_sdk::localize::register_bundle(
-            "de-BE", include_str!("../locales/de-BE.ftl"));
+        let _ =
+            sicompass_sdk::localize::register_bundle("en-US", include_str!("../locales/en-US.ftl"));
+        let _ =
+            sicompass_sdk::localize::register_bundle("nl-BE", include_str!("../locales/nl-BE.ftl"));
+        let _ =
+            sicompass_sdk::localize::register_bundle("fr-BE", include_str!("../locales/fr-BE.ftl"));
+        let _ =
+            sicompass_sdk::localize::register_bundle("de-BE", include_str!("../locales/de-BE.ftl"));
     });
 }
 
@@ -1164,7 +2177,8 @@ pub fn hints_for(r: &AppRenderer) -> Vec<String> {
 
     // Collect entries: skip dispatch-only (empty label) and deduplicate by label.
     let mut seen_labels = std::collections::HashSet::new();
-    SHORTCUTS.iter()
+    SHORTCUTS
+        .iter()
         .filter(|s| {
             !s.label.is_empty()
                 && s.modes.contains(&coord)
@@ -1174,7 +2188,11 @@ pub fn hints_for(r: &AppRenderer) -> Vec<String> {
         .map(|s| {
             let key = label_fluent_key(s.label);
             let translated = sicompass_sdk::localize::t(&key);
-            if translated == key { s.label.to_string() } else { translated }
+            if translated == key {
+                s.label.to_string()
+            } else {
+                translated
+            }
         })
         .collect()
 }
@@ -1215,18 +2233,41 @@ fn sdl_keycode_to_dashboard_keysym(k: Keycode) -> Option<sicompass_sdk::Dashboar
         Keycode::F10 => K::F(10),
         Keycode::F11 => K::F(11),
         Keycode::F12 => K::F(12),
-        Keycode::A => K::Char('a'), Keycode::B => K::Char('b'), Keycode::C => K::Char('c'),
-        Keycode::D => K::Char('d'), Keycode::E => K::Char('e'), Keycode::F => K::Char('f'),
-        Keycode::G => K::Char('g'), Keycode::H => K::Char('h'), Keycode::I => K::Char('i'),
-        Keycode::J => K::Char('j'), Keycode::K => K::Char('k'), Keycode::L => K::Char('l'),
-        Keycode::M => K::Char('m'), Keycode::N => K::Char('n'), Keycode::O => K::Char('o'),
-        Keycode::P => K::Char('p'), Keycode::Q => K::Char('q'), Keycode::R => K::Char('r'),
-        Keycode::S => K::Char('s'), Keycode::T => K::Char('t'), Keycode::U => K::Char('u'),
-        Keycode::V => K::Char('v'), Keycode::W => K::Char('w'), Keycode::X => K::Char('x'),
-        Keycode::Y => K::Char('y'), Keycode::Z => K::Char('z'),
-        Keycode::_0 => K::Char('0'), Keycode::_1 => K::Char('1'), Keycode::_2 => K::Char('2'),
-        Keycode::_3 => K::Char('3'), Keycode::_4 => K::Char('4'), Keycode::_5 => K::Char('5'),
-        Keycode::_6 => K::Char('6'), Keycode::_7 => K::Char('7'), Keycode::_8 => K::Char('8'),
+        Keycode::A => K::Char('a'),
+        Keycode::B => K::Char('b'),
+        Keycode::C => K::Char('c'),
+        Keycode::D => K::Char('d'),
+        Keycode::E => K::Char('e'),
+        Keycode::F => K::Char('f'),
+        Keycode::G => K::Char('g'),
+        Keycode::H => K::Char('h'),
+        Keycode::I => K::Char('i'),
+        Keycode::J => K::Char('j'),
+        Keycode::K => K::Char('k'),
+        Keycode::L => K::Char('l'),
+        Keycode::M => K::Char('m'),
+        Keycode::N => K::Char('n'),
+        Keycode::O => K::Char('o'),
+        Keycode::P => K::Char('p'),
+        Keycode::Q => K::Char('q'),
+        Keycode::R => K::Char('r'),
+        Keycode::S => K::Char('s'),
+        Keycode::T => K::Char('t'),
+        Keycode::U => K::Char('u'),
+        Keycode::V => K::Char('v'),
+        Keycode::W => K::Char('w'),
+        Keycode::X => K::Char('x'),
+        Keycode::Y => K::Char('y'),
+        Keycode::Z => K::Char('z'),
+        Keycode::_0 => K::Char('0'),
+        Keycode::_1 => K::Char('1'),
+        Keycode::_2 => K::Char('2'),
+        Keycode::_3 => K::Char('3'),
+        Keycode::_4 => K::Char('4'),
+        Keycode::_5 => K::Char('5'),
+        Keycode::_6 => K::Char('6'),
+        Keycode::_7 => K::Char('7'),
+        Keycode::_8 => K::Char('8'),
         Keycode::_9 => K::Char('9'),
         Keycode::Space => K::Char(' '),
         _ => return Some(K::Unknown),
@@ -1243,9 +2284,15 @@ mod tests {
     use super::*;
     use crate::app_state::AppRenderer;
 
-    fn no_mod() -> Mod { Mod::empty() }
-    fn ctrl()   -> Mod { Mod::LCTRLMOD }
-    fn shift()  -> Mod { Mod::LSHIFTMOD }
+    fn no_mod() -> Mod {
+        Mod::empty()
+    }
+    fn ctrl() -> Mod {
+        Mod::LCTRLMOD
+    }
+    fn shift() -> Mod {
+        Mod::LSHIFTMOD
+    }
 
     // --- key derivation ---
 
@@ -1258,10 +2305,14 @@ mod tests {
 
     #[test]
     fn label_fluent_key_chord_modifiers() {
-        assert_eq!(label_fluent_key("Ctrl+Shift+I Insert before"),
-                   "hint-ctrl-shift-i-insert-before");
-        assert_eq!(label_fluent_key("Shift+Up Select up"),
-                   "hint-shift-up-select-up");
+        assert_eq!(
+            label_fluent_key("Ctrl+Shift+I Insert before"),
+            "hint-ctrl-shift-i-insert-before"
+        );
+        assert_eq!(
+            label_fluent_key("Shift+Up Select up"),
+            "hint-shift-up-select-up"
+        );
     }
 
     #[test]
@@ -1288,8 +2339,12 @@ mod tests {
         let mut missing: Vec<String> = Vec::new();
         let mut seen = std::collections::HashSet::new();
         for s in SHORTCUTS {
-            if s.label.is_empty() { continue; }
-            if !seen.insert(s.label) { continue; }
+            if s.label.is_empty() {
+                continue;
+            }
+            if !seen.insert(s.label) {
+                continue;
+            }
             let key = label_fluent_key(s.label);
             let resolved = sicompass_sdk::localize::t(&key);
             if resolved == key {
@@ -1371,8 +2426,17 @@ mod tests {
         r.current_id.push(0);
         let hints = hints_for(&r);
         // Insert mode should expose navigation + editing hints.
-        assert!(hints.iter().any(|h| h.contains("Ctrl+F")), "Ctrl+F missing, got: {hints:?}");
-        assert!(hints.iter().any(|h| h.contains("Up")),     "Up missing, got: {hints:?}");
-        assert!(hints.iter().any(|h| h.contains("Esc")),    "Esc missing, got: {hints:?}");
+        assert!(
+            hints.iter().any(|h| h.contains("Ctrl+F")),
+            "Ctrl+F missing, got: {hints:?}"
+        );
+        assert!(
+            hints.iter().any(|h| h.contains("Up")),
+            "Up missing, got: {hints:?}"
+        );
+        assert!(
+            hints.iter().any(|h| h.contains("Esc")),
+            "Esc missing, got: {hints:?}"
+        );
     }
 }

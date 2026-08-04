@@ -53,7 +53,10 @@ fn main() {
 
 /// Walk up from `start` until a directory containing `Cargo.lock` is found.
 fn find_cargo_lock(start: &Path) -> Option<PathBuf> {
-    start.ancestors().map(|d| d.join("Cargo.lock")).find(|p| p.is_file())
+    start
+        .ancestors()
+        .map(|d| d.join("Cargo.lock"))
+        .find(|p| p.is_file())
 }
 
 /// Pull the `version` of the `sicompass-sdk` `[[package]]` entry out of a

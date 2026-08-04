@@ -3,7 +3,9 @@
 //! Routes SDL events to key handlers, updates the window title with
 //! navigation state, and drives the Vulkan render loop.
 
-use crate::app_state::{AppRenderer, AppState, CommandPhase, Coordinate, History, Task, WindowAction};
+use crate::app_state::{
+    AppRenderer, AppState, CommandPhase, Coordinate, History, Task, WindowAction,
+};
 use crate::handlers;
 use crate::render;
 use sdl3::event::{Event, WindowEvent};
@@ -117,12 +119,18 @@ pub fn main_loop(app: &mut AppState) {
                     app.running = false;
                 }
 
-                Event::KeyDown { keycode, keymod, window_id, .. } => {
+                Event::KeyDown {
+                    keycode,
+                    keymod,
+                    window_id,
+                    ..
+                } => {
                     if window_id != app.window.id() {
                         continue;
                     }
                     tracing::debug!(
-                        ?keycode, ?keymod,
+                        ?keycode,
+                        ?keymod,
                         mode = app.renderer.coordinate.as_str(),
                         "keydown"
                     );
@@ -135,7 +143,9 @@ pub fn main_loop(app: &mut AppState) {
                     }
                 }
 
-                Event::KeyUp { keycode, window_id, .. } => {
+                Event::KeyUp {
+                    keycode, window_id, ..
+                } => {
                     if window_id != app.window.id() {
                         continue;
                     }
@@ -152,7 +162,11 @@ pub fn main_loop(app: &mut AppState) {
                     }
                 }
 
-                Event::Window { win_event, window_id, .. } => {
+                Event::Window {
+                    win_event,
+                    window_id,
+                    ..
+                } => {
                     if window_id != app.window.id() {
                         continue;
                     }
@@ -201,7 +215,9 @@ pub fn main_loop(app: &mut AppState) {
                     }
                 }
 
-                Event::TextInput { text, window_id, .. } => {
+                Event::TextInput {
+                    text, window_id, ..
+                } => {
                     if window_id != app.window.id() {
                         continue;
                     }
@@ -216,26 +232,36 @@ pub fn main_loop(app: &mut AppState) {
                 // ---- Custom titlebar buttons (mouse) ------------------------
                 // Button rects are filled by the renderer each frame in logical
                 // point space — the same space SDL reports mouse coords in.
-                Event::MouseMotion { x, y, window_id, .. } => {
+                Event::MouseMotion {
+                    x, y, window_id, ..
+                } => {
                     if window_id != app.window.id() {
                         continue;
                     }
-                    let hover = crate::app_state::window_button_at(
-                        &app.renderer.window_button_rects, x, y);
+                    let hover =
+                        crate::app_state::window_button_at(&app.renderer.window_button_rects, x, y);
                     if hover != app.renderer.window_button_hover {
                         app.renderer.window_button_hover = hover;
                         app.renderer.needs_redraw = true;
                     }
                 }
 
-                Event::MouseButtonDown { x, y, mouse_btn, window_id, .. } => {
+                Event::MouseButtonDown {
+                    x,
+                    y,
+                    mouse_btn,
+                    window_id,
+                    ..
+                } => {
                     if window_id != app.window.id() {
                         continue;
                     }
                     if mouse_btn == MouseButton::Left {
                         if let Some(idx) = crate::app_state::window_button_at(
-                            &app.renderer.window_button_rects, x, y)
-                        {
+                            &app.renderer.window_button_rects,
+                            x,
+                            y,
+                        ) {
                             app.renderer.pending_window_action = Some(match idx {
                                 0 => WindowAction::Minimize,
                                 1 => WindowAction::MaximizeToggle,
@@ -279,16 +305,23 @@ pub fn main_loop(app: &mut AppState) {
                     .and_then(|d| d.get_content_scale())
                     .unwrap_or(1.0);
                 let font_scale = crate::programs::read_font_scale();
-                let effective_dpi = (96.0_f32 * content_scale * font_scale)
-                    .round()
-                    .max(48.0) as u32;
+                let effective_dpi =
+                    (96.0_f32 * content_scale * font_scale).round().max(48.0) as u32;
                 match crate::text::FontRenderer::new(
-                    &app.device, &app.instance, app.physical_device,
-                    app.command_pool, app.graphics_queue, app.render_pass,
+                    &app.device,
+                    &app.instance,
+                    app.physical_device,
+                    app.command_pool,
+                    app.graphics_queue,
+                    app.render_pass,
                     effective_dpi,
                 ) {
-                    Ok(fr) => { app.font_renderer = Some(fr); }
-                    Err(e) => { app.renderer.error_message = format!("font reload failed: {e}"); }
+                    Ok(fr) => {
+                        app.font_renderer = Some(fr);
+                    }
+                    Err(e) => {
+                        app.renderer.error_message = format!("font reload failed: {e}");
+                    }
                 }
             }
             app.renderer.needs_redraw = true;
@@ -324,36 +357,42 @@ pub fn main_loop(app: &mut AppState) {
             // The terminal/claude `+i` live input slot is an Obj; recognise it
             // only when the active provider actually exposes such a slot.
             let on_live_input_provider = matches!(
-                crate::provider::get_active_provider_ref(&app.renderer)
-                    .map(|p| p.name()),
+                crate::provider::get_active_provider_ref(&app.renderer).map(|p| p.name()),
                 Some("terminal") | Some("claude")
             );
-            let was_on_input = sicompass_sdk::ffon::get_ffon_at_id(
-                &app.renderer.ffon, &app.renderer.current_id,
-            )
-            .and_then(|arr| {
-                let idx = app.renderer.current_id.last()?;
-                match arr.get(idx)? {
-                    sicompass_sdk::ffon::FfonElement::Str(s) if s.ends_with("<input></input>") => Some(()),
-                    sicompass_sdk::ffon::FfonElement::Obj(o)
-                        if on_live_input_provider
-                            && sicompass_sdk::tags::has_input(&o.key) => Some(()),
-                    _ => None,
-                }
-            })
-            .is_some();
+            let was_on_input =
+                sicompass_sdk::ffon::get_ffon_at_id(&app.renderer.ffon, &app.renderer.current_id)
+                    .and_then(|arr| {
+                        let idx = app.renderer.current_id.last()?;
+                        match arr.get(idx)? {
+                            sicompass_sdk::ffon::FfonElement::Str(s)
+                                if s.ends_with("<input></input>") =>
+                            {
+                                Some(())
+                            }
+                            sicompass_sdk::ffon::FfonElement::Obj(o)
+                                if on_live_input_provider
+                                    && sicompass_sdk::tags::has_input(&o.key) =>
+                            {
+                                Some(())
+                            }
+                            _ => None,
+                        }
+                    })
+                    .is_some();
 
             crate::provider::refresh_current_directory(&mut app.renderer);
 
             if was_on_input {
                 if let Some(arr) = sicompass_sdk::ffon::get_ffon_at_id(
-                    &app.renderer.ffon, &app.renderer.current_id,
+                    &app.renderer.ffon,
+                    &app.renderer.current_id,
                 ) {
                     if let Some(idx) = arr.iter().rposition(|e| match e {
                         sicompass_sdk::ffon::FfonElement::Str(s) => s.ends_with("<input></input>"),
-                        sicompass_sdk::ffon::FfonElement::Obj(o) =>
-                            on_live_input_provider
-                                && sicompass_sdk::tags::has_input(&o.key),
+                        sicompass_sdk::ffon::FfonElement::Obj(o) => {
+                            on_live_input_provider && sicompass_sdk::tags::has_input(&o.key)
+                        }
                     }) {
                         app.renderer.current_id.set_last(idx);
                         app.renderer.scroll_offset = -1;
@@ -380,10 +419,14 @@ pub fn main_loop(app: &mut AppState) {
         // provider's pending signal before the user has navigated there.
         // Skip while the user is in insert mode — the caret must not jump mid-typing.
         let in_insert = is_insert_mode(app.renderer.coordinate);
-        let active_refresh = !in_insert && app.renderer.current_id.get(0)
-            .and_then(|i| app.renderer.providers.get(i))
-            .map(|p| p.needs_refresh())
-            .unwrap_or(false);
+        let active_refresh = !in_insert
+            && app
+                .renderer
+                .current_id
+                .get(0)
+                .and_then(|i| app.renderer.providers.get(i))
+                .map(|p| p.needs_refresh())
+                .unwrap_or(false);
         if active_refresh {
             // Save the current list-item label so we can restore the cursor after rebuild.
             let saved_label = app.renderer.current_list_item().map(|it| it.label.clone());
@@ -401,7 +444,12 @@ pub fn main_loop(app: &mut AppState) {
 
             // Restore cursor to the same labelled item when possible.
             if let Some(label) = saved_label {
-                if let Some(pos) = app.renderer.total_list.iter().position(|it| it.label == label) {
+                if let Some(pos) = app
+                    .renderer
+                    .total_list
+                    .iter()
+                    .position(|it| it.label == label)
+                {
                     if let Some(id) = app.renderer.total_list.get(pos).map(|it| it.id.clone()) {
                         app.renderer.current_id = id;
                         app.renderer.list_index = pos;
@@ -507,8 +555,16 @@ fn draw_window_controls(app: &mut AppState) {
     let p = *app.renderer.palette();
     let win_w_px = app.swapchain_extent.width as f32;
     let (sz_w, _) = app.window.size();
-    let device_scale = if sz_w > 0 { win_w_px / sz_w as f32 } else { 1.0 };
-    let win_w_pt = if device_scale > 0.0 { win_w_px / device_scale } else { win_w_px };
+    let device_scale = if sz_w > 0 {
+        win_w_px / sz_w as f32
+    } else {
+        1.0
+    };
+    let win_w_pt = if device_scale > 0.0 {
+        win_w_px / device_scale
+    } else {
+        win_w_px
+    };
     let on_left = crate::app_state::controls_on_left();
 
     let rects = crate::app_state::window_button_rects(win_w_pt, on_left);
@@ -548,13 +604,15 @@ fn draw_window_controls(app: &mut AppState) {
             1 => {
                 // Maximize / restore: a square outline drawn as four strokes.
                 // When maximized, draw two offset squares to read as "restore".
-                let square = |rr: &mut crate::rectangle::RectangleRenderer, ox: f32, oy: f32, he: f32| {
-                    let (x0, y0, x1, y1) = (cx - he + ox, cy - he + oy, cx + he + ox, cy + he + oy);
-                    rr.prepare_line(x0, y0, x1, y0, t, p.text); // top
-                    rr.prepare_line(x0, y1, x1, y1, t, p.text); // bottom
-                    rr.prepare_line(x0, y0, x0, y1, t, p.text); // left
-                    rr.prepare_line(x1, y0, x1, y1, t, p.text); // right
-                };
+                let square =
+                    |rr: &mut crate::rectangle::RectangleRenderer, ox: f32, oy: f32, he: f32| {
+                        let (x0, y0, x1, y1) =
+                            (cx - he + ox, cy - he + oy, cx + he + ox, cy + he + oy);
+                        rr.prepare_line(x0, y0, x1, y0, t, p.text); // top
+                        rr.prepare_line(x0, y1, x1, y1, t, p.text); // bottom
+                        rr.prepare_line(x0, y0, x0, y1, t, p.text); // left
+                        rr.prepare_line(x1, y0, x1, y1, t, p.text); // right
+                    };
                 if maximized {
                     let off = (h * 0.55).round();
                     square(rr, off, -off, h - off / 2.0);
@@ -604,7 +662,8 @@ fn update_view(app: &mut AppState) {
     let header = build_header_text(&app.renderer, line_height);
     let win_w = app.swapchain_extent.width as f32;
     let win_h = app.swapchain_extent.height as f32;
-    let list_items: Vec<(String, Option<String>, bool, Vec<u32>, Option<String>)> = collect_list_items(&app.renderer);
+    let list_items: Vec<(String, Option<String>, bool, Vec<u32>, Option<String>)> =
+        collect_list_items(&app.renderer);
     let list_has_indicators = list_items.iter().any(|(label, _, _, _, _)| {
         get_radio_type(label) != RadioType::None || get_checkbox_type(label) != CheckboxType::None
     });
@@ -633,12 +692,17 @@ fn update_view(app: &mut AppState) {
         let prefix = if is_flat_list {
             0.0_f32
         } else {
-            list_items.iter()
+            list_items
+                .iter()
                 .map(|(label, _, _, _, _)| {
                     let (p, _) = split_label(label);
                     let text_w = fr.measure_text_width(p, scale);
                     // When any item has an indicator, all items reserve the same indicator width
-                    let indicator_w = if list_has_indicators { indicator_width(line_height as f32, em_width) } else { 0.0 };
+                    let indicator_w = if list_has_indicators {
+                        indicator_width(line_height as f32, em_width)
+                    } else {
+                        0.0
+                    };
                     text_w + indicator_w
                 })
                 .fold(0.0_f32, f32::max)
@@ -652,9 +716,10 @@ fn update_view(app: &mut AppState) {
     let max_content_w = content_w.min(win_w - text_x - left_inset);
 
     // ---- Scroll / ScrollSearch / ScrollPrefixSearch early dispatch -----------
-    if matches!(app.renderer.coordinate,
-        Coordinate::Scroll | Coordinate::ScrollSearch | Coordinate::ScrollPrefixSearch)
-    {
+    if matches!(
+        app.renderer.coordinate,
+        Coordinate::Scroll | Coordinate::ScrollSearch | Coordinate::ScrollPrefixSearch
+    ) {
         // Cache layout metrics for handlers
         app.renderer.window_height = win_h as i32;
         app.renderer.cached_line_height = line_height;
@@ -665,7 +730,9 @@ fn update_view(app: &mut AppState) {
         let search_query = app.renderer.input_buffer.clone();
         let search_cursor = app.renderer.cursor_position;
         let search_caret_visible = app.renderer.caret.visible;
-        let search_selection = app.renderer.selection_anchor
+        let search_selection = app
+            .renderer
+            .selection_anchor
             .filter(|&a| a != search_cursor)
             .map(|a| (a.min(search_cursor), a.max(search_cursor)));
         let search_current_match = app.renderer.scroll_search_current_match;
@@ -688,7 +755,10 @@ fn update_view(app: &mut AppState) {
         let error_msg = app.renderer.error_message.clone();
 
         // Begin render passes
-        let fr = match app.font_renderer.as_mut() { Some(f) => f, None => return };
+        let fr = match app.font_renderer.as_mut() {
+            Some(f) => f,
+            None => return,
+        };
         fr.begin_text_rendering();
         if let Some(rr) = app.rect_renderer.as_mut() {
             rr.begin_rect_rendering();
@@ -699,10 +769,20 @@ fn update_view(app: &mut AppState) {
 
         // Header separator and text
         if let Some(rr) = app.rect_renderer.as_mut() {
-            rr.prepare_rectangle(0.0, line_height as f32 + top_offset, win_w, 1.0, p.header_sep, 0.0);
+            rr.prepare_rectangle(
+                0.0,
+                line_height as f32 + top_offset,
+                win_w,
+                1.0,
+                p.header_sep,
+                0.0,
+            );
         }
         let header_baseline = (ascender * scale + crate::text::TEXT_PADDING) as f32 + top_offset;
-        app.font_renderer.as_mut().unwrap().prepare_text_for_rendering(&header, text_x, header_baseline, scale, p.text);
+        app.font_renderer
+            .as_mut()
+            .unwrap()
+            .prepare_text_for_rendering(&header, text_x, header_baseline, scale, p.text);
         if !error_msg.is_empty() {
             let fr = app.font_renderer.as_mut().unwrap();
             let err_x = text_x + (header.len() as f32 * fr.get_width_em(scale)) + 10.0;
@@ -726,7 +806,16 @@ fn update_view(app: &mut AppState) {
                 search_needs_position,
                 search_snap,
                 corpus,
-                scale, line_height, ascender, em_width, text_x, max_prefix_px, max_content_w, win_h, top_offset, &p,
+                scale,
+                line_height,
+                ascender,
+                em_width,
+                text_x,
+                max_prefix_px,
+                max_content_w,
+                win_h,
+                top_offset,
+                &p,
             );
             app.renderer.text_scroll_total_height = result.total_height;
             app.renderer.scroll_search_match_count = result.match_count;
@@ -754,7 +843,16 @@ fn update_view(app: &mut AppState) {
                 &list_items,
                 list_index,
                 text_scroll_offset,
-                scale, line_height, ascender, em_width, text_x, max_prefix_px, max_content_w, win_h, top_offset, &p,
+                scale,
+                line_height,
+                ascender,
+                em_width,
+                text_x,
+                max_prefix_px,
+                max_content_w,
+                win_h,
+                top_offset,
+                &p,
             );
             app.renderer.text_scroll_total_height = total_height;
             app.renderer.text_scroll_offset = resolved_offset;
@@ -794,7 +892,10 @@ fn update_view(app: &mut AppState) {
             app.renderer.dashboard_cell_size = (cols, rows);
 
             // Begin render passes
-            let fr = match app.font_renderer.as_mut() { Some(f) => f, None => return };
+            let fr = match app.font_renderer.as_mut() {
+                Some(f) => f,
+                None => return,
+            };
             fr.begin_text_rendering();
             if let Some(rr) = app.rect_renderer.as_mut() {
                 rr.begin_rect_rendering();
@@ -805,12 +906,21 @@ fn update_view(app: &mut AppState) {
 
             // Header separator + title
             if let Some(rr) = app.rect_renderer.as_mut() {
-                rr.prepare_rectangle(0.0, line_height as f32 + top_offset, win_w, 1.0, p.header_sep, 0.0);
+                rr.prepare_rectangle(
+                    0.0,
+                    line_height as f32 + top_offset,
+                    win_w,
+                    1.0,
+                    p.header_sep,
+                    0.0,
+                );
             }
-            let header_baseline = (ascender * scale + crate::text::TEXT_PADDING) as f32 + top_offset;
-            app.font_renderer.as_mut().unwrap().prepare_text_for_rendering(
-                &header, text_x, header_baseline, scale, p.text,
-            );
+            let header_baseline =
+                (ascender * scale + crate::text::TEXT_PADDING) as f32 + top_offset;
+            app.font_renderer
+                .as_mut()
+                .unwrap()
+                .prepare_text_for_rendering(&header, text_x, header_baseline, scale, p.text);
 
             // Pass 1: cell backgrounds (and the cursor block).
             if let Some(rr) = app.rect_renderer.as_mut() {
@@ -819,7 +929,9 @@ fn update_view(app: &mut AppState) {
                         let cell = frame.cell(col, row);
                         let is_cursor = frame.cursor == Some((col, row));
                         let bg = if is_cursor { cell.fg } else { cell.bg };
-                        if (bg & 0xFF) == 0 { continue; }
+                        if (bg & 0xFF) == 0 {
+                            continue;
+                        }
                         let x = col as f32 * cell_w;
                         let y = grid_top + row as f32 * cell_h;
                         rr.prepare_rectangle(x, y, cell_w, cell_h, bg, 0.0);
@@ -832,14 +944,19 @@ fn update_view(app: &mut AppState) {
             let fr = app.font_renderer.as_mut().unwrap();
             let mut utf8 = [0u8; 4];
             for row in 0..rows {
-                let baseline = grid_top + row as f32 * cell_h
+                let baseline = grid_top
+                    + row as f32 * cell_h
                     + (ascender * scale + crate::text::TEXT_PADDING) as f32;
                 for col in 0..cols {
                     let cell = frame.cell(col, row);
-                    if cell.ch == ' ' { continue; }
+                    if cell.ch == ' ' {
+                        continue;
+                    }
                     let is_cursor = frame.cursor == Some((col, row));
                     let fg = if is_cursor { cell.bg } else { cell.fg };
-                    if (fg & 0xFF) == 0 { continue; }
+                    if (fg & 0xFF) == 0 {
+                        continue;
+                    }
                     let s: &str = cell.ch.encode_utf8(&mut utf8);
                     let x = col as f32 * cell_w;
                     fr.prepare_text_for_rendering(s, x, baseline, scale, fg);
@@ -850,7 +967,10 @@ fn update_view(app: &mut AppState) {
             let dashboard_path = app.renderer.dashboard_image_path.clone();
 
             // Begin render passes
-            let fr = match app.font_renderer.as_mut() { Some(f) => f, None => return };
+            let fr = match app.font_renderer.as_mut() {
+                Some(f) => f,
+                None => return,
+            };
             fr.begin_text_rendering();
             if let Some(rr) = app.rect_renderer.as_mut() {
                 rr.begin_rect_rendering();
@@ -861,10 +981,21 @@ fn update_view(app: &mut AppState) {
 
             // Header separator and text
             if let Some(rr) = app.rect_renderer.as_mut() {
-                rr.prepare_rectangle(0.0, line_height as f32 + top_offset, win_w, 1.0, p.header_sep, 0.0);
+                rr.prepare_rectangle(
+                    0.0,
+                    line_height as f32 + top_offset,
+                    win_w,
+                    1.0,
+                    p.header_sep,
+                    0.0,
+                );
             }
-            let header_baseline = (ascender * scale + crate::text::TEXT_PADDING) as f32 + top_offset;
-            app.font_renderer.as_mut().unwrap().prepare_text_for_rendering(&header, text_x, header_baseline, scale, p.text);
+            let header_baseline =
+                (ascender * scale + crate::text::TEXT_PADDING) as f32 + top_offset;
+            app.font_renderer
+                .as_mut()
+                .unwrap()
+                .prepare_text_for_rendering(&header, text_x, header_baseline, scale, p.text);
             let error_msg = app.renderer.error_message.clone();
             if !error_msg.is_empty() {
                 let fr = app.font_renderer.as_mut().unwrap();
@@ -881,13 +1012,19 @@ fn update_view(app: &mut AppState) {
                         let img_w = img_w as f32;
                         let img_h = img_h as f32;
                         let mut display_scale = 1.0_f32;
-                        if img_w > avail_w { display_scale = avail_w / img_w; }
-                        if img_h * display_scale > avail_h { display_scale = avail_h / img_h; }
+                        if img_w > avail_w {
+                            display_scale = avail_w / img_w;
+                        }
+                        if img_h * display_scale > avail_h {
+                            display_scale = avail_h / img_h;
+                        }
                         let display_w = img_w * display_scale;
                         let display_h = img_h * display_scale;
                         let img_x = (win_w - display_w) / 2.0;
                         let img_y = line_height as f32 + top_offset + (avail_h - display_h) / 2.0;
-                        unsafe { ir.prepare_image(&dashboard_path, img_x, img_y, display_w, display_h); }
+                        unsafe {
+                            ir.prepare_image(&dashboard_path, img_x, img_y, display_w, display_h);
+                        }
                     }
                 }
             }
@@ -916,9 +1053,15 @@ fn update_view(app: &mut AppState) {
     let mask_password = renders_insert_buffer && app.renderer.input_is_password;
     let (insert_buf, insert_cursor, insert_sel) = if mask_password {
         let raw = &app.renderer.input_buffer;
-        let masked: String = raw.chars().map(|c| if c == '\n' { '\n' } else { '*' }).collect();
-        let to_masked = |b: usize| raw.get(..b).map(|s| s.chars().count())
-            .unwrap_or_else(|| raw.chars().count());
+        let masked: String = raw
+            .chars()
+            .map(|c| if c == '\n' { '\n' } else { '*' })
+            .collect();
+        let to_masked = |b: usize| {
+            raw.get(..b)
+                .map(|s| s.chars().count())
+                .unwrap_or_else(|| raw.chars().count())
+        };
         (
             masked,
             to_masked(app.renderer.cursor_position),
@@ -942,8 +1085,11 @@ fn update_view(app: &mut AppState) {
         Some("This tab has a running program. Close it?".to_string())
     } else if matches!(
         app.renderer.coordinate,
-        Coordinate::SimpleSearch | Coordinate::ExtendedSearch | Coordinate::Command
-            | Coordinate::TabSwitcher | Coordinate::InputSearch
+        Coordinate::SimpleSearch
+            | Coordinate::ExtendedSearch
+            | Coordinate::Command
+            | Coordinate::TabSwitcher
+            | Coordinate::InputSearch
     ) {
         let (prefix, text) = match app.renderer.coordinate {
             Coordinate::Command => ("search: ", app.renderer.input_buffer.as_str()),
@@ -988,48 +1134,64 @@ fn update_view(app: &mut AppState) {
         parent_id.pop();
         let parent_idx = parent_id.last();
         let parent_slice = sicompass_sdk::ffon::get_ffon_at_id(&app.renderer.ffon, &parent_id);
-        parent_slice.zip(parent_idx).and_then(|(slice, idx)| {
-            let elem = slice.get(idx)?;
-            let raw_text = match elem {
-                sicompass_sdk::ffon::FfonElement::Obj(obj) => obj.key.as_str(),
-                sicompass_sdk::ffon::FfonElement::Str(s) => s.as_str(),
-            };
-            let mut display_text = sicompass_sdk::tags::strip_display(raw_text);
-            if app.renderer.current_id.depth() == 2 {
-                let provider_idx = app.renderer.current_id.get(0).unwrap_or(0);
-                if let Some(p) = app.renderer.providers.get(provider_idx) {
-                    if !p.at_root() {
-                        if let Some(name) = std::path::Path::new(p.current_path())
-                            .file_name()
-                            .and_then(|n| n.to_str())
-                            .filter(|s| !s.is_empty())
-                        {
-                            display_text = name.to_owned();
+        parent_slice
+            .zip(parent_idx)
+            .and_then(|(slice, idx)| {
+                let elem = slice.get(idx)?;
+                let raw_text = match elem {
+                    sicompass_sdk::ffon::FfonElement::Obj(obj) => obj.key.as_str(),
+                    sicompass_sdk::ffon::FfonElement::Str(s) => s.as_str(),
+                };
+                let mut display_text = sicompass_sdk::tags::strip_display(raw_text);
+                if app.renderer.current_id.depth() == 2 {
+                    let provider_idx = app.renderer.current_id.get(0).unwrap_or(0);
+                    if let Some(p) = app.renderer.providers.get(provider_idx) {
+                        if !p.at_root() {
+                            if let Some(name) = std::path::Path::new(p.current_path())
+                                .file_name()
+                                .and_then(|n| n.to_str())
+                                .filter(|s| !s.is_empty())
+                            {
+                                display_text = name.to_owned();
+                            }
                         }
                     }
                 }
-            }
-            let (is_radio, radio_summary) = if let sicompass_sdk::ffon::FfonElement::Obj(obj) = elem {
-                if sicompass_sdk::tags::has_radio(&obj.key) {
-                    let checked = obj.children.iter().find_map(|child| {
-                        if let sicompass_sdk::ffon::FfonElement::Str(s) = child {
-                            if sicompass_sdk::tags::has_checked(s) {
-                                return sicompass_sdk::tags::extract_checked(s);
-                            }
+                let (is_radio, radio_summary) =
+                    if let sicompass_sdk::ffon::FfonElement::Obj(obj) = elem {
+                        if sicompass_sdk::tags::has_radio(&obj.key) {
+                            let checked = obj.children.iter().find_map(|child| {
+                                if let sicompass_sdk::ffon::FfonElement::Str(s) = child {
+                                    if sicompass_sdk::tags::has_checked(s) {
+                                        return sicompass_sdk::tags::extract_checked(s);
+                                    }
+                                }
+                                None
+                            });
+                            (true, checked)
+                        } else {
+                            (false, None)
                         }
-                        None
-                    });
-                    (true, checked)
-                } else {
-                    (false, None)
-                }
-            } else {
-                (false, None)
-            };
-            Some(ParentInfo { display_text, is_radio, radio_summary })
-        }).unwrap_or(ParentInfo { display_text: String::new(), is_radio: false, radio_summary: None })
+                    } else {
+                        (false, None)
+                    };
+                Some(ParentInfo {
+                    display_text,
+                    is_radio,
+                    radio_summary,
+                })
+            })
+            .unwrap_or(ParentInfo {
+                display_text: String::new(),
+                is_radio: false,
+                radio_summary: None,
+            })
     } else {
-        ParentInfo { display_text: String::new(), is_radio: false, radio_summary: None }
+        ParentInfo {
+            display_text: String::new(),
+            is_radio: false,
+            radio_summary: None,
+        }
     };
 
     // ---- Scroll-into-view: compute start_index from scroll_offset/list_index --
@@ -1038,75 +1200,130 @@ fn update_view(app: &mut AppState) {
     let extra_lines = if search_str.is_some() {
         1
     } else {
-        1 + if parent_info.radio_summary.is_some() { 1 } else { 0 }
+        1 + if parent_info.radio_summary.is_some() {
+            1
+        } else {
+            0
+        }
     };
-    let first_item_y = (line_height as f32) * (1.0 + extra_lines as f32) + ascender * scale + crate::text::TEXT_PADDING + top_offset;
+    let first_item_y = (line_height as f32) * (1.0 + extra_lines as f32)
+        + ascender * scale
+        + crate::text::TEXT_PADDING
+        + top_offset;
     let available_lines = ((win_h - first_item_y) / line_height as f32).max(1.0) as usize;
     let item_max_w = max_content_w.max(1.0);
 
     let is_extended_search = app.renderer.coordinate == Coordinate::ExtendedSearch;
     let count = list_items.len();
-    let list_index = if count > 0 { app.renderer.list_index.min(count - 1) } else { 0 };
+    let list_index = if count > 0 {
+        app.renderer.list_index.min(count - 1)
+    } else {
+        0
+    };
     let line_counts: Vec<usize> = {
-        let fr = match app.font_renderer.as_ref() { Some(f) => f, None => return };
-        list_items.iter().enumerate().map(|(idx, (label, img_data, _, _, ext_prefix))| {
-            if in_insert_mode && idx == list_index {
-                return insert_buf.split('\n').count().max(1);
-            }
-            if !is_extended_search {
-                if let Some(path) = img_data {
-                    let (prefix, suffix, has_prefix) = split_image_label(label, path);
-                    let prefix_lines = if has_prefix { count_text_lines(prefix) } else { 0 };
-                    let suffix_lines = if suffix.is_empty() { 0 } else { count_text_lines(suffix) };
-                    let header_lines = (1 + extra_lines) as f32;
-                    let lh = line_height as f32;
-                    let max_h_raw = win_h - lh * (header_lines + prefix_lines as f32 + suffix_lines as f32);
-                    let max_h = if suffix_lines > 0 {
-                        ((max_h_raw / lh).floor() * lh).max(lh)
-                    } else {
-                        (max_h_raw - crate::text::TEXT_PADDING).max(lh)
-                    };
-                    let raw_img_h = app.image_renderer.as_mut()
-                        .and_then(|ir| unsafe { ir.texture_size(path) })
-                        .map(|(tw, th)| if tw == 0 { item_max_w } else { item_max_w * th as f32 / tw as f32 })
-                        .unwrap_or(item_max_w);
-                    let img_h = raw_img_h.min(max_h);
-                    let image_lines = ((img_h / line_height as f32).ceil() as usize).max(1);
-                    return prefix_lines + image_lines + suffix_lines;
+        let fr = match app.font_renderer.as_ref() {
+            Some(f) => f,
+            None => return,
+        };
+        list_items
+            .iter()
+            .enumerate()
+            .map(|(idx, (label, img_data, _, _, ext_prefix))| {
+                if in_insert_mode && idx == list_index {
+                    return insert_buf.split('\n').count().max(1);
                 }
-                let (_, content) = split_label(label);
-                return fr.count_wrapped_lines(content, scale, item_max_w);
-            }
-            // ExtendedSearch: breadcrumb + prefix precede content — reduce available width.
-            // Use 4.0 * em_width (= item_prefix_x offset) not list_indent_px (space-based)
-            // so that the available_w matches what the rendering loop actually uses.
-            // Also subtract indicator_width when any item has an indicator, since text_prefix_x
-            // is shifted right by that amount for ALL items (for alignment).
-            let indicator_w = if list_has_indicators { indicator_width(line_height as f32, em_width) } else { 0.0 };
-            // Image result: one breadcrumb/prefix line, then the image below.
-            if let Some(path) = ext_prefix {
-                let img_w = (max_content_w - 4.0 * em_width - indicator_w).max(1.0);
-                let img_h = app.image_renderer.as_mut()
-                    .and_then(|ir| unsafe { ir.texture_size(path) })
-                    .map(|(tw, th)| if tw == 0 { img_w } else { img_w * th as f32 / tw as f32 })
-                    .unwrap_or(img_w);
-                let image_lines = ((img_h / line_height as f32).ceil() as usize).max(1);
-                let (_, suffix, _) = split_image_label(label, path);
-                let suffix_lines = if suffix.is_empty() { 0 }
-                    else { fr.count_wrapped_lines(suffix, scale, img_w) };
-                // 1 breadcrumb/prefix line + image + trailing text below it.
-                return 1 + image_lines + suffix_lines;
-            }
-            let bc_w = img_data.as_deref().filter(|s| !s.is_empty())
-                .map(|bc| fr.measure_text_width(bc, scale)).unwrap_or(0.0);
-            let (prefix_str, content) = split_label(label);
-            let prefix_w = fr.measure_text_width(prefix_str, scale);
-            // First line trails the breadcrumb + prefix; continuation lines
-            // wrap full-width (left margin → column edge) below them.
-            let rest_w = (max_content_w - 4.0 * em_width - indicator_w).max(1.0);
-            let first_w = (rest_w - bc_w - prefix_w).max(1.0);
-            fr.wrap_lines_with_offsets_hanging(content, scale, first_w, rest_w).len().max(1)
-        }).collect()
+                if !is_extended_search {
+                    if let Some(path) = img_data {
+                        let (prefix, suffix, has_prefix) = split_image_label(label, path);
+                        let prefix_lines = if has_prefix {
+                            count_text_lines(prefix)
+                        } else {
+                            0
+                        };
+                        let suffix_lines = if suffix.is_empty() {
+                            0
+                        } else {
+                            count_text_lines(suffix)
+                        };
+                        let header_lines = (1 + extra_lines) as f32;
+                        let lh = line_height as f32;
+                        let max_h_raw =
+                            win_h - lh * (header_lines + prefix_lines as f32 + suffix_lines as f32);
+                        let max_h = if suffix_lines > 0 {
+                            ((max_h_raw / lh).floor() * lh).max(lh)
+                        } else {
+                            (max_h_raw - crate::text::TEXT_PADDING).max(lh)
+                        };
+                        let raw_img_h = app
+                            .image_renderer
+                            .as_mut()
+                            .and_then(|ir| unsafe { ir.texture_size(path) })
+                            .map(|(tw, th)| {
+                                if tw == 0 {
+                                    item_max_w
+                                } else {
+                                    item_max_w * th as f32 / tw as f32
+                                }
+                            })
+                            .unwrap_or(item_max_w);
+                        let img_h = raw_img_h.min(max_h);
+                        let image_lines = ((img_h / line_height as f32).ceil() as usize).max(1);
+                        return prefix_lines + image_lines + suffix_lines;
+                    }
+                    let (_, content) = split_label(label);
+                    return fr.count_wrapped_lines(content, scale, item_max_w);
+                }
+                // ExtendedSearch: breadcrumb + prefix precede content — reduce available width.
+                // Use 4.0 * em_width (= item_prefix_x offset) not list_indent_px (space-based)
+                // so that the available_w matches what the rendering loop actually uses.
+                // Also subtract indicator_width when any item has an indicator, since text_prefix_x
+                // is shifted right by that amount for ALL items (for alignment).
+                let indicator_w = if list_has_indicators {
+                    indicator_width(line_height as f32, em_width)
+                } else {
+                    0.0
+                };
+                // Image result: one breadcrumb/prefix line, then the image below.
+                if let Some(path) = ext_prefix {
+                    let img_w = (max_content_w - 4.0 * em_width - indicator_w).max(1.0);
+                    let img_h = app
+                        .image_renderer
+                        .as_mut()
+                        .and_then(|ir| unsafe { ir.texture_size(path) })
+                        .map(|(tw, th)| {
+                            if tw == 0 {
+                                img_w
+                            } else {
+                                img_w * th as f32 / tw as f32
+                            }
+                        })
+                        .unwrap_or(img_w);
+                    let image_lines = ((img_h / line_height as f32).ceil() as usize).max(1);
+                    let (_, suffix, _) = split_image_label(label, path);
+                    let suffix_lines = if suffix.is_empty() {
+                        0
+                    } else {
+                        fr.count_wrapped_lines(suffix, scale, img_w)
+                    };
+                    // 1 breadcrumb/prefix line + image + trailing text below it.
+                    return 1 + image_lines + suffix_lines;
+                }
+                let bc_w = img_data
+                    .as_deref()
+                    .filter(|s| !s.is_empty())
+                    .map(|bc| fr.measure_text_width(bc, scale))
+                    .unwrap_or(0.0);
+                let (prefix_str, content) = split_label(label);
+                let prefix_w = fr.measure_text_width(prefix_str, scale);
+                // First line trails the breadcrumb + prefix; continuation lines
+                // wrap full-width (left margin → column edge) below them.
+                let rest_w = (max_content_w - 4.0 * em_width - indicator_w).max(1.0);
+                let first_w = (rest_w - bc_w - prefix_w).max(1.0);
+                fr.wrap_lines_with_offsets_hanging(content, scale, first_w, rest_w)
+                    .len()
+                    .max(1)
+            })
+            .collect()
     };
 
     let start_index: usize = if count == 0 {
@@ -1126,7 +1343,9 @@ fn update_view(app: &mut AppState) {
             let mut si = list_index;
             while si > 0 {
                 let prev = line_counts.get(si - 1).copied().unwrap_or(1);
-                if lines_from_bottom + prev > available_lines { break; }
+                if lines_from_bottom + prev > available_lines {
+                    break;
+                }
                 lines_from_bottom += prev;
                 si -= 1;
             }
@@ -1166,18 +1385,31 @@ fn update_view(app: &mut AppState) {
         let cap = list_items.len().saturating_sub(start_index);
         let mut metrics = Vec::with_capacity(cap);
         let mut layouts: Vec<Option<ImageLayout>> = Vec::with_capacity(cap);
-        for (global_idx, (label, img_data, _, _, ext_prefix)) in list_items.iter().enumerate().skip(start_index) {
-            if y > win_h { break; }
+        for (global_idx, (label, img_data, _, _, ext_prefix)) in
+            list_items.iter().enumerate().skip(start_index)
+        {
+            if y > win_h {
+                break;
+            }
             let (lines, img_layout) = if in_insert_mode && global_idx == list_index {
                 (insert_buf.split('\n').count().max(1), None)
             } else if !is_extended_search {
                 if let Some(path) = img_data {
                     let (prefix, suffix, has_prefix) = split_image_label(label, path);
-                    let prefix_lines = if has_prefix { count_text_lines(prefix) } else { 0 };
-                    let suffix_lines = if suffix.is_empty() { 0 } else { count_text_lines(suffix) };
+                    let prefix_lines = if has_prefix {
+                        count_text_lines(prefix)
+                    } else {
+                        0
+                    };
+                    let suffix_lines = if suffix.is_empty() {
+                        0
+                    } else {
+                        count_text_lines(suffix)
+                    };
                     let header_lines = (1 + extra_lines) as f32;
                     let lh = line_height as f32;
-                    let max_h_raw = win_h - lh * (header_lines + prefix_lines as f32 + suffix_lines as f32);
+                    let max_h_raw =
+                        win_h - lh * (header_lines + prefix_lines as f32 + suffix_lines as f32);
                     let max_h = if suffix_lines > 0 {
                         ((max_h_raw / lh).floor() * lh).max(lh)
                     } else {
@@ -1187,7 +1419,11 @@ fn update_view(app: &mut AppState) {
                     let img_h = if let Some(ir) = app.image_renderer.as_mut() {
                         unsafe { ir.texture_size(path) }
                             .map(|(tw, th)| {
-                                if tw == 0 { img_w } else { (img_w * th as f32 / tw as f32).min(max_h) }
+                                if tw == 0 {
+                                    img_w
+                                } else {
+                                    (img_w * th as f32 / tw as f32).min(max_h)
+                                }
                             })
                             .unwrap_or(img_w)
                     } else {
@@ -1195,7 +1431,16 @@ fn update_view(app: &mut AppState) {
                     };
                     let image_lines = ((img_h / line_height as f32).ceil() as usize).max(1);
                     let total_lines = prefix_lines + image_lines + suffix_lines;
-                    (total_lines, Some(ImageLayout { prefix_lines, suffix_lines, image_lines, img_w, img_h }))
+                    (
+                        total_lines,
+                        Some(ImageLayout {
+                            prefix_lines,
+                            suffix_lines,
+                            image_lines,
+                            img_w,
+                            img_h,
+                        }),
+                    )
                 } else if is_flat_list {
                     // Command/Meta items: no prefix split — measure the full label
                     (fr.count_wrapped_lines(label, scale, item_max_w), None)
@@ -1205,31 +1450,63 @@ fn update_view(app: &mut AppState) {
                 }
             } else {
                 // ExtendedSearch: breadcrumb + prefix precede content — reduce available width.
-                let indicator_w = if list_has_indicators { indicator_width(line_height as f32, em_width) } else { 0.0 };
+                let indicator_w = if list_has_indicators {
+                    indicator_width(line_height as f32, em_width)
+                } else {
+                    0.0
+                };
                 if let Some(path) = ext_prefix {
                     // Image result: one breadcrumb/prefix line, then the image.
                     let img_w = (max_content_w - 4.0 * em_width - indicator_w).max(1.0);
-                    let img_h = app.image_renderer.as_mut()
+                    let img_h = app
+                        .image_renderer
+                        .as_mut()
                         .and_then(|ir| unsafe { ir.texture_size(path) })
-                        .map(|(tw, th)| if tw == 0 { img_w } else { img_w * th as f32 / tw as f32 })
+                        .map(|(tw, th)| {
+                            if tw == 0 {
+                                img_w
+                            } else {
+                                img_w * th as f32 / tw as f32
+                            }
+                        })
                         .unwrap_or(img_w);
                     let image_lines = ((img_h / line_height as f32).ceil() as usize).max(1);
                     let (_, suffix, _) = split_image_label(label, path);
-                    let suffix_lines = if suffix.is_empty() { 0 }
-                        else { fr.count_wrapped_lines(suffix, scale, img_w) };
-                    (1 + image_lines + suffix_lines,
-                     Some(ImageLayout { prefix_lines: 1, suffix_lines, image_lines, img_w, img_h }))
+                    let suffix_lines = if suffix.is_empty() {
+                        0
+                    } else {
+                        fr.count_wrapped_lines(suffix, scale, img_w)
+                    };
+                    (
+                        1 + image_lines + suffix_lines,
+                        Some(ImageLayout {
+                            prefix_lines: 1,
+                            suffix_lines,
+                            image_lines,
+                            img_w,
+                            img_h,
+                        }),
+                    )
                 } else {
-                    let bc_w = img_data.as_deref().filter(|s| !s.is_empty())
-                        .map(|bc| fr.measure_text_width(bc, scale)).unwrap_or(0.0);
+                    let bc_w = img_data
+                        .as_deref()
+                        .filter(|s| !s.is_empty())
+                        .map(|bc| fr.measure_text_width(bc, scale))
+                        .unwrap_or(0.0);
                     let (prefix_str, content) = split_label(label);
                     let prefix_w = fr.measure_text_width(prefix_str, scale);
                     let rest_w = (max_content_w - 4.0 * em_width - indicator_w).max(1.0);
                     let first_w = (rest_w - bc_w - prefix_w).max(1.0);
-                    (fr.wrap_lines_with_offsets_hanging(content, scale, first_w, rest_w).len().max(1), None)
+                    (
+                        fr.wrap_lines_with_offsets_hanging(content, scale, first_w, rest_w)
+                            .len()
+                            .max(1),
+                        None,
+                    )
                 }
             };
-            let highlight_w = (max_prefix_px + item_max_w + 20.0).min(win_w - content_x - list_indent_px);
+            let highlight_w =
+                (max_prefix_px + item_max_w + 20.0).min(win_w - content_x - list_indent_px);
             metrics.push((y, content_start_x, lines, highlight_w));
             layouts.push(img_layout);
             y += lines as f32 * line_height as f32;
@@ -1243,7 +1520,10 @@ fn update_view(app: &mut AppState) {
     app.renderer.cached_line_counts = line_counts.clone();
 
     // ---- Begin rendering --------------------------------------------------
-    let fr = match app.font_renderer.as_mut() { Some(f) => f, None => return };
+    let fr = match app.font_renderer.as_mut() {
+        Some(f) => f,
+        None => return,
+    };
     let mut rr_opt = app.rect_renderer.as_mut();
 
     fr.begin_text_rendering();
@@ -1256,7 +1536,14 @@ fn update_view(app: &mut AppState) {
 
     // ---- Header separator line (between header and content) --------------
     if let Some(rr) = app.rect_renderer.as_mut() {
-        rr.prepare_rectangle(0.0, line_height as f32 + top_offset, win_w, 1.0, p.header_sep, 0.0);
+        rr.prepare_rectangle(
+            0.0,
+            line_height as f32 + top_offset,
+            win_w,
+            1.0,
+            p.header_sep,
+            0.0,
+        );
     }
 
     // ---- Header text -----------------------------------------------------
@@ -1271,7 +1558,8 @@ fn update_view(app: &mut AppState) {
 
     // ---- Parent element (when navigated into a child level) ---------------
     if !parent_info.display_text.is_empty() && search_str.is_none() {
-        let parent_y = line_height as f32 + ascender * scale + crate::text::TEXT_PADDING + top_offset;
+        let parent_y =
+            line_height as f32 + ascender * scale + crate::text::TEXT_PADDING + top_offset;
         let parent_display = if parent_info.is_radio {
             let state = parent_info.radio_summary.as_deref().unwrap_or("");
             format!("{} [{}]", parent_info.display_text, state)
@@ -1285,29 +1573,62 @@ fn update_view(app: &mut AppState) {
             let summary_y = parent_y + line_height as f32;
             let display = format!("-rc {}", summary);
             let indicator_offset = if let Some(rr) = app.rect_renderer.as_mut() {
-                render_radio_indicator(rr, &RadioType::Checked, summary_x, summary_y, scale, ascender, line_height as f32, em_width, &p)
-            } else { 0.0 };
-            fr.prepare_text_for_rendering(&display, summary_x + indicator_offset, summary_y, scale, p.text);
+                render_radio_indicator(
+                    rr,
+                    &RadioType::Checked,
+                    summary_x,
+                    summary_y,
+                    scale,
+                    ascender,
+                    line_height as f32,
+                    em_width,
+                    &p,
+                )
+            } else {
+                0.0
+            };
+            fr.prepare_text_for_rendering(
+                &display,
+                summary_x + indicator_offset,
+                summary_y,
+                scale,
+                p.text,
+            );
         }
     }
 
     // ---- Search / command line -------------------------------------------
     if let Some(ref s) = search_str {
-        let search_y = line_height as f32 + ascender * scale + crate::text::TEXT_PADDING + top_offset;
+        let search_y =
+            line_height as f32 + ascender * scale + crate::text::TEXT_PADDING + top_offset;
         fr.prepare_text_for_rendering(s, text_x, search_y, scale, p.text);
     }
 
     // ---- List items — selection highlight rectangles ----------------------
-    for (i, (_, _, is_selected, _, _)) in list_items[start_index..].iter().take(item_metrics.len()).enumerate() {
-        if !is_selected { continue; }
+    for (i, (_, _, is_selected, _, _)) in list_items[start_index..]
+        .iter()
+        .take(item_metrics.len())
+        .enumerate()
+    {
+        if !is_selected {
+            continue;
+        }
         // In insert mode the highlight is deferred: only the input buffer portion
         // is highlighted (drawn in the text pass below), not the full row.
-        if renders_insert_buffer { continue; }
+        if renders_insert_buffer {
+            continue;
+        }
         let (item_y, content_start_x, lines, highlight_w) = item_metrics[i];
         if let Some(layout) = &image_layouts[i] {
             // Tight-fitting selection background around image + prefix/suffix text.
-            let bg_top = item_y - ascender * scale - crate::text::TEXT_PADDING
-                - if layout.prefix_lines == 0 { crate::text::TEXT_PADDING } else { 0.0 };
+            let bg_top = item_y
+                - ascender * scale
+                - crate::text::TEXT_PADDING
+                - if layout.prefix_lines == 0 {
+                    crate::text::TEXT_PADDING
+                } else {
+                    0.0
+                };
             let img_y = if layout.prefix_lines > 0 {
                 bg_top + layout.prefix_lines as f32 * line_height as f32
             } else {
@@ -1331,14 +1652,28 @@ fn update_view(app: &mut AppState) {
                 }
                 // Square off bottom-right corner when no suffix text
                 if layout.suffix_lines == 0 {
-                    rr.prepare_rectangle(bg_right - 5.0, bg_top + bg_h - 5.0, 5.0, 5.0, p.selected, 0.0);
+                    rr.prepare_rectangle(
+                        bg_right - 5.0,
+                        bg_top + bg_h - 5.0,
+                        5.0,
+                        5.0,
+                        p.selected,
+                        0.0,
+                    );
                 }
             }
         } else {
             let rect_y = item_y - ascender * scale - crate::text::TEXT_PADDING;
             let rect_h = lines as f32 * line_height as f32;
             if let Some(rr) = app.rect_renderer.as_mut() {
-                rr.prepare_rectangle(content_x + 4.0 * em_width, rect_y, highlight_w, rect_h, p.selected, 5.0);
+                rr.prepare_rectangle(
+                    content_x + 4.0 * em_width,
+                    rect_y,
+                    highlight_w,
+                    rect_h,
+                    p.selected,
+                    5.0,
+                );
             }
         }
     }
@@ -1349,7 +1684,11 @@ fn update_view(app: &mut AppState) {
     let mut captured_elem_x: f32 = 0.0;
     let mut captured_elem_base_x: f32 = 0.0;
     let mut captured_elem_y: f32 = 0.0;
-    for (i, (label, item_data, is_selected, match_pos, ext_prefix)) in list_items[start_index..].iter().take(item_metrics.len()).enumerate() {
+    for (i, (label, item_data, is_selected, match_pos, ext_prefix)) in list_items[start_index..]
+        .iter()
+        .take(item_metrics.len())
+        .enumerate()
+    {
         let (item_y, content_start_x, _, _) = item_metrics[i];
 
         // Draw graphical indicator (radio/checkbox) and compute x shift.
@@ -1359,11 +1698,31 @@ fn update_view(app: &mut AppState) {
         let checkbox = get_checkbox_type(label);
         if radio != RadioType::None {
             if let Some(rr) = app.rect_renderer.as_mut() {
-                render_radio_indicator(rr, &radio, item_prefix_x, item_y, scale, ascender, line_height as f32, em_width, &p);
+                render_radio_indicator(
+                    rr,
+                    &radio,
+                    item_prefix_x,
+                    item_y,
+                    scale,
+                    ascender,
+                    line_height as f32,
+                    em_width,
+                    &p,
+                );
             }
         } else if checkbox != CheckboxType::None {
             if let Some(rr) = app.rect_renderer.as_mut() {
-                render_checkbox_indicator(rr, &checkbox, item_prefix_x, item_y, scale, ascender, line_height as f32, em_width, &p);
+                render_checkbox_indicator(
+                    rr,
+                    &checkbox,
+                    item_prefix_x,
+                    item_y,
+                    scale,
+                    ascender,
+                    line_height as f32,
+                    em_width,
+                    &p,
+                );
             }
         }
         let text_prefix_x = if list_has_indicators {
@@ -1388,26 +1747,48 @@ fn update_view(app: &mut AppState) {
                 // ranges so the search term highlights in both.
                 let prefix_char_count = prefix_text.chars().count() as u32;
                 let path_char_count = path.chars().count() as u32;
-                let prefix_positions: Vec<u32> = match_pos.iter()
-                    .copied().filter(|&pp| pp < prefix_char_count).collect();
-                let suffix_positions: Vec<u32> = match_pos.iter()
+                let prefix_positions: Vec<u32> = match_pos
+                    .iter()
+                    .copied()
+                    .filter(|&pp| pp < prefix_char_count)
+                    .collect();
+                let suffix_positions: Vec<u32> = match_pos
+                    .iter()
                     .filter(|&&pp| pp >= prefix_char_count + path_char_count)
                     .map(|&pp| pp - prefix_char_count - path_char_count)
                     .collect();
                 if let Some(fr) = app.font_renderer.as_mut() {
                     let mut label_x = text_prefix_x;
-                    if let Some(breadcrumb) = item_data.as_deref().filter(|s: &&str| !s.is_empty()) {
+                    if let Some(breadcrumb) = item_data.as_deref().filter(|s: &&str| !s.is_empty())
+                    {
                         let bc_w = fr.measure_text_width(breadcrumb, scale);
-                        fr.prepare_text_for_rendering(breadcrumb, label_x, item_y, scale, p.ext_search);
+                        fr.prepare_text_for_rendering(
+                            breadcrumb,
+                            label_x,
+                            item_y,
+                            scale,
+                            p.ext_search,
+                        );
                         label_x += bc_w;
                     }
                     if prefix_positions.is_empty() {
                         fr.prepare_text_for_rendering(prefix_text, label_x, item_y, scale, p.text);
                     } else {
                         let rr = app.rect_renderer.as_mut();
-                        render_with_highlights(fr, rr, prefix_text, label_x, item_y, scale,
-                            ascender, line_height as f32, p.text, p.scroll_search,
-                            &prefix_positions, None);
+                        render_with_highlights(
+                            fr,
+                            rr,
+                            prefix_text,
+                            label_x,
+                            item_y,
+                            scale,
+                            ascender,
+                            line_height as f32,
+                            p.text,
+                            p.scroll_search,
+                            &prefix_positions,
+                            None,
+                        );
                     }
                 }
                 // Image one line below the breadcrumb/prefix row.
@@ -1416,8 +1797,13 @@ fn update_view(app: &mut AppState) {
                     let img_y = img_top_y - ascender * scale - crate::text::TEXT_PADDING;
                     let border = 2.0_f32;
                     unsafe {
-                        ir.prepare_image(path, text_prefix_x + border, img_y + border,
-                                         layout.img_w - 2.0 * border, layout.img_h - 2.0 * border);
+                        ir.prepare_image(
+                            path,
+                            text_prefix_x + border,
+                            img_y + border,
+                            layout.img_w - 2.0 * border,
+                            layout.img_h - 2.0 * border,
+                        );
                     }
                 }
                 // Trailing text below the image.
@@ -1426,14 +1812,35 @@ fn update_view(app: &mut AppState) {
                         let suffix_y = img_top_y + layout.image_lines as f32 * line_height as f32;
                         let img_w = layout.img_w.max(1.0);
                         if suffix_positions.is_empty() {
-                            fr.prepare_text_wrapped(suffix_text, text_prefix_x, suffix_y, scale,
-                                                    img_w, line_height as f32, p.text);
+                            fr.prepare_text_wrapped(
+                                suffix_text,
+                                text_prefix_x,
+                                suffix_y,
+                                scale,
+                                img_w,
+                                line_height as f32,
+                                p.text,
+                            );
                         } else {
                             let rr = app.rect_renderer.as_mut();
-                            render_with_highlights(fr, rr, suffix_text, text_prefix_x, suffix_y,
-                                scale, ascender, line_height as f32, p.text, p.scroll_search,
+                            render_with_highlights(
+                                fr,
+                                rr,
+                                suffix_text,
+                                text_prefix_x,
+                                suffix_y,
+                                scale,
+                                ascender,
+                                line_height as f32,
+                                p.text,
+                                p.scroll_search,
                                 &suffix_positions,
-                                Some(WrapLayout { first_width: img_w, rest_x: text_prefix_x, rest_width: img_w }));
+                                Some(WrapLayout {
+                                    first_width: img_w,
+                                    rest_x: text_prefix_x,
+                                    rest_width: img_w,
+                                }),
+                            );
                         }
                     }
                 }
@@ -1451,7 +1858,8 @@ fn update_view(app: &mut AppState) {
                 let rest_w = (right_edge - text_prefix_x).max(1.0);
                 // Adjust match positions to be relative to content (subtract prefix char count)
                 let prefix_char_count = prefix_str.chars().count() as u32;
-                let content_positions: Vec<u32> = match_pos.iter()
+                let content_positions: Vec<u32> = match_pos
+                    .iter()
                     .filter(|&&p| p >= prefix_char_count)
                     .map(|&p| p - prefix_char_count)
                     .collect();
@@ -1459,9 +1867,22 @@ fn update_view(app: &mut AppState) {
                 // First content line trails the breadcrumb + prefix; wrapped
                 // continuation lines run full-width below, at the left margin.
                 render_with_highlights(
-                    fr, rr, content, content_x, item_y, scale, ascender, line_height as f32,
-                    p.text, p.scroll_search, &content_positions,
-                    Some(WrapLayout { first_width: first_w, rest_x: text_prefix_x, rest_width: rest_w }),
+                    fr,
+                    rr,
+                    content,
+                    content_x,
+                    item_y,
+                    scale,
+                    ascender,
+                    line_height as f32,
+                    p.text,
+                    p.scroll_search,
+                    &content_positions,
+                    Some(WrapLayout {
+                        first_width: first_w,
+                        rest_x: text_prefix_x,
+                        rest_width: rest_w,
+                    }),
                 );
             }
         } else if let Some(path) = item_data {
@@ -1482,7 +1903,8 @@ fn update_view(app: &mut AppState) {
                 let (tag, content) = split_label(prefix_text);
                 // Content trails the "-p " tag — shift match positions past it.
                 let tag_char_count = tag.chars().count() as u32;
-                let content_positions: Vec<u32> = match_pos.iter()
+                let content_positions: Vec<u32> = match_pos
+                    .iter()
                     .filter(|&&pp| pp >= tag_char_count && pp < prefix_char_count)
                     .map(|&pp| pp - tag_char_count)
                     .collect();
@@ -1490,12 +1912,29 @@ fn update_view(app: &mut AppState) {
                     fr.prepare_text_for_rendering(tag, text_prefix_x, current_y, scale, p.text);
                     if !content.is_empty() {
                         if content_positions.is_empty() {
-                            fr.prepare_text_for_rendering(content, content_start_x, current_y, scale, p.text);
+                            fr.prepare_text_for_rendering(
+                                content,
+                                content_start_x,
+                                current_y,
+                                scale,
+                                p.text,
+                            );
                         } else {
                             let rr = app.rect_renderer.as_mut();
-                            render_with_highlights(fr, rr, content, content_start_x, current_y,
-                                scale, ascender, line_height as f32, p.text, p.scroll_search,
-                                &content_positions, None);
+                            render_with_highlights(
+                                fr,
+                                rr,
+                                content,
+                                content_start_x,
+                                current_y,
+                                scale,
+                                ascender,
+                                line_height as f32,
+                                p.text,
+                                p.scroll_search,
+                                &content_positions,
+                                None,
+                            );
                         }
                     }
                 }
@@ -1513,32 +1952,61 @@ fn update_view(app: &mut AppState) {
                     img_h_precomp
                 } else {
                     unsafe { ir.texture_size(path) }
-                        .map(|(tw, th)| if tw == 0 { img_w } else { img_w * th as f32 / tw as f32 })
+                        .map(|(tw, th)| {
+                            if tw == 0 {
+                                img_w
+                            } else {
+                                img_w * th as f32 / tw as f32
+                            }
+                        })
                         .unwrap_or(img_w)
                 };
                 let img_y = current_y - ascender * scale - crate::text::TEXT_PADDING;
                 let border = 2.0_f32;
                 unsafe {
-                    ir.prepare_image(path, content_start_x + border, img_y + border,
-                                     img_w - 2.0 * border, img_h - 2.0 * border);
+                    ir.prepare_image(
+                        path,
+                        content_start_x + border,
+                        img_y + border,
+                        img_w - 2.0 * border,
+                        img_h - 2.0 * border,
+                    );
                 }
                 current_y += (img_h / line_height as f32).ceil() as f32 * line_height as f32;
             }
 
             // Render suffix text below image
             if !suffix_text.is_empty() {
-                let suffix_positions: Vec<u32> = match_pos.iter()
+                let suffix_positions: Vec<u32> = match_pos
+                    .iter()
                     .filter(|&&pp| pp >= prefix_char_count + path_char_count)
                     .map(|&pp| pp - prefix_char_count - path_char_count)
                     .collect();
                 if let Some(fr) = app.font_renderer.as_mut() {
                     if suffix_positions.is_empty() {
-                        fr.prepare_text_for_rendering(suffix_text, content_start_x, current_y, scale, p.text);
+                        fr.prepare_text_for_rendering(
+                            suffix_text,
+                            content_start_x,
+                            current_y,
+                            scale,
+                            p.text,
+                        );
                     } else {
                         let rr = app.rect_renderer.as_mut();
-                        render_with_highlights(fr, rr, suffix_text, content_start_x, current_y,
-                            scale, ascender, line_height as f32, p.text, p.scroll_search,
-                            &suffix_positions, None);
+                        render_with_highlights(
+                            fr,
+                            rr,
+                            suffix_text,
+                            content_start_x,
+                            current_y,
+                            scale,
+                            ascender,
+                            line_height as f32,
+                            p.text,
+                            p.scroll_search,
+                            &suffix_positions,
+                            None,
+                        );
                     }
                 }
             }
@@ -1547,7 +2015,13 @@ fn update_view(app: &mut AppState) {
                 // Render prefix (non-editable, no highlight)
                 let pfx_w = if !insert_prefix.is_empty() {
                     let w = fr.measure_text_width(&insert_prefix, scale);
-                    fr.prepare_text_for_rendering(&insert_prefix, text_prefix_x, item_y, scale, p.text);
+                    fr.prepare_text_for_rendering(
+                        &insert_prefix,
+                        text_prefix_x,
+                        item_y,
+                        scale,
+                        p.text,
+                    );
                     w
                 } else {
                     0.0
@@ -1564,7 +2038,11 @@ fn update_view(app: &mut AppState) {
                 if let Some(nl_pos) = buf.find('\n') {
                     let first_line = &buf[..nl_pos];
                     let rest = &buf[nl_pos + 1..];
-                    let first_text = if first_line.is_empty() { " " } else { first_line };
+                    let first_text = if first_line.is_empty() {
+                        " "
+                    } else {
+                        first_line
+                    };
                     // Highlight first line of buffer
                     let first_w = fr.measure_text_width(first_text, scale);
                     if let Some(rr) = app.rect_renderer.as_mut() {
@@ -1573,10 +2051,17 @@ fn update_view(app: &mut AppState) {
                             item_y - ascender * scale - crate::text::TEXT_PADDING,
                             first_w + 2.0 * crate::text::TEXT_PADDING,
                             lh,
-                            p.selected, 5.0,
+                            p.selected,
+                            5.0,
                         );
                     }
-                    fr.prepare_text_for_rendering(first_text, after_prefix_x, item_y, scale, p.text);
+                    fr.prepare_text_for_rendering(
+                        first_text,
+                        after_prefix_x,
+                        item_y,
+                        scale,
+                        p.text,
+                    );
                     let mut rest_y = item_y + lh;
                     let mut last_segment = "";
                     for segment in rest.split('\n') {
@@ -1589,19 +2074,37 @@ fn update_view(app: &mut AppState) {
                                 rest_y - ascender * scale - crate::text::TEXT_PADDING,
                                 seg_w + 2.0 * crate::text::TEXT_PADDING,
                                 lh,
-                                p.selected, 5.0,
+                                p.selected,
+                                5.0,
                             );
                         }
-                        fr.prepare_text_for_rendering(seg_text, text_prefix_x, rest_y, scale, p.text);
+                        fr.prepare_text_for_rendering(
+                            seg_text,
+                            text_prefix_x,
+                            rest_y,
+                            scale,
+                            p.text,
+                        );
                         last_segment = segment;
                         rest_y += lh;
                     }
                     if !insert_suffix.is_empty() {
                         let last_y = rest_y - lh;
                         let last_w = fr.measure_text_width(
-                            if last_segment.is_empty() { " " } else { last_segment }, scale,
+                            if last_segment.is_empty() {
+                                " "
+                            } else {
+                                last_segment
+                            },
+                            scale,
                         );
-                        fr.prepare_text_for_rendering(&insert_suffix, text_prefix_x + last_w, last_y, scale, p.text);
+                        fr.prepare_text_for_rendering(
+                            &insert_suffix,
+                            text_prefix_x + last_w,
+                            last_y,
+                            scale,
+                            p.text,
+                        );
                     }
                 } else {
                     let buf_text = if buf.is_empty() { " " } else { buf };
@@ -1613,12 +2116,19 @@ fn update_view(app: &mut AppState) {
                             item_y - ascender * scale - crate::text::TEXT_PADDING,
                             buf_w + 2.0 * crate::text::TEXT_PADDING,
                             lh,
-                            p.selected, 5.0,
+                            p.selected,
+                            5.0,
                         );
                     }
                     fr.prepare_text_for_rendering(buf_text, after_prefix_x, item_y, scale, p.text);
                     if !insert_suffix.is_empty() {
-                        fr.prepare_text_for_rendering(&insert_suffix, after_prefix_x + buf_w, item_y, scale, p.text);
+                        fr.prepare_text_for_rendering(
+                            &insert_suffix,
+                            after_prefix_x + buf_w,
+                            item_y,
+                            scale,
+                            p.text,
+                        );
                     }
                 }
             } else if is_flat_list {
@@ -1626,31 +2136,80 @@ fn update_view(app: &mut AppState) {
                 // Use fuzzy highlights when match positions are available.
                 let wrap_w = max_content_w.max(1.0);
                 if match_pos.is_empty() {
-                    fr.prepare_text_wrapped(label.as_str(), text_prefix_x, item_y, scale, wrap_w, line_height as f32, p.text);
+                    fr.prepare_text_wrapped(
+                        label.as_str(),
+                        text_prefix_x,
+                        item_y,
+                        scale,
+                        wrap_w,
+                        line_height as f32,
+                        p.text,
+                    );
                 } else {
                     // Same uniform wrap as the branch above: highlighted items
                     // must wrap too, and the line count reserved above assumes it.
                     let rr = app.rect_renderer.as_mut();
-                    render_with_highlights(fr, rr, label.as_str(), text_prefix_x, item_y, scale, ascender, line_height as f32, p.text, p.scroll_search, &match_pos,
-                        Some(WrapLayout { first_width: wrap_w, rest_x: text_prefix_x, rest_width: wrap_w }));
+                    render_with_highlights(
+                        fr,
+                        rr,
+                        label.as_str(),
+                        text_prefix_x,
+                        item_y,
+                        scale,
+                        ascender,
+                        line_height as f32,
+                        p.text,
+                        p.scroll_search,
+                        &match_pos,
+                        Some(WrapLayout {
+                            first_width: wrap_w,
+                            rest_x: text_prefix_x,
+                            rest_width: wrap_w,
+                        }),
+                    );
                 }
             } else {
                 let (prefix, content) = split_label(label.as_str());
                 let prefix_char_count = prefix.chars().count() as u32;
                 fr.prepare_text_for_rendering(prefix, text_prefix_x, item_y, scale, p.text);
-                let content_positions: Vec<u32> = match_pos.iter()
+                let content_positions: Vec<u32> = match_pos
+                    .iter()
                     .filter(|&&p| p >= prefix_char_count)
                     .map(|&p| p - prefix_char_count)
                     .collect();
                 let wrap_w = max_content_w.max(1.0);
                 if content_positions.is_empty() {
-                    fr.prepare_text_wrapped(content, content_start_x, item_y, scale, wrap_w, line_height as f32, p.text);
+                    fr.prepare_text_wrapped(
+                        content,
+                        content_start_x,
+                        item_y,
+                        scale,
+                        wrap_w,
+                        line_height as f32,
+                        p.text,
+                    );
                 } else {
                     // Same uniform wrap as the branch above: highlighted items
                     // must wrap too, and the line count reserved above assumes it.
                     let rr = app.rect_renderer.as_mut();
-                    render_with_highlights(fr, rr, content, content_start_x, item_y, scale, ascender, line_height as f32, p.text, p.scroll_search, &content_positions,
-                        Some(WrapLayout { first_width: wrap_w, rest_x: content_start_x, rest_width: wrap_w }));
+                    render_with_highlights(
+                        fr,
+                        rr,
+                        content,
+                        content_start_x,
+                        item_y,
+                        scale,
+                        ascender,
+                        line_height as f32,
+                        p.text,
+                        p.scroll_search,
+                        &content_positions,
+                        Some(WrapLayout {
+                            first_width: wrap_w,
+                            rest_x: content_start_x,
+                            rest_width: wrap_w,
+                        }),
+                    );
                 }
             }
         }
@@ -1676,7 +2235,9 @@ fn update_view(app: &mut AppState) {
 
         let mut line_starts: Vec<usize> = vec![0];
         for (i, c) in buf.char_indices() {
-            if c == '\n' { line_starts.push(i + 1); }
+            if c == '\n' {
+                line_starts.push(i + 1);
+            }
         }
 
         if let Some(fr) = app.font_renderer.as_ref() {
@@ -1690,9 +2251,17 @@ fn update_view(app: &mut AppState) {
                 // each covered line gets its own rect, as the selection loop does.
                 let m_start = off.min(buf.len());
                 let m_end = (off + len).min(buf.len());
-                let start_line = line_starts.partition_point(|&s| s <= m_start).saturating_sub(1);
-                let end_line = line_starts.partition_point(|&s| s <= m_end).saturating_sub(1);
-                let color = if mi == current { p.scroll_search } else { p.ext_search };
+                let start_line = line_starts
+                    .partition_point(|&s| s <= m_start)
+                    .saturating_sub(1);
+                let end_line = line_starts
+                    .partition_point(|&s| s <= m_end)
+                    .saturating_sub(1);
+                let color = if mi == current {
+                    p.scroll_search
+                } else {
+                    p.ext_search
+                };
                 for line in start_line..=end_line {
                     let line_start_off = line_starts[line];
                     let line_end_off = if line + 1 < line_starts.len() {
@@ -1702,13 +2271,25 @@ fn update_view(app: &mut AppState) {
                     };
                     let clamp_start = m_start.max(line_start_off);
                     let clamp_end = m_end.min(line_end_off);
-                    if clamp_end <= clamp_start { continue; }
-                    let line_x = if line == 0 { captured_elem_x } else { captured_elem_base_x };
+                    if clamp_end <= clamp_start {
+                        continue;
+                    }
+                    let line_x = if line == 0 {
+                        captured_elem_x
+                    } else {
+                        captured_elem_base_x
+                    };
                     let line_y = captured_elem_y - ascender * scale + line as f32 * lh;
-                    let x_start = line_x
-                        + fr.measure_text_width(&buf[line_start_off..clamp_start], scale);
-                    let w = fr.measure_text_width(&buf[clamp_start..clamp_end], scale).max(2.0);
-                    let target = if mi == current { &mut current_rects } else { &mut rects };
+                    let x_start =
+                        line_x + fr.measure_text_width(&buf[line_start_off..clamp_start], scale);
+                    let w = fr
+                        .measure_text_width(&buf[clamp_start..clamp_end], scale)
+                        .max(2.0);
+                    let target = if mi == current {
+                        &mut current_rects
+                    } else {
+                        &mut rects
+                    };
                     target.push((x_start, line_y, w, hl_height, color));
                 }
             }
@@ -1735,17 +2316,23 @@ fn update_view(app: &mut AppState) {
                     Coordinate::Command => "search: ",
                     _ => "search: ",
                 };
-                let pfx_w = app.font_renderer.as_ref()
+                let pfx_w = app
+                    .font_renderer
+                    .as_ref()
                     .map(|fr| fr.measure_text_width(prefix, scale))
                     .unwrap_or(0.0);
                 // search baseline is (line_height + ascender*scale + TEXT_PADDING); shift to cell top
-                (text_x + pfx_w, line_height as f32 + crate::text::TEXT_PADDING + top_offset)
+                (
+                    text_x + pfx_w,
+                    line_height as f32 + crate::text::TEXT_PADDING + top_offset,
+                )
             };
             let sel_height = line_height as f32 - 2.0 * crate::text::TEXT_PADDING;
             let search_buf;
-            let buf = if matches!(app.renderer.coordinate,
-                Coordinate::SimpleSearch | Coordinate::InputSearch)
-            {
+            let buf = if matches!(
+                app.renderer.coordinate,
+                Coordinate::SimpleSearch | Coordinate::InputSearch
+            ) {
                 search_buf = app.renderer.search_string.clone();
                 search_buf.as_str()
             } else {
@@ -1755,21 +2342,35 @@ fn update_view(app: &mut AppState) {
             // Build line-start offsets
             let mut line_starts: Vec<usize> = vec![0];
             for (i, c) in buf.char_indices() {
-                if c == '\n' { line_starts.push(i + 1); }
+                if c == '\n' {
+                    line_starts.push(i + 1);
+                }
             }
             let num_lines = line_starts.len();
 
             // Find start/end lines
-            let start_line = line_starts.partition_point(|&s| s <= sel_start).saturating_sub(1);
-            let end_line = line_starts.partition_point(|&s| s <= sel_end).saturating_sub(1);
+            let start_line = line_starts
+                .partition_point(|&s| s <= sel_start)
+                .saturating_sub(1);
+            let end_line = line_starts
+                .partition_point(|&s| s <= sel_end)
+                .saturating_sub(1);
 
             if let Some(fr) = app.font_renderer.as_ref() {
                 for line in start_line..=end_line {
                     let line_start_off = line_starts[line];
-                    let line_end_off = if line + 1 < num_lines { line_starts[line + 1] - 1 } else { buf.len() };
+                    let line_end_off = if line + 1 < num_lines {
+                        line_starts[line + 1] - 1
+                    } else {
+                        buf.len()
+                    };
                     let clamp_start = sel_start.max(line_start_off);
                     let clamp_end = sel_end.min(line_end_off);
-                    let line_x = if in_insert_mode && line > 0 { captured_elem_base_x } else { base_x };
+                    let line_x = if in_insert_mode && line > 0 {
+                        captured_elem_base_x
+                    } else {
+                        base_x
+                    };
                     let line_y = base_y + line as f32 * line_height as f32;
 
                     let x_start = if clamp_start > line_start_off {
@@ -1785,7 +2386,14 @@ fn update_view(app: &mut AppState) {
                     let sel_w = x_end - x_start;
                     if sel_w > 0.0 {
                         if let Some(rr) = app.rect_renderer.as_mut() {
-                            rr.prepare_rectangle(x_start, line_y, sel_w, sel_height, p.scroll_search, 0.0);
+                            rr.prepare_rectangle(
+                                x_start,
+                                line_y,
+                                sel_w,
+                                sel_height,
+                                p.scroll_search,
+                                0.0,
+                            );
                         }
                     }
                 }
@@ -1808,7 +2416,11 @@ fn update_view(app: &mut AppState) {
             // Count newlines before cursor
             let cursor_line = buf[..pos].chars().filter(|&c| c == '\n').count();
             let line_start_off = buf[..pos].rfind('\n').map(|i| i + 1).unwrap_or(0);
-            let line_x = if cursor_line == 0 { captured_elem_x } else { captured_elem_base_x };
+            let line_x = if cursor_line == 0 {
+                captured_elem_x
+            } else {
+                captured_elem_base_x
+            };
             let col_text = &buf[line_start_off..pos];
             let caret_x = if let Some(fr) = app.font_renderer.as_ref() {
                 line_x + fr.measure_text_width(col_text, scale)
@@ -1816,25 +2428,33 @@ fn update_view(app: &mut AppState) {
                 line_x
             };
             // Shift from baseline to cell top + padding so the caret sits inside the row
-            let caret_y = captured_elem_y - ascender * scale
-                + cursor_line as f32 * lh;
+            let caret_y = captured_elem_y - ascender * scale + cursor_line as f32 * lh;
             if let Some(rr) = app.rect_renderer.as_mut() {
                 rr.prepare_rectangle(caret_x, caret_y, 2.0, caret_h, p.text, 0.0);
             }
         } else if matches!(
             app.renderer.coordinate,
-            Coordinate::SimpleSearch | Coordinate::ExtendedSearch | Coordinate::Command
-                | Coordinate::ScrollSearch | Coordinate::InputSearch | Coordinate::TabSwitcher
+            Coordinate::SimpleSearch
+                | Coordinate::ExtendedSearch
+                | Coordinate::Command
+                | Coordinate::ScrollSearch
+                | Coordinate::InputSearch
+                | Coordinate::TabSwitcher
         ) {
             // Search/command caret after the prefix
             let (prefix, buf, cursor) = match app.renderer.coordinate {
                 Coordinate::Command => ("search: ", insert_buf.as_str(), insert_cursor),
                 Coordinate::ExtendedSearch => ("ext search: ", insert_buf.as_str(), insert_cursor),
                 Coordinate::TabSwitcher => ("switch tab: ", insert_buf.as_str(), insert_cursor),
-                _ => ("search: ", app.renderer.search_string.as_str(), insert_cursor),
+                _ => (
+                    "search: ",
+                    app.renderer.search_string.as_str(),
+                    insert_cursor,
+                ),
             };
             // search_y is the baseline — shift to cell top + padding
-            let search_y = line_height as f32 + ascender * scale + crate::text::TEXT_PADDING + top_offset;
+            let search_y =
+                line_height as f32 + ascender * scale + crate::text::TEXT_PADDING + top_offset;
             let caret_top_y = search_y - ascender * scale;
             if let Some(fr) = app.font_renderer.as_ref() {
                 let pfx_w = fr.measure_text_width(prefix, scale);
@@ -1934,7 +2554,13 @@ fn measure_scroll_items(
             let img_h = ir
                 .as_deref_mut()
                 .and_then(|ir| unsafe { ir.texture_size(path) })
-                .map(|(tw, th)| if tw == 0 { img_w } else { img_w * th as f32 / tw as f32 })
+                .map(|(tw, th)| {
+                    if tw == 0 {
+                        img_w
+                    } else {
+                        img_w * th as f32 / tw as f32
+                    }
+                })
                 .unwrap_or(img_w);
             let image_lines = ((img_h / line_height as f32).ceil() as usize).max(1);
             let (caption_prefix, caption_suffix) = scroll_image_caption(label, path);
@@ -1950,7 +2576,13 @@ fn measure_scroll_items(
             };
             let content_lines = caption_prefix_lines + image_lines + caption_suffix_lines;
             (
-                Some(ScrollImg { img_w, img_h, image_lines, caption_prefix_lines, caption_suffix_lines }),
+                Some(ScrollImg {
+                    img_w,
+                    img_h,
+                    image_lines,
+                    caption_prefix_lines,
+                    caption_suffix_lines,
+                }),
                 content_lines,
             )
         } else {
@@ -1958,7 +2590,13 @@ fn measure_scroll_items(
             (None, fr.count_wrapped_lines(&content, scale, max_w).max(1))
         };
         let height = (prefix_lines + content_lines) as i32 * line_height;
-        layouts.push(ScrollItemLayout { top: y_accum, height, prefix_lines, content_lines, img });
+        layouts.push(ScrollItemLayout {
+            top: y_accum,
+            height,
+            prefix_lines,
+            content_lines,
+            img,
+        });
         y_accum += height;
     }
     (layouts, y_accum)
@@ -2006,18 +2644,30 @@ fn render_scroll_item(
 
     // First row: list prefix in the left column, extended prefix at content_x.
     let prefix_text = ext_prefix.as_deref().unwrap_or("");
-    for (n, (line, _)) in fr.wrap_lines_with_offsets(prefix_text, scale, content_w).iter().enumerate() {
+    for (n, (line, _)) in fr
+        .wrap_lines_with_offsets(prefix_text, scale, content_w)
+        .iter()
+        .enumerate()
+    {
         let line_top = item_top_screen + n as f32 * lh;
-        if line_top + lh <= clip_y { continue; }
-        if line_top >= win_h { break; }
+        if line_top + lh <= clip_y {
+            continue;
+        }
+        if line_top >= win_h {
+            break;
+        }
         let baseline = line_top + ascender * scale + crate::text::TEXT_PADDING;
         if n == 0 {
             // Graphical radio/checkbox indicator (matches general mode).
             if let Some(rr) = rr.as_deref_mut() {
                 if radio != RadioType::None {
-                    render_radio_indicator(rr, &radio, prefix_x, baseline, scale, ascender, lh, em_width, p);
+                    render_radio_indicator(
+                        rr, &radio, prefix_x, baseline, scale, ascender, lh, em_width, p,
+                    );
                 } else if checkbox != CheckboxType::None {
-                    render_checkbox_indicator(rr, &checkbox, prefix_x, baseline, scale, ascender, lh, em_width, p);
+                    render_checkbox_indicator(
+                        rr, &checkbox, prefix_x, baseline, scale, ascender, lh, em_width, p,
+                    );
                 }
             }
             if !list_prefix.is_empty() {
@@ -2032,10 +2682,18 @@ fn render_scroll_item(
         let (caption_prefix, caption_suffix) = scroll_image_caption(label, path);
         // Caption text rendered above the image, at the content column.
         if !caption_prefix.is_empty() {
-            for (n, (line, _)) in fr.wrap_lines_with_offsets(caption_prefix, scale, content_w).iter().enumerate() {
+            for (n, (line, _)) in fr
+                .wrap_lines_with_offsets(caption_prefix, scale, content_w)
+                .iter()
+                .enumerate()
+            {
                 let line_top = content_top + n as f32 * lh;
-                if line_top + lh <= clip_y { continue; }
-                if line_top >= win_h { break; }
+                if line_top + lh <= clip_y {
+                    continue;
+                }
+                if line_top >= win_h {
+                    break;
+                }
                 let baseline = line_top + ascender * scale + crate::text::TEXT_PADDING;
                 fr.prepare_text_for_rendering(line, content_x, baseline, scale, p.text);
             }
@@ -2047,27 +2705,50 @@ fn render_scroll_item(
                 // Clip vertically so a scrolled image never bleeds over the
                 // header / tabs band (or below the window).
                 unsafe {
-                    ir.prepare_image_clipped(path, content_x + border, img_top + border,
-                                     img.img_w - 2.0 * border, img.img_h - 2.0 * border, clip_y, win_h);
+                    ir.prepare_image_clipped(
+                        path,
+                        content_x + border,
+                        img_top + border,
+                        img.img_w - 2.0 * border,
+                        img.img_h - 2.0 * border,
+                        clip_y,
+                        win_h,
+                    );
                 }
             }
         }
         // Caption text rendered below the image.
         if !caption_suffix.is_empty() {
             let suffix_top = img_top + img.image_lines as f32 * lh;
-            for (n, (line, _)) in fr.wrap_lines_with_offsets(caption_suffix, scale, content_w).iter().enumerate() {
+            for (n, (line, _)) in fr
+                .wrap_lines_with_offsets(caption_suffix, scale, content_w)
+                .iter()
+                .enumerate()
+            {
                 let line_top = suffix_top + n as f32 * lh;
-                if line_top + lh <= clip_y { continue; }
-                if line_top >= win_h { break; }
+                if line_top + lh <= clip_y {
+                    continue;
+                }
+                if line_top >= win_h {
+                    break;
+                }
                 let baseline = line_top + ascender * scale + crate::text::TEXT_PADDING;
                 fr.prepare_text_for_rendering(line, content_x, baseline, scale, p.text);
             }
         }
     } else {
-        for (n, (line, _)) in fr.wrap_lines_with_offsets(&content, scale, content_w).iter().enumerate() {
+        for (n, (line, _)) in fr
+            .wrap_lines_with_offsets(&content, scale, content_w)
+            .iter()
+            .enumerate()
+        {
             let line_top = content_top + n as f32 * lh;
-            if line_top + lh <= clip_y { continue; }
-            if line_top >= win_h { break; }
+            if line_top + lh <= clip_y {
+                continue;
+            }
+            if line_top >= win_h {
+                break;
+            }
             let baseline = line_top + ascender * scale + crate::text::TEXT_PADDING;
             fr.prepare_text_for_rendering(line, content_x, baseline, scale, p.text);
         }
@@ -2109,7 +2790,11 @@ fn render_scroll_full(
     // Resolve sentinel (-1): place the selected item at viewport top.
     let max_offset = (total_height - viewport_h as i32).max(0);
     let scroll_offset = if text_scroll_offset < 0 {
-        layouts.get(list_index).map(|l| l.top).unwrap_or(0).min(max_offset)
+        layouts
+            .get(list_index)
+            .map(|l| l.top)
+            .unwrap_or(0)
+            .min(max_offset)
     } else {
         text_scroll_offset.clamp(0, max_offset)
     };
@@ -2121,11 +2806,33 @@ fn render_scroll_full(
     for (i, (label, img_data, _, _, ext_prefix)) in list_items.iter().enumerate() {
         let l = &layouts[i];
         let item_top_screen = clip_y + (l.top - scroll_offset) as f32;
-        if item_top_screen + l.height as f32 <= clip_y { continue; } // above viewport
-        if item_top_screen >= win_h { break; }                        // below viewport
-        render_scroll_item(fr, rr.as_deref_mut(), ir.as_deref_mut(), label, img_data, ext_prefix, l,
-            item_top_screen, scale, ascender, line_height, em_width, list_has_indicators,
-            text_x, content_x, max_w, clip_y, win_h, p);
+        if item_top_screen + l.height as f32 <= clip_y {
+            continue;
+        } // above viewport
+        if item_top_screen >= win_h {
+            break;
+        } // below viewport
+        render_scroll_item(
+            fr,
+            rr.as_deref_mut(),
+            ir.as_deref_mut(),
+            label,
+            img_data,
+            ext_prefix,
+            l,
+            item_top_screen,
+            scale,
+            ascender,
+            line_height,
+            em_width,
+            list_has_indicators,
+            text_x,
+            content_x,
+            max_w,
+            clip_y,
+            win_h,
+            p,
+        );
     }
 
     (total_height, scroll_offset)
@@ -2234,7 +2941,12 @@ fn render_scroll_search_full(
         let l = &layouts[item_idx];
         let mut push_segment = |text: String, virtual_top: i32, fr: &crate::text::FontRenderer| {
             let wrap = fr.wrap_lines_with_offsets(&text, scale, max_w);
-            segments.push(SearchSegment { item_idx, text, wrap, virtual_top });
+            segments.push(SearchSegment {
+                item_idx,
+                text,
+                wrap,
+                virtual_top,
+            });
         };
         match corpus {
             ScrollSearchCorpus::Prefix => {
@@ -2264,10 +2976,19 @@ fn render_scroll_search_full(
     let mut all_matches: Vec<ScrollMatch> = Vec::new();
     for (seg_idx, seg) in segments.iter().enumerate() {
         for (byte_off, mlen) in handlers::find_matches_ci(&seg.text, search_query) {
-            let li = seg.wrap.partition_point(|(_, off)| *off <= byte_off).saturating_sub(1);
+            let li = seg
+                .wrap
+                .partition_point(|(_, off)| *off <= byte_off)
+                .saturating_sub(1);
             let li = li.min(seg.wrap.len().saturating_sub(1));
             let virtual_y = seg.virtual_top + li as i32 * line_height;
-            all_matches.push(ScrollMatch { seg_idx, item_idx: seg.item_idx, byte_off, mlen, virtual_y });
+            all_matches.push(ScrollMatch {
+                seg_idx,
+                item_idx: seg.item_idx,
+                byte_off,
+                mlen,
+                virtual_y,
+            });
         }
     }
     let match_count = all_matches.len();
@@ -2285,7 +3006,8 @@ fn render_scroll_search_full(
     } else {
         let clamped = search_current_match.min(match_count - 1);
         if needs_position {
-            all_matches.iter()
+            all_matches
+                .iter()
                 .position(|m| m.virtual_y + line_height > viewport_top)
                 .unwrap_or(0)
         } else {
@@ -2301,7 +3023,10 @@ fn render_scroll_search_full(
     // announcement on Up/Down. Same lookup the highlight pass below performs.
     let current_match_line = all_matches.get(current_match).and_then(|m| {
         let seg = &segments[m.seg_idx];
-        let li = seg.wrap.partition_point(|(_, off)| *off <= m.byte_off).saturating_sub(1);
+        let li = seg
+            .wrap
+            .partition_point(|(_, off)| *off <= m.byte_off)
+            .saturating_sub(1);
         let li = li.min(seg.wrap.len().saturating_sub(1));
         seg.wrap.get(li).map(|(t, _)| t.clone())
     });
@@ -2310,13 +3035,18 @@ fn render_scroll_search_full(
     let max_offset = (total_height - viewport_h as i32).max(0);
     let scroll_offset = if snap && match_count > 0 {
         let match_item = all_matches[current_match].item_idx;
-        layouts.get(match_item).map(|l| l.top).unwrap_or(0).clamp(0, max_offset)
+        layouts
+            .get(match_item)
+            .map(|l| l.top)
+            .unwrap_or(0)
+            .clamp(0, max_offset)
     } else {
         viewport_top.clamp(0, max_offset)
     };
 
     // Search bar at line 1 (below the header separator, under the tabs band).
-    let search_bar_y = line_height as f32 + ascender * scale + crate::text::TEXT_PADDING + top_offset;
+    let search_bar_y =
+        line_height as f32 + ascender * scale + crate::text::TEXT_PADDING + top_offset;
     let bar_label = match corpus {
         ScrollSearchCorpus::Content => "search",
         ScrollSearchCorpus::Prefix => "prefix search",
@@ -2351,20 +3081,31 @@ fn render_scroll_search_full(
     if let Some(rr) = rr.as_deref_mut() {
         for (mi, m) in all_matches.iter().enumerate() {
             let seg = &segments[m.seg_idx];
-            let li = seg.wrap.partition_point(|(_, off)| *off <= m.byte_off).saturating_sub(1);
+            let li = seg
+                .wrap
+                .partition_point(|(_, off)| *off <= m.byte_off)
+                .saturating_sub(1);
             let li = li.min(seg.wrap.len().saturating_sub(1));
             let (line_text, line_byte_off) = match seg.wrap.get(li) {
                 Some((t, o)) => (t.as_str(), *o),
                 None => continue,
             };
             let line_top = clip_y + (m.virtual_y - scroll_offset) as f32;
-            if line_top + lh <= clip_y || line_top >= win_h { continue; }
+            if line_top + lh <= clip_y || line_top >= win_h {
+                continue;
+            }
             let local_start = m.byte_off.saturating_sub(line_byte_off);
             let safe_start = local_start.min(line_text.len());
             let safe_end = (local_start + m.mlen).min(line_text.len());
             let match_x = content_x + fr.measure_text_width(&line_text[..safe_start], scale);
-            let match_w = fr.measure_text_width(&line_text[safe_start..safe_end], scale).max(2.0);
-            let color = if mi == current_match { p.scroll_search } else { p.selected };
+            let match_w = fr
+                .measure_text_width(&line_text[safe_start..safe_end], scale)
+                .max(2.0);
+            let color = if mi == current_match {
+                p.scroll_search
+            } else {
+                p.selected
+            };
             rr.prepare_rectangle(match_x, line_top, match_w, lh, color, 3.0);
         }
     }
@@ -2373,16 +3114,43 @@ fn render_scroll_search_full(
     for (i, (label, img_data, _, _, ext_prefix)) in list_items.iter().enumerate() {
         let l = &layouts[i];
         let item_top_screen = clip_y + (l.top - scroll_offset) as f32;
-        if item_top_screen + l.height as f32 <= clip_y { continue; }
-        if item_top_screen >= win_h { break; }
+        if item_top_screen + l.height as f32 <= clip_y {
+            continue;
+        }
+        if item_top_screen >= win_h {
+            break;
+        }
 
-        render_scroll_item(fr, rr.as_deref_mut(), ir.as_deref_mut(), label, img_data, ext_prefix, l,
-            item_top_screen, scale, ascender, line_height, em_width, list_has_indicators,
-            text_x, content_x, max_w, clip_y, win_h, p);
+        render_scroll_item(
+            fr,
+            rr.as_deref_mut(),
+            ir.as_deref_mut(),
+            label,
+            img_data,
+            ext_prefix,
+            l,
+            item_top_screen,
+            scale,
+            ascender,
+            line_height,
+            em_width,
+            list_has_indicators,
+            text_x,
+            content_x,
+            max_w,
+            clip_y,
+            win_h,
+            p,
+        );
     }
 
     ScrollSearchResult {
-        total_height, match_count, current_match, current_item, current_match_line, scroll_offset,
+        total_height,
+        match_count,
+        current_match,
+        current_item,
+        current_match_line,
+        scroll_offset,
     }
 }
 
@@ -2391,8 +3159,8 @@ fn rgba_u32_to_f32(c: u32) -> [f32; 4] {
     [
         ((c >> 24) & 0xFF) as f32 / 255.0,
         ((c >> 16) & 0xFF) as f32 / 255.0,
-        ((c >>  8) & 0xFF) as f32 / 255.0,
-        ( c        & 0xFF) as f32 / 255.0,
+        ((c >> 8) & 0xFF) as f32 / 255.0,
+        (c & 0xFF) as f32 / 255.0,
     ]
 }
 
@@ -2404,13 +3172,17 @@ fn build_header_text(r: &AppRenderer, line_height: i32) -> String {
 
 /// Snapshot the active list for rendering (avoids mixed borrows later).
 /// Returns `(label, item_data, is_selected, fuzzy_match_positions, ext_prefix)`.
-fn collect_list_items(r: &AppRenderer) -> Vec<(String, Option<String>, bool, Vec<u32>, Option<String>)> {
+fn collect_list_items(
+    r: &AppRenderer,
+) -> Vec<(String, Option<String>, bool, Vec<u32>, Option<String>)> {
     let len = r.active_list_len();
     let mut out = Vec::with_capacity(len);
     let has_filter = !r.filtered_list_indices.is_empty();
     for i in 0..len {
         let item = if has_filter {
-            r.filtered_list_indices.get(i).and_then(|&raw| r.total_list.get(raw))
+            r.filtered_list_indices
+                .get(i)
+                .and_then(|&raw| r.total_list.get(raw))
         } else {
             r.total_list.get(i)
         };
@@ -2420,7 +3192,13 @@ fn collect_list_items(r: &AppRenderer) -> Vec<(String, Option<String>, bool, Vec
             } else {
                 Vec::new()
             };
-            out.push((item.label.clone(), item.data.clone(), i == r.list_index, positions, item.ext_prefix.clone()));
+            out.push((
+                item.label.clone(),
+                item.data.clone(),
+                i == r.list_index,
+                positions,
+                item.ext_prefix.clone(),
+            ));
         }
     }
     out
@@ -2483,7 +3261,8 @@ fn render_with_highlights(
         if let Some(rr) = rr.as_deref_mut() {
             let seg_chars: Vec<char> = seg_text.chars().collect();
             let seg_char_len = seg_chars.len() as u32;
-            let local_positions: Vec<u32> = match_positions.iter()
+            let local_positions: Vec<u32> = match_positions
+                .iter()
                 .filter(|&&p| p >= char_start && p < char_start + seg_char_len)
                 .map(|&p| p - char_start)
                 .collect();
@@ -2494,13 +3273,22 @@ fn render_with_highlights(
                 while i < seg_chars.len() {
                     if local_positions.binary_search(&(i as u32)).is_ok() {
                         let start_byte = byte_off;
-                        while i < seg_chars.len() && local_positions.binary_search(&(i as u32)).is_ok() {
+                        while i < seg_chars.len()
+                            && local_positions.binary_search(&(i as u32)).is_ok()
+                        {
                             byte_off += seg_chars[i].len_utf8();
                             i += 1;
                         }
                         let match_x = seg_x + fr.measure_text_width(&seg_text[..start_byte], scale);
                         let match_w = fr.measure_text_width(&seg_text[start_byte..byte_off], scale);
-                        rr.prepare_rectangle(match_x, rect_y, match_w, line_height, highlight_color, 3.0);
+                        rr.prepare_rectangle(
+                            match_x,
+                            rect_y,
+                            match_w,
+                            line_height,
+                            highlight_color,
+                            3.0,
+                        );
                     } else {
                         byte_off += seg_chars[i].len_utf8();
                         i += 1;
@@ -2512,7 +3300,6 @@ fn render_with_highlights(
         fr.prepare_text_for_rendering(seg_text, seg_x, seg_y, scale, text_color);
     }
 }
-
 
 // ---------------------------------------------------------------------------
 // Key dispatch
@@ -2533,7 +3320,8 @@ fn update_window_title(app: &mut AppState) {
     let mode = r.mode_display_label();
     let path = build_display_path(r);
 
-    let selected = r.current_list_item()
+    let selected = r
+        .current_list_item()
         .map(|item| item.label.as_str())
         .unwrap_or("");
     let selected_short: String = selected.chars().take(50).collect();
@@ -2574,7 +3362,11 @@ fn build_display_path(r: &crate::app_state::AppRenderer) -> String {
         }
     }
 
-    if parts.is_empty() { "/".to_owned() } else { parts.join(" / ") }
+    if parts.is_empty() {
+        "/".to_owned()
+    } else {
+        parts.join(" / ")
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -2582,21 +3374,37 @@ fn build_display_path(r: &crate::app_state::AppRenderer) -> String {
 // ---------------------------------------------------------------------------
 
 #[derive(PartialEq)]
-enum RadioType { None, Unchecked, Checked }
+enum RadioType {
+    None,
+    Unchecked,
+    Checked,
+}
 
 #[derive(PartialEq)]
-enum CheckboxType { None, Unchecked, Checked }
+enum CheckboxType {
+    None,
+    Unchecked,
+    Checked,
+}
 
 fn get_radio_type(label: &str) -> RadioType {
-    if label.starts_with("-rc ") { RadioType::Checked }
-    else if label.starts_with("-r ") { RadioType::Unchecked }
-    else { RadioType::None }
+    if label.starts_with("-rc ") {
+        RadioType::Checked
+    } else if label.starts_with("-r ") {
+        RadioType::Unchecked
+    } else {
+        RadioType::None
+    }
 }
 
 fn get_checkbox_type(label: &str) -> CheckboxType {
-    if label.starts_with("-cc ") || label.starts_with("+cc ") { CheckboxType::Checked }
-    else if label.starts_with("-c ") || label.starts_with("+c ") { CheckboxType::Unchecked }
-    else { CheckboxType::None }
+    if label.starts_with("-cc ") || label.starts_with("+cc ") {
+        CheckboxType::Checked
+    } else if label.starts_with("-c ") || label.starts_with("+c ") {
+        CheckboxType::Unchecked
+    } else {
+        CheckboxType::None
+    }
 }
 
 /// Returns the pixel width consumed by the indicator (circle/box + one em gap).
@@ -2608,8 +3416,12 @@ fn indicator_width(line_h: f32, em_width: f32) -> f32 {
 fn render_radio_indicator(
     rr: &mut crate::rectangle::RectangleRenderer,
     radio_type: &RadioType,
-    x: f32, item_y: f32,
-    scale: f32, ascender: f32, line_h: f32, em_width: f32,
+    x: f32,
+    item_y: f32,
+    scale: f32,
+    ascender: f32,
+    line_h: f32,
+    em_width: f32,
     p: &crate::app_state::ColorPalette,
 ) -> f32 {
     let size = line_h * 0.8;
@@ -2621,8 +3433,19 @@ fn render_radio_indicator(
     // Inner circle
     let inner_size = size * 0.55;
     let inner_offset = (size - inner_size) / 2.0;
-    let inner_color = if *radio_type == RadioType::Checked { p.selected } else { p.background };
-    rr.prepare_rectangle(x + inner_offset, indicator_y + inner_offset, inner_size, inner_size, inner_color, inner_size / 2.0);
+    let inner_color = if *radio_type == RadioType::Checked {
+        p.selected
+    } else {
+        p.background
+    };
+    rr.prepare_rectangle(
+        x + inner_offset,
+        indicator_y + inner_offset,
+        inner_size,
+        inner_size,
+        inner_color,
+        inner_size / 2.0,
+    );
 
     size + em_width
 }
@@ -2631,8 +3454,12 @@ fn render_radio_indicator(
 fn render_checkbox_indicator(
     rr: &mut crate::rectangle::RectangleRenderer,
     checkbox_type: &CheckboxType,
-    x: f32, item_y: f32,
-    scale: f32, ascender: f32, line_h: f32, em_width: f32,
+    x: f32,
+    item_y: f32,
+    scale: f32,
+    ascender: f32,
+    line_h: f32,
+    em_width: f32,
     p: &crate::app_state::ColorPalette,
 ) -> f32 {
     let size = line_h * 0.8;
@@ -2681,13 +3508,21 @@ fn split_image_label<'a>(label: &'a str, path: &str) -> (&'a str, &'a str, bool)
 /// Counts display lines in text using 120-character column wrapping.
 /// Matches C render.c countTextLines().
 fn count_text_lines(text: &str) -> usize {
-    if text.is_empty() { return 1; }
+    if text.is_empty() {
+        return 1;
+    }
     let mut lines = 0usize;
     for seg in text.split('\n') {
         let len = seg.len();
-        if len <= 120 { lines += 1; } else { lines += (len + 119) / 120; }
+        if len <= 120 {
+            lines += 1;
+        } else {
+            lines += (len + 119) / 120;
+        }
     }
-    if text.ends_with('\n') { lines += 1; }
+    if text.ends_with('\n') {
+        lines += 1;
+    }
     lines.max(1)
 }
 
@@ -2699,7 +3534,6 @@ struct ImageLayout {
     img_w: f32,
     img_h: f32,
 }
-
 
 #[cfg(test)]
 mod tests {

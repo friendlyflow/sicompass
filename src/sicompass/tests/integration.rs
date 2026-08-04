@@ -6,12 +6,12 @@
 //! headless harness with no SDL window or Vulkan context.  Key presses are
 //! simulated by calling `events::dispatch_key` directly on an `AppRenderer`.
 
-use sicompass::events::dispatch_key;
-use sicompass::app_state::{AppRenderer, Coordinate};
 use sdl3::keyboard::{Keycode, Mod};
+use sicompass::app_state::{AppRenderer, Coordinate};
+use sicompass::events::dispatch_key;
+use sicompass_sdk::ffon::FfonElement;
 use sicompass_sdk::placeholders::I_PLACEHOLDER;
 use sicompass_sdk::provider::Provider;
-use sicompass_sdk::ffon::FfonElement;
 use std::path::Path;
 use tempfile::TempDir;
 
@@ -49,14 +49,19 @@ impl Harness {
         let mut renderer = AppRenderer::new();
 
         // File browser rooted at temp dir (set path AFTER init which resets to "/")
-        register(&mut renderer, sicompass_sdk::create_provider_by_name("filebrowser").unwrap());
+        register(
+            &mut renderer,
+            sicompass_sdk::create_provider_by_name("filebrowser").unwrap(),
+        );
         renderer.providers[0].set_current_path(root.to_str().unwrap());
         // Re-fetch now that the path is correct
         {
             let children = renderer.providers[0].fetch();
             let display_name = renderer.providers[0].display_name().to_owned();
             let mut root_elem = FfonElement::new_obj(&display_name);
-            for child in children { root_elem.as_obj_mut().unwrap().push(child); }
+            for child in children {
+                root_elem.as_obj_mut().unwrap().push(child);
+            }
             renderer.ffon[0] = root_elem;
         }
 
@@ -68,7 +73,11 @@ impl Harness {
 
         sicompass::list::create_list_current_layer(&mut renderer);
 
-        Harness { renderer, tmp, settings_tmp }
+        Harness {
+            renderer,
+            tmp,
+            settings_tmp,
+        }
     }
 
     fn new_with_webbrowser() -> Self {
@@ -85,17 +94,25 @@ impl Harness {
         let mut renderer = AppRenderer::new();
 
         // Filebrowser: init resets path to "/", so set path after init
-        register(&mut renderer, sicompass_sdk::create_provider_by_name("filebrowser").unwrap());
+        register(
+            &mut renderer,
+            sicompass_sdk::create_provider_by_name("filebrowser").unwrap(),
+        );
         renderer.providers[0].set_current_path(root.to_str().unwrap());
         {
             let children = renderer.providers[0].fetch();
             let display_name = renderer.providers[0].display_name().to_owned();
             let mut root_elem = FfonElement::new_obj(&display_name);
-            for child in children { root_elem.as_obj_mut().unwrap().push(child); }
+            for child in children {
+                root_elem.as_obj_mut().unwrap().push(child);
+            }
             renderer.ffon[0] = root_elem;
         }
 
-        register(&mut renderer, sicompass_sdk::create_provider_by_name("webbrowser").unwrap());
+        register(
+            &mut renderer,
+            sicompass_sdk::create_provider_by_name("webbrowser").unwrap(),
+        );
 
         // Settings (isolated to a separate temp dir — see Harness::new).
         let mut settings = sicompass_sdk::create_provider_by_name("settings").unwrap();
@@ -104,7 +121,11 @@ impl Harness {
 
         sicompass::list::create_list_current_layer(&mut renderer);
 
-        Harness { renderer, tmp, settings_tmp }
+        Harness {
+            renderer,
+            tmp,
+            settings_tmp,
+        }
     }
 
     fn r(&mut self) -> &mut AppRenderer {
@@ -113,7 +134,10 @@ impl Harness {
 
     /// Provider index by name (`"filebrowser"`, `"settings"`, …).
     fn provider_idx(&self, name: &str) -> Option<usize> {
-        self.renderer.providers.iter().position(|p| p.name() == name)
+        self.renderer
+            .providers
+            .iter()
+            .position(|p| p.name() == name)
     }
 
     fn tmp_path(&self) -> &Path {
@@ -167,11 +191,19 @@ fn press_ctrl_shift(r: &mut AppRenderer, key: Keycode) {
     dispatch_key(r, Some(key), Mod::LCTRLMOD | Mod::LSHIFTMOD);
     settle_provider_ops(r);
 }
-fn press_shift_left(r: &mut AppRenderer)  { dispatch_key(r, Some(Keycode::Left),  Mod::LSHIFTMOD); }
-fn press_shift_right(r: &mut AppRenderer) { dispatch_key(r, Some(Keycode::Right), Mod::LSHIFTMOD); }
+fn press_shift_left(r: &mut AppRenderer) {
+    dispatch_key(r, Some(Keycode::Left), Mod::LSHIFTMOD);
+}
+fn press_shift_right(r: &mut AppRenderer) {
+    dispatch_key(r, Some(Keycode::Right), Mod::LSHIFTMOD);
+}
 
-fn press_down(r: &mut AppRenderer)   { press(r, Keycode::Down); }
-fn press_up(r: &mut AppRenderer)     { press(r, Keycode::Up); }
+fn press_down(r: &mut AppRenderer) {
+    press(r, Keycode::Down);
+}
+fn press_up(r: &mut AppRenderer) {
+    press(r, Keycode::Up);
+}
 /// Register a terminal provider and swap it into its shell view.
 ///
 /// The terminal opens on a folder listing; `:` is what turns the list into the
@@ -183,7 +215,10 @@ fn press_up(r: &mut AppRenderer)     { press(r, Keycode::Up); }
 /// level past the provider root. Returns the id of the live input slot, which
 /// is where the cursor is left.
 fn register_terminal_in_shell(renderer: &mut AppRenderer) -> sicompass_sdk::ffon::IdArray {
-    register(renderer, sicompass_sdk::create_provider_by_name("terminal").unwrap());
+    register(
+        renderer,
+        sicompass_sdk::create_provider_by_name("terminal").unwrap(),
+    );
     sicompass::list::create_list_current_layer(renderer);
     press_right(renderer);
     sicompass::handlers::handle_colon(renderer);
@@ -203,7 +238,11 @@ fn slot_key_at(renderer: &AppRenderer, slot_id: &sicompass_sdk::ffon::IdArray) -
 
 /// Replace the live input slot's children (the real on-disk recall history is
 /// unpredictable in tests) with the given `<button>` entries.
-fn set_history_buttons(renderer: &mut AppRenderer, slot_id: &sicompass_sdk::ffon::IdArray, cmds: &[&str]) {
+fn set_history_buttons(
+    renderer: &mut AppRenderer,
+    slot_id: &sicompass_sdk::ffon::IdArray,
+    cmds: &[&str],
+) {
     let idx = slot_id.last().unwrap();
     let slot = sicompass::state::navigate_to_slice_pub(&mut renderer.ffon, slot_id)
         .and_then(|arr| arr.get_mut(idx))
@@ -211,16 +250,29 @@ fn set_history_buttons(renderer: &mut AppRenderer, slot_id: &sicompass_sdk::ffon
         .expect("cursor should be on the +i slot");
     slot.children.clear();
     for cmd in cmds {
-        slot.children.push(FfonElement::new_str(format!("<button>{cmd}</button>{cmd}")));
+        slot.children
+            .push(FfonElement::new_str(format!("<button>{cmd}</button>{cmd}")));
     }
 }
 
-fn press_right(r: &mut AppRenderer)  { press(r, Keycode::Right); }
-fn press_left(r: &mut AppRenderer)   { press(r, Keycode::Left); }
-fn press_enter(r: &mut AppRenderer)  { press(r, Keycode::Return); }
-fn press_escape(r: &mut AppRenderer) { press(r, Keycode::Escape); }
-fn press_colon(r: &mut AppRenderer)  { press(r, Keycode::Colon); }
-fn press_tab(r: &mut AppRenderer)    { press(r, Keycode::Tab); }
+fn press_right(r: &mut AppRenderer) {
+    press(r, Keycode::Right);
+}
+fn press_left(r: &mut AppRenderer) {
+    press(r, Keycode::Left);
+}
+fn press_enter(r: &mut AppRenderer) {
+    press(r, Keycode::Return);
+}
+fn press_escape(r: &mut AppRenderer) {
+    press(r, Keycode::Escape);
+}
+fn press_colon(r: &mut AppRenderer) {
+    press(r, Keycode::Colon);
+}
+fn press_tab(r: &mut AppRenderer) {
+    press(r, Keycode::Tab);
+}
 
 fn type_text(r: &mut AppRenderer, text: &str) {
     sicompass::handlers::handle_input(r, text);
@@ -229,12 +281,18 @@ fn type_text(r: &mut AppRenderer, text: &str) {
 /// Navigate from root to a specific root-level provider index.
 fn navigate_to_provider(r: &mut AppRenderer, target_idx: usize) {
     // Go to root depth if needed
-    while r.current_id.depth() > 1 { press_left(r); }
+    while r.current_id.depth() > 1 {
+        press_left(r);
+    }
     let current = r.current_id.get(0).unwrap_or(0);
     if current < target_idx {
-        for _ in 0..(target_idx - current) { press_down(r); }
+        for _ in 0..(target_idx - current) {
+            press_down(r);
+        }
     } else {
-        for _ in 0..(current - target_idx) { press_up(r); }
+        for _ in 0..(current - target_idx) {
+            press_up(r);
+        }
     }
 }
 
@@ -249,7 +307,10 @@ fn initial_state() {
     assert_eq!(r.coordinate, Coordinate::General);
     assert_eq!(r.current_id.depth(), 1);
     assert_eq!(r.current_id.get(0), Some(0));
-    assert!(r.ffon.len() >= 2, "should have at least filebrowser + settings");
+    assert!(
+        r.ffon.len() >= 2,
+        "should have at least filebrowser + settings"
+    );
 }
 
 #[test]
@@ -268,7 +329,9 @@ fn navigate_between_providers_up_down() {
 #[test]
 fn enter_provider_and_navigate_back() {
     let mut h = Harness::new();
-    let fb_idx = h.provider_idx("filebrowser").expect("filebrowser not found");
+    let fb_idx = h
+        .provider_idx("filebrowser")
+        .expect("filebrowser not found");
 
     // Reset filebrowser to "/" so pressing left from the provider root returns to depth 1.
     h.renderer.providers[fb_idx].set_current_path("/");
@@ -276,7 +339,9 @@ fn enter_provider_and_navigate_back() {
         let children = h.renderer.providers[fb_idx].fetch();
         let display_name = h.renderer.providers[fb_idx].display_name().to_owned();
         let mut root_elem = FfonElement::new_obj(&display_name);
-        for child in children { root_elem.as_obj_mut().unwrap().push(child); }
+        for child in children {
+            root_elem.as_obj_mut().unwrap().push(child);
+        }
         h.renderer.ffon[fb_idx] = root_elem;
     }
     sicompass::list::create_list_current_layer(h.r());
@@ -284,7 +349,11 @@ fn enter_provider_and_navigate_back() {
     navigate_to_provider(h.r(), fb_idx);
 
     press_right(h.r());
-    assert_eq!(h.renderer.current_id.depth(), 2, "should be inside provider");
+    assert_eq!(
+        h.renderer.current_id.depth(),
+        2,
+        "should be inside provider"
+    );
     assert_eq!(h.renderer.coordinate, Coordinate::General);
 
     press_left(h.r());
@@ -294,12 +363,18 @@ fn enter_provider_and_navigate_back() {
 #[test]
 fn filebrowser_left_in_subdir_pops_one_level() {
     let mut h = Harness::new();
-    let fb_idx = h.provider_idx("filebrowser").expect("filebrowser not found");
+    let fb_idx = h
+        .provider_idx("filebrowser")
+        .expect("filebrowser not found");
     navigate_to_provider(h.r(), fb_idx);
 
     // Enter the filebrowser (depth 2, listing temp dir)
     press_right(h.r());
-    assert_eq!(h.renderer.current_id.depth(), 2, "should be inside provider");
+    assert_eq!(
+        h.renderer.current_id.depth(),
+        2,
+        "should be inside provider"
+    );
 
     // Navigate down to subdir (meta=0, alpha.txt=1, beta.txt=2, subdir=3)
     press_down(h.r());
@@ -310,34 +385,49 @@ fn filebrowser_left_in_subdir_pops_one_level() {
     press_right(h.r());
     assert_eq!(h.renderer.current_id.depth(), 3, "descends into subdir");
     let path_in_subdir = sicompass::provider::current_path(&h.renderer).to_owned();
-    assert!(path_in_subdir.ends_with("subdir"), "path should be inside subdir");
+    assert!(
+        path_in_subdir.ends_with("subdir"),
+        "path should be inside subdir"
+    );
 
     // Press left — pops exactly one level back to the parent dir.
     press_left(h.r());
     assert_eq!(h.renderer.current_id.depth(), 2, "Left pops one level");
     let path_after = sicompass::provider::current_path(&h.renderer).to_owned();
-    assert!(!path_after.ends_with("subdir"), "path should be back at parent");
+    assert!(
+        !path_after.ends_with("subdir"),
+        "path should be back at parent"
+    );
 }
 
 #[test]
 fn filebrowser_left_from_subdir_restores_cursor_to_entered_folder() {
     let mut h = Harness::new();
-    let fb_idx = h.provider_idx("filebrowser").expect("filebrowser not found");
+    let fb_idx = h
+        .provider_idx("filebrowser")
+        .expect("filebrowser not found");
     navigate_to_provider(h.r(), fb_idx);
     press_right(h.r()); // enter filebrowser at depth 2
 
     // Find "subdir" in the listing and navigate to it.
     let subdir_idx = {
         let obj = h.renderer.ffon[fb_idx].as_obj().unwrap();
-        obj.children.iter().position(|c| {
-            c.as_obj().map(|o| sicompass_sdk::tags::strip_display(&o.key) == "subdir").unwrap_or(false)
-        }).expect("subdir should exist")
+        obj.children
+            .iter()
+            .position(|c| {
+                c.as_obj()
+                    .map(|o| sicompass_sdk::tags::strip_display(&o.key) == "subdir")
+                    .unwrap_or(false)
+            })
+            .expect("subdir should exist")
     };
     let cur = h.renderer.current_id.get(1).unwrap_or(0);
-    for _ in 0..(subdir_idx as isize - cur as isize).max(0) { press_down(h.r()); }
+    for _ in 0..(subdir_idx as isize - cur as isize).max(0) {
+        press_down(h.r());
+    }
 
     press_right(h.r()); // enter subdir
-    press_left(h.r());  // navigate back to parent
+    press_left(h.r()); // navigate back to parent
 
     // Cursor should land on "subdir", not index 0.
     assert_eq!(
@@ -354,7 +444,9 @@ fn filebrowser_left_from_subdir_restores_cursor_to_entered_folder() {
 #[test]
 fn filebrowser_shows_temp_files() {
     let mut h = Harness::new();
-    let fb_idx = h.provider_idx("filebrowser").expect("filebrowser not found");
+    let fb_idx = h
+        .provider_idx("filebrowser")
+        .expect("filebrowser not found");
     navigate_to_provider(h.r(), fb_idx);
     press_right(h.r());
 
@@ -400,25 +492,31 @@ fn provider_active_changes_with_navigation() {
 #[test]
 fn navigate_into_subdirectory() {
     let mut h = Harness::new();
-    let fb_idx = h.provider_idx("filebrowser").expect("filebrowser not found");
+    let fb_idx = h
+        .provider_idx("filebrowser")
+        .expect("filebrowser not found");
     navigate_to_provider(h.r(), fb_idx);
     press_right(h.r());
 
     // Find "subdir" in the FFON tree
     let subdir_idx = {
         let obj = h.renderer.ffon[fb_idx].as_obj().unwrap();
-        obj.children.iter().position(|c| {
-            c.as_obj().map(|o| o.key == "subdir").unwrap_or(false)
-        })
+        obj.children
+            .iter()
+            .position(|c| c.as_obj().map(|o| o.key == "subdir").unwrap_or(false))
     };
 
     if let Some(idx) = subdir_idx {
         let current_child = h.renderer.current_id.get(1).unwrap_or(0);
         let diff = idx as isize - current_child as isize;
         if diff > 0 {
-            for _ in 0..diff { press_down(h.r()); }
+            for _ in 0..diff {
+                press_down(h.r());
+            }
         } else {
-            for _ in 0..(-diff) { press_up(h.r()); }
+            for _ in 0..(-diff) {
+                press_up(h.r());
+            }
         }
 
         press_right(h.r());
@@ -432,7 +530,9 @@ fn navigate_into_subdirectory() {
 #[test]
 fn provider_state_preserved_across_navigation() {
     let mut h = Harness::new();
-    let fb_idx = h.provider_idx("filebrowser").expect("filebrowser not found");
+    let fb_idx = h
+        .provider_idx("filebrowser")
+        .expect("filebrowser not found");
 
     // Use "/" so that pressing left from inside the provider exits to the root list.
     h.renderer.providers[fb_idx].set_current_path("/");
@@ -440,7 +540,9 @@ fn provider_state_preserved_across_navigation() {
         let children = h.renderer.providers[fb_idx].fetch();
         let display_name = h.renderer.providers[fb_idx].display_name().to_owned();
         let mut root_elem = FfonElement::new_obj(&display_name);
-        for child in children { root_elem.as_obj_mut().unwrap().push(child); }
+        for child in children {
+            root_elem.as_obj_mut().unwrap().push(child);
+        }
         h.renderer.ffon[fb_idx] = root_elem;
     }
     sicompass::list::create_list_current_layer(h.r());
@@ -465,7 +567,9 @@ fn provider_state_preserved_across_navigation() {
 fn file_creation_via_insert_mode() {
     let mut h = Harness::new();
     let tmp = h.tmp_path().to_path_buf();
-    let fb_idx = h.provider_idx("filebrowser").expect("filebrowser not found");
+    let fb_idx = h
+        .provider_idx("filebrowser")
+        .expect("filebrowser not found");
     navigate_to_provider(h.r(), fb_idx);
     press_right(h.r());
 
@@ -476,14 +580,19 @@ fn file_creation_via_insert_mode() {
     press_enter(h.r());
     assert_eq!(h.renderer.coordinate, Coordinate::General);
 
-    assert!(tmp.join("newfile.txt").exists(), "newfile.txt should exist on disk");
+    assert!(
+        tmp.join("newfile.txt").exists(),
+        "newfile.txt should exist on disk"
+    );
 }
 
 #[test]
 fn directory_creation_via_insert_mode() {
     let mut h = Harness::new();
     let tmp = h.tmp_path().to_path_buf();
-    let fb_idx = h.provider_idx("filebrowser").expect("filebrowser not found");
+    let fb_idx = h
+        .provider_idx("filebrowser")
+        .expect("filebrowser not found");
     navigate_to_provider(h.r(), fb_idx);
     press_right(h.r());
 
@@ -491,7 +600,10 @@ fn directory_creation_via_insert_mode() {
     type_text(h.r(), "+ newdir");
     press_enter(h.r());
 
-    assert!(tmp.join("newdir").is_dir(), "newdir should exist as a directory");
+    assert!(
+        tmp.join("newdir").is_dir(),
+        "newdir should exist as a directory"
+    );
 }
 
 #[test]
@@ -505,7 +617,9 @@ fn escape_returns_to_general() {
     assert_eq!(h.renderer.coordinate, Coordinate::General);
 
     // From insert mode
-    let fb_idx = h.provider_idx("filebrowser").expect("filebrowser not found");
+    let fb_idx = h
+        .provider_idx("filebrowser")
+        .expect("filebrowser not found");
     navigate_to_provider(h.r(), fb_idx);
     press_right(h.r());
     press_ctrl(h.r(), Keycode::I);
@@ -520,7 +634,9 @@ fn file_deletion() {
     let tmp = h.tmp_path().to_path_buf();
     std::fs::write(tmp.join("deleteme.txt"), "").unwrap();
 
-    let fb_idx = h.provider_idx("filebrowser").expect("filebrowser not found");
+    let fb_idx = h
+        .provider_idx("filebrowser")
+        .expect("filebrowser not found");
     navigate_to_provider(h.r(), fb_idx);
     press_right(h.r());
 
@@ -531,7 +647,9 @@ fn file_deletion() {
     let target_idx = {
         let obj = h.renderer.ffon[fb_idx].as_obj().unwrap();
         obj.children.iter().position(|c| {
-            let key = c.as_obj().map(|o| o.key.as_str())
+            let key = c
+                .as_obj()
+                .map(|o| o.key.as_str())
                 .or_else(|| c.as_str())
                 .unwrap_or("");
             sicompass_sdk::tags::strip_display(key).contains("deleteme.txt")
@@ -542,12 +660,19 @@ fn file_deletion() {
         let cur = h.renderer.current_id.get(1).unwrap_or(0);
         let diff = idx as isize - cur as isize;
         if diff > 0 {
-            for _ in 0..diff { press_down(h.r()); }
+            for _ in 0..diff {
+                press_down(h.r());
+            }
         } else {
-            for _ in 0..(-diff) { press_up(h.r()); }
+            for _ in 0..(-diff) {
+                press_up(h.r());
+            }
         }
         press_ctrl(h.r(), Keycode::D);
-        assert!(!tmp.join("deleteme.txt").exists(), "deleteme.txt should be deleted");
+        assert!(
+            !tmp.join("deleteme.txt").exists(),
+            "deleteme.txt should be deleted"
+        );
     }
 }
 
@@ -568,7 +693,9 @@ fn mode_transitions_tab_escape_chain() {
     assert_eq!(h.renderer.coordinate, Coordinate::General);
 
     // S key enters Scroll from inside a provider (not at root)
-    let fb_idx = h.provider_idx("filebrowser").expect("filebrowser not found");
+    let fb_idx = h
+        .provider_idx("filebrowser")
+        .expect("filebrowser not found");
     navigate_to_provider(h.r(), fb_idx);
     press_right(h.r());
     press(h.r(), Keycode::S);
@@ -583,10 +710,12 @@ fn scroll_search_esc_chain() {
     let mut h = Harness::new();
 
     // S only works inside a provider, not at root
-    let fb_idx = h.provider_idx("filebrowser").expect("filebrowser not found");
+    let fb_idx = h
+        .provider_idx("filebrowser")
+        .expect("filebrowser not found");
     navigate_to_provider(h.r(), fb_idx);
     press_right(h.r());
-    press(h.r(), Keycode::S);  // -> Scroll
+    press(h.r(), Keycode::S); // -> Scroll
     assert_eq!(h.renderer.coordinate, Coordinate::Scroll);
 
     press_ctrl(h.r(), Keycode::F);
@@ -603,7 +732,9 @@ fn scroll_search_esc_chain() {
 fn enter_on_file_does_not_rename() {
     let mut h = Harness::new();
     let tmp = h.tmp_path().to_path_buf();
-    let fb_idx = h.provider_idx("filebrowser").expect("filebrowser not found");
+    let fb_idx = h
+        .provider_idx("filebrowser")
+        .expect("filebrowser not found");
     navigate_to_provider(h.r(), fb_idx);
     press_right(h.r());
 
@@ -611,7 +742,9 @@ fn enter_on_file_does_not_rename() {
     let alpha_idx = {
         let obj = h.renderer.ffon[fb_idx].as_obj().unwrap();
         obj.children.iter().position(|c| {
-            let key = c.as_obj().map(|o| o.key.as_str())
+            let key = c
+                .as_obj()
+                .map(|o| o.key.as_str())
                 .or_else(|| c.as_str())
                 .unwrap_or("");
             sicompass_sdk::tags::strip_display(key).contains("alpha.txt")
@@ -622,26 +755,37 @@ fn enter_on_file_does_not_rename() {
         let cur = h.renderer.current_id.get(1).unwrap_or(0);
         let diff = idx as isize - cur as isize;
         if diff > 0 {
-            for _ in 0..diff { press_down(h.r()); }
+            for _ in 0..diff {
+                press_down(h.r());
+            }
         } else {
-            for _ in 0..(-diff) { press_up(h.r()); }
+            for _ in 0..(-diff) {
+                press_up(h.r());
+            }
         }
         press_enter(h.r());
-        assert!(tmp.join("alpha.txt").exists(), "alpha.txt should still exist after Enter");
+        assert!(
+            tmp.join("alpha.txt").exists(),
+            "alpha.txt should still exist after Enter"
+        );
     }
 }
 
 #[test]
 fn handle_i_populates_input_buffer() {
     let mut h = Harness::new();
-    let fb_idx = h.provider_idx("filebrowser").expect("filebrowser not found");
+    let fb_idx = h
+        .provider_idx("filebrowser")
+        .expect("filebrowser not found");
     navigate_to_provider(h.r(), fb_idx);
     press_right(h.r());
 
     let alpha_idx = {
         let obj = h.renderer.ffon[fb_idx].as_obj().unwrap();
         obj.children.iter().position(|c| {
-            let key = c.as_obj().map(|o| o.key.as_str())
+            let key = c
+                .as_obj()
+                .map(|o| o.key.as_str())
                 .or_else(|| c.as_str())
                 .unwrap_or("");
             sicompass_sdk::tags::strip_display(key).contains("alpha.txt")
@@ -652,9 +796,13 @@ fn handle_i_populates_input_buffer() {
         let cur = h.renderer.current_id.get(1).unwrap_or(0);
         let diff = idx as isize - cur as isize;
         if diff > 0 {
-            for _ in 0..diff { press_down(h.r()); }
+            for _ in 0..diff {
+                press_down(h.r());
+            }
         } else {
-            for _ in 0..(-diff) { press_up(h.r()); }
+            for _ in 0..(-diff) {
+                press_up(h.r());
+            }
         }
         press(h.r(), Keycode::I);
         assert_eq!(h.renderer.coordinate, Coordinate::Insert);
@@ -670,37 +818,56 @@ fn handle_i_populates_input_buffer() {
 fn undo_file_creation() {
     let mut h = Harness::new();
     let tmp = h.tmp_path().to_path_buf();
-    let fb_idx = h.provider_idx("filebrowser").expect("filebrowser not found");
+    let fb_idx = h
+        .provider_idx("filebrowser")
+        .expect("filebrowser not found");
     navigate_to_provider(h.r(), fb_idx);
     press_right(h.r());
 
     press_ctrl(h.r(), Keycode::I);
     type_text(h.r(), "- undotest.txt");
     press_enter(h.r());
-    assert!(tmp.join("undotest.txt").exists(), "file should exist after creation");
+    assert!(
+        tmp.join("undotest.txt").exists(),
+        "file should exist after creation"
+    );
 
     press_ctrl(h.r(), Keycode::Z);
-    assert!(!tmp.join("undotest.txt").exists(), "file should be deleted after undo");
+    assert!(
+        !tmp.join("undotest.txt").exists(),
+        "file should be deleted after undo"
+    );
 
     press_ctrl_shift(h.r(), Keycode::Z);
-    assert!(tmp.join("undotest.txt").exists(), "file should be re-created after redo");
+    assert!(
+        tmp.join("undotest.txt").exists(),
+        "file should be re-created after redo"
+    );
 }
 
 #[test]
 fn undo_directory_creation() {
     let mut h = Harness::new();
     let tmp = h.tmp_path().to_path_buf();
-    let fb_idx = h.provider_idx("filebrowser").expect("filebrowser not found");
+    let fb_idx = h
+        .provider_idx("filebrowser")
+        .expect("filebrowser not found");
     navigate_to_provider(h.r(), fb_idx);
     press_right(h.r());
 
     press_ctrl(h.r(), Keycode::I);
     type_text(h.r(), "+ undodir");
     press_enter(h.r());
-    assert!(tmp.join("undodir").is_dir(), "directory should exist after creation");
+    assert!(
+        tmp.join("undodir").is_dir(),
+        "directory should exist after creation"
+    );
 
     press_ctrl(h.r(), Keycode::Z);
-    assert!(!tmp.join("undodir").exists(), "directory should be deleted after undo");
+    assert!(
+        !tmp.join("undodir").exists(),
+        "directory should be deleted after undo"
+    );
 }
 
 #[test]
@@ -713,10 +880,15 @@ fn webbrowser_url_bar_is_input() {
 
     // First element (index 0) should be the URL bar with <input> tag
     let wb_obj = h.renderer.ffon[wb_idx].as_obj().unwrap();
-    assert!(wb_obj.children.len() >= 1, "web browser should have url bar");
+    assert!(
+        wb_obj.children.len() >= 1,
+        "web browser should have url bar"
+    );
 
     let url_elem = &wb_obj.children[0];
-    let url_str = url_elem.as_obj().map(|o| o.key.as_str())
+    let url_str = url_elem
+        .as_obj()
+        .map(|o| o.key.as_str())
         .or_else(|| url_elem.as_str())
         .unwrap_or("");
     assert!(
@@ -741,7 +913,9 @@ fn webbrowser_url_commit_updates_ffon() {
 
     // Navigate to the URL bar (first child, index 0)
     let cur = h.renderer.current_id.get(1).unwrap_or(0);
-    for _ in 0..cur { press_up(h.r()); }
+    for _ in 0..cur {
+        press_up(h.r());
+    }
 
     // Enter insert mode
     press(h.r(), Keycode::I);
@@ -770,7 +944,9 @@ fn webbrowser_url_commit_updates_ffon() {
     // This verifies that refresh_current_directory was called (re-fetching from provider).
     let wb_obj = h.renderer.ffon[wb_idx].as_obj().unwrap();
     let url_elem = &wb_obj.children[0];
-    let url_text = url_elem.as_obj().map(|o| o.key.as_str())
+    let url_text = url_elem
+        .as_obj()
+        .map(|o| o.key.as_str())
         .or_else(|| url_elem.as_str())
         .unwrap_or("");
     assert!(
@@ -793,18 +969,25 @@ fn webbrowser_url_commit_enters_page_content() {
 
     // Navigate to the URL bar (first child, index 0)
     let cur = h.renderer.current_id.get(1).unwrap_or(0);
-    for _ in 0..cur { press_up(h.r()); }
+    for _ in 0..cur {
+        press_up(h.r());
+    }
 
     press(h.r(), Keycode::I);
     type_text(h.r(), "https://example.invalid");
     press_enter(h.r());
 
     assert_eq!(
-        h.renderer.current_id.depth(), 3,
+        h.renderer.current_id.depth(),
+        3,
         "cursor should sit inside the page content, not on the URL bar"
     );
     assert_eq!(h.renderer.current_id.get(0), Some(wb_idx));
-    let label = h.renderer.current_list_item().map(|it| it.label.clone()).unwrap_or_default();
+    let label = h
+        .renderer
+        .current_list_item()
+        .map(|it| it.label.clone())
+        .unwrap_or_default();
     assert!(
         label.contains("example.invalid"),
         "cursor should be on the loaded page's first content element, got: {label:?}"
@@ -827,7 +1010,11 @@ fn webbrowser_url_commit_enters_page_content() {
     type_text(h.r(), "https://second.invalid");
     press_enter(h.r());
     assert_eq!(h.renderer.current_id.depth(), 3);
-    let label = h.renderer.current_list_item().map(|it| it.label.clone()).unwrap_or_default();
+    let label = h
+        .renderer
+        .current_list_item()
+        .map(|it| it.label.clone())
+        .unwrap_or_default();
     assert!(
         label.contains("second.invalid"),
         "second navigation should land in the new page's content, got: {label:?}"
@@ -845,7 +1032,9 @@ fn webbrowser_url_same_content_exits_insert_mode() {
 
     // Navigate to URL bar (index 0)
     let cur = h.renderer.current_id.get(1).unwrap_or(0);
-    for _ in 0..cur { press_up(h.r()); }
+    for _ in 0..cur {
+        press_up(h.r());
+    }
 
     // Enter insert mode — don't change anything — press Enter
     press(h.r(), Keycode::I);
@@ -894,7 +1083,8 @@ fn webbrowser_fragment_link_navigates_to_target() {
 
     // Cursor must now be on the target row (index 1 in the page children)
     assert_eq!(
-        h.renderer.current_id.last(), Some(1),
+        h.renderer.current_id.last(),
+        Some(1),
         "cursor should be on the target row (index 1) after fragment nav"
     );
 }
@@ -914,7 +1104,10 @@ fn enter_on_input_obj_does_not_activate() {
     {
         let wb_obj = h.renderer.ffon[wb_idx].as_obj_mut().unwrap();
         let mut url_obj = FfonElement::new_obj("<input>https://example.com</input>");
-        url_obj.as_obj_mut().unwrap().push(FfonElement::new_str("content"));
+        url_obj
+            .as_obj_mut()
+            .unwrap()
+            .push(FfonElement::new_str("content"));
         if !wb_obj.children.is_empty() {
             wb_obj.children[0] = url_obj;
         }
@@ -922,7 +1115,9 @@ fn enter_on_input_obj_does_not_activate() {
     sicompass::list::create_list_current_layer(h.r());
     // Navigate to index 0 (the URL Obj)
     let cur = h.renderer.current_id.get(1).unwrap_or(0);
-    for _ in 0..cur { press_up(h.r()); }
+    for _ in 0..cur {
+        press_up(h.r());
+    }
 
     // Press Enter — should NOT navigate into the Obj's children or re-commit
     press_enter(h.r());
@@ -934,7 +1129,8 @@ fn enter_on_input_obj_does_not_activate() {
         "should stay in General"
     );
     assert_eq!(
-        h.renderer.current_id.depth(), 2,
+        h.renderer.current_id.depth(),
+        2,
         "should not navigate deeper into URL Obj on Enter"
     );
 }
@@ -946,7 +1142,9 @@ fn enter_on_input_obj_does_not_activate() {
 #[test]
 fn test_list_item_label_has_prefix() {
     let mut h = Harness::new();
-    let fb_idx = h.provider_idx("filebrowser").expect("filebrowser not found");
+    let fb_idx = h
+        .provider_idx("filebrowser")
+        .expect("filebrowser not found");
     navigate_to_provider(h.r(), fb_idx);
     press_right(h.r());
     assert_eq!(h.renderer.current_id.depth(), 2);
@@ -955,7 +1153,9 @@ fn test_list_item_label_has_prefix() {
     let alpha_ffon_idx = {
         let obj = h.renderer.ffon[fb_idx].as_obj().unwrap();
         obj.children.iter().position(|c| {
-            let key = c.as_obj().map(|o| o.key.as_str())
+            let key = c
+                .as_obj()
+                .map(|o| o.key.as_str())
                 .or_else(|| c.as_str())
                 .unwrap_or("");
             sicompass_sdk::tags::strip_display(key).contains("alpha.txt")
@@ -967,16 +1167,23 @@ fn test_list_item_label_has_prefix() {
     let cur = h.renderer.current_id.get(1).unwrap_or(0);
     let diff = alpha_ffon_idx as isize - cur as isize;
     if diff > 0 {
-        for _ in 0..diff { press_down(h.r()); }
+        for _ in 0..diff {
+            press_down(h.r());
+        }
     } else {
-        for _ in 0..(-diff) { press_up(h.r()); }
+        for _ in 0..(-diff) {
+            press_up(h.r());
+        }
     }
 
     // Rebuild list and find visual list index for alpha.txt
     sicompass::list::create_list_current_layer(h.r());
-    let visual_idx = h.renderer.total_list.iter().position(|item| {
-        item.id.last() == Some(alpha_ffon_idx)
-    }).expect("alpha.txt not found in visual list");
+    let visual_idx = h
+        .renderer
+        .total_list
+        .iter()
+        .position(|item| item.id.last() == Some(alpha_ffon_idx))
+        .expect("alpha.txt not found in visual list");
     h.renderer.list_index = visual_idx;
 
     let label = &h.renderer.total_list[visual_idx].label;
@@ -1000,7 +1207,9 @@ fn test_full_workflow() {
     let tmp = h.tmp_path().to_path_buf();
     std::fs::create_dir(tmp.join("Downloads")).unwrap();
 
-    let fb_idx = h.provider_idx("filebrowser").expect("filebrowser not found");
+    let fb_idx = h
+        .provider_idx("filebrowser")
+        .expect("filebrowser not found");
 
     // ---- Step 1: Navigate to filebrowser, enter it, refresh ----
     navigate_to_provider(h.r(), fb_idx);
@@ -1012,7 +1221,9 @@ fn test_full_workflow() {
     let dl_idx = {
         let obj = h.renderer.ffon[fb_idx].as_obj().unwrap();
         obj.children.iter().position(|c| {
-            let key = c.as_obj().map(|o| o.key.as_str())
+            let key = c
+                .as_obj()
+                .map(|o| o.key.as_str())
                 .or_else(|| c.as_str())
                 .unwrap_or("");
             sicompass_sdk::tags::strip_display(key) == "Downloads"
@@ -1022,24 +1233,37 @@ fn test_full_workflow() {
     let cur = h.renderer.current_id.get(1).unwrap_or(0);
     let diff = dl_idx as isize - cur as isize;
     if diff > 0 {
-        for _ in 0..diff { press_down(h.r()); }
+        for _ in 0..diff {
+            press_down(h.r());
+        }
     } else {
-        for _ in 0..(-diff) { press_up(h.r()); }
+        for _ in 0..(-diff) {
+            press_up(h.r());
+        }
     }
     press_right(h.r());
     // Unified in-memory model: navigating into a directory descends one level
     // and grafts its contents in place, so depth grows to 3.
-    assert_eq!(h.renderer.current_id.depth(), 3, "should be inside Downloads");
+    assert_eq!(
+        h.renderer.current_id.depth(),
+        3,
+        "should be inside Downloads"
+    );
 
     // ---- Step 3: Create a file in Downloads ----
     press_ctrl(h.r(), Keycode::I);
     type_text(h.r(), "- report.txt");
     press_enter(h.r());
     assert_eq!(h.renderer.coordinate, Coordinate::General);
-    assert!(tmp.join("Downloads/report.txt").exists(), "report.txt should be created");
+    assert!(
+        tmp.join("Downloads/report.txt").exists(),
+        "report.txt should be created"
+    );
 
     // ---- Step 4: Navigate back to root ----
-    while h.renderer.current_id.depth() > 1 { press_left(h.r()); }
+    while h.renderer.current_id.depth() > 1 {
+        press_left(h.r());
+    }
     assert_eq!(h.renderer.current_id.depth(), 1);
     assert_eq!(h.renderer.coordinate, Coordinate::General);
 }
@@ -1051,31 +1275,43 @@ fn test_full_workflow() {
 #[test]
 fn test_meta_enters_coordinate() {
     let mut h = Harness::new();
-    let fb_idx = h.provider_idx("filebrowser").expect("filebrowser not found");
+    let fb_idx = h
+        .provider_idx("filebrowser")
+        .expect("filebrowser not found");
     navigate_to_provider(h.r(), fb_idx);
     press_right(h.r());
     assert_eq!(h.renderer.coordinate, Coordinate::General);
 
     press(h.r(), Keycode::M);
     assert_eq!(h.renderer.coordinate, Coordinate::Meta);
-    assert!(!h.renderer.total_list.is_empty(), "meta list should have items");
+    assert!(
+        !h.renderer.total_list.is_empty(),
+        "meta list should have items"
+    );
 }
 
 #[test]
 fn test_meta_shows_hints() {
     let mut h = Harness::new();
-    let fb_idx = h.provider_idx("filebrowser").expect("filebrowser not found");
+    let fb_idx = h
+        .provider_idx("filebrowser")
+        .expect("filebrowser not found");
     navigate_to_provider(h.r(), fb_idx);
     press_right(h.r());
     press(h.r(), Keycode::M);
     assert_eq!(h.renderer.coordinate, Coordinate::Meta);
-    assert!(h.renderer.total_list.len() >= 3, "should have multiple shortcut hints");
+    assert!(
+        h.renderer.total_list.len() >= 3,
+        "should have multiple shortcut hints"
+    );
 }
 
 #[test]
 fn test_escape_from_meta_restores_position() {
     let mut h = Harness::new();
-    let fb_idx = h.provider_idx("filebrowser").expect("filebrowser not found");
+    let fb_idx = h
+        .provider_idx("filebrowser")
+        .expect("filebrowser not found");
     navigate_to_provider(h.r(), fb_idx);
     press_right(h.r());
     let saved_id = h.renderer.current_id.clone();
@@ -1093,21 +1329,29 @@ fn test_escape_from_meta_restores_position() {
 #[test]
 fn test_left_noop_in_meta() {
     let mut h = Harness::new();
-    let fb_idx = h.provider_idx("filebrowser").expect("filebrowser not found");
+    let fb_idx = h
+        .provider_idx("filebrowser")
+        .expect("filebrowser not found");
     navigate_to_provider(h.r(), fb_idx);
     press_right(h.r());
     press(h.r(), Keycode::M);
     let list_before = h.renderer.total_list.len();
 
     press_left(h.r());
-    assert_eq!(h.renderer.coordinate, Coordinate::Meta, "left should be noop in meta");
+    assert_eq!(
+        h.renderer.coordinate,
+        Coordinate::Meta,
+        "left should be noop in meta"
+    );
     assert_eq!(h.renderer.total_list.len(), list_before);
 }
 
 #[test]
 fn test_up_down_in_meta() {
     let mut h = Harness::new();
-    let fb_idx = h.provider_idx("filebrowser").expect("filebrowser not found");
+    let fb_idx = h
+        .provider_idx("filebrowser")
+        .expect("filebrowser not found");
     navigate_to_provider(h.r(), fb_idx);
     press_right(h.r());
     press(h.r(), Keycode::M);
@@ -1122,13 +1366,19 @@ fn test_up_down_in_meta() {
 #[test]
 fn test_right_noop_in_meta() {
     let mut h = Harness::new();
-    let fb_idx = h.provider_idx("filebrowser").expect("filebrowser not found");
+    let fb_idx = h
+        .provider_idx("filebrowser")
+        .expect("filebrowser not found");
     navigate_to_provider(h.r(), fb_idx);
     press_right(h.r());
     press(h.r(), Keycode::M);
 
     press_right(h.r());
-    assert_eq!(h.renderer.coordinate, Coordinate::Meta, "right should be noop in meta");
+    assert_eq!(
+        h.renderer.coordinate,
+        Coordinate::Meta,
+        "right should be noop in meta"
+    );
 }
 
 #[test]
@@ -1138,12 +1388,26 @@ fn test_meta_at_root_shows_root_hints() {
 
     press(h.r(), Keycode::M);
     assert_eq!(h.renderer.coordinate, Coordinate::Meta);
-    assert!(!h.renderer.total_list.is_empty(), "root meta list should not be empty");
+    assert!(
+        !h.renderer.total_list.is_empty(),
+        "root meta list should not be empty"
+    );
 
     // Root hints should mention Search and Ctrl+F which work at root
-    let labels: Vec<&str> = h.renderer.total_list.iter().map(|i| i.label.as_str()).collect();
-    assert!(labels.iter().any(|l| l.contains("Search")), "root meta should mention Search, got: {labels:?}");
-    assert!(labels.iter().any(|l| l.contains("Ctrl+F")), "root meta should mention Ctrl+F");
+    let labels: Vec<&str> = h
+        .renderer
+        .total_list
+        .iter()
+        .map(|i| i.label.as_str())
+        .collect();
+    assert!(
+        labels.iter().any(|l| l.contains("Search")),
+        "root meta should mention Search, got: {labels:?}"
+    );
+    assert!(
+        labels.iter().any(|l| l.contains("Ctrl+F")),
+        "root meta should mention Ctrl+F"
+    );
 }
 
 /// Helper: build a renderer rooted in an editor-semantics provider at depth 2,
@@ -1151,17 +1415,30 @@ fn test_meta_at_root_shows_root_hints() {
 fn editor_renderer_in(coord: Coordinate) -> AppRenderer {
     struct EditorMock;
     impl Provider for EditorMock {
-        fn name(&self) -> &str { "mock_editor" }
-        fn fetch(&mut self) -> Vec<FfonElement> { Vec::new() }
-        fn has_editor_semantics(&self) -> bool { true }
+        fn name(&self) -> &str {
+            "mock_editor"
+        }
+        fn fetch(&mut self) -> Vec<FfonElement> {
+            Vec::new()
+        }
+        fn has_editor_semantics(&self) -> bool {
+            true
+        }
     }
 
     let mut r = AppRenderer::new();
     r.providers.push(Box::new(EditorMock));
     let mut root = FfonElement::new_obj("buffer");
-    root.as_obj_mut().unwrap().push(FfonElement::new_str("alpha"));
+    root.as_obj_mut()
+        .unwrap()
+        .push(FfonElement::new_str("alpha"));
     r.ffon = vec![root];
-    r.current_id = { let mut id = sicompass_sdk::ffon::IdArray::new(); id.push(0); id.push(0); id };
+    r.current_id = {
+        let mut id = sicompass_sdk::ffon::IdArray::new();
+        id.push(0);
+        id.push(0);
+        id
+    };
     r.coordinate = coord;
     r.previous_coordinate = coord;
     sicompass::list::create_list_current_layer(&mut r);
@@ -1218,7 +1495,10 @@ fn input_search_walks_matches_and_commits_caret() {
 
     press_ctrl(&mut r, Keycode::F);
     assert_eq!(r.coordinate, Coordinate::InputSearch);
-    assert_eq!(r.input_buffer, SEARCH_FIXTURE, "Ctrl+F must not touch the edit");
+    assert_eq!(
+        r.input_buffer, SEARCH_FIXTURE,
+        "Ctrl+F must not touch the edit"
+    );
 
     type_text(&mut r, "err");
     assert_eq!(r.input_search_match_count, 3);
@@ -1230,7 +1510,10 @@ fn input_search_walks_matches_and_commits_caret() {
 
     press_enter(&mut r);
     assert_eq!(r.coordinate, Coordinate::Insert);
-    assert_eq!(r.input_buffer, SEARCH_FIXTURE, "search must not modify the element");
+    assert_eq!(
+        r.input_buffer, SEARCH_FIXTURE,
+        "search must not modify the element"
+    );
     assert_eq!(r.cursor_position, SEARCH_FIXTURE.rfind("err").unwrap());
     assert_eq!(r.search_string, "", "query is discarded on commit");
 }
@@ -1271,7 +1554,11 @@ fn input_search_backspace_edits_query_not_element() {
 #[test]
 fn enter_at_root_does_not_append() {
     let mut h = Harness::new();
-    assert_eq!(h.renderer.current_id.depth(), 1, "expected to start at root");
+    assert_eq!(
+        h.renderer.current_id.depth(),
+        1,
+        "expected to start at root"
+    );
     let before = h.renderer.ffon.len();
     press_enter(h.r());
     assert_eq!(
@@ -1286,7 +1573,9 @@ fn enter_at_root_does_not_append() {
 #[test]
 fn enter_in_filebrowser_does_not_append() {
     let mut h = Harness::new();
-    let fb_idx = h.provider_idx("filebrowser").expect("filebrowser not found");
+    let fb_idx = h
+        .provider_idx("filebrowser")
+        .expect("filebrowser not found");
     navigate_to_provider(h.r(), fb_idx);
     press_right(h.r()); // enter filebrowser (depth 2)
 
@@ -1328,9 +1617,9 @@ fn webbrowser_link_obj_shows_plus_l_prefix_and_is_navigable() {
     {
         let wb_obj = h.renderer.ffon[wb_idx].as_obj_mut().unwrap();
         let mut url_obj = FfonElement::new_obj("<input>https://example.com</input>");
-        url_obj.as_obj_mut().unwrap().push(
-            FfonElement::new_obj("Example link <link>https://example.com/page</link>"),
-        );
+        url_obj.as_obj_mut().unwrap().push(FfonElement::new_obj(
+            "Example link <link>https://example.com/page</link>",
+        ));
         if !wb_obj.children.is_empty() {
             wb_obj.children[0] = url_obj;
         }
@@ -1340,10 +1629,15 @@ fn webbrowser_link_obj_shows_plus_l_prefix_and_is_navigable() {
     sicompass::list::create_list_current_layer(h.r());
 
     // The link Obj item should have a "+l" prefix in the visual list
-    let link_item = h.renderer.total_list.iter().find(|item| {
-        item.label.contains("Example link")
-    });
-    assert!(link_item.is_some(), "link element should appear in the list");
+    let link_item = h
+        .renderer
+        .total_list
+        .iter()
+        .find(|item| item.label.contains("Example link"));
+    assert!(
+        link_item.is_some(),
+        "link element should appear in the list"
+    );
     assert!(
         link_item.unwrap().label.starts_with("+l"),
         "link Obj should have '+l' prefix, got: '{}'",
@@ -1351,11 +1645,23 @@ fn webbrowser_link_obj_shows_plus_l_prefix_and_is_navigable() {
     );
 
     // Navigate to the link item and press Right — should go one level deeper
-    let link_vis_idx = h.renderer.total_list.iter().position(|i| i.label.contains("Example link")).unwrap();
+    let link_vis_idx = h
+        .renderer
+        .total_list
+        .iter()
+        .position(|i| i.label.contains("Example link"))
+        .unwrap();
     let cur = h.renderer.list_index;
     let diff = link_vis_idx as isize - cur as isize;
-    if diff > 0 { for _ in 0..diff { press_down(h.r()); } }
-    else { for _ in 0..(-diff) { press_up(h.r()); } }
+    if diff > 0 {
+        for _ in 0..diff {
+            press_down(h.r());
+        }
+    } else {
+        for _ in 0..(-diff) {
+            press_up(h.r());
+        }
+    }
 
     let depth_before = h.renderer.current_id.depth();
     press_right(h.r());
@@ -1373,18 +1679,29 @@ fn webbrowser_link_obj_shows_plus_l_prefix_and_is_navigable() {
 /// then press Enter to execute it.
 fn execute_provider_command(h: &mut Harness, command: &str) {
     press(h.r(), Keycode::Colon);
-    assert_eq!(h.renderer.coordinate, sicompass::app_state::Coordinate::Command,
-        "should be in Command mode after :");
+    assert_eq!(
+        h.renderer.coordinate,
+        sicompass::app_state::Coordinate::Command,
+        "should be in Command mode after :"
+    );
 
     // Find the command in the list and navigate to it. Command items render as
     // buttons ("-b <name>"); the bare name is carried in nav_path, so match that.
-    let idx = h.renderer.total_list.iter().position(|item| item.nav_path.as_deref() == Some(command))
+    let idx = h
+        .renderer
+        .total_list
+        .iter()
+        .position(|item| item.nav_path.as_deref() == Some(command))
         .unwrap_or_else(|| panic!("command '{command}' not found in command list"));
     let cur = h.renderer.list_index;
     if idx > cur {
-        for _ in 0..(idx - cur) { press_down(h.r()); }
+        for _ in 0..(idx - cur) {
+            press_down(h.r());
+        }
     } else {
-        for _ in 0..(cur - idx) { press_up(h.r()); }
+        for _ in 0..(cur - idx) {
+            press_up(h.r());
+        }
     }
     press_enter(h.r());
 }
@@ -1394,33 +1711,56 @@ fn execute_provider_command(h: &mut Harness, command: &str) {
 #[test]
 fn filebrowser_show_properties_refreshes_listing() {
     let mut h = Harness::new();
-    let fb_idx = h.renderer.providers.iter().position(|p| p.name() == "filebrowser")
+    let fb_idx = h
+        .renderer
+        .providers
+        .iter()
+        .position(|p| p.name() == "filebrowser")
         .expect("filebrowser not found");
     navigate_to_provider(h.r(), fb_idx);
     press_right(h.r()); // enter filebrowser layer
 
     // Capture labels before toggling
-    let labels_before: Vec<String> = h.renderer.total_list.iter()
-        .map(|i| i.label.clone()).collect();
+    let labels_before: Vec<String> = h
+        .renderer
+        .total_list
+        .iter()
+        .map(|i| i.label.clone())
+        .collect();
 
     execute_provider_command(&mut h, "show/hide properties");
 
     // Should be back in General after a state-toggle
-    assert_eq!(h.renderer.coordinate, sicompass::app_state::Coordinate::General,
-        "should return to General after show/hide properties");
+    assert_eq!(
+        h.renderer.coordinate,
+        sicompass::app_state::Coordinate::General,
+        "should return to General after show/hide properties"
+    );
 
     // Labels must have changed — properties prefix should now be present
-    let labels_after: Vec<String> = h.renderer.total_list.iter()
-        .map(|i| i.label.clone()).collect();
-    assert_ne!(labels_before, labels_after,
-        "labels should change after toggling show/hide properties");
+    let labels_after: Vec<String> = h
+        .renderer
+        .total_list
+        .iter()
+        .map(|i| i.label.clone())
+        .collect();
+    assert_ne!(
+        labels_before, labels_after,
+        "labels should change after toggling show/hide properties"
+    );
 
     // Toggle back — labels should return to original
     execute_provider_command(&mut h, "show/hide properties");
-    let labels_restored: Vec<String> = h.renderer.total_list.iter()
-        .map(|i| i.label.clone()).collect();
-    assert_eq!(labels_before, labels_restored,
-        "labels should match original after toggling properties twice");
+    let labels_restored: Vec<String> = h
+        .renderer
+        .total_list
+        .iter()
+        .map(|i| i.label.clone())
+        .collect();
+    assert_eq!(
+        labels_before, labels_restored,
+        "labels should match original after toggling properties twice"
+    );
 }
 
 /// Regression: invoking "show/hide properties" while inside a subdirectory must
@@ -1430,65 +1770,108 @@ fn filebrowser_show_properties_refreshes_listing() {
 #[test]
 fn filebrowser_show_properties_stays_in_subdir_and_persists() {
     let mut h = Harness::new();
-    let fb_idx = h.provider_idx("filebrowser").expect("filebrowser not found");
+    let fb_idx = h
+        .provider_idx("filebrowser")
+        .expect("filebrowser not found");
     navigate_to_provider(h.r(), fb_idx);
     press_right(h.r()); // enter filebrowser at depth 2 (listing tmp)
 
     // Navigate into `subdir` → depth 3.
     let to_subdir = |h: &mut Harness| {
-        let idx = h.renderer.total_list.iter()
+        let idx = h
+            .renderer
+            .total_list
+            .iter()
             .position(|i| i.label.contains("subdir"))
             .expect("subdir not in listing");
         let cur = h.renderer.list_index;
-        for _ in 0..idx.saturating_sub(cur) { press_down(h.r()); }
-        for _ in 0..cur.saturating_sub(idx) { press_up(h.r()); }
+        for _ in 0..idx.saturating_sub(cur) {
+            press_down(h.r());
+        }
+        for _ in 0..cur.saturating_sub(idx) {
+            press_up(h.r());
+        }
         press_right(h.r());
     };
     to_subdir(&mut h);
     assert_eq!(h.renderer.current_id.depth(), 3, "should be inside subdir");
     let subdir_path = h.renderer.providers[fb_idx].current_path().to_owned();
-    assert!(subdir_path.ends_with("subdir"), "path should be subdir, got {subdir_path}");
+    assert!(
+        subdir_path.ends_with("subdir"),
+        "path should be subdir, got {subdir_path}"
+    );
 
     // Snapshot nested.txt's label before the toggle so we can verify a
     // properties prefix gets added. Unix shows "rw" perms but Windows
     // doesn't — compare against the no-properties baseline instead.
-    let nested_label_before = h.renderer.total_list.iter()
-        .find(|i| i.label.contains("nested.txt")).map(|i| i.label.clone())
+    let nested_label_before = h
+        .renderer
+        .total_list
+        .iter()
+        .find(|i| i.label.contains("nested.txt"))
+        .map(|i| i.label.clone())
         .expect("nested.txt must be in subdir listing");
 
     // Toggle properties on.
     execute_provider_command(&mut h, "show/hide properties");
 
     // Bug fix: the cursor stays in the subdir and the provider path is unchanged.
-    assert_eq!(h.renderer.current_id.depth(), 3,
-        "show/hide properties must not unwind out of the subdir");
-    assert_eq!(h.renderer.providers[fb_idx].current_path(), subdir_path,
-        "show/hide properties must not reset the path away from the subdir");
+    assert_eq!(
+        h.renderer.current_id.depth(),
+        3,
+        "show/hide properties must not unwind out of the subdir"
+    );
+    assert_eq!(
+        h.renderer.providers[fb_idx].current_path(),
+        subdir_path,
+        "show/hide properties must not reset the path away from the subdir"
+    );
 
     // The subdir listing now carries a properties prefix.
-    let nested_label_after = h.renderer.total_list.iter()
-        .find(|i| i.label.contains("nested.txt")).map(|i| i.label.clone())
+    let nested_label_after = h
+        .renderer
+        .total_list
+        .iter()
+        .find(|i| i.label.contains("nested.txt"))
+        .map(|i| i.label.clone())
         .expect("nested.txt should still be in listing after toggle");
-    assert!(nested_label_after.len() > nested_label_before.len(),
-        "nested.txt label should be longer after properties toggle, before: {nested_label_before:?}, after: {nested_label_after:?}");
+    assert!(
+        nested_label_after.len() > nested_label_before.len(),
+        "nested.txt label should be longer after properties toggle, before: {nested_label_before:?}, after: {nested_label_after:?}"
+    );
 
     // Persistence going up: the parent listing also reflects the toggle.
     press_left(h.r());
     assert_eq!(h.renderer.current_id.depth(), 2);
-    let parent_alpha = h.renderer.total_list.iter()
-        .find(|i| i.label.contains("alpha.txt")).map(|i| i.label.clone())
+    let parent_alpha = h
+        .renderer
+        .total_list
+        .iter()
+        .find(|i| i.label.contains("alpha.txt"))
+        .map(|i| i.label.clone())
         .expect("alpha.txt should be in parent listing");
     // "alpha.txt" is 9 chars; with a properties prefix the label is longer.
-    assert!(parent_alpha.len() > "alpha.txt".len() + 4,
-        "parent listing should also show properties prefix, got: {parent_alpha:?}");
+    assert!(
+        parent_alpha.len() > "alpha.txt".len() + 4,
+        "parent listing should also show properties prefix, got: {parent_alpha:?}"
+    );
 
     // Persistence going back down: navigation segment must ignore the prefix.
     to_subdir(&mut h);
     assert_eq!(h.renderer.current_id.depth(), 3, "should re-enter subdir");
-    assert!(h.renderer.providers[fb_idx].current_path().ends_with("subdir"),
-        "re-entered path must be the subdir, not corrupted by the properties prefix");
-    assert!(h.renderer.total_list.iter().any(|i| i.label.contains("nested.txt")),
-        "subdir should still list nested.txt after re-entry");
+    assert!(
+        h.renderer.providers[fb_idx]
+            .current_path()
+            .ends_with("subdir"),
+        "re-entered path must be the subdir, not corrupted by the properties prefix"
+    );
+    assert!(
+        h.renderer
+            .total_list
+            .iter()
+            .any(|i| i.label.contains("nested.txt")),
+        "subdir should still list nested.txt after re-entry"
+    );
 }
 
 /// After running "sort chronologically", the listing should immediately reorder.
@@ -1498,7 +1881,11 @@ fn filebrowser_show_properties_stays_in_subdir_and_persists() {
 #[test]
 fn filebrowser_sort_chrono_refreshes_listing() {
     let mut h = Harness::new();
-    let fb_idx = h.renderer.providers.iter().position(|p| p.name() == "filebrowser")
+    let fb_idx = h
+        .renderer
+        .providers
+        .iter()
+        .position(|p| p.name() == "filebrowser")
         .expect("filebrowser not found");
     navigate_to_provider(h.r(), fb_idx);
     press_right(h.r());
@@ -1506,10 +1893,16 @@ fn filebrowser_sort_chrono_refreshes_listing() {
     let count_before = h.renderer.total_list.len();
     execute_provider_command(&mut h, "sort chronologically");
 
-    assert_eq!(h.renderer.coordinate, sicompass::app_state::Coordinate::General,
-        "should return to General after sort chronologically");
-    assert_eq!(h.renderer.total_list.len(), count_before,
-        "item count should be unchanged after sort");
+    assert_eq!(
+        h.renderer.coordinate,
+        sicompass::app_state::Coordinate::General,
+        "should return to General after sort chronologically"
+    );
+    assert_eq!(
+        h.renderer.total_list.len(),
+        count_before,
+        "item count should be unchanged after sort"
+    );
 }
 
 /// Pressing `:` at root level (depth 1) must NOT enter command mode.
@@ -1517,10 +1910,15 @@ fn filebrowser_sort_chrono_refreshes_listing() {
 fn colon_blocked_at_root() {
     let mut h = Harness::new();
     // Ensure we're at root
-    while h.renderer.current_id.depth() > 1 { press_left(h.r()); }
+    while h.renderer.current_id.depth() > 1 {
+        press_left(h.r());
+    }
     dispatch_key(h.r(), Some(Keycode::Semicolon), Mod::LSHIFTMOD);
-    assert_eq!(h.renderer.coordinate, sicompass::app_state::Coordinate::General,
-        "command mode must not activate at root depth");
+    assert_eq!(
+        h.renderer.coordinate,
+        sicompass::app_state::Coordinate::General,
+        "command mode must not activate at root depth"
+    );
 }
 
 /// Navigating right into an empty directory shows a single `<input></input>` placeholder.
@@ -1534,13 +1932,18 @@ fn navigate_right_empty_dir_shows_placeholder() {
     std::fs::create_dir(root.join("emptydir")).unwrap();
 
     let mut renderer = AppRenderer::new();
-    register(&mut renderer, sicompass_sdk::create_provider_by_name("filebrowser").unwrap());
+    register(
+        &mut renderer,
+        sicompass_sdk::create_provider_by_name("filebrowser").unwrap(),
+    );
     renderer.providers[0].set_current_path(root.to_str().unwrap());
     {
         let children = renderer.providers[0].fetch();
         let display_name = renderer.providers[0].display_name().to_owned();
         let mut root_elem = FfonElement::new_obj(&display_name);
-        for child in children { root_elem.as_obj_mut().unwrap().push(child); }
+        for child in children {
+            root_elem.as_obj_mut().unwrap().push(child);
+        }
         renderer.ffon[0] = root_elem;
     }
     sicompass::list::create_list_current_layer(&mut renderer);
@@ -1550,14 +1953,20 @@ fn navigate_right_empty_dir_shows_placeholder() {
     assert_eq!(renderer.current_id.depth(), 2);
 
     // Navigate to emptydir in the list
-    let emptydir_idx = renderer.total_list.iter()
+    let emptydir_idx = renderer
+        .total_list
+        .iter()
         .position(|item| item.label.contains("emptydir"))
         .expect("emptydir not found in list");
     let cur = renderer.list_index;
     if emptydir_idx > cur {
-        for _ in 0..(emptydir_idx - cur) { press_down(&mut renderer); }
+        for _ in 0..(emptydir_idx - cur) {
+            press_down(&mut renderer);
+        }
     } else {
-        for _ in 0..(cur - emptydir_idx) { press_up(&mut renderer); }
+        for _ in 0..(cur - emptydir_idx) {
+            press_up(&mut renderer);
+        }
     }
 
     // Enter emptydir — descends one level, grafts the (empty) contents.
@@ -1565,10 +1974,17 @@ fn navigate_right_empty_dir_shows_placeholder() {
     assert_eq!(renderer.current_id.depth(), 3, "descends into subdir");
 
     // Placeholder is the only list item
-    assert_eq!(renderer.total_list.len(), 1, "empty dir should show exactly one placeholder");
+    assert_eq!(
+        renderer.total_list.len(),
+        1,
+        "empty dir should show exactly one placeholder"
+    );
     let label = &renderer.total_list[0].label;
     // I_PLACEHOLDER renders as "i" (typed insert affordance)
-    assert_eq!(label, "i", "placeholder label should be 'i', got: {label:?}");
+    assert_eq!(
+        label, "i",
+        "placeholder label should be 'i', got: {label:?}"
+    );
 }
 
 /// Unified in-memory model: the provider root Obj key stays the display name
@@ -1584,13 +2000,18 @@ fn navigate_right_updates_parent_key() {
     std::fs::write(root.join("subdir/file.txt"), "").unwrap();
 
     let mut renderer = AppRenderer::new();
-    register(&mut renderer, sicompass_sdk::create_provider_by_name("filebrowser").unwrap());
+    register(
+        &mut renderer,
+        sicompass_sdk::create_provider_by_name("filebrowser").unwrap(),
+    );
     renderer.providers[0].set_current_path(root.to_str().unwrap());
     {
         let children = renderer.providers[0].fetch();
         let display_name = renderer.providers[0].display_name().to_owned();
         let mut root_elem = FfonElement::new_obj(&display_name);
-        for child in children { root_elem.as_obj_mut().unwrap().push(child); }
+        for child in children {
+            root_elem.as_obj_mut().unwrap().push(child);
+        }
         renderer.ffon[0] = root_elem;
     }
     sicompass::list::create_list_current_layer(&mut renderer);
@@ -1600,31 +2021,48 @@ fn navigate_right_updates_parent_key() {
 
     // Enter provider layer (static children already loaded, no refresh yet)
     press_right(&mut renderer);
-    assert_eq!(renderer.ffon[0].as_obj().unwrap().key, "file browser",
-        "key should still be display name before navigating into subdir");
+    assert_eq!(
+        renderer.ffon[0].as_obj().unwrap().key,
+        "file browser",
+        "key should still be display name before navigating into subdir"
+    );
 
     // Navigate to subdir
-    let subdir_idx = renderer.total_list.iter()
+    let subdir_idx = renderer
+        .total_list
+        .iter()
         .position(|item| item.label.contains("subdir"))
         .expect("subdir not found in list");
     let cur = renderer.list_index;
     if subdir_idx > cur {
-        for _ in 0..(subdir_idx - cur) { press_down(&mut renderer); }
+        for _ in 0..(subdir_idx - cur) {
+            press_down(&mut renderer);
+        }
     } else {
-        for _ in 0..(cur - subdir_idx) { press_up(&mut renderer); }
+        for _ in 0..(cur - subdir_idx) {
+            press_up(&mut renderer);
+        }
     }
 
     // Enter subdir — descends one level; the provider root key is unchanged.
     let subdir_pos = renderer.current_id.get(1).unwrap_or(0);
     press_right(&mut renderer);
     assert_eq!(renderer.current_id.depth(), 3);
-    assert_eq!(renderer.ffon[0].as_obj().unwrap().key, "file browser",
-        "provider root key stays the display name in the deep model");
+    assert_eq!(
+        renderer.ffon[0].as_obj().unwrap().key,
+        "file browser",
+        "provider root key stays the display name in the deep model"
+    );
     // The directory we descended into keeps its own name as its Obj key.
     let subdir_key = renderer.ffon[0].as_obj().unwrap().children[subdir_pos]
-        .as_obj().unwrap().key.clone();
-    assert!(sicompass_sdk::tags::strip_display(&subdir_key).contains("subdir"),
-        "the descended directory keeps its name as its Obj key; got {subdir_key:?}");
+        .as_obj()
+        .unwrap()
+        .key
+        .clone();
+    assert!(
+        sicompass_sdk::tags::strip_display(&subdir_key).contains("subdir"),
+        "the descended directory keeps its name as its Obj key; got {subdir_key:?}"
+    );
 
     // Navigate back left — provider root key is still the display name.
     press_left(&mut renderer);
@@ -1643,27 +2081,38 @@ fn delete_last_item_leaves_placeholder() {
     std::fs::write(root.join("mydir/only.txt"), "").unwrap();
 
     let mut renderer = AppRenderer::new();
-    register(&mut renderer, sicompass_sdk::create_provider_by_name("filebrowser").unwrap());
+    register(
+        &mut renderer,
+        sicompass_sdk::create_provider_by_name("filebrowser").unwrap(),
+    );
     renderer.providers[0].set_current_path(root.to_str().unwrap());
     {
         let children = renderer.providers[0].fetch();
         let display_name = renderer.providers[0].display_name().to_owned();
         let mut root_elem = FfonElement::new_obj(&display_name);
-        for child in children { root_elem.as_obj_mut().unwrap().push(child); }
+        for child in children {
+            root_elem.as_obj_mut().unwrap().push(child);
+        }
         renderer.ffon[0] = root_elem;
     }
     sicompass::list::create_list_current_layer(&mut renderer);
 
     // Enter filebrowser → mydir
     press_right(&mut renderer);
-    let mydir_idx = renderer.total_list.iter()
+    let mydir_idx = renderer
+        .total_list
+        .iter()
         .position(|item| item.label.contains("mydir"))
         .expect("mydir not found");
     let cur = renderer.list_index;
     if mydir_idx > cur {
-        for _ in 0..(mydir_idx - cur) { press_down(&mut renderer); }
+        for _ in 0..(mydir_idx - cur) {
+            press_down(&mut renderer);
+        }
     } else {
-        for _ in 0..(cur - mydir_idx) { press_up(&mut renderer); }
+        for _ in 0..(cur - mydir_idx) {
+            press_up(&mut renderer);
+        }
     }
     press_right(&mut renderer); // enters mydir (lazy-fetch, depth 2)
 
@@ -1673,11 +2122,21 @@ fn delete_last_item_leaves_placeholder() {
     press_ctrl(&mut renderer, Keycode::D);
 
     // Placeholder must now be the only item
-    assert_eq!(renderer.total_list.len(), 1, "placeholder should be the only item after delete");
+    assert_eq!(
+        renderer.total_list.len(),
+        1,
+        "placeholder should be the only item after delete"
+    );
     let label = &renderer.total_list[0].label;
-    assert_eq!(label, "i",
-        "placeholder should appear after deleting last item, got: {label:?}");
-    assert_eq!(renderer.current_id.last(), Some(0), "current_id should point at placeholder");
+    assert_eq!(
+        label, "i",
+        "placeholder should appear after deleting last item, got: {label:?}"
+    );
+    assert_eq!(
+        renderer.current_id.last(),
+        Some(0),
+        "current_id should point at placeholder"
+    );
 }
 
 /// Running "create file" command when on the empty placeholder replaces it in-place.
@@ -1689,46 +2148,71 @@ fn create_file_on_placeholder_replaces_in_place() {
     std::fs::create_dir(root.join("emptydir")).unwrap();
 
     let mut renderer = AppRenderer::new();
-    register(&mut renderer, sicompass_sdk::create_provider_by_name("filebrowser").unwrap());
+    register(
+        &mut renderer,
+        sicompass_sdk::create_provider_by_name("filebrowser").unwrap(),
+    );
     renderer.providers[0].set_current_path(root.to_str().unwrap());
     {
         let children = renderer.providers[0].fetch();
         let display_name = renderer.providers[0].display_name().to_owned();
         let mut root_elem = FfonElement::new_obj(&display_name);
-        for child in children { root_elem.as_obj_mut().unwrap().push(child); }
+        for child in children {
+            root_elem.as_obj_mut().unwrap().push(child);
+        }
         renderer.ffon[0] = root_elem;
     }
     sicompass::list::create_list_current_layer(&mut renderer);
 
     // Navigate into filebrowser → emptydir
     press_right(&mut renderer);
-    let emptydir_idx = renderer.total_list.iter()
+    let emptydir_idx = renderer
+        .total_list
+        .iter()
         .position(|item| item.label.contains("emptydir"))
         .expect("emptydir not found");
     let cur = renderer.list_index;
     if emptydir_idx > cur {
-        for _ in 0..(emptydir_idx - cur) { press_down(&mut renderer); }
+        for _ in 0..(emptydir_idx - cur) {
+            press_down(&mut renderer);
+        }
     } else {
-        for _ in 0..(cur - emptydir_idx) { press_up(&mut renderer); }
+        for _ in 0..(cur - emptydir_idx) {
+            press_up(&mut renderer);
+        }
     }
     press_right(&mut renderer); // enters emptydir — shows placeholder
 
-    assert_eq!(renderer.total_list.len(), 1, "emptydir should show placeholder");
+    assert_eq!(
+        renderer.total_list.len(),
+        1,
+        "emptydir should show placeholder"
+    );
     assert_eq!(renderer.current_id.last(), Some(0));
 
     // Execute "create file" command from command mode
     let settings_tmp = TempDir::new().unwrap();
-    let mut h = Harness { renderer, tmp, settings_tmp };
+    let mut h = Harness {
+        renderer,
+        tmp,
+        settings_tmp,
+    };
     execute_provider_command(&mut h, "create file");
     let renderer = h.r();
 
     // Placeholder replaced in-place → still at index 0
-    assert_eq!(renderer.current_id.last(), Some(0),
-        "create file on placeholder should stay at idx 0 (replaced in-place)");
+    assert_eq!(
+        renderer.current_id.last(),
+        Some(0),
+        "create file on placeholder should stay at idx 0 (replaced in-place)"
+    );
 
     // Should enter insert mode to type the filename
-    assert_eq!(renderer.coordinate, sicompass::app_state::Coordinate::Insert,
-        "should enter insert mode after create file");
+    assert_eq!(
+        renderer.coordinate,
+        sicompass::app_state::Coordinate::Insert,
+        "should enter insert mode after create file"
+    );
 }
 
 /// Typing a plain name on the `i` placeholder in an empty directory creates a file.
@@ -1742,22 +2226,35 @@ fn filebrowser_i_placeholder_creates_file() {
     std::fs::create_dir(root.join("emptydir")).unwrap();
 
     let mut renderer = AppRenderer::new();
-    register(&mut renderer, sicompass_sdk::create_provider_by_name("filebrowser").unwrap());
+    register(
+        &mut renderer,
+        sicompass_sdk::create_provider_by_name("filebrowser").unwrap(),
+    );
     renderer.providers[0].set_current_path(root.to_str().unwrap());
     {
         let children = renderer.providers[0].fetch();
         let display_name = renderer.providers[0].display_name().to_owned();
         let mut root_elem = FfonElement::new_obj(&display_name);
-        for child in children { root_elem.as_obj_mut().unwrap().push(child); }
+        for child in children {
+            root_elem.as_obj_mut().unwrap().push(child);
+        }
         renderer.ffon[0] = root_elem;
     }
     sicompass::list::create_list_current_layer(&mut renderer);
 
     press_right(&mut renderer);
-    let idx = renderer.total_list.iter().position(|i| i.label.contains("emptydir")).unwrap();
+    let idx = renderer
+        .total_list
+        .iter()
+        .position(|i| i.label.contains("emptydir"))
+        .unwrap();
     let cur = renderer.list_index;
     for _ in 0..(idx.abs_diff(cur)) {
-        if idx > cur { press_down(&mut renderer); } else { press_up(&mut renderer); }
+        if idx > cur {
+            press_down(&mut renderer);
+        } else {
+            press_up(&mut renderer);
+        }
     }
     press_right(&mut renderer); // enter emptydir → i placeholder shown
 
@@ -1766,12 +2263,21 @@ fn filebrowser_i_placeholder_creates_file() {
 
     // Press i, type a filename, commit
     press(&mut renderer, Keycode::I);
-    assert!(renderer.placeholder_insert_mode, "should be in placeholder insert mode");
+    assert!(
+        renderer.placeholder_insert_mode,
+        "should be in placeholder insert mode"
+    );
     type_text(&mut renderer, "notes.txt");
     press_enter(&mut renderer);
 
-    assert!(root.join("emptydir/notes.txt").exists(), "notes.txt should have been created on disk");
-    assert_eq!(renderer.coordinate, sicompass::app_state::Coordinate::General);
+    assert!(
+        root.join("emptydir/notes.txt").exists(),
+        "notes.txt should have been created on disk"
+    );
+    assert_eq!(
+        renderer.coordinate,
+        sicompass::app_state::Coordinate::General
+    );
 }
 
 /// Typing `name:` on the `i` placeholder in an empty directory creates a subdirectory.
@@ -1785,22 +2291,35 @@ fn filebrowser_i_placeholder_creates_subdirectory() {
     std::fs::create_dir(root.join("emptydir")).unwrap();
 
     let mut renderer = AppRenderer::new();
-    register(&mut renderer, sicompass_sdk::create_provider_by_name("filebrowser").unwrap());
+    register(
+        &mut renderer,
+        sicompass_sdk::create_provider_by_name("filebrowser").unwrap(),
+    );
     renderer.providers[0].set_current_path(root.to_str().unwrap());
     {
         let children = renderer.providers[0].fetch();
         let display_name = renderer.providers[0].display_name().to_owned();
         let mut root_elem = FfonElement::new_obj(&display_name);
-        for child in children { root_elem.as_obj_mut().unwrap().push(child); }
+        for child in children {
+            root_elem.as_obj_mut().unwrap().push(child);
+        }
         renderer.ffon[0] = root_elem;
     }
     sicompass::list::create_list_current_layer(&mut renderer);
 
     press_right(&mut renderer);
-    let idx = renderer.total_list.iter().position(|i| i.label.contains("emptydir")).unwrap();
+    let idx = renderer
+        .total_list
+        .iter()
+        .position(|i| i.label.contains("emptydir"))
+        .unwrap();
     let cur = renderer.list_index;
     for _ in 0..(idx.abs_diff(cur)) {
-        if idx > cur { press_down(&mut renderer); } else { press_up(&mut renderer); }
+        if idx > cur {
+            press_down(&mut renderer);
+        } else {
+            press_up(&mut renderer);
+        }
     }
     press_right(&mut renderer); // enter emptydir → i placeholder shown
 
@@ -1810,8 +2329,14 @@ fn filebrowser_i_placeholder_creates_subdirectory() {
     type_text(&mut renderer, "subdir:");
     press_enter(&mut renderer);
 
-    assert!(root.join("emptydir/subdir").is_dir(), "subdir should have been created on disk");
-    assert_eq!(renderer.coordinate, sicompass::app_state::Coordinate::General);
+    assert!(
+        root.join("emptydir/subdir").is_dir(),
+        "subdir should have been created on disk"
+    );
+    assert_eq!(
+        renderer.coordinate,
+        sicompass::app_state::Coordinate::General
+    );
 }
 
 /// Ctrl+A after creating a file (prefixed insert mode) must not panic.
@@ -1824,28 +2349,44 @@ fn ctrl_a_after_prefixed_creation_no_panic() {
     std::fs::create_dir(root.join("testdir")).unwrap();
 
     let settings_tmp = TempDir::new().unwrap();
-    let mut h = Harness { renderer: AppRenderer::new(), tmp, settings_tmp };
-    register(h.r(), sicompass_sdk::create_provider_by_name("filebrowser").unwrap());
+    let mut h = Harness {
+        renderer: AppRenderer::new(),
+        tmp,
+        settings_tmp,
+    };
+    register(
+        h.r(),
+        sicompass_sdk::create_provider_by_name("filebrowser").unwrap(),
+    );
     h.renderer.providers[0].set_current_path(root.to_str().unwrap());
     {
         let children = h.renderer.providers[0].fetch();
         let display_name = h.renderer.providers[0].display_name().to_owned();
         let mut root_elem = FfonElement::new_obj(&display_name);
-        for child in children { root_elem.as_obj_mut().unwrap().push(child); }
+        for child in children {
+            root_elem.as_obj_mut().unwrap().push(child);
+        }
         h.renderer.ffon[0] = root_elem;
     }
     sicompass::list::create_list_current_layer(h.r());
 
     // Navigate into filebrowser, then into testdir (empty → shows placeholder)
     press_right(h.r());
-    let dir_idx = h.renderer.total_list.iter()
+    let dir_idx = h
+        .renderer
+        .total_list
+        .iter()
         .position(|item| item.label.contains("testdir"))
         .expect("testdir not found");
     let cur = h.renderer.list_index;
     if dir_idx > cur {
-        for _ in 0..(dir_idx - cur) { press_down(h.r()); }
+        for _ in 0..(dir_idx - cur) {
+            press_down(h.r());
+        }
     } else {
-        for _ in 0..(cur - dir_idx) { press_up(h.r()); }
+        for _ in 0..(cur - dir_idx) {
+            press_up(h.r());
+        }
     }
     press_right(h.r()); // enter testdir → placeholder at index 0
 
@@ -1853,30 +2394,46 @@ fn ctrl_a_after_prefixed_creation_no_panic() {
 
     // Ctrl+A → append placeholder after index 0, enter Insert
     press_ctrl(h.r(), Keycode::A);
-    assert_eq!(h.renderer.coordinate, sicompass::app_state::Coordinate::Insert);
+    assert_eq!(
+        h.renderer.coordinate,
+        sicompass::app_state::Coordinate::Insert
+    );
 
     // Create a file
     type_text(h.r(), "- newfile.txt");
     press_enter(h.r());
 
-    assert!(h.tmp.path().join("testdir/newfile.txt").exists(),
-        "newfile.txt should be created");
-    assert_eq!(h.renderer.coordinate, sicompass::app_state::Coordinate::General);
+    assert!(
+        h.tmp.path().join("testdir/newfile.txt").exists(),
+        "newfile.txt should be created"
+    );
+    assert_eq!(
+        h.renderer.coordinate,
+        sicompass::app_state::Coordinate::General
+    );
 
     // current_id must be in-bounds after refresh
     let cur_last = h.renderer.current_id.last().unwrap_or(0);
     let prov_idx = h.renderer.current_id.get(0).unwrap_or(0);
-    let child_len = h.renderer.ffon.get(prov_idx)
+    let child_len = h
+        .renderer
+        .ffon
+        .get(prov_idx)
         .and_then(|e| e.as_obj())
         .map(|o| o.children.len())
         .unwrap_or(0);
-    assert!(cur_last < child_len.max(1),
-        "current_id ({cur_last}) should be in-bounds after refresh (len={child_len})");
+    assert!(
+        cur_last < child_len.max(1),
+        "current_id ({cur_last}) should be in-bounds after refresh (len={child_len})"
+    );
 
     // Ctrl+A again — must not panic
     press_ctrl(h.r(), Keycode::A);
-    assert_eq!(h.renderer.coordinate, sicompass::app_state::Coordinate::Insert,
-        "Ctrl+A after creation should enter Insert without panic");
+    assert_eq!(
+        h.renderer.coordinate,
+        sicompass::app_state::Coordinate::Insert,
+        "Ctrl+A after creation should enter Insert without panic"
+    );
 }
 
 /// After creating a file whose name sorts last (e.g. "zzz.txt"), the cursor
@@ -1893,16 +2450,29 @@ fn prefixed_create_cursor_follows_sorted_file() {
     type_text(h.r(), "- zzz.txt");
     press_enter(h.r());
 
-    assert!(h.tmp_path().join("zzz.txt").exists(), "zzz.txt should be created");
+    assert!(
+        h.tmp_path().join("zzz.txt").exists(),
+        "zzz.txt should be created"
+    );
     assert_eq!(h.renderer.coordinate, Coordinate::General);
 
     // Cursor label content should be "zzz.txt" — both current_id and list_index must agree
     let cur_idx = h.renderer.current_id.last().unwrap_or(0);
     let list_idx = h.renderer.list_index;
-    assert_eq!(cur_idx, list_idx, "current_id and list_index must be in sync");
-    let label = h.renderer.total_list.get(list_idx).map(|i| i.label.as_str()).unwrap_or("");
-    assert!(label.contains("zzz.txt"),
-        "cursor should be on zzz.txt after sorted insertion, got: {label:?}");
+    assert_eq!(
+        cur_idx, list_idx,
+        "current_id and list_index must be in sync"
+    );
+    let label = h
+        .renderer
+        .total_list
+        .get(list_idx)
+        .map(|i| i.label.as_str())
+        .unwrap_or("");
+    assert!(
+        label.contains("zzz.txt"),
+        "cursor should be on zzz.txt after sorted insertion, got: {label:?}"
+    );
 }
 
 /// After creating a directory that sorts first (e.g. "aaa/"), the cursor
@@ -1924,17 +2494,31 @@ fn prefixed_create_cursor_follows_sorted_dir() {
 
     let cur_idx = h.renderer.current_id.last().unwrap_or(0);
     let list_idx = h.renderer.list_index;
-    assert_eq!(cur_idx, list_idx, "current_id and list_index must be in sync");
-    let label = h.renderer.total_list.get(list_idx).map(|i| i.label.as_str()).unwrap_or("");
-    assert!(label.contains("aaa"),
-        "cursor should be on aaa/ after sorted insertion, got: {label:?}");
+    assert_eq!(
+        cur_idx, list_idx,
+        "current_id and list_index must be in sync"
+    );
+    let label = h
+        .renderer
+        .total_list
+        .get(list_idx)
+        .map(|i| i.label.as_str())
+        .unwrap_or("");
+    assert!(
+        label.contains("aaa"),
+        "cursor should be on aaa/ after sorted insertion, got: {label:?}"
+    );
 }
 
 /// After running "sort alphanumerically", the listing should immediately reorder.
 #[test]
 fn filebrowser_sort_alpha_refreshes_listing() {
     let mut h = Harness::new();
-    let fb_idx = h.renderer.providers.iter().position(|p| p.name() == "filebrowser")
+    let fb_idx = h
+        .renderer
+        .providers
+        .iter()
+        .position(|p| p.name() == "filebrowser")
         .expect("filebrowser not found");
     navigate_to_provider(h.r(), fb_idx);
     press_right(h.r());
@@ -1942,10 +2526,16 @@ fn filebrowser_sort_alpha_refreshes_listing() {
     let count_before = h.renderer.total_list.len();
     execute_provider_command(&mut h, "sort alphanumerically");
 
-    assert_eq!(h.renderer.coordinate, sicompass::app_state::Coordinate::General,
-        "should return to General after sort alphanumerically");
-    assert_eq!(h.renderer.total_list.len(), count_before,
-        "item count should be unchanged after sort");
+    assert_eq!(
+        h.renderer.coordinate,
+        sicompass::app_state::Coordinate::General,
+        "should return to General after sort alphanumerically"
+    );
+    assert_eq!(
+        h.renderer.total_list.len(),
+        count_before,
+        "item count should be unchanged after sort"
+    );
 }
 
 /// Provider exposing one "open file with"-shaped command whose secondary list is
@@ -1954,41 +2544,72 @@ fn filebrowser_sort_alpha_refreshes_listing() {
 struct OpenWithMock;
 
 impl Provider for OpenWithMock {
-    fn name(&self) -> &str { "openwithmock" }
-    fn fetch(&mut self) -> Vec<FfonElement> { vec![FfonElement::new_str("- doc.txt")] }
-    fn commands(&self) -> Vec<String> { vec!["open file with".to_string()] }
-    fn handle_command(&mut self, _cmd: &str, _key: &str, _ty: i32, _err: &mut String) -> Option<FfonElement> {
+    fn name(&self) -> &str {
+        "openwithmock"
+    }
+    fn fetch(&mut self) -> Vec<FfonElement> {
+        vec![FfonElement::new_str("- doc.txt")]
+    }
+    fn commands(&self) -> Vec<String> {
+        vec!["open file with".to_string()]
+    }
+    fn handle_command(
+        &mut self,
+        _cmd: &str,
+        _key: &str,
+        _ty: i32,
+        _err: &mut String,
+    ) -> Option<FfonElement> {
         // None + no error = "I need a secondary selection", the same contract
         // the real filebrowser uses for this command.
         None
     }
     fn command_list_items(&self, _cmd: &str) -> Vec<sicompass_sdk::provider::ListItem> {
         vec![
-            sicompass_sdk::provider::ListItem { label: "App A".into(), data: "/usr/bin/app-a".into() },
-            sicompass_sdk::provider::ListItem { label: "App B".into(), data: "/usr/bin/app-b".into() },
+            sicompass_sdk::provider::ListItem {
+                label: "App A".into(),
+                data: "/usr/bin/app-a".into(),
+            },
+            sicompass_sdk::provider::ListItem {
+                label: "App B".into(),
+                data: "/usr/bin/app-b".into(),
+            },
         ]
     }
-    fn execute_command(&mut self, _cmd: &str, _sel: &str) -> bool { true }
+    fn execute_command(&mut self, _cmd: &str, _sel: &str) -> bool {
+        true
+    }
 }
 
 /// Walk the cursor to `idx` in the current list.
 fn move_to_index(h: &mut Harness, idx: usize) {
     let cur = h.renderer.list_index;
     if idx > cur {
-        for _ in 0..(idx - cur) { press_down(h.r()); }
+        for _ in 0..(idx - cur) {
+            press_down(h.r());
+        }
     } else {
-        for _ in 0..(cur - idx) { press_up(h.r()); }
+        for _ in 0..(cur - idx) {
+            press_up(h.r());
+        }
     }
 }
 
 /// Open the command palette and select "open file with".
 fn select_open_file_with(h: &mut Harness) {
     press(h.r(), Keycode::Colon);
-    assert_eq!(h.renderer.coordinate, sicompass::app_state::Coordinate::Command);
+    assert_eq!(
+        h.renderer.coordinate,
+        sicompass::app_state::Coordinate::Command
+    );
 
     // Command items render as buttons ("-b open file with"); the bare command
     // name is carried in nav_path, so locate by that rather than the display label.
-    let idx = h.renderer.total_list.iter().position(|item| item.nav_path.as_deref() == Some("open file with"))
+    let idx = h
+        .renderer
+        .total_list
+        .iter()
+        .position(|item| item.nav_path.as_deref() == Some("open file with"))
         .expect("open file with command not found");
     move_to_index(h, idx);
     press_enter(h.r());
@@ -2006,22 +2627,43 @@ fn select_open_file_with(h: &mut Harness) {
 fn open_file_with_secondary_list_uses_nav_path_not_data() {
     let mut h = Harness::new();
     register(h.r(), Box::new(OpenWithMock));
-    let idx = h.provider_idx("openwithmock").expect("mock provider not found");
+    let idx = h
+        .provider_idx("openwithmock")
+        .expect("mock provider not found");
     navigate_to_provider(h.r(), idx);
     press_right(h.r());
 
     select_open_file_with(&mut h);
 
     // Should now be in CommandPhase::Provider showing the app list
-    assert_eq!(h.renderer.current_command, sicompass::app_state::CommandPhase::Provider,
-        "should be in Provider phase after selecting 'open file with'");
+    assert_eq!(
+        h.renderer.current_command,
+        sicompass::app_state::CommandPhase::Provider,
+        "should be in Provider phase after selecting 'open file with'"
+    );
 
-    assert_eq!(h.renderer.total_list.len(), 2, "both mock applications should be listed");
-    for (item, exec) in h.renderer.total_list.iter().zip(["/usr/bin/app-a", "/usr/bin/app-b"]) {
-        assert!(item.data.is_none(),
-            "item '{}': data should be None (exec must be in nav_path to avoid image load)", item.label);
-        assert_eq!(item.nav_path.as_deref(), Some(exec),
-            "item '{}': nav_path should hold the exec command", item.label);
+    assert_eq!(
+        h.renderer.total_list.len(),
+        2,
+        "both mock applications should be listed"
+    );
+    for (item, exec) in h
+        .renderer
+        .total_list
+        .iter()
+        .zip(["/usr/bin/app-a", "/usr/bin/app-b"])
+    {
+        assert!(
+            item.data.is_none(),
+            "item '{}': data should be None (exec must be in nav_path to avoid image load)",
+            item.label
+        );
+        assert_eq!(
+            item.nav_path.as_deref(),
+            Some(exec),
+            "item '{}': nav_path should hold the exec command",
+            item.label
+        );
     }
 }
 
@@ -2038,7 +2680,9 @@ fn filebrowser_open_file_with_lists_installed_applications() {
     }
 
     let mut h = Harness::new();
-    let fb_idx = h.provider_idx("filebrowser").expect("filebrowser not found");
+    let fb_idx = h
+        .provider_idx("filebrowser")
+        .expect("filebrowser not found");
     navigate_to_provider(h.r(), fb_idx);
     press_right(h.r());
 
@@ -2053,15 +2697,26 @@ fn filebrowser_open_file_with_lists_installed_applications() {
 
     select_open_file_with(&mut h);
 
-    assert_eq!(h.renderer.current_command, sicompass::app_state::CommandPhase::Provider,
-        "should be in Provider phase after selecting 'open file with'");
-    assert!(!h.renderer.total_list.is_empty(),
-        "open file with should show at least one application");
+    assert_eq!(
+        h.renderer.current_command,
+        sicompass::app_state::CommandPhase::Provider,
+        "should be in Provider phase after selecting 'open file with'"
+    );
+    assert!(
+        !h.renderer.total_list.is_empty(),
+        "open file with should show at least one application"
+    );
     for item in &h.renderer.total_list {
-        assert!(item.data.is_none(),
-            "item '{}': data should be None (exec must be in nav_path to avoid image load)", item.label);
-        assert!(item.nav_path.is_some(),
-            "item '{}': nav_path should hold the exec command", item.label);
+        assert!(
+            item.data.is_none(),
+            "item '{}': data should be None (exec must be in nav_path to avoid image load)",
+            item.label
+        );
+        assert!(
+            item.nav_path.is_some(),
+            "item '{}': nav_path should hold the exec command",
+            item.label
+        );
     }
 }
 
@@ -2074,21 +2729,33 @@ fn undo_from_search_mode() {
     // Ctrl+Z while in SimpleSearch should undo and return to General.
     let mut h = Harness::new();
     let tmp = h.tmp_path().to_path_buf();
-    let fb_idx = h.provider_idx("filebrowser").expect("filebrowser not found");
+    let fb_idx = h
+        .provider_idx("filebrowser")
+        .expect("filebrowser not found");
     navigate_to_provider(h.r(), fb_idx);
     press_right(h.r());
 
     press_ctrl(h.r(), Keycode::I);
     type_text(h.r(), "- searchundo.txt");
     press_enter(h.r());
-    assert!(tmp.join("searchundo.txt").exists(), "file should exist after creation");
+    assert!(
+        tmp.join("searchundo.txt").exists(),
+        "file should exist after creation"
+    );
 
     // Enter search mode, then undo
     press_tab(h.r());
     assert_eq!(h.renderer.coordinate, Coordinate::SimpleSearch);
     press_ctrl(h.r(), Keycode::Z);
-    assert_eq!(h.renderer.coordinate, Coordinate::General, "undo should exit search mode");
-    assert!(!tmp.join("searchundo.txt").exists(), "file should be deleted after undo from search mode");
+    assert_eq!(
+        h.renderer.coordinate,
+        Coordinate::General,
+        "undo should exit search mode"
+    );
+    assert!(
+        !tmp.join("searchundo.txt").exists(),
+        "file should be deleted after undo from search mode"
+    );
 }
 
 #[test]
@@ -2096,21 +2763,33 @@ fn undo_from_insert_mode() {
     // Ctrl+Z while in Insert should undo and return to General.
     let mut h = Harness::new();
     let tmp = h.tmp_path().to_path_buf();
-    let fb_idx = h.provider_idx("filebrowser").expect("filebrowser not found");
+    let fb_idx = h
+        .provider_idx("filebrowser")
+        .expect("filebrowser not found");
     navigate_to_provider(h.r(), fb_idx);
     press_right(h.r());
 
     press_ctrl(h.r(), Keycode::I);
     type_text(h.r(), "- insertundo.txt");
     press_enter(h.r());
-    assert!(tmp.join("insertundo.txt").exists(), "file should exist after creation");
+    assert!(
+        tmp.join("insertundo.txt").exists(),
+        "file should exist after creation"
+    );
 
     // Re-enter insert mode, then undo
     press_ctrl(h.r(), Keycode::I);
     assert_eq!(h.renderer.coordinate, Coordinate::Insert);
     press_ctrl(h.r(), Keycode::Z);
-    assert_eq!(h.renderer.coordinate, Coordinate::General, "undo should exit insert mode");
-    assert!(!tmp.join("insertundo.txt").exists(), "file should be deleted after undo from insert mode");
+    assert_eq!(
+        h.renderer.coordinate,
+        Coordinate::General,
+        "undo should exit insert mode"
+    );
+    assert!(
+        !tmp.join("insertundo.txt").exists(),
+        "file should be deleted after undo from insert mode"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -2121,14 +2800,19 @@ fn undo_from_insert_mode() {
 fn undo_redo_rename() {
     let mut h = Harness::new();
     let tmp = h.tmp_path().to_path_buf();
-    let fb_idx = h.provider_idx("filebrowser").expect("filebrowser not found");
+    let fb_idx = h
+        .provider_idx("filebrowser")
+        .expect("filebrowser not found");
     navigate_to_provider(h.r(), fb_idx);
     press_right(h.r());
 
     // Navigate to alpha.txt and rename it
-    let alpha_idx = h.renderer.total_list.iter().position(|item| {
-        item.label.contains("alpha.txt")
-    }).expect("alpha.txt not in list");
+    let alpha_idx = h
+        .renderer
+        .total_list
+        .iter()
+        .position(|item| item.label.contains("alpha.txt"))
+        .expect("alpha.txt not in list");
     h.renderer.list_index = alpha_idx;
     h.renderer.current_id = h.renderer.total_list[alpha_idx].id.clone();
 
@@ -2145,13 +2829,25 @@ fn undo_redo_rename() {
 
     // Undo rename
     press_ctrl(h.r(), Keycode::Z);
-    assert!(tmp.join("alpha.txt").exists(), "undo should restore original name");
-    assert!(!tmp.join("renamed.txt").exists(), "renamed file should be gone after undo");
+    assert!(
+        tmp.join("alpha.txt").exists(),
+        "undo should restore original name"
+    );
+    assert!(
+        !tmp.join("renamed.txt").exists(),
+        "renamed file should be gone after undo"
+    );
 
     // Redo rename
     press_ctrl_shift(h.r(), Keycode::Z);
-    assert!(tmp.join("renamed.txt").exists(), "redo should re-apply rename");
-    assert!(!tmp.join("alpha.txt").exists(), "original name should be gone after redo");
+    assert!(
+        tmp.join("renamed.txt").exists(),
+        "redo should re-apply rename"
+    );
+    assert!(
+        !tmp.join("alpha.txt").exists(),
+        "original name should be gone after redo"
+    );
 }
 
 #[test]
@@ -2160,14 +2856,19 @@ fn rename_directory_does_not_navigate_into_it() {
     // not navigate inside the renamed directory.
     let mut h = Harness::new();
     let tmp = h.tmp_path().to_path_buf();
-    let fb_idx = h.provider_idx("filebrowser").expect("filebrowser not found");
+    let fb_idx = h
+        .provider_idx("filebrowser")
+        .expect("filebrowser not found");
     navigate_to_provider(h.r(), fb_idx);
     press_right(h.r());
 
     // Find subdir in the list
-    let subdir_idx = h.renderer.total_list.iter().position(|item| {
-        item.label.contains("subdir")
-    }).expect("subdir not in list");
+    let subdir_idx = h
+        .renderer
+        .total_list
+        .iter()
+        .position(|item| item.label.contains("subdir"))
+        .expect("subdir not in list");
     h.renderer.list_index = subdir_idx;
     h.renderer.current_id = h.renderer.total_list[subdir_idx].id.clone();
 
@@ -2178,10 +2879,16 @@ fn rename_directory_does_not_navigate_into_it() {
     press_enter(h.r());
 
     assert!(tmp.join("subdir2").is_dir(), "directory should be renamed");
-    assert_eq!(h.renderer.coordinate, Coordinate::General,
-        "should stay in General, not navigate into the renamed dir");
-    assert_eq!(h.renderer.current_id.depth(), 2,
-        "should remain at depth 2 (inside filebrowser root), not deeper");
+    assert_eq!(
+        h.renderer.coordinate,
+        Coordinate::General,
+        "should stay in General, not navigate into the renamed dir"
+    );
+    assert_eq!(
+        h.renderer.current_id.depth(),
+        2,
+        "should remain at depth 2 (inside filebrowser root), not deeper"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -2191,32 +2898,51 @@ fn rename_directory_does_not_navigate_into_it() {
 #[test]
 fn undo_redo_navigate_into_directory() {
     let mut h = Harness::new();
-    let fb_idx = h.provider_idx("filebrowser").expect("filebrowser not found");
+    let fb_idx = h
+        .provider_idx("filebrowser")
+        .expect("filebrowser not found");
     navigate_to_provider(h.r(), fb_idx);
     press_right(h.r()); // enter filebrowser root
 
     let root_path = h.renderer.providers[fb_idx].current_path().to_owned();
 
     // Navigate into subdir
-    let subdir_idx = h.renderer.total_list.iter().position(|item| item.label.contains("subdir"))
+    let subdir_idx = h
+        .renderer
+        .total_list
+        .iter()
+        .position(|item| item.label.contains("subdir"))
         .expect("subdir not in list");
     h.renderer.list_index = subdir_idx;
     h.renderer.current_id = h.renderer.total_list[subdir_idx].id.clone();
     press_right(h.r());
 
     let subdir_path = h.renderer.providers[fb_idx].current_path().to_owned();
-    assert!(subdir_path.ends_with("subdir"), "should be inside subdir after navigating right");
+    assert!(
+        subdir_path.ends_with("subdir"),
+        "should be inside subdir after navigating right"
+    );
 
     // Undo navigate: should return to root
     press_ctrl(h.r(), Keycode::Z);
-    assert_eq!(h.renderer.providers[fb_idx].current_path(), root_path,
-        "undo should restore provider path to root");
-    assert_eq!(h.renderer.current_id.depth(), 2, "should be back at depth 2");
+    assert_eq!(
+        h.renderer.providers[fb_idx].current_path(),
+        root_path,
+        "undo should restore provider path to root"
+    );
+    assert_eq!(
+        h.renderer.current_id.depth(),
+        2,
+        "should be back at depth 2"
+    );
 
     // Redo navigate: should go back into subdir
     press_ctrl_shift(h.r(), Keycode::Z);
-    assert_eq!(h.renderer.providers[fb_idx].current_path(), subdir_path,
-        "redo should restore path to subdir");
+    assert_eq!(
+        h.renderer.providers[fb_idx].current_path(),
+        subdir_path,
+        "redo should restore path to subdir"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -2232,13 +2958,19 @@ struct ButtonTestProvider {
 
 impl ButtonTestProvider {
     fn new() -> Self {
-        ButtonTestProvider { path: "/".to_owned() }
+        ButtonTestProvider {
+            path: "/".to_owned(),
+        }
     }
 }
 
 impl Provider for ButtonTestProvider {
-    fn name(&self) -> &str { "buttontest" }
-    fn display_name(&self) -> String { "Button Test".to_owned() }
+    fn name(&self) -> &str {
+        "buttontest"
+    }
+    fn display_name(&self) -> String {
+        "Button Test".to_owned()
+    }
 
     fn fetch(&mut self) -> Vec<FfonElement> {
         match self.path.as_str() {
@@ -2246,15 +2978,12 @@ impl Provider for ButtonTestProvider {
                 // Root: one mandatory item + "Add element:" with a widget button
                 let add_section = {
                     let mut obj = FfonElement::new_obj("Add element:");
-                    obj.as_obj_mut().unwrap().push(
-                        FfonElement::Str("<button>widget</button>widget".to_owned())
-                    );
+                    obj.as_obj_mut()
+                        .unwrap()
+                        .push(FfonElement::Str("<button>widget</button>widget".to_owned()));
                     obj
                 };
-                vec![
-                    FfonElement::Str("existing".to_owned()),
-                    add_section,
-                ]
+                vec![FfonElement::Str("existing".to_owned()), add_section]
             }
             "/widget" => {
                 // Widget level: one child + "Add element:" with a subwidget button.
@@ -2262,15 +2991,12 @@ impl Provider for ButtonTestProvider {
                 // = "/widget" and call fetch() → only returns children for correct path.
                 let add_section = {
                     let mut obj = FfonElement::new_obj("Add element:");
-                    obj.as_obj_mut().unwrap().push(
-                        FfonElement::Str("<button>subwidget</button>subwidget".to_owned())
-                    );
+                    obj.as_obj_mut().unwrap().push(FfonElement::Str(
+                        "<button>subwidget</button>subwidget".to_owned(),
+                    ));
                     obj
                 };
-                vec![
-                    FfonElement::Str("wchild1".to_owned()),
-                    add_section,
-                ]
+                vec![FfonElement::Str("wchild1".to_owned()), add_section]
             }
             "/widget/subwidget" => {
                 // Subwidget level: leaf children.
@@ -2296,13 +3022,21 @@ impl Provider for ButtonTestProvider {
     }
 
     fn pop_path(&mut self) {
-        if self.path == "/" { return; }
+        if self.path == "/" {
+            return;
+        }
         if let Some(idx) = self.path.rfind('/') {
-            self.path = if idx == 0 { "/".to_owned() } else { self.path[..idx].to_owned() };
+            self.path = if idx == 0 {
+                "/".to_owned()
+            } else {
+                self.path[..idx].to_owned()
+            };
         }
     }
 
-    fn current_path(&self) -> &str { &self.path }
+    fn current_path(&self) -> &str {
+        &self.path
+    }
 
     fn create_element(&mut self, element_key: &str) -> Option<FfonElement> {
         let key = element_key.strip_prefix("one-opt:").unwrap_or(element_key);
@@ -2329,20 +3063,32 @@ struct NestedButtonProvider {
 
 impl NestedButtonProvider {
     fn new() -> Self {
-        NestedButtonProvider { path: "/".to_owned() }
+        NestedButtonProvider {
+            path: "/".to_owned(),
+        }
     }
 }
 
 impl Provider for NestedButtonProvider {
-    fn name(&self) -> &str { "nestedbutton" }
-    fn display_name(&self) -> String { "Nested Button".to_owned() }
+    fn name(&self) -> &str {
+        "nestedbutton"
+    }
+    fn display_name(&self) -> String {
+        "Nested Button".to_owned()
+    }
 
     fn fetch(&mut self) -> Vec<FfonElement> {
         match self.path.as_str() {
             "/" => {
                 let mut group = FfonElement::new_obj("Group");
-                group.as_obj_mut().unwrap().push(FfonElement::new_str("<button>noop</button>press me"));
-                group.as_obj_mut().unwrap().push(FfonElement::new_str("beta"));
+                group
+                    .as_obj_mut()
+                    .unwrap()
+                    .push(FfonElement::new_str("<button>noop</button>press me"));
+                group
+                    .as_obj_mut()
+                    .unwrap()
+                    .push(FfonElement::new_str("beta"));
                 vec![FfonElement::new_str("alpha"), group]
             }
             "/Group" => vec![
@@ -2354,16 +3100,28 @@ impl Provider for NestedButtonProvider {
     }
 
     fn push_path(&mut self, seg: &str) {
-        if self.path == "/" { self.path = format!("/{seg}"); }
-        else { self.path.push('/'); self.path.push_str(seg); }
+        if self.path == "/" {
+            self.path = format!("/{seg}");
+        } else {
+            self.path.push('/');
+            self.path.push_str(seg);
+        }
     }
     fn pop_path(&mut self) {
         if let Some(s) = self.path.rfind('/') {
-            self.path = if s == 0 { "/".to_owned() } else { self.path[..s].to_owned() };
+            self.path = if s == 0 {
+                "/".to_owned()
+            } else {
+                self.path[..s].to_owned()
+            };
         }
     }
-    fn current_path(&self) -> &str { &self.path }
-    fn set_current_path(&mut self, path: &str) { self.path = path.to_owned(); }
+    fn current_path(&self) -> &str {
+        &self.path
+    }
+    fn set_current_path(&mut self, path: &str) {
+        self.path = path.to_owned();
+    }
 }
 
 /// Regression: Ctrl+F (ExtendedSearch) jumps the cursor to a match one layer
@@ -2391,9 +3149,13 @@ fn search_enter_on_deep_button_syncs_provider_path() {
     sicompass::list::create_list_extended_search(&mut renderer);
 
     // Select the deep button match: provider 0 / Group 1 / button 0.
-    let btn_idx = renderer.total_list.iter().position(|it| {
-        it.id.get(0) == Some(0) && it.id.get(1) == Some(1) && it.id.get(2) == Some(0)
-    }).expect("deep button must appear in extended search results");
+    let btn_idx = renderer
+        .total_list
+        .iter()
+        .position(|it| {
+            it.id.get(0) == Some(0) && it.id.get(1) == Some(1) && it.id.get(2) == Some(0)
+        })
+        .expect("deep button must appear in extended search results");
     renderer.list_index = btn_idx;
 
     // First Enter exits search onto the button. The path must re-sync to its layer.
@@ -2409,14 +3171,25 @@ fn search_enter_on_deep_button_syncs_provider_path() {
     // Second Enter activates the button (General-mode → refresh). Focus must stay
     // on the deep layer, not snap back to the search-origin (root) layer.
     press_enter(&mut renderer);
-    assert_eq!(renderer.current_id.depth(), 3, "focus must remain on the deep button layer");
-    let list_keys: Vec<String> = renderer.ffon[0].as_obj().unwrap()
-        .children[1].as_obj().unwrap()
-        .children.iter()
-        .map(|e| match e { FfonElement::Obj(o) => o.key.clone(), FfonElement::Str(s) => s.clone() })
+    assert_eq!(
+        renderer.current_id.depth(),
+        3,
+        "focus must remain on the deep button layer"
+    );
+    let list_keys: Vec<String> = renderer.ffon[0].as_obj().unwrap().children[1]
+        .as_obj()
+        .unwrap()
+        .children
+        .iter()
+        .map(|e| match e {
+            FfonElement::Obj(o) => o.key.clone(),
+            FfonElement::Str(s) => s.clone(),
+        })
         .collect();
-    assert!(list_keys.iter().any(|k| k.contains("press me")),
-        "Group layer must still show its button after activation; got {list_keys:?}");
+    assert!(
+        list_keys.iter().any(|k| k.contains("press me")),
+        "Group layer must still show its button after activation; got {list_keys:?}"
+    );
 }
 
 /// Pressing Enter on a button inside "Add element:" creates the element with the
@@ -2440,21 +3213,33 @@ fn button_press_creates_element_without_corrupting_path() {
     // At depth 1, push_path is NOT called (depth < 2). Path stays "/".
     renderer.current_id.set(0, provider_idx);
     press_right(&mut renderer);
-    assert_eq!(renderer.providers[provider_idx].current_path(), "/",
-        "navigating into provider root (depth 1→2) must not push path");
+    assert_eq!(
+        renderer.providers[provider_idx].current_path(),
+        "/",
+        "navigating into provider root (depth 1→2) must not push path"
+    );
 
     // Navigate into "Add element:" — pre-loaded children → in-place, depth 2→3.
     // At depth 2, push_path IS called. Path becomes "/Add element:".
-    let add_idx = renderer.total_list.iter().position(|item| item.label.contains("Add element:"))
+    let add_idx = renderer
+        .total_list
+        .iter()
+        .position(|item| item.label.contains("Add element:"))
         .expect("Add element: should appear in list");
     renderer.list_index = add_idx;
     renderer.current_id = renderer.total_list[add_idx].id.clone();
     press_right(&mut renderer);
-    assert_eq!(renderer.providers[provider_idx].current_path(), "/Add element:",
-        "navigating into 'Add element:' (in-place, depth>=2) must push path");
+    assert_eq!(
+        renderer.providers[provider_idx].current_path(),
+        "/Add element:",
+        "navigating into 'Add element:' (in-place, depth>=2) must push path"
+    );
 
     // Find the button inside "Add element:".
-    let btn_idx = renderer.total_list.iter().position(|item| item.label.contains("widget"))
+    let btn_idx = renderer
+        .total_list
+        .iter()
+        .position(|item| item.label.contains("widget"))
         .expect("widget button should appear inside Add element:");
     renderer.list_index = btn_idx;
     renderer.current_id = renderer.total_list[btn_idx].id.clone();
@@ -2466,33 +3251,58 @@ fn button_press_creates_element_without_corrupting_path() {
     press_enter(&mut renderer);
 
     assert_eq!(
-        renderer.providers[provider_idx].current_path(), "/",
+        renderer.providers[provider_idx].current_path(),
+        "/",
         "path must be at grandparent level ('/') after button press"
     );
 
     // Cursor should be at the new element (depth 2, same level as "Add element:").
-    assert_eq!(renderer.current_id.depth(), 2,
-        "cursor should be at grandparent depth (2) after element creation");
+    assert_eq!(
+        renderer.current_id.depth(),
+        2,
+        "cursor should be at grandparent depth (2) after element creation"
+    );
 
     // The new "widget" object should appear in the list.
     sicompass::list::create_list_current_layer(&mut renderer);
-    let widget_in_list = renderer.total_list.iter().any(|item| item.label.contains("widget"));
-    assert!(widget_in_list, "newly created widget element should appear in list");
+    let widget_in_list = renderer
+        .total_list
+        .iter()
+        .any(|item| item.label.contains("widget"));
+    assert!(
+        widget_in_list,
+        "newly created widget element should appear in list"
+    );
 
     // Navigate into the new widget element (in-place, pre-loaded children).
     // push_path("widget") → path "/widget".
     press_right(&mut renderer);
-    assert_eq!(renderer.providers[provider_idx].current_path(), "/widget",
-        "navigating into new element must push path");
+    assert_eq!(
+        renderer.providers[provider_idx].current_path(),
+        "/widget",
+        "navigating into new element must push path"
+    );
 
     // Press Left — should pop path back to "/" and land on widget in the list.
     press_left(&mut renderer);
-    assert_eq!(renderer.providers[provider_idx].current_path(), "/",
-        "pressing Left from inside widget must restore path to '/'");
-    assert_eq!(renderer.current_id.depth(), 2,
-        "after Left, should be back at depth 2");
-    let on_widget = renderer.total_list.iter().any(|item| item.label.contains("widget"));
-    assert!(on_widget, "widget should still be visible in list after Left");
+    assert_eq!(
+        renderer.providers[provider_idx].current_path(),
+        "/",
+        "pressing Left from inside widget must restore path to '/'"
+    );
+    assert_eq!(
+        renderer.current_id.depth(),
+        2,
+        "after Left, should be back at depth 2"
+    );
+    let on_widget = renderer
+        .total_list
+        .iter()
+        .any(|item| item.label.contains("widget"));
+    assert!(
+        on_widget,
+        "widget should still be visible in list after Left"
+    );
 }
 
 /// Two-level nested button press: mirrors the AHU → supply → filter scenario.
@@ -2517,28 +3327,42 @@ fn button_press_two_level_nested_creates_element() {
     press_right(&mut renderer);
 
     // Navigate into "Add element:" (depth 2→3, push "Add element:").
-    let add_idx = renderer.total_list.iter().position(|item| item.label.contains("Add element:"))
+    let add_idx = renderer
+        .total_list
+        .iter()
+        .position(|item| item.label.contains("Add element:"))
         .expect("root Add element: should appear in list");
     renderer.list_index = add_idx;
     renderer.current_id = renderer.total_list[add_idx].id.clone();
     press_right(&mut renderer);
 
     // Press Enter on "widget" button — creates widget with children from path "/widget".
-    let btn_idx = renderer.total_list.iter().position(|item| item.label.contains("widget"))
+    let btn_idx = renderer
+        .total_list
+        .iter()
+        .position(|item| item.label.contains("widget"))
         .expect("widget button should appear");
     renderer.list_index = btn_idx;
     renderer.current_id = renderer.total_list[btn_idx].id.clone();
     press_enter(&mut renderer);
 
-    assert_eq!(renderer.providers[provider_idx].current_path(), "/",
-        "after level-1 button press, path must be at grandparent '/'");
-    assert_eq!(renderer.current_id.depth(), 2,
-        "cursor must be at depth 2 (grandparent level) after widget creation");
+    assert_eq!(
+        renderer.providers[provider_idx].current_path(),
+        "/",
+        "after level-1 button press, path must be at grandparent '/'"
+    );
+    assert_eq!(
+        renderer.current_id.depth(),
+        2,
+        "cursor must be at depth 2 (grandparent level) after widget creation"
+    );
 
     // Widget must have received children (fetch was called at path "/widget").
     sicompass::list::create_list_current_layer(&mut renderer);
     // Label is "+ widget" (build_obj_label strips many-opt tag, adds "+" prefix)
-    let widget_idx = renderer.total_list.iter()
+    let widget_idx = renderer
+        .total_list
+        .iter()
         .position(|item| item.label.contains("widget") && !item.label.contains("subwidget"))
         .expect("widget should be in list after creation");
 
@@ -2549,8 +3373,10 @@ fn button_press_two_level_nested_creates_element() {
         let slice = get_ffon_at_id(&renderer.ffon, &item_id).unwrap();
         let last = item_id.last().unwrap();
         let widget_obj = slice[last].as_obj().expect("widget should be an Obj");
-        assert!(!widget_obj.children.is_empty(),
-            "widget must have children (create_element fetched from '/widget')");
+        assert!(
+            !widget_obj.children.is_empty(),
+            "widget must have children (create_element fetched from '/widget')"
+        );
     }
 
     // --- Navigate into widget ---
@@ -2558,36 +3384,56 @@ fn button_press_two_level_nested_creates_element() {
     renderer.list_index = widget_idx;
     renderer.current_id = renderer.total_list[widget_idx].id.clone();
     press_right(&mut renderer);
-    assert_eq!(renderer.providers[provider_idx].current_path(), "/widget",
-        "after navigating into widget, path must be '/widget'");
+    assert_eq!(
+        renderer.providers[provider_idx].current_path(),
+        "/widget",
+        "after navigating into widget, path must be '/widget'"
+    );
     assert_eq!(renderer.current_id.depth(), 3, "inside widget: depth 3");
 
     // --- Level 2: create subwidget from widget's "Add element:" ---
 
     // Navigate into widget's "Add element:" (depth 3→4, push "Add element:").
-    let wadd_idx = renderer.total_list.iter().position(|item| item.label.contains("Add element:"))
+    let wadd_idx = renderer
+        .total_list
+        .iter()
+        .position(|item| item.label.contains("Add element:"))
         .expect("widget's Add element: should appear");
     renderer.list_index = wadd_idx;
     renderer.current_id = renderer.total_list[wadd_idx].id.clone();
     press_right(&mut renderer);
-    assert_eq!(renderer.providers[provider_idx].current_path(), "/widget/Add element:",
-        "after navigating into widget's Add element:, path must be '/widget/Add element:'");
+    assert_eq!(
+        renderer.providers[provider_idx].current_path(),
+        "/widget/Add element:",
+        "after navigating into widget's Add element:, path must be '/widget/Add element:'"
+    );
 
     // Press Enter on "subwidget" button — create_element must see path "/widget".
-    let sbtn_idx = renderer.total_list.iter().position(|item| item.label.contains("subwidget"))
+    let sbtn_idx = renderer
+        .total_list
+        .iter()
+        .position(|item| item.label.contains("subwidget"))
         .expect("subwidget button should appear inside widget's Add element:");
     renderer.list_index = sbtn_idx;
     renderer.current_id = renderer.total_list[sbtn_idx].id.clone();
     press_enter(&mut renderer);
 
-    assert_eq!(renderer.providers[provider_idx].current_path(), "/widget",
-        "after level-2 button press, path must be at '/widget' (widget's grandparent)");
-    assert_eq!(renderer.current_id.depth(), 3,
-        "cursor must be at depth 3 (inside widget) after subwidget creation");
+    assert_eq!(
+        renderer.providers[provider_idx].current_path(),
+        "/widget",
+        "after level-2 button press, path must be at '/widget' (widget's grandparent)"
+    );
+    assert_eq!(
+        renderer.current_id.depth(),
+        3,
+        "cursor must be at depth 3 (inside widget) after subwidget creation"
+    );
 
     // Subwidget must have received children (fetch called at "/widget/subwidget").
     sicompass::list::create_list_current_layer(&mut renderer);
-    let subwidget_idx = renderer.total_list.iter()
+    let subwidget_idx = renderer
+        .total_list
+        .iter()
         .position(|item| item.label.contains("subwidget"))
         .expect("subwidget should be in widget's list after creation");
 
@@ -2597,26 +3443,43 @@ fn button_press_two_level_nested_creates_element() {
         let slice = get_ffon_at_id(&renderer.ffon, &item_id).unwrap();
         let last = item_id.last().unwrap();
         let subwidget_obj = slice[last].as_obj().expect("subwidget should be an Obj");
-        assert!(!subwidget_obj.children.is_empty(),
-            "subwidget must have children (create_element fetched from '/widget/subwidget')");
+        assert!(
+            !subwidget_obj.children.is_empty(),
+            "subwidget must have children (create_element fetched from '/widget/subwidget')"
+        );
     }
 
     // Navigate into subwidget — path must go to "/widget/subwidget".
     renderer.list_index = subwidget_idx;
     renderer.current_id = renderer.total_list[subwidget_idx].id.clone();
     press_right(&mut renderer);
-    assert_eq!(renderer.providers[provider_idx].current_path(), "/widget/subwidget",
-        "after navigating into subwidget, path must be '/widget/subwidget'");
+    assert_eq!(
+        renderer.providers[provider_idx].current_path(),
+        "/widget/subwidget",
+        "after navigating into subwidget, path must be '/widget/subwidget'"
+    );
     assert_eq!(renderer.current_id.depth(), 4, "inside subwidget: depth 4");
 
     // Press Left — must pop back to "/widget" with cursor on subwidget.
     press_left(&mut renderer);
-    assert_eq!(renderer.providers[provider_idx].current_path(), "/widget",
-        "Left from subwidget must restore path to '/widget'");
-    assert_eq!(renderer.current_id.depth(), 3,
-        "after Left from subwidget, depth must be 3");
-    let subwidget_visible = renderer.total_list.iter().any(|item| item.label.contains("subwidget"));
-    assert!(subwidget_visible, "subwidget must still be visible in widget's list after Left");
+    assert_eq!(
+        renderer.providers[provider_idx].current_path(),
+        "/widget",
+        "Left from subwidget must restore path to '/widget'"
+    );
+    assert_eq!(
+        renderer.current_id.depth(),
+        3,
+        "after Left from subwidget, depth must be 3"
+    );
+    let subwidget_visible = renderer
+        .total_list
+        .iter()
+        .any(|item| item.label.contains("subwidget"));
+    assert!(
+        subwidget_visible,
+        "subwidget must still be visible in widget's list after Left"
+    );
 }
 
 #[test]
@@ -2629,27 +3492,45 @@ fn root_blocks_editing_keys() {
 
     // S — should not enter Scroll at root
     press(h.r(), Keycode::S);
-    assert_eq!(h.renderer.coordinate, coord_before, "S must be no-op at root");
+    assert_eq!(
+        h.renderer.coordinate, coord_before,
+        "S must be no-op at root"
+    );
 
     // I — should not enter Insert at root
     press(h.r(), Keycode::I);
-    assert_eq!(h.renderer.coordinate, coord_before, "I must be no-op at root");
+    assert_eq!(
+        h.renderer.coordinate, coord_before,
+        "I must be no-op at root"
+    );
 
     // A — should not enter Insert at root
     press(h.r(), Keycode::A);
-    assert_eq!(h.renderer.coordinate, coord_before, "A must be no-op at root");
+    assert_eq!(
+        h.renderer.coordinate, coord_before,
+        "A must be no-op at root"
+    );
 
     // Ctrl+I — should not enter Insert at root
     press_ctrl(h.r(), Keycode::I);
-    assert_eq!(h.renderer.coordinate, coord_before, "Ctrl+I must be no-op at root");
+    assert_eq!(
+        h.renderer.coordinate, coord_before,
+        "Ctrl+I must be no-op at root"
+    );
 
     // Ctrl+A — should not enter Insert at root
     press_ctrl(h.r(), Keycode::A);
-    assert_eq!(h.renderer.coordinate, coord_before, "Ctrl+A must be no-op at root");
+    assert_eq!(
+        h.renderer.coordinate, coord_before,
+        "Ctrl+A must be no-op at root"
+    );
 
     // Enter — should not enter general mode at root
     press_enter(h.r());
-    assert_eq!(h.renderer.coordinate, coord_before, "Enter must be no-op at root");
+    assert_eq!(
+        h.renderer.coordinate, coord_before,
+        "Enter must be no-op at root"
+    );
 
     // depth must still be 1 (no navigation happened)
     assert_eq!(h.renderer.current_id.depth(), 1, "depth must remain 1");
@@ -2698,7 +3579,11 @@ fn test_dashboard_key_transitions_and_escape() {
 
     // Escape should return to General
     press_escape(h.r());
-    assert_eq!(h.renderer.coordinate, Coordinate::General, "Escape from Dashboard should restore previous coordinate");
+    assert_eq!(
+        h.renderer.coordinate,
+        Coordinate::General,
+        "Escape from Dashboard should restore previous coordinate"
+    );
 }
 
 #[test]
@@ -2707,7 +3592,11 @@ fn test_d_key_noop_without_dashboard_image() {
     // No dashboard_image_path set on providers — pressing D at root should stay in General
     assert_eq!(h.renderer.coordinate, Coordinate::General);
     press(h.r(), Keycode::D);
-    assert_eq!(h.renderer.coordinate, Coordinate::General, "D without dashboard image should not enter Dashboard mode");
+    assert_eq!(
+        h.renderer.coordinate,
+        Coordinate::General,
+        "D without dashboard image should not enter Dashboard mode"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -2729,13 +3618,18 @@ fn ctrl_a_general_clones_add_element_section_for_create_element_provider() {
 
     // Cursor is inside the provider now. "Add element:" should be in the list.
     assert!(
-        renderer.total_list.iter().any(|item| item.label.contains("Add element:")),
+        renderer
+            .total_list
+            .iter()
+            .any(|item| item.label.contains("Add element:")),
         "Add element: should be visible before Ctrl+A"
     );
     let count_before = renderer.total_list.len();
 
     // Place cursor on "existing" (index 0 in the provider children).
-    let existing_idx = renderer.total_list.iter()
+    let existing_idx = renderer
+        .total_list
+        .iter()
         .position(|item| item.label.contains("existing"))
         .expect("existing item should be in list");
     renderer.list_index = existing_idx;
@@ -2745,19 +3639,30 @@ fn ctrl_a_general_clones_add_element_section_for_create_element_provider() {
     press_ctrl(&mut renderer, Keycode::A);
 
     // Must stay in General (no insert mode for createElement providers).
-    assert_eq!(renderer.coordinate, Coordinate::General,
-        "Ctrl+A with createElement provider must stay in General");
+    assert_eq!(
+        renderer.coordinate,
+        Coordinate::General,
+        "Ctrl+A with createElement provider must stay in General"
+    );
 
     // List should now have one more item.
     sicompass::list::create_list_current_layer(&mut renderer);
-    assert_eq!(renderer.total_list.len(), count_before + 1,
-        "one extra item (the cloned Add element:) should appear after Ctrl+A");
+    assert_eq!(
+        renderer.total_list.len(),
+        count_before + 1,
+        "one extra item (the cloned Add element:) should appear after Ctrl+A"
+    );
 
     // The new item should be an "Add element:" clone.
-    let clone_count = renderer.total_list.iter()
+    let clone_count = renderer
+        .total_list
+        .iter()
         .filter(|item| item.label.contains("Add element:"))
         .count();
-    assert_eq!(clone_count, 2, "both the original and the clone should be visible");
+    assert_eq!(
+        clone_count, 2,
+        "both the original and the clone should be visible"
+    );
 }
 
 /// Ctrl+I in General for a createElement provider should clone the
@@ -2773,7 +3678,9 @@ fn ctrl_i_general_clones_add_element_section_for_create_element_provider() {
 
     let count_before = renderer.total_list.len();
 
-    let existing_idx = renderer.total_list.iter()
+    let existing_idx = renderer
+        .total_list
+        .iter()
         .position(|item| item.label.contains("existing"))
         .expect("existing item should be in list");
     renderer.list_index = existing_idx;
@@ -2781,17 +3688,28 @@ fn ctrl_i_general_clones_add_element_section_for_create_element_provider() {
 
     press_ctrl(&mut renderer, Keycode::I);
 
-    assert_eq!(renderer.coordinate, Coordinate::General,
-        "Ctrl+I with createElement provider must stay in General");
+    assert_eq!(
+        renderer.coordinate,
+        Coordinate::General,
+        "Ctrl+I with createElement provider must stay in General"
+    );
 
     sicompass::list::create_list_current_layer(&mut renderer);
-    assert_eq!(renderer.total_list.len(), count_before + 1,
-        "one extra item (the cloned Add element:) should appear after Ctrl+I");
+    assert_eq!(
+        renderer.total_list.len(),
+        count_before + 1,
+        "one extra item (the cloned Add element:) should appear after Ctrl+I"
+    );
 
-    let clone_count = renderer.total_list.iter()
+    let clone_count = renderer
+        .total_list
+        .iter()
         .filter(|item| item.label.contains("Add element:"))
         .count();
-    assert_eq!(clone_count, 2, "both original and clone should be visible after Ctrl+I");
+    assert_eq!(
+        clone_count, 2,
+        "both original and clone should be visible after Ctrl+I"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -2807,19 +3725,34 @@ fn ctrl_i_general_clones_add_element_section_for_create_element_provider() {
 fn ctrl_a_in_general_double_tap_does_append_append() {
     struct EditorMock;
     impl Provider for EditorMock {
-        fn name(&self) -> &str { "mock_editor" }
-        fn fetch(&mut self) -> Vec<FfonElement> { Vec::new() }
-        fn has_editor_semantics(&self) -> bool { true }
+        fn name(&self) -> &str {
+            "mock_editor"
+        }
+        fn fetch(&mut self) -> Vec<FfonElement> {
+            Vec::new()
+        }
+        fn has_editor_semantics(&self) -> bool {
+            true
+        }
     }
 
     // Set up a renderer with two items in an obj (depth-2 General context).
     let mut r = AppRenderer::new();
     r.providers.push(Box::new(EditorMock));
     let mut root = FfonElement::new_obj("section");
-    root.as_obj_mut().unwrap().push(FfonElement::new_str("alpha"));
-    root.as_obj_mut().unwrap().push(FfonElement::new_str("beta"));
+    root.as_obj_mut()
+        .unwrap()
+        .push(FfonElement::new_str("alpha"));
+    root.as_obj_mut()
+        .unwrap()
+        .push(FfonElement::new_str("beta"));
     r.ffon = vec![root];
-    r.current_id = { let mut id = sicompass_sdk::ffon::IdArray::new(); id.push(0); id.push(0); id };
+    r.current_id = {
+        let mut id = sicompass_sdk::ffon::IdArray::new();
+        id.push(0);
+        id.push(0);
+        id
+    };
     r.coordinate = Coordinate::General;
     r.previous_coordinate = Coordinate::General;
     sicompass::list::create_list_current_layer(&mut r);
@@ -2827,7 +3760,10 @@ fn ctrl_a_in_general_double_tap_does_append_append() {
     // First Ctrl+A — single tap append.
     sicompass::handlers::handle_ctrl_a(&mut r, sicompass::app_state::History::None);
     let count_after_first = r.ffon[0].as_obj().unwrap().children.len();
-    assert_eq!(count_after_first, 3, "first Ctrl+A should append one element (3 total)");
+    assert_eq!(
+        count_after_first, 3,
+        "first Ctrl+A should append one element (3 total)"
+    );
 
     // Record a recent keypress time so the next call is within DELTA_MS.
     r.last_keypress_time = sicompass::handlers::sdl_ticks();
@@ -2868,22 +3804,44 @@ impl ConfigProvider {
 }
 
 impl Provider for ConfigProvider {
-    fn name(&self) -> &str { "configprovider" }
-    fn display_name(&self) -> String { "Config Provider".to_owned() }
-    fn supports_config_files(&self) -> bool { true }
-    fn fetch(&mut self) -> Vec<FfonElement> { self.data.clone() }
-    fn push_path(&mut self, segment: &str) {
-        if self.path == "/" { self.path = format!("/{segment}"); }
-        else { self.path.push('/'); self.path.push_str(segment); }
+    fn name(&self) -> &str {
+        "configprovider"
     }
-    fn pop_path(&mut self) {
-        if self.path == "/" { return; }
-        if let Some(idx) = self.path.rfind('/') {
-            self.path = if idx == 0 { "/".to_owned() } else { self.path[..idx].to_owned() };
+    fn display_name(&self) -> String {
+        "Config Provider".to_owned()
+    }
+    fn supports_config_files(&self) -> bool {
+        true
+    }
+    fn fetch(&mut self) -> Vec<FfonElement> {
+        self.data.clone()
+    }
+    fn push_path(&mut self, segment: &str) {
+        if self.path == "/" {
+            self.path = format!("/{segment}");
+        } else {
+            self.path.push('/');
+            self.path.push_str(segment);
         }
     }
-    fn current_path(&self) -> &str { &self.path }
-    fn set_current_path(&mut self, path: &str) { self.path = path.to_owned(); }
+    fn pop_path(&mut self) {
+        if self.path == "/" {
+            return;
+        }
+        if let Some(idx) = self.path.rfind('/') {
+            self.path = if idx == 0 {
+                "/".to_owned()
+            } else {
+                self.path[..idx].to_owned()
+            };
+        }
+    }
+    fn current_path(&self) -> &str {
+        &self.path
+    }
+    fn set_current_path(&mut self, path: &str) {
+        self.path = path.to_owned();
+    }
 }
 
 /// Helper: create a harness with ConfigProvider (idx 0), FilebrowserProvider (idx 1).
@@ -2898,13 +3856,18 @@ fn harness_with_config_provider() -> (AppRenderer, TempDir) {
 
     // Filebrowser at index 1
     let root = tmp.path().to_str().unwrap().to_owned();
-    register(&mut renderer, sicompass_sdk::create_provider_by_name("filebrowser").unwrap());
+    register(
+        &mut renderer,
+        sicompass_sdk::create_provider_by_name("filebrowser").unwrap(),
+    );
     renderer.providers[1].set_current_path(&root);
     {
         let children = renderer.providers[1].fetch();
         let display_name = renderer.providers[1].display_name().to_owned();
         let mut root_elem = FfonElement::new_obj(&display_name);
-        for child in children { root_elem.as_obj_mut().unwrap().push(child); }
+        for child in children {
+            root_elem.as_obj_mut().unwrap().push(child);
+        }
         renderer.ffon[1] = root_elem;
     }
 
@@ -2925,9 +3888,19 @@ fn ctrl_o_navigates_to_filebrowser_and_sets_pending_flag() {
 
     press_ctrl(&mut r, Keycode::O);
 
-    assert!(r.pending_file_browser_open, "pending_file_browser_open should be set after Ctrl+O");
-    assert_eq!(r.current_id.get(0), Some(1), "should have navigated to filebrowser (index 1)");
-    assert_eq!(r.save_as_source_root_idx, 0, "source root idx should be the config provider");
+    assert!(
+        r.pending_file_browser_open,
+        "pending_file_browser_open should be set after Ctrl+O"
+    );
+    assert_eq!(
+        r.current_id.get(0),
+        Some(1),
+        "should have navigated to filebrowser (index 1)"
+    );
+    assert_eq!(
+        r.save_as_source_root_idx, 0,
+        "source root idx should be the config provider"
+    );
 }
 
 /// Pressing Escape after Ctrl+O cancels the open flow and returns to the source provider.
@@ -2940,8 +3913,15 @@ fn escape_after_ctrl_o_cancels_open_and_returns_to_source() {
 
     press(&mut r, Keycode::Escape);
 
-    assert!(!r.pending_file_browser_open, "pending_file_browser_open should be cleared after Escape");
-    assert_eq!(r.current_id.get(0), Some(0), "should be back at config provider after Escape");
+    assert!(
+        !r.pending_file_browser_open,
+        "pending_file_browser_open should be cleared after Escape"
+    );
+    assert_eq!(
+        r.current_id.get(0),
+        Some(0),
+        "should be back at config provider after Escape"
+    );
 }
 
 /// Selecting a .json file in the filebrowser during the open flow loads it into the
@@ -2962,10 +3942,11 @@ fn open_flow_loads_json_file_into_source_provider() {
     // filebrowser root obj, set current_id to point at it, set provider path to tmpdir.
     // This simulates the user having navigated to config.json without requiring
     // navigate_to_path to traverse a deep tmpdir path.
-    r.ffon[1].as_obj_mut().unwrap().children.insert(
-        0,
-        FfonElement::Str("<input>config.json</input>".to_owned()),
-    );
+    r.ffon[1]
+        .as_obj_mut()
+        .unwrap()
+        .children
+        .insert(0, FfonElement::Str("<input>config.json</input>".to_owned()));
     r.providers[1].set_current_path(tmp.path().to_str().unwrap());
     r.pending_file_browser_open = true;
     r.save_as_source_root_idx = 0;
@@ -2984,7 +3965,9 @@ fn open_flow_loads_json_file_into_source_provider() {
     };
     sicompass::list::create_list_current_layer(&mut r);
 
-    let json_idx = r.total_list.iter()
+    let json_idx = r
+        .total_list
+        .iter()
         .position(|item| item.label.contains("config.json"))
         .expect("config.json entry should be visible in filebrowser list");
     r.list_index = json_idx;
@@ -2992,10 +3975,20 @@ fn open_flow_loads_json_file_into_source_provider() {
 
     press(&mut r, Keycode::Return);
 
-    assert!(!r.pending_file_browser_open, "pending flag should be cleared after loading");
-    assert_eq!(r.current_id.get(0), Some(0), "should be back at config provider after open");
-    assert_eq!(r.current_save_path, json_path.to_str().unwrap(),
-        "current_save_path should point to the loaded file");
+    assert!(
+        !r.pending_file_browser_open,
+        "pending flag should be cleared after loading"
+    );
+    assert_eq!(
+        r.current_id.get(0),
+        Some(0),
+        "should be back at config provider after open"
+    );
+    assert_eq!(
+        r.current_save_path,
+        json_path.to_str().unwrap(),
+        "current_save_path should point to the loaded file"
+    );
 
     // The loaded FFON should have replaced the original "initial-item"
     if let Some(FfonElement::Obj(root_obj)) = r.ffon.get(0) {
@@ -3003,7 +3996,10 @@ fn open_flow_loads_json_file_into_source_provider() {
             FfonElement::Obj(o) => o.key == "loaded-item",
             _ => false,
         });
-        assert!(has_loaded, "loaded FFON should contain 'loaded-item' from the JSON file");
+        assert!(
+            has_loaded,
+            "loaded FFON should contain 'loaded-item' from the JSON file"
+        );
     } else {
         panic!("config provider FFON root should be an Obj");
     }
@@ -3018,25 +4014,45 @@ fn open_flow_hides_non_json_files_in_list() {
     // Inject mixed entries: a .txt file, a .json file, and a directory
     let children = r.ffon[1].as_obj_mut().unwrap();
     children.children.clear();
-    children.children.push(FfonElement::Str("<input>notes.txt</input>".to_owned()));
-    children.children.push(FfonElement::Str("<input>config.json</input>".to_owned()));
-    children.children.push(FfonElement::new_obj("<input>some-dir</input>"));
+    children
+        .children
+        .push(FfonElement::Str("<input>notes.txt</input>".to_owned()));
+    children
+        .children
+        .push(FfonElement::Str("<input>config.json</input>".to_owned()));
+    children
+        .children
+        .push(FfonElement::new_obj("<input>some-dir</input>"));
 
     r.pending_file_browser_open = true;
     r.current_id = {
         let mut id = sicompass_sdk::ffon::IdArray::new();
-        id.push(1); id.push(0); id
+        id.push(1);
+        id.push(0);
+        id
     };
     sicompass::list::create_list_current_layer(&mut r);
 
     // .txt file must not appear
-    assert!(!r.total_list.iter().any(|item| item.label.contains("notes.txt")),
-        "non-.json file should be hidden from list during open flow");
+    assert!(
+        !r.total_list
+            .iter()
+            .any(|item| item.label.contains("notes.txt")),
+        "non-.json file should be hidden from list during open flow"
+    );
     // .json file and directory must appear
-    assert!(r.total_list.iter().any(|item| item.label.contains("config.json")),
-        ".json file should be visible during open flow");
-    assert!(r.total_list.iter().any(|item| item.label.contains("some-dir")),
-        "directory should be visible during open flow");
+    assert!(
+        r.total_list
+            .iter()
+            .any(|item| item.label.contains("config.json")),
+        ".json file should be visible during open flow"
+    );
+    assert!(
+        r.total_list
+            .iter()
+            .any(|item| item.label.contains("some-dir")),
+        "directory should be visible during open flow"
+    );
 }
 
 /// Outside the open flow, all files appear (no extension filtering).
@@ -3046,20 +4062,34 @@ fn file_browser_shows_all_files_outside_open_flow() {
 
     let children = r.ffon[1].as_obj_mut().unwrap();
     children.children.clear();
-    children.children.push(FfonElement::Str("<input>notes.txt</input>".to_owned()));
-    children.children.push(FfonElement::Str("<input>config.json</input>".to_owned()));
+    children
+        .children
+        .push(FfonElement::Str("<input>notes.txt</input>".to_owned()));
+    children
+        .children
+        .push(FfonElement::Str("<input>config.json</input>".to_owned()));
 
     // pending_file_browser_open is false by default
     r.current_id = {
         let mut id = sicompass_sdk::ffon::IdArray::new();
-        id.push(1); id.push(0); id
+        id.push(1);
+        id.push(0);
+        id
     };
     sicompass::list::create_list_current_layer(&mut r);
 
-    assert!(r.total_list.iter().any(|item| item.label.contains("notes.txt")),
-        "non-.json file should be visible when not in open flow");
-    assert!(r.total_list.iter().any(|item| item.label.contains("config.json")),
-        ".json file should be visible when not in open flow");
+    assert!(
+        r.total_list
+            .iter()
+            .any(|item| item.label.contains("notes.txt")),
+        "non-.json file should be visible when not in open flow"
+    );
+    assert!(
+        r.total_list
+            .iter()
+            .any(|item| item.label.contains("config.json")),
+        ".json file should be visible when not in open flow"
+    );
 }
 
 /// Destructive keys (Ctrl+A, Ctrl+I, Delete) are no-ops in General
@@ -3071,13 +4101,17 @@ fn open_flow_blocks_destructive_keys() {
     // Navigate to filebrowser and inject some entries
     let children = r.ffon[1].as_obj_mut().unwrap();
     children.children.clear();
-    children.children.push(FfonElement::Str("<input>config.json</input>".to_owned()));
+    children
+        .children
+        .push(FfonElement::Str("<input>config.json</input>".to_owned()));
 
     r.pending_file_browser_open = true;
     r.save_as_source_root_idx = 0;
     r.current_id = {
         let mut id = sicompass_sdk::ffon::IdArray::new();
-        id.push(1); id.push(0); id
+        id.push(1);
+        id.push(0);
+        id
     };
     r.coordinate = Coordinate::General;
     sicompass::list::create_list_current_layer(&mut r);
@@ -3085,19 +4119,27 @@ fn open_flow_blocks_destructive_keys() {
 
     // Ctrl+A (append) must be blocked
     press_ctrl(&mut r, Keycode::A);
-    assert_eq!(r.coordinate, Coordinate::General,
-        "Ctrl+A should not enter insert mode during open flow");
+    assert_eq!(
+        r.coordinate,
+        Coordinate::General,
+        "Ctrl+A should not enter insert mode during open flow"
+    );
 
     // Ctrl+I (insert) must be blocked
     press_ctrl(&mut r, Keycode::I);
-    assert_eq!(r.coordinate, Coordinate::General,
-        "Ctrl+I should not enter insert mode during open flow");
+    assert_eq!(
+        r.coordinate,
+        Coordinate::General,
+        "Ctrl+I should not enter insert mode during open flow"
+    );
 
     // Delete must be blocked — filebrowser children count should be unchanged
     press(&mut r, Keycode::Delete);
     let after_list_len = r.ffon[1].as_obj().unwrap().children.len();
-    assert_eq!(after_list_len, initial_list_len,
-        "Delete should not remove items during open flow");
+    assert_eq!(
+        after_list_len, initial_list_len,
+        "Delete should not remove items during open flow"
+    );
 }
 
 /// Selecting a JSON file via SimpleSearch Enter during the open flow triggers the load.
@@ -3109,20 +4151,25 @@ fn open_flow_simple_search_enter_triggers_load() {
     std::fs::write(&json_path, r#"[{"found-item":[]}]"#).unwrap();
 
     // Set up filebrowser state directly (same as other open tests)
-    r.ffon[1].as_obj_mut().unwrap().children.insert(
-        0,
-        FfonElement::Str("<input>found.json</input>".to_owned()),
-    );
+    r.ffon[1]
+        .as_obj_mut()
+        .unwrap()
+        .children
+        .insert(0, FfonElement::Str("<input>found.json</input>".to_owned()));
     r.providers[1].set_current_path(tmp.path().to_str().unwrap());
     r.pending_file_browser_open = true;
     r.save_as_source_root_idx = 0;
     r.save_as_return_id = {
         let mut id = sicompass_sdk::ffon::IdArray::new();
-        id.push(0); id.push(0); id
+        id.push(0);
+        id.push(0);
+        id
     };
     r.current_id = {
         let mut id = sicompass_sdk::ffon::IdArray::new();
-        id.push(1); id.push(0); id
+        id.push(1);
+        id.push(0);
+        id
     };
     sicompass::list::create_list_current_layer(&mut r);
 
@@ -3131,7 +4178,9 @@ fn open_flow_simple_search_enter_triggers_load() {
     r.previous_coordinate = Coordinate::General;
 
     // The search result points at the found.json entry
-    let json_idx = r.total_list.iter()
+    let json_idx = r
+        .total_list
+        .iter()
         .position(|item| item.label.contains("found.json"))
         .expect("found.json should be in list");
     r.list_index = json_idx;
@@ -3139,10 +4188,19 @@ fn open_flow_simple_search_enter_triggers_load() {
     // Enter in SimpleSearch exits search and navigates → then triggers the open flow
     press(&mut r, Keycode::Return);
 
-    assert!(!r.pending_file_browser_open, "pending flag should be cleared after SimpleSearch Enter");
-    assert_eq!(r.current_id.get(0), Some(0), "should be back at config provider");
-    assert!(r.error_message.contains("found.json") || r.current_save_path.contains("found.json"),
-        "should have loaded found.json");
+    assert!(
+        !r.pending_file_browser_open,
+        "pending flag should be cleared after SimpleSearch Enter"
+    );
+    assert_eq!(
+        r.current_id.get(0),
+        Some(0),
+        "should be back at config provider"
+    );
+    assert!(
+        r.error_message.contains("found.json") || r.current_save_path.contains("found.json"),
+        "should have loaded found.json"
+    );
 }
 
 /// Save writes only children (not the root wrapper), matching C behaviour.
@@ -3151,21 +4209,31 @@ fn save_as_writes_children_not_root_wrapper() {
     let (mut r, tmp) = harness_with_config_provider();
 
     // Add a child item to the config provider's FFON
-    r.ffon[0].as_obj_mut().unwrap().children.push(FfonElement::new_str("my-item"));
+    r.ffon[0]
+        .as_obj_mut()
+        .unwrap()
+        .children
+        .push(FfonElement::new_str("my-item"));
 
     let dest = tmp.path().join("out.json");
-    sicompass::handlers::handle_load_provider_config(&mut r, "");  // no-op
+    sicompass::handlers::handle_load_provider_config(&mut r, ""); // no-op
     // Directly save using the save handler path
     r.current_save_path = dest.to_str().unwrap().to_owned();
     press_ctrl(&mut r, Keycode::S);
 
     let raw = std::fs::read_to_string(&dest).expect("save should have written a file");
-    let parsed: serde_json::Value = serde_json::from_str(&raw).expect("save output should be valid JSON");
+    let parsed: serde_json::Value =
+        serde_json::from_str(&raw).expect("save output should be valid JSON");
     // Must be an array (children), not an object with the root key
-    assert!(parsed.is_array(), "saved JSON must be a top-level array of children, got: {raw}");
+    assert!(
+        parsed.is_array(),
+        "saved JSON must be a top-level array of children, got: {raw}"
+    );
     // Must NOT contain the provider name as a wrapper key
-    assert!(!raw.contains("\"Config Provider\"") && !raw.contains("\"configprovider\""),
-        "saved JSON must not contain root wrapper key, got: {raw}");
+    assert!(
+        !raw.contains("\"Config Provider\"") && !raw.contains("\"configprovider\""),
+        "saved JSON must not contain root wrapper key, got: {raw}"
+    );
 }
 
 /// Ctrl+S + Escape during save-as (Insert) cancels and returns to source provider.
@@ -3175,13 +4243,27 @@ fn escape_in_save_as_insert_cancels_and_returns_to_source() {
 
     // Trigger save-as (no existing save path → falls through to file-browser save-as)
     press_ctrl(&mut r, Keycode::S);
-    assert!(r.pending_file_browser_save_as, "save-as should be pending after Ctrl+S with no path");
-    assert_eq!(r.coordinate, Coordinate::Insert, "should be in Insert for filename entry");
+    assert!(
+        r.pending_file_browser_save_as,
+        "save-as should be pending after Ctrl+S with no path"
+    );
+    assert_eq!(
+        r.coordinate,
+        Coordinate::Insert,
+        "should be in Insert for filename entry"
+    );
 
     press(&mut r, Keycode::Escape);
 
-    assert!(!r.pending_file_browser_save_as, "save-as flag should be cleared after Escape");
-    assert_eq!(r.current_id.get(0), Some(0), "should be back at config provider after Escape");
+    assert!(
+        !r.pending_file_browser_save_as,
+        "save-as flag should be cleared after Escape"
+    );
+    assert_eq!(
+        r.current_id.get(0),
+        Some(0),
+        "should be back at config provider after Escape"
+    );
     assert_eq!(r.coordinate, Coordinate::General);
 }
 
@@ -3221,7 +4303,11 @@ fn editor_insert_left_announces_char() {
     clear_announcement(&mut r);
 
     press_left(&mut r);
-    assert_eq!(announced_text(&r).as_deref(), Some("l"), "left over second 'l'");
+    assert_eq!(
+        announced_text(&r).as_deref(),
+        Some("l"),
+        "left over second 'l'"
+    );
 }
 
 /// Pressing `w` (whereami) in General mode announces the focus position: the
@@ -3234,16 +4320,24 @@ fn w_speaks_focus_position() {
     // A minimal provider so `current_id[0]` resolves and the list builder runs.
     struct NavMock;
     impl Provider for NavMock {
-        fn name(&self) -> &str { "navmock" }
-        fn fetch(&mut self) -> Vec<FfonElement> { Vec::new() }
+        fn name(&self) -> &str {
+            "navmock"
+        }
+        fn fetch(&mut self) -> Vec<FfonElement> {
+            Vec::new()
+        }
     }
 
     // Files > home > [main.rs, lib.rs], cursor on main.rs (depth 3, layer 2).
     let mut r = AppRenderer::new();
     r.providers.push(Box::new(NavMock));
     let mut home = FfonElement::new_obj("home");
-    home.as_obj_mut().unwrap().push(FfonElement::new_str("main.rs"));
-    home.as_obj_mut().unwrap().push(FfonElement::new_str("lib.rs"));
+    home.as_obj_mut()
+        .unwrap()
+        .push(FfonElement::new_str("main.rs"));
+    home.as_obj_mut()
+        .unwrap()
+        .push(FfonElement::new_str("lib.rs"));
     let mut files = FfonElement::new_obj("Files");
     files.as_obj_mut().unwrap().push(home);
     r.ffon = vec![files];
@@ -3274,7 +4368,10 @@ fn w_speaks_focus_position() {
     let raw_first = r.pending_announcement.clone();
     press(&mut r, Keycode::W);
     let raw_second = r.pending_announcement.clone();
-    assert_ne!(raw_first, raw_second, "consecutive presses must toggle the parity sentinel");
+    assert_ne!(
+        raw_first, raw_second,
+        "consecutive presses must toggle the parity sentinel"
+    );
     assert_eq!(
         announced_text(&r).as_deref(),
         Some(spoken.as_str()),
@@ -3305,12 +4402,20 @@ fn editor_insert_shift_left_announces_and_extends_selection() {
     r.cursor_position = 3;
 
     press_shift_left(&mut r);
-    assert_eq!(announced_text(&r).as_deref(), Some("c"), "shift-left over 'c'");
+    assert_eq!(
+        announced_text(&r).as_deref(),
+        Some("c"),
+        "shift-left over 'c'"
+    );
     assert!(r.selection_anchor.is_some(), "selection should be anchored");
     clear_announcement(&mut r);
 
     press_shift_left(&mut r);
-    assert_eq!(announced_text(&r).as_deref(), Some("b"), "shift-left over 'b'");
+    assert_eq!(
+        announced_text(&r).as_deref(),
+        Some("b"),
+        "shift-left over 'b'"
+    );
 }
 
 #[test]
@@ -3321,7 +4426,11 @@ fn editor_insert_shift_right_announces_and_extends_selection() {
     r.cursor_position = 0;
 
     press_shift_right(&mut r);
-    assert_eq!(announced_text(&r).as_deref(), Some("a"), "shift-right over 'a'");
+    assert_eq!(
+        announced_text(&r).as_deref(),
+        Some("a"),
+        "shift-right over 'a'"
+    );
     assert!(r.selection_anchor.is_some(), "selection should be anchored");
 }
 
@@ -3335,7 +4444,10 @@ fn editor_insert_left_no_announcement_on_selection_collapse() {
     sicompass::handlers::handle_select_all(&mut r);
     clear_announcement(&mut r);
     press_left(&mut r);
-    assert_eq!(r.pending_announcement, None, "no char announcement on selection collapse");
+    assert_eq!(
+        r.pending_announcement, None,
+        "no char announcement on selection collapse"
+    );
     assert_eq!(r.cursor_position, 0, "cursor collapsed to selection start");
 }
 
@@ -3348,7 +4460,11 @@ fn simple_search_left_announces_char() {
     clear_announcement(h.r());
 
     press_left(h.r());
-    assert_eq!(announced_text(&h.renderer).as_deref(), Some("o"), "left over 'o' in search");
+    assert_eq!(
+        announced_text(&h.renderer).as_deref(),
+        Some("o"),
+        "left over 'o' in search"
+    );
 }
 
 #[test]
@@ -3360,7 +4476,11 @@ fn simple_search_right_announces_char() {
     clear_announcement(h.r());
 
     press_right(h.r());
-    assert_eq!(announced_text(&h.renderer).as_deref(), Some("f"), "right over 'f' in search");
+    assert_eq!(
+        announced_text(&h.renderer).as_deref(),
+        Some("f"),
+        "right over 'f' in search"
+    );
 }
 
 #[test]
@@ -3374,7 +4494,11 @@ fn command_mode_left_announces_char() {
     clear_announcement(&mut r);
 
     press_left(&mut r);
-    assert_eq!(announced_text(&r).as_deref(), Some("c"), "left over 'c' in command");
+    assert_eq!(
+        announced_text(&r).as_deref(),
+        Some("c"),
+        "left over 'c' in command"
+    );
 }
 
 #[test]
@@ -3386,7 +4510,11 @@ fn command_mode_right_announces_char() {
     clear_announcement(&mut r);
 
     press_right(&mut r);
-    assert_eq!(announced_text(&r).as_deref(), Some("a"), "right over 'a' in command");
+    assert_eq!(
+        announced_text(&r).as_deref(),
+        Some("a"),
+        "right over 'a' in command"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -3400,12 +4528,20 @@ struct InMemoryFormProvider {
 }
 
 impl InMemoryFormProvider {
-    fn new() -> Self { InMemoryFormProvider { path: "/".to_owned() } }
+    fn new() -> Self {
+        InMemoryFormProvider {
+            path: "/".to_owned(),
+        }
+    }
 }
 
 impl Provider for InMemoryFormProvider {
-    fn name(&self) -> &str { "inmemform" }
-    fn display_name(&self) -> String { "In-Mem Form".to_owned() }
+    fn name(&self) -> &str {
+        "inmemform"
+    }
+    fn display_name(&self) -> String {
+        "In-Mem Form".to_owned()
+    }
 
     fn fetch(&mut self) -> Vec<FfonElement> {
         // This provider's script has no memory of user additions — same pattern
@@ -3413,9 +4549,9 @@ impl Provider for InMemoryFormProvider {
         match self.path.as_str() {
             "/" => {
                 let mut add = FfonElement::new_obj("Add element:");
-                add.as_obj_mut().unwrap().push(FfonElement::Str(
-                    "<button>branch</button>branch".to_owned(),
-                ));
+                add.as_obj_mut()
+                    .unwrap()
+                    .push(FfonElement::Str("<button>branch</button>branch".to_owned()));
                 add.as_obj_mut().unwrap().push(FfonElement::Str(
                     "<button>one-opt:leaf</button>leaf".to_owned(),
                 ));
@@ -3434,18 +4570,30 @@ impl Provider for InMemoryFormProvider {
     }
 
     fn push_path(&mut self, segment: &str) {
-        if self.path == "/" { self.path = format!("/{segment}"); }
-        else { self.path.push('/'); self.path.push_str(segment); }
-    }
-
-    fn pop_path(&mut self) {
-        if self.path == "/" { return; }
-        if let Some(idx) = self.path.rfind('/') {
-            self.path = if idx == 0 { "/".to_owned() } else { self.path[..idx].to_owned() };
+        if self.path == "/" {
+            self.path = format!("/{segment}");
+        } else {
+            self.path.push('/');
+            self.path.push_str(segment);
         }
     }
 
-    fn current_path(&self) -> &str { &self.path }
+    fn pop_path(&mut self) {
+        if self.path == "/" {
+            return;
+        }
+        if let Some(idx) = self.path.rfind('/') {
+            self.path = if idx == 0 {
+                "/".to_owned()
+            } else {
+                self.path[..idx].to_owned()
+            };
+        }
+    }
+
+    fn current_path(&self) -> &str {
+        &self.path
+    }
 
     fn create_element(&mut self, element_key: &str) -> Option<FfonElement> {
         let key = element_key.strip_prefix("one-opt:").unwrap_or(element_key);
@@ -3459,7 +4607,9 @@ impl Provider for InMemoryFormProvider {
         self.push_path(key);
         let children = self.fetch();
         self.path = saved;
-        for c in children { obj.as_obj_mut().unwrap().push(c); }
+        for c in children {
+            obj.as_obj_mut().unwrap().push(c);
+        }
         Some(obj)
     }
 
@@ -3468,9 +4618,17 @@ impl Provider for InMemoryFormProvider {
 
 /// Helper: return child keys of the provider root element.
 fn root_child_keys(renderer: &AppRenderer) -> Vec<String> {
-    renderer.ffon.get(0)
+    renderer
+        .ffon
+        .get(0)
         .and_then(|e| e.as_obj())
-        .map(|o| o.children.iter().filter_map(|c| c.as_obj()).map(|o| o.key.clone()).collect())
+        .map(|o| {
+            o.children
+                .iter()
+                .filter_map(|c| c.as_obj())
+                .map(|o| o.key.clone())
+                .collect()
+        })
         .unwrap_or_default()
 }
 
@@ -3491,7 +4649,10 @@ fn added_empty_leaf_survives_right_then_left() {
     assert_eq!(renderer.current_id.depth(), 2);
 
     // Navigate into "Add element:" (depth 2 → 3).
-    let add_idx = renderer.total_list.iter().position(|i| i.label.contains("Add element:"))
+    let add_idx = renderer
+        .total_list
+        .iter()
+        .position(|i| i.label.contains("Add element:"))
         .expect("Add element: must be in list");
     renderer.list_index = add_idx;
     renderer.current_id = renderer.total_list[add_idx].id.clone();
@@ -3499,33 +4660,55 @@ fn added_empty_leaf_survives_right_then_left() {
     assert_eq!(renderer.current_id.depth(), 3);
 
     // Select the "leaf" button and press Enter → creates empty-children Obj.
-    let leaf_btn = renderer.total_list.iter().position(|i| i.label.contains("leaf"))
+    let leaf_btn = renderer
+        .total_list
+        .iter()
+        .position(|i| i.label.contains("leaf"))
         .expect("leaf button must appear inside Add element:");
     renderer.list_index = leaf_btn;
     renderer.current_id = renderer.total_list[leaf_btn].id.clone();
     press_enter(&mut renderer);
 
     // Cursor should be at depth 2 on the new leaf Obj.
-    assert_eq!(renderer.current_id.depth(), 2, "cursor at depth 2 after adding leaf");
+    assert_eq!(
+        renderer.current_id.depth(),
+        2,
+        "cursor at depth 2 after adding leaf"
+    );
 
     // The new leaf must appear in the root's children.
     let keys_after_add = root_child_keys(&renderer);
-    let leaf_present = keys_after_add.iter().any(|k| sicompass_sdk::tags::strip_display(k) == "leaf");
-    assert!(leaf_present, "leaf must be in root children after creation; got: {keys_after_add:?}");
+    let leaf_present = keys_after_add
+        .iter()
+        .any(|k| sicompass_sdk::tags::strip_display(k) == "leaf");
+    assert!(
+        leaf_present,
+        "leaf must be in root children after creation; got: {keys_after_add:?}"
+    );
 
     // Navigate right into the leaf Obj.  Its children are empty — before the fix
     // this fired refresh_current_directory and wiped the tree.
     press_right(&mut renderer);
     // Verify the leaf is still in the tree (not wiped).
     let keys_after_right = root_child_keys(&renderer);
-    let still_present = keys_after_right.iter().any(|k| sicompass_sdk::tags::strip_display(k) == "leaf");
-    assert!(still_present, "leaf must survive right-nav into it; got: {keys_after_right:?}");
+    let still_present = keys_after_right
+        .iter()
+        .any(|k| sicompass_sdk::tags::strip_display(k) == "leaf");
+    assert!(
+        still_present,
+        "leaf must survive right-nav into it; got: {keys_after_right:?}"
+    );
 
     // Navigate left — must return to leaf without wiping the tree.
     press_left(&mut renderer);
     let keys_after_left = root_child_keys(&renderer);
-    let after_left = keys_after_left.iter().any(|k| sicompass_sdk::tags::strip_display(k) == "leaf");
-    assert!(after_left, "leaf must survive Left back out; got: {keys_after_left:?}");
+    let after_left = keys_after_left
+        .iter()
+        .any(|k| sicompass_sdk::tags::strip_display(k) == "leaf");
+    assert!(
+        after_left,
+        "leaf must survive Left back out; got: {keys_after_left:?}"
+    );
     assert_eq!(renderer.current_id.depth(), 2, "back at depth 2 after Left");
 }
 
@@ -3545,51 +4728,93 @@ fn nested_added_nodes_survive_deep_navigation() {
     press_right(&mut renderer);
 
     // Navigate into "Add element:", add "branch".
-    let add_idx = renderer.total_list.iter().position(|i| i.label.contains("Add element:"))
+    let add_idx = renderer
+        .total_list
+        .iter()
+        .position(|i| i.label.contains("Add element:"))
         .expect("root Add element: must exist");
     renderer.list_index = add_idx;
     renderer.current_id = renderer.total_list[add_idx].id.clone();
     press_right(&mut renderer);
-    let branch_btn = renderer.total_list.iter().position(|i| i.label.contains("branch"))
+    let branch_btn = renderer
+        .total_list
+        .iter()
+        .position(|i| i.label.contains("branch"))
         .expect("branch button must exist");
     renderer.list_index = branch_btn;
     renderer.current_id = renderer.total_list[branch_btn].id.clone();
     press_enter(&mut renderer);
-    assert_eq!(renderer.current_id.depth(), 2, "cursor at depth 2 after adding branch");
+    assert_eq!(
+        renderer.current_id.depth(),
+        2,
+        "cursor at depth 2 after adding branch"
+    );
 
     // Navigate right into the new "branch" Obj.
     press_right(&mut renderer);
     assert_eq!(renderer.current_id.depth(), 3, "inside branch at depth 3");
-    assert_eq!(renderer.providers[pid].current_path(), "/branch",
-        "path must be /branch after entering it");
+    assert_eq!(
+        renderer.providers[pid].current_path(),
+        "/branch",
+        "path must be /branch after entering it"
+    );
 
     // Verify branch is still in the root.
-    let branch_in_root = renderer.ffon.get(0).and_then(|e| e.as_obj())
-        .map(|o| o.children.iter().filter_map(|c| c.as_obj())
-            .any(|o| sicompass_sdk::tags::strip_display(&o.key) == "branch"))
+    let branch_in_root = renderer
+        .ffon
+        .get(0)
+        .and_then(|e| e.as_obj())
+        .map(|o| {
+            o.children
+                .iter()
+                .filter_map(|c| c.as_obj())
+                .any(|o| sicompass_sdk::tags::strip_display(&o.key) == "branch")
+        })
         .unwrap_or(false);
-    assert!(branch_in_root, "branch must still be in root after entering it");
+    assert!(
+        branch_in_root,
+        "branch must still be in root after entering it"
+    );
 
     // Inside branch: navigate into its "Add element:", add "leaf".
-    let add2_idx = renderer.total_list.iter().position(|i| i.label.contains("Add element:"))
+    let add2_idx = renderer
+        .total_list
+        .iter()
+        .position(|i| i.label.contains("Add element:"))
         .expect("branch Add element: must exist");
     renderer.list_index = add2_idx;
     renderer.current_id = renderer.total_list[add2_idx].id.clone();
     press_right(&mut renderer);
-    let leaf_btn = renderer.total_list.iter().position(|i| i.label.contains("leaf"))
+    let leaf_btn = renderer
+        .total_list
+        .iter()
+        .position(|i| i.label.contains("leaf"))
         .expect("leaf button inside branch must exist");
     renderer.list_index = leaf_btn;
     renderer.current_id = renderer.total_list[leaf_btn].id.clone();
     press_enter(&mut renderer);
-    assert_eq!(renderer.current_id.depth(), 3, "cursor at depth 3 after adding leaf inside branch");
+    assert_eq!(
+        renderer.current_id.depth(),
+        3,
+        "cursor at depth 3 after adding leaf inside branch"
+    );
 
     // The branch Obj must now contain a "leaf" child.
-    let branch_obj = renderer.ffon.get(0).and_then(|e| e.as_obj())
-        .and_then(|o| o.children.iter().filter_map(|c| c.as_obj())
-            .find(|o| sicompass_sdk::tags::strip_display(&o.key) == "branch").cloned());
-    let leaf_in_branch = branch_obj.as_ref()
-        .map(|b| b.children.iter().filter_map(|c| c.as_obj())
-            .any(|o| sicompass_sdk::tags::strip_display(&o.key) == "leaf"))
+    let branch_obj = renderer.ffon.get(0).and_then(|e| e.as_obj()).and_then(|o| {
+        o.children
+            .iter()
+            .filter_map(|c| c.as_obj())
+            .find(|o| sicompass_sdk::tags::strip_display(&o.key) == "branch")
+            .cloned()
+    });
+    let leaf_in_branch = branch_obj
+        .as_ref()
+        .map(|b| {
+            b.children
+                .iter()
+                .filter_map(|c| c.as_obj())
+                .any(|o| sicompass_sdk::tags::strip_display(&o.key) == "leaf")
+        })
         .unwrap_or(false);
     assert!(leaf_in_branch, "leaf must be inside branch after creation");
 
@@ -3597,37 +4822,80 @@ fn nested_added_nodes_survive_deep_navigation() {
     press_right(&mut renderer);
     assert_eq!(renderer.current_id.depth(), 4, "inside leaf at depth 4");
 
-    let still_branch = renderer.ffon.get(0).and_then(|e| e.as_obj())
-        .map(|o| o.children.iter().filter_map(|c| c.as_obj())
-            .any(|o| sicompass_sdk::tags::strip_display(&o.key) == "branch"))
+    let still_branch = renderer
+        .ffon
+        .get(0)
+        .and_then(|e| e.as_obj())
+        .map(|o| {
+            o.children
+                .iter()
+                .filter_map(|c| c.as_obj())
+                .any(|o| sicompass_sdk::tags::strip_display(&o.key) == "branch")
+        })
         .unwrap_or(false);
     assert!(still_branch, "branch must survive right-nav into leaf");
 
     // Left: back into branch (depth 3).
     press_left(&mut renderer);
-    assert_eq!(renderer.current_id.depth(), 3, "back at depth 3 (inside branch)");
-    let branch_still = renderer.ffon.get(0).and_then(|e| e.as_obj())
-        .map(|o| o.children.iter().filter_map(|c| c.as_obj())
-            .any(|o| sicompass_sdk::tags::strip_display(&o.key) == "branch"))
+    assert_eq!(
+        renderer.current_id.depth(),
+        3,
+        "back at depth 3 (inside branch)"
+    );
+    let branch_still = renderer
+        .ffon
+        .get(0)
+        .and_then(|e| e.as_obj())
+        .map(|o| {
+            o.children
+                .iter()
+                .filter_map(|c| c.as_obj())
+                .any(|o| sicompass_sdk::tags::strip_display(&o.key) == "branch")
+        })
         .unwrap_or(false);
     assert!(branch_still, "branch must still exist after Left from leaf");
 
     // Left: back to provider root list (depth 2).
     press_left(&mut renderer);
-    assert_eq!(renderer.current_id.depth(), 2, "back at depth 2 (provider root)");
-    let branch_d2 = renderer.ffon.get(0).and_then(|e| e.as_obj())
-        .map(|o| o.children.iter().filter_map(|c| c.as_obj())
-            .any(|o| sicompass_sdk::tags::strip_display(&o.key) == "branch"))
+    assert_eq!(
+        renderer.current_id.depth(),
+        2,
+        "back at depth 2 (provider root)"
+    );
+    let branch_d2 = renderer
+        .ffon
+        .get(0)
+        .and_then(|e| e.as_obj())
+        .map(|o| {
+            o.children
+                .iter()
+                .filter_map(|c| c.as_obj())
+                .any(|o| sicompass_sdk::tags::strip_display(&o.key) == "branch")
+        })
         .unwrap_or(false);
-    assert!(branch_d2, "branch must still exist in root list after Left×2");
+    assert!(
+        branch_d2,
+        "branch must still exist in root list after Left×2"
+    );
 
     // Left: back to top-level provider selection (depth 1).
     press_left(&mut renderer);
-    assert_eq!(renderer.current_id.depth(), 1, "back at depth 1 (provider selection)");
+    assert_eq!(
+        renderer.current_id.depth(),
+        1,
+        "back at depth 1 (provider selection)"
+    );
     // ffon root still intact — branch is still there even from depth 1.
-    let branch_d1 = renderer.ffon.get(0).and_then(|e| e.as_obj())
-        .map(|o| o.children.iter().filter_map(|c| c.as_obj())
-            .any(|o| sicompass_sdk::tags::strip_display(&o.key) == "branch"))
+    let branch_d1 = renderer
+        .ffon
+        .get(0)
+        .and_then(|e| e.as_obj())
+        .map(|o| {
+            o.children
+                .iter()
+                .filter_map(|c| c.as_obj())
+                .any(|o| sicompass_sdk::tags::strip_display(&o.key) == "branch")
+        })
         .unwrap_or(false);
     assert!(branch_d1, "branch must still exist after Left×3");
 }
@@ -3653,31 +4921,53 @@ fn get_meta_at_root_returns_universal_hints() {
     assert_eq!(h.renderer.current_id.depth(), 1);
     let meta = sicompass::provider::get_meta(&h.renderer);
     assert!(!meta.is_empty(), "root should have hints");
-    assert!(meta.iter().any(|s| s.contains("Search")),
-        "root should have Search hint, got: {meta:?}");
-    assert!(meta.iter().any(|s| s.contains("Ctrl+F")),
-        "root should have Ctrl+F");
+    assert!(
+        meta.iter().any(|s| s.contains("Search")),
+        "root should have Search hint, got: {meta:?}"
+    );
+    assert!(
+        meta.iter().any(|s| s.contains("Ctrl+F")),
+        "root should have Ctrl+F"
+    );
     // Provider-specific hints (e.g. filebrowser's Ctrl+I) must NOT appear at root.
-    assert!(!meta.iter().any(|s| s.contains("Ctrl+I")),
-        "root should not show provider-only shortcut Ctrl+I");
+    assert!(
+        !meta.iter().any(|s| s.contains("Ctrl+I")),
+        "root should not show provider-only shortcut Ctrl+I"
+    );
 }
 
 #[test]
 fn get_meta_inside_filebrowser_shows_provider_hints() {
     let mut h = Harness::new();
     nav_into_filebrowser(&mut h);
-    assert_eq!(h.renderer.current_id.depth(), 2, "should be depth 2 after entering filebrowser");
+    assert_eq!(
+        h.renderer.current_id.depth(),
+        2,
+        "should be depth 2 after entering filebrowser"
+    );
 
     let meta = sicompass::provider::get_meta(&h.renderer);
     assert!(!meta.is_empty(), "filebrowser list should have hints");
     // No universal root hints at this depth.
-    assert!(!meta.iter().any(|s| s.starts_with("D ") || s.trim_start().starts_with("D\t")),
-        "filebrowser should not show root-only D=Dashboard");
+    assert!(
+        !meta
+            .iter()
+            .any(|s| s.starts_with("D ") || s.trim_start().starts_with("D\t")),
+        "filebrowser should not show root-only D=Dashboard"
+    );
     // Provider-declared filebrowser hints.
-    assert!(meta.iter().any(|s| s.contains("Ctrl+I")), "filebrowser must declare Ctrl+I");
-    assert!(meta.iter().any(|s| s.contains("F5")),     "filebrowser must declare F5");
-    assert!(meta.iter().any(|s| s.contains("Search")),
-        "filebrowser must declare Search hint, got: {meta:?}");
+    assert!(
+        meta.iter().any(|s| s.contains("Ctrl+I")),
+        "filebrowser must declare Ctrl+I"
+    );
+    assert!(
+        meta.iter().any(|s| s.contains("F5")),
+        "filebrowser must declare F5"
+    );
+    assert!(
+        meta.iter().any(|s| s.contains("Search")),
+        "filebrowser must declare Search hint, got: {meta:?}"
+    );
 }
 
 #[test]
@@ -3686,31 +4976,49 @@ fn get_meta_tag_derived_hints_appear_for_input_children() {
     use sicompass_sdk::provider::Provider;
 
     // Build a provider whose fetch returns a list with <input> children.
-    struct InputListProvider { path: String }
+    struct InputListProvider {
+        path: String,
+    }
     impl Provider for InputListProvider {
-        fn name(&self) -> &str { "inputlist" }
+        fn name(&self) -> &str {
+            "inputlist"
+        }
         fn fetch(&mut self) -> Vec<FfonElement> {
             vec![
                 FfonElement::new_str("Name: <input>Alice</input>"),
                 FfonElement::new_str("Email: <input>alice@example.com</input>"),
             ]
         }
-        fn push_path(&mut self, seg: &str) { self.path = format!("/{seg}"); }
-        fn pop_path(&mut self) { self.path = "/".to_owned(); }
-        fn current_path(&self) -> &str { &self.path }
-        fn set_current_path(&mut self, p: &str) { self.path = p.to_owned(); }
+        fn push_path(&mut self, seg: &str) {
+            self.path = format!("/{seg}");
+        }
+        fn pop_path(&mut self) {
+            self.path = "/".to_owned();
+        }
+        fn current_path(&self) -> &str {
+            &self.path
+        }
+        fn set_current_path(&mut self, p: &str) {
+            self.path = p.to_owned();
+        }
     }
 
     let mut renderer = AppRenderer::default();
     let children = {
-        let mut p = InputListProvider { path: "/".to_owned() };
+        let mut p = InputListProvider {
+            path: "/".to_owned(),
+        };
         p.fetch()
     };
     // Build the FFON tree manually: one root Obj whose children are the input rows.
     let mut root = FfonElement::new_obj("inputlist");
-    for c in children { root.as_obj_mut().unwrap().push(c); }
+    for c in children {
+        root.as_obj_mut().unwrap().push(c);
+    }
     renderer.ffon = vec![root];
-    renderer.providers = vec![Box::new(InputListProvider { path: "/".to_owned() })];
+    renderer.providers = vec![Box::new(InputListProvider {
+        path: "/".to_owned(),
+    })];
     renderer.current_id = sicompass_sdk::ffon::IdArray::new();
     renderer.current_id.push(0); // provider
     renderer.current_id.push(0); // first row → depth 2, container = ffon[0]
@@ -3718,7 +5026,8 @@ fn get_meta_tag_derived_hints_appear_for_input_children() {
     let meta = sicompass::provider::get_meta(&renderer);
     // Tag-derived: children have <input> → Tab search/cycle hint.
     assert!(
-        meta.iter().any(|s| s.contains("Tab") && s.contains("Search")),
+        meta.iter()
+            .any(|s| s.contains("Tab") && s.contains("Search")),
         "input children should auto-derive Tab Search hint, got: {meta:?}"
     );
 }
@@ -3731,8 +5040,12 @@ fn get_meta_tag_derived_hints_appear_for_input_children() {
 /// Cursor starts at depth 2 (inside the provider, on first child).
 fn make_placeholder_harness() -> AppRenderer {
     let mut root = FfonElement::new_obj("testprovider");
-    root.as_obj_mut().unwrap().push(FfonElement::new_str("first"));
-    root.as_obj_mut().unwrap().push(FfonElement::new_str("second"));
+    root.as_obj_mut()
+        .unwrap()
+        .push(FfonElement::new_str("first"));
+    root.as_obj_mut()
+        .unwrap()
+        .push(FfonElement::new_str("second"));
 
     let mut r = AppRenderer::new();
     r.ffon = vec![root];
@@ -3751,9 +5064,15 @@ fn placeholder_ctrl_shift_i_enters_insert() {
     let mut r = make_placeholder_harness();
     // Ctrl+Shift+I is invoked from code, not from key dispatch (shortcut removed by design).
     sicompass::handlers::handle_ctrl_shift_i_placeholder(&mut r);
-    assert_eq!(r.coordinate, Coordinate::Insert,
-        "handle_ctrl_shift_i_placeholder should enter Insert");
-    assert!(r.placeholder_insert_mode, "placeholder_insert_mode should be set");
+    assert_eq!(
+        r.coordinate,
+        Coordinate::Insert,
+        "handle_ctrl_shift_i_placeholder should enter Insert"
+    );
+    assert!(
+        r.placeholder_insert_mode,
+        "placeholder_insert_mode should be set"
+    );
 }
 
 #[test]
@@ -3772,7 +5091,11 @@ fn placeholder_commit_plain_text_becomes_string_element() {
             FfonElement::Str(s) => s.contains("myvalue"),
             _ => false,
         });
-        assert!(has_value, "expected a child containing 'myvalue', got: {:?}", prov.children);
+        assert!(
+            has_value,
+            "expected a child containing 'myvalue', got: {:?}",
+            prov.children
+        );
     } else {
         panic!("root should be Obj");
     }
@@ -3787,8 +5110,15 @@ fn placeholder_commit_plus_prefix_becomes_obj_element() {
     assert_eq!(r.coordinate, Coordinate::General);
     assert!(!r.placeholder_insert_mode);
     if let Some(FfonElement::Obj(prov)) = r.ffon.get(0) {
-        let has_obj = prov.children.iter().any(|e| matches!(e, FfonElement::Obj(o) if o.key == "myobj"));
-        assert!(has_obj, "expected an Obj child with key 'myobj', got: {:?}", prov.children);
+        let has_obj = prov
+            .children
+            .iter()
+            .any(|e| matches!(e, FfonElement::Obj(o) if o.key == "myobj"));
+        assert!(
+            has_obj,
+            "expected an Obj child with key 'myobj', got: {:?}",
+            prov.children
+        );
     } else {
         panic!("root should be Obj");
     }
@@ -3802,7 +5132,10 @@ fn placeholder_commit_trailing_colon_becomes_obj_element() {
     press_enter(&mut r);
     assert_eq!(r.coordinate, Coordinate::General);
     if let Some(FfonElement::Obj(prov)) = r.ffon.get(0) {
-        let has_obj = prov.children.iter().any(|e| matches!(e, FfonElement::Obj(o) if o.key == "section"));
+        let has_obj = prov
+            .children
+            .iter()
+            .any(|e| matches!(e, FfonElement::Obj(o) if o.key == "section"));
         assert!(has_obj, "expected Obj(section), got: {:?}", prov.children);
     } else {
         panic!("root should be Obj");
@@ -3815,10 +5148,16 @@ fn placeholder_commit_empty_stays_in_insert() {
     sicompass::handlers::handle_ctrl_shift_i_placeholder(&mut r);
     // Don't type anything — commit empty
     press_enter(&mut r);
-    assert_eq!(r.coordinate, Coordinate::Insert,
-        "empty commit should stay in Insert");
+    assert_eq!(
+        r.coordinate,
+        Coordinate::Insert,
+        "empty commit should stay in Insert"
+    );
     assert!(!r.error_message.is_empty(), "should show an error message");
-    assert!(r.placeholder_insert_mode, "placeholder_insert_mode should still be set");
+    assert!(
+        r.placeholder_insert_mode,
+        "placeholder_insert_mode should still be set"
+    );
 }
 
 #[test]
@@ -3827,7 +5166,10 @@ fn placeholder_escape_clears_flag() {
     sicompass::handlers::handle_ctrl_shift_i_placeholder(&mut r);
     assert!(r.placeholder_insert_mode);
     press_escape(&mut r);
-    assert!(!r.placeholder_insert_mode, "escape should clear placeholder_insert_mode");
+    assert!(
+        !r.placeholder_insert_mode,
+        "escape should clear placeholder_insert_mode"
+    );
     assert_eq!(r.coordinate, Coordinate::General);
 }
 
@@ -3836,8 +5178,12 @@ fn placeholder_escape_clears_flag() {
 /// adds the permanent placeholder.
 fn make_star_prefix_harness() -> AppRenderer {
     let mut root = FfonElement::new_obj("provider");
-    root.as_obj_mut().unwrap().push(FfonElement::new_str(I_PLACEHOLDER.to_owned()));
-    root.as_obj_mut().unwrap().push(FfonElement::new_str("other item".to_owned()));
+    root.as_obj_mut()
+        .unwrap()
+        .push(FfonElement::new_str(I_PLACEHOLDER.to_owned()));
+    root.as_obj_mut()
+        .unwrap()
+        .push(FfonElement::new_str("other item".to_owned()));
 
     let mut r = AppRenderer::new();
     r.ffon = vec![root];
@@ -3856,10 +5202,15 @@ fn handle_i_on_star_prefix_element_sets_placeholder_insert_mode() {
     let mut r = make_star_prefix_harness();
     // Press 'i' — handle_i should detect the "* " input_prefix and set the flag.
     press(&mut r, Keycode::I);
-    assert_eq!(r.coordinate, Coordinate::Insert,
-        "pressing 'i' should enter Insert");
-    assert!(r.placeholder_insert_mode,
-        "handle_i should set placeholder_insert_mode when input_prefix is '* '");
+    assert_eq!(
+        r.coordinate,
+        Coordinate::Insert,
+        "pressing 'i' should enter Insert"
+    );
+    assert!(
+        r.placeholder_insert_mode,
+        "handle_i should set placeholder_insert_mode when input_prefix is '* '"
+    );
 }
 
 #[test]
@@ -3877,7 +5228,11 @@ fn handle_i_on_star_element_commit_plain_text_produces_str() {
             FfonElement::Str(s) => s.contains("hello"),
             _ => false,
         });
-        assert!(has_hello, "expected a Str child containing 'hello'; got: {:?}", prov.children);
+        assert!(
+            has_hello,
+            "expected a Str child containing 'hello'; got: {:?}",
+            prov.children
+        );
     } else {
         panic!("root should be Obj");
     }
@@ -3891,7 +5246,10 @@ fn handle_i_on_star_element_commit_plus_prefix_produces_obj() {
     press_enter(&mut r);
     assert_eq!(r.coordinate, Coordinate::General);
     if let Some(FfonElement::Obj(prov)) = r.ffon.get(0) {
-        let has_obj = prov.children.iter().any(|e| matches!(e, FfonElement::Obj(o) if o.key == "section"));
+        let has_obj = prov
+            .children
+            .iter()
+            .any(|e| matches!(e, FfonElement::Obj(o) if o.key == "section"));
         assert!(has_obj, "expected Obj(section); got: {:?}", prov.children);
     } else {
         panic!("root should be Obj");
@@ -3904,8 +5262,10 @@ fn handle_a_on_star_prefix_element_sets_placeholder_insert_mode() {
     // Navigate to the "* " element and press 'a' (append mode).
     sicompass::handlers::handle_a(&mut r);
     assert_eq!(r.coordinate, Coordinate::Insert);
-    assert!(r.placeholder_insert_mode,
-        "handle_a should set placeholder_insert_mode when input_prefix is '* '");
+    assert!(
+        r.placeholder_insert_mode,
+        "handle_a should set placeholder_insert_mode when input_prefix is '* '"
+    );
 }
 
 /// Navigating right into an empty email compose body inserts the typed `i` placeholder
@@ -3921,7 +5281,10 @@ fn navigate_into_empty_compose_body_shows_i_placeholder() {
     let mut renderer = AppRenderer::new();
     // Use register_no_init to avoid loading real OAuth config from disk,
     // which would cause fetch() to return "Loading…" on machines with an expired token.
-    register_no_init(&mut renderer, sicompass_sdk::create_provider_by_name("emailclient").unwrap());
+    register_no_init(
+        &mut renderer,
+        sicompass_sdk::create_provider_by_name("emailclient").unwrap(),
+    );
 
     // Set provider path to compose root so is_in_email_compose_body returns true
     // after we push "Body: [text]".
@@ -3952,9 +5315,14 @@ fn navigate_into_empty_compose_body_shows_i_placeholder() {
 
     // Exactly one child: the `i` typed-placeholder (renders as "i", not "-i").
     assert_eq!(
-        renderer.total_list.len(), 1,
+        renderer.total_list.len(),
+        1,
         "empty compose body must show exactly one i placeholder; got: {:?}",
-        renderer.total_list.iter().map(|i| &i.label).collect::<Vec<_>>()
+        renderer
+            .total_list
+            .iter()
+            .map(|i| &i.label)
+            .collect::<Vec<_>>()
     );
     assert_eq!(
         renderer.total_list[0].label, "i",
@@ -3980,7 +5348,10 @@ fn delete_last_compose_body_element_keeps_i_placeholder() {
     use sicompass_sdk::ffon::{FfonElement, IdArray};
 
     let mut renderer = AppRenderer::new();
-    register_no_init(&mut renderer, sicompass_sdk::create_provider_by_name("emailclient").unwrap());
+    register_no_init(
+        &mut renderer,
+        sicompass_sdk::create_provider_by_name("emailclient").unwrap(),
+    );
 
     // Prime provider internal body state via the trait API:
     //   set_current_path so is_in_email_compose_body() returns true,
@@ -3991,7 +5362,9 @@ fn delete_last_compose_body_element_keeps_i_placeholder() {
     // Build the flat ffon shape that refresh_current_directory produces when the
     // provider path's last segment is "Body: [text]".  One child: <input>hello</input>.
     let mut root = FfonElement::new_obj("Body: [text]");
-    root.as_obj_mut().unwrap().push(FfonElement::new_str("<input>hello</input>".to_owned()));
+    root.as_obj_mut()
+        .unwrap()
+        .push(FfonElement::new_str("<input>hello</input>".to_owned()));
     renderer.ffon[0] = root;
 
     // Position cursor on the single body element (provider 0, child 0 of root).
@@ -4009,9 +5382,14 @@ fn delete_last_compose_body_element_keeps_i_placeholder() {
 
     // Body must still show exactly one element: the `i` typed placeholder.
     assert_eq!(
-        renderer.total_list.len(), 1,
+        renderer.total_list.len(),
+        1,
         "deleting last body element must leave one i placeholder; got: {:?}",
-        renderer.total_list.iter().map(|i| &i.label).collect::<Vec<_>>()
+        renderer
+            .total_list
+            .iter()
+            .map(|i| &i.label)
+            .collect::<Vec<_>>()
     );
     assert_eq!(
         renderer.total_list[0].label, "i",
@@ -4031,7 +5409,10 @@ fn delete_body_element_str_with_obj_sibling_integration() {
     use sicompass_sdk::ffon::IdArray;
 
     let mut renderer = AppRenderer::new();
-    register_no_init(&mut renderer, sicompass_sdk::create_provider_by_name("emailclient").unwrap());
+    register_no_init(
+        &mut renderer,
+        sicompass_sdk::create_provider_by_name("emailclient").unwrap(),
+    );
 
     // Build a body with [Str("abc"), Obj{key:"myobj:"}, Str("def")].
     renderer.providers[0].set_current_path("compose/Body: [ffon]");
@@ -4070,9 +5451,14 @@ fn delete_body_element_str_with_obj_sibling_integration() {
 
     // After deletion the list should show the Obj + second Str (2 items).
     assert_eq!(
-        renderer.total_list.len(), 2,
+        renderer.total_list.len(),
+        2,
         "after deleting first Str, 2 elements should remain; got: {:?}",
-        renderer.total_list.iter().map(|i| &i.label).collect::<Vec<_>>()
+        renderer
+            .total_list
+            .iter()
+            .map(|i| &i.label)
+            .collect::<Vec<_>>()
     );
 }
 
@@ -4086,7 +5472,10 @@ fn delete_body_element_str_with_obj_sibling_integration() {
 fn is_in_email_compose_body_true_for_reply_from_message() {
     ensure_builtins();
     let mut renderer = AppRenderer::new();
-    register_no_init(&mut renderer, sicompass_sdk::create_provider_by_name("emailclient").unwrap());
+    register_no_init(
+        &mut renderer,
+        sicompass_sdk::create_provider_by_name("emailclient").unwrap(),
+    );
 
     // Simulate a reply entered from /INBOX/msg — compose root is at segs[2].
     renderer.providers[0].set_current_path("INBOX/Hello — alice@example.com/reply/Body: [text]");
@@ -4109,7 +5498,10 @@ fn navigate_into_reply_from_message_body_shows_i_placeholder() {
     use sicompass_sdk::ffon::{FfonElement, FfonObject, IdArray};
 
     let mut renderer = AppRenderer::new();
-    register_no_init(&mut renderer, sicompass_sdk::create_provider_by_name("emailclient").unwrap());
+    register_no_init(
+        &mut renderer,
+        sicompass_sdk::create_provider_by_name("emailclient").unwrap(),
+    );
 
     // Simulate the path produced when reply is entered from /INBOX/msg.
     renderer.providers[0].set_current_path("INBOX/Hello — alice@example.com/reply");
@@ -4139,9 +5531,14 @@ fn navigate_into_reply_from_message_body_shows_i_placeholder() {
 
     // Must show exactly the typed `i` placeholder (label "i", not "-i").
     assert_eq!(
-        renderer.total_list.len(), 1,
+        renderer.total_list.len(),
+        1,
         "reply body must show exactly one i placeholder; got: {:?}",
-        renderer.total_list.iter().map(|i| &i.label).collect::<Vec<_>>()
+        renderer
+            .total_list
+            .iter()
+            .map(|i| &i.label)
+            .collect::<Vec<_>>()
     );
     assert_eq!(
         renderer.total_list[0].label, "i",
@@ -4162,7 +5559,10 @@ fn navigate_into_nested_body_obj_shows_i_placeholder() {
     use sicompass_sdk::ffon::{FfonElement, FfonObject, IdArray};
 
     let mut renderer = AppRenderer::new();
-    register_no_init(&mut renderer, sicompass_sdk::create_provider_by_name("emailclient").unwrap());
+    register_no_init(
+        &mut renderer,
+        sicompass_sdk::create_provider_by_name("emailclient").unwrap(),
+    );
 
     // Path is inside the body so that push_path (called by navigate_right_raw) appends
     // to the correct base path when navigating into `foo:`.
@@ -4187,9 +5587,9 @@ fn navigate_into_nested_body_obj_shows_i_placeholder() {
     // Position cursor on `foo:` (depth 3: [provider=0, body_obj=0, foo_obj=0]).
     renderer.current_id = {
         let mut id = IdArray::new();
-        id.push(0);  // provider
-        id.push(0);  // Body: Obj (child 0 of compose_root)
-        id.push(0);  // foo: Obj (child 0 of body)
+        id.push(0); // provider
+        id.push(0); // Body: Obj (child 0 of compose_root)
+        id.push(0); // foo: Obj (child 0 of body)
         id
     };
     renderer.coordinate = Coordinate::General;
@@ -4199,9 +5599,14 @@ fn navigate_into_nested_body_obj_shows_i_placeholder() {
     press_right(&mut renderer);
 
     assert_eq!(
-        renderer.total_list.len(), 1,
+        renderer.total_list.len(),
+        1,
         "nested foo: Obj must show exactly one i placeholder; got: {:?}",
-        renderer.total_list.iter().map(|i| &i.label).collect::<Vec<_>>()
+        renderer
+            .total_list
+            .iter()
+            .map(|i| &i.label)
+            .collect::<Vec<_>>()
     );
     assert_eq!(
         renderer.total_list[0].label, "i",
@@ -4220,7 +5625,10 @@ fn navigate_into_nested_body_obj_shows_i_placeholder() {
 fn commit_in_nested_compose_body_creates_child_there() {
     ensure_builtins();
     let mut renderer = AppRenderer::new();
-    register_no_init(&mut renderer, sicompass_sdk::create_provider_by_name("emailclient").unwrap());
+    register_no_init(
+        &mut renderer,
+        sicompass_sdk::create_provider_by_name("emailclient").unwrap(),
+    );
 
     // Step 1: create `foo:` at the top level of the body.
     renderer.providers[0].push_path("compose");
@@ -4247,7 +5655,9 @@ fn commit_in_nested_compose_body_creates_child_there() {
         .expect("fetch_subtree_children must return Some when inside nested body Obj");
 
     assert!(
-        children.iter().any(|c| matches!(c, FfonElement::Str(s) if s.contains("bar"))),
+        children
+            .iter()
+            .any(|c| matches!(c, FfonElement::Str(s) if s.contains("bar"))),
         "bar must appear in foo:'s children (not at body top level); got: {:?}",
         children
     );
@@ -4262,7 +5672,10 @@ fn commit_in_nested_compose_body_creates_child_there() {
 fn commit_trailing_colon_in_nested_body_creates_obj_with_i_placeholder() {
     ensure_builtins();
     let mut renderer = AppRenderer::new();
-    register_no_init(&mut renderer, sicompass_sdk::create_provider_by_name("emailclient").unwrap());
+    register_no_init(
+        &mut renderer,
+        sicompass_sdk::create_provider_by_name("emailclient").unwrap(),
+    );
 
     // Create `foo:` at top level, then `baz:` inside `foo:`.
     renderer.providers[0].push_path("compose");
@@ -4277,14 +5690,17 @@ fn commit_trailing_colon_in_nested_body_creates_obj_with_i_placeholder() {
         .fetch_subtree_children()
         .expect("fetch_subtree_children must return Some");
 
-    let baz = children.iter().find_map(|c| {
-        if let FfonElement::Obj(o) = c {
-            if sicompass_sdk::tags::strip_display(&o.key) == "baz" {
-                return Some(o);
+    let baz = children
+        .iter()
+        .find_map(|c| {
+            if let FfonElement::Obj(o) = c {
+                if sicompass_sdk::tags::strip_display(&o.key) == "baz" {
+                    return Some(o);
+                }
             }
-        }
-        None
-    }).expect("baz: Obj not found in foo:'s children; got: {:?}");
+            None
+        })
+        .expect("baz: Obj not found in foo:'s children; got: {:?}");
 
     assert_eq!(
         baz.children.first(),
@@ -4308,7 +5724,10 @@ fn editing_leaf_in_nested_compose_body_does_not_empty_list() {
     use sicompass_sdk::ffon::{FfonElement, FfonObject, IdArray};
 
     let mut renderer = AppRenderer::new();
-    register_no_init(&mut renderer, sicompass_sdk::create_provider_by_name("emailclient").unwrap());
+    register_no_init(
+        &mut renderer,
+        sicompass_sdk::create_provider_by_name("emailclient").unwrap(),
+    );
 
     // Step 1: build draft.body via the provider API so that fetch_subtree_children
     // can return the correct children for the nested path.
@@ -4359,7 +5778,8 @@ fn editing_leaf_in_nested_compose_body_does_not_empty_list() {
     press_enter(&mut renderer);
 
     assert_eq!(
-        renderer.coordinate, Coordinate::General,
+        renderer.coordinate,
+        Coordinate::General,
         "Enter in Insert must exit to General"
     );
     assert!(
@@ -4377,50 +5797,108 @@ fn editing_leaf_in_nested_compose_body_does_not_empty_list() {
 /// as a flat Obj{msg_key, body_children}.  This helper replicates that runtime
 /// state without going through the full SDL/network stack.
 fn email_renderer_inside_message() -> AppRenderer {
-    use sicompass_emailclient::{EmailClientProvider, ImapBackend, FolderInfo, MessageHeader, EmailMessage};
+    use sicompass_emailclient::{
+        EmailClientProvider, EmailMessage, FolderInfo, ImapBackend, MessageHeader,
+    };
     use sicompass_sdk::ffon::{FfonElement, IdArray};
 
-    struct StubImap { messages: Vec<MessageHeader>, removed_uids: Vec<u32> }
+    struct StubImap {
+        messages: Vec<MessageHeader>,
+        removed_uids: Vec<u32>,
+    }
     #[allow(unused_variables)]
     #[async_trait::async_trait]
     impl ImapBackend for StubImap {
         async fn list_folders(&mut self) -> Result<Vec<FolderInfo>, String> {
             Ok(vec![
-                FolderInfo { name: "INBOX".to_owned(), attributes: vec![] },
-                FolderInfo { name: "[Gmail]/Trash".to_owned(),
-                             attributes: vec!["\\Trash".to_owned()] },
+                FolderInfo {
+                    name: "INBOX".to_owned(),
+                    attributes: vec![],
+                },
+                FolderInfo {
+                    name: "[Gmail]/Trash".to_owned(),
+                    attributes: vec!["\\Trash".to_owned()],
+                },
             ])
         }
-        async fn list_messages(&mut self, _f: &str, _l: usize) -> Result<Vec<MessageHeader>, String> {
+        async fn list_messages(
+            &mut self,
+            _f: &str,
+            _l: usize,
+        ) -> Result<Vec<MessageHeader>, String> {
             // Exclude removed UIDs so the list reflects post-delete state.
-            Ok(self.messages.iter().filter(|m| !self.removed_uids.contains(&m.uid)).cloned().collect())
+            Ok(self
+                .messages
+                .iter()
+                .filter(|m| !self.removed_uids.contains(&m.uid))
+                .cloned()
+                .collect())
         }
-        async fn fetch_message(&mut self, _: &str, _: u32) -> Result<Option<EmailMessage>, String> { Ok(None) }
-        async fn fetch_message_by_message_id(&mut self, _: &str, _: &str) -> Result<Option<EmailMessage>, String> { Ok(None) }
-        async fn set_flags(&mut self, _: &str, _: u32, _: &[&str], _: &[&str]) -> Result<(), String> { Ok(()) }
-        async fn copy_message(&mut self, _: &str, _: u32, _: &str) -> Result<(), String> { Ok(()) }
+        async fn fetch_message(&mut self, _: &str, _: u32) -> Result<Option<EmailMessage>, String> {
+            Ok(None)
+        }
+        async fn fetch_message_by_message_id(
+            &mut self,
+            _: &str,
+            _: &str,
+        ) -> Result<Option<EmailMessage>, String> {
+            Ok(None)
+        }
+        async fn set_flags(
+            &mut self,
+            _: &str,
+            _: u32,
+            _: &[&str],
+            _: &[&str],
+        ) -> Result<(), String> {
+            Ok(())
+        }
+        async fn copy_message(&mut self, _: &str, _: u32, _: &str) -> Result<(), String> {
+            Ok(())
+        }
         async fn move_message(&mut self, _: &str, uid: u32, _: &str) -> Result<(), String> {
-            self.removed_uids.push(uid); Ok(())
+            self.removed_uids.push(uid);
+            Ok(())
         }
         async fn expunge_uid(&mut self, _: &str, uid: u32) -> Result<(), String> {
-            self.removed_uids.push(uid); Ok(())
+            self.removed_uids.push(uid);
+            Ok(())
         }
-        async fn append(&mut self, _: &str, _: &[u8]) -> Result<(), String> { Ok(()) }
-        async fn fetch_threads(&mut self, _: &str) -> Result<Option<Vec<Vec<u32>>>, String> { Ok(None) }
+        async fn append(&mut self, _: &str, _: &[u8]) -> Result<(), String> {
+            Ok(())
+        }
+        async fn fetch_threads(&mut self, _: &str) -> Result<Option<Vec<Vec<u32>>>, String> {
+            Ok(None)
+        }
     }
 
     let msgs = vec![
-        MessageHeader { uid: 1, from: "alice@x.com".to_owned(),
-                        subject: "Alpha".to_owned(), date: String::new(), seen: true, message_id: String::new(),
-            flagged: false },
-        MessageHeader { uid: 2, from: "bob@x.com".to_owned(),
-                        subject: "Beta".to_owned(), date: String::new(), seen: true, message_id: String::new(),
-            flagged: false },
+        MessageHeader {
+            uid: 1,
+            from: "alice@x.com".to_owned(),
+            subject: "Alpha".to_owned(),
+            date: String::new(),
+            seen: true,
+            message_id: String::new(),
+            flagged: false,
+        },
+        MessageHeader {
+            uid: 2,
+            from: "bob@x.com".to_owned(),
+            subject: "Beta".to_owned(),
+            date: String::new(),
+            seen: true,
+            message_id: String::new(),
+            flagged: false,
+        },
     ];
 
     let provider = EmailClientProvider::new()
         .with_oauth_token("fake")
-        .with_imap(Box::new(StubImap { messages: msgs, removed_uids: vec![] }));
+        .with_imap(Box::new(StubImap {
+            messages: msgs,
+            removed_uids: vec![],
+        }));
 
     let mut renderer = AppRenderer::new();
     register_no_init(&mut renderer, Box::new(provider));
@@ -4436,9 +5914,7 @@ fn email_renderer_inside_message() -> AppRenderer {
     // Flat FFON that navigate_right_raw / refresh_current_directory produces at
     // this path: root Obj = the opened message, children = body elements.
     let mut root = FfonElement::new_obj("[read] Alpha — alice@x.com");
-    root.as_obj_mut().unwrap().children = vec![
-        FfonElement::Str("body text".to_owned()),
-    ];
+    root.as_obj_mut().unwrap().children = vec![FfonElement::Str("body text".to_owned())];
     renderer.ffon[0] = root;
 
     // current_id = [0, 0]: depth 2, cursor on first body element (same shape as
@@ -4467,26 +5943,38 @@ fn ctrl_d_from_inside_message_shows_message_list_with_cursor_on_next() {
     let mut renderer = email_renderer_inside_message();
 
     // Pre-condition: depth 2, flat FFON shows the message body.
-    assert_eq!(renderer.current_id.depth(), 2, "pre-condition: depth must be 2");
+    assert_eq!(
+        renderer.current_id.depth(),
+        2,
+        "pre-condition: depth must be 2"
+    );
 
     press_ctrl(&mut renderer, Keycode::D);
 
     assert!(
         renderer.error_message.is_empty(),
-        "delete must succeed; got: {:?}", renderer.error_message
+        "delete must succeed; got: {:?}",
+        renderer.error_message
     );
 
     // View must be the message list — the current level holds the folder's
     // messages after the delete + refresh re-fetched the parent path.
 
     // Alpha must be gone; Beta must be present.
-    let children = renderer.ffon[0].as_obj().map(|o| o.children.as_slice()).unwrap_or(&[]);
+    let children = renderer.ffon[0]
+        .as_obj()
+        .map(|o| o.children.as_slice())
+        .unwrap_or(&[]);
     assert!(
-        !children.iter().any(|e| e.as_obj().map_or(false, |o| o.key.contains("Alpha"))),
+        !children
+            .iter()
+            .any(|e| e.as_obj().map_or(false, |o| o.key.contains("Alpha"))),
         "Alpha must be absent from the message list after deletion"
     );
     assert!(
-        children.iter().any(|e| e.as_obj().map_or(false, |o| o.key.contains("Beta"))),
+        children
+            .iter()
+            .any(|e| e.as_obj().map_or(false, |o| o.key.contains("Beta"))),
         "Beta must still be in the message list"
     );
 
@@ -4494,10 +5982,14 @@ fn ctrl_d_from_inside_message_shows_message_list_with_cursor_on_next() {
     let cursor = renderer.current_id.last().unwrap_or(0);
     assert!(
         children.is_empty() || cursor < children.len(),
-        "cursor {cursor} must be within message list of length {}", children.len()
+        "cursor {cursor} must be within message list of length {}",
+        children.len()
     );
     if !children.is_empty() {
-        let selected_key = children[cursor].as_obj().map(|o| o.key.as_str()).unwrap_or("");
+        let selected_key = children[cursor]
+            .as_obj()
+            .map(|o| o.key.as_str())
+            .unwrap_or("");
         assert!(
             selected_key.contains("Beta"),
             "cursor must point to Beta after Alpha deleted; got: {selected_key:?}"
@@ -4510,49 +6002,107 @@ fn ctrl_d_from_inside_message_shows_message_list_with_cursor_on_next() {
 /// cursor valid in the refreshed list.
 #[test]
 fn ctrl_d_from_message_list_removes_message() {
-    use sicompass_emailclient::{EmailClientProvider, ImapBackend, FolderInfo, MessageHeader, EmailMessage};
+    use sicompass_emailclient::{
+        EmailClientProvider, EmailMessage, FolderInfo, ImapBackend, MessageHeader,
+    };
     use sicompass_sdk::ffon::{FfonElement, IdArray};
 
-    struct StubImap2 { messages: Vec<MessageHeader>, removed_uids: Vec<u32> }
+    struct StubImap2 {
+        messages: Vec<MessageHeader>,
+        removed_uids: Vec<u32>,
+    }
     #[allow(unused_variables)]
     #[async_trait::async_trait]
     impl ImapBackend for StubImap2 {
         async fn list_folders(&mut self) -> Result<Vec<FolderInfo>, String> {
             Ok(vec![
-                FolderInfo { name: "INBOX".to_owned(), attributes: vec![] },
-                FolderInfo { name: "[Gmail]/Trash".to_owned(),
-                             attributes: vec!["\\Trash".to_owned()] },
+                FolderInfo {
+                    name: "INBOX".to_owned(),
+                    attributes: vec![],
+                },
+                FolderInfo {
+                    name: "[Gmail]/Trash".to_owned(),
+                    attributes: vec!["\\Trash".to_owned()],
+                },
             ])
         }
-        async fn list_messages(&mut self, _f: &str, _l: usize) -> Result<Vec<MessageHeader>, String> {
-            Ok(self.messages.iter().filter(|m| !self.removed_uids.contains(&m.uid)).cloned().collect())
+        async fn list_messages(
+            &mut self,
+            _f: &str,
+            _l: usize,
+        ) -> Result<Vec<MessageHeader>, String> {
+            Ok(self
+                .messages
+                .iter()
+                .filter(|m| !self.removed_uids.contains(&m.uid))
+                .cloned()
+                .collect())
         }
-        async fn fetch_message(&mut self, _: &str, _: u32) -> Result<Option<EmailMessage>, String> { Ok(None) }
-        async fn fetch_message_by_message_id(&mut self, _: &str, _: &str) -> Result<Option<EmailMessage>, String> { Ok(None) }
-        async fn set_flags(&mut self, _: &str, _: u32, _: &[&str], _: &[&str]) -> Result<(), String> { Ok(()) }
-        async fn copy_message(&mut self, _: &str, _: u32, _: &str) -> Result<(), String> { Ok(()) }
+        async fn fetch_message(&mut self, _: &str, _: u32) -> Result<Option<EmailMessage>, String> {
+            Ok(None)
+        }
+        async fn fetch_message_by_message_id(
+            &mut self,
+            _: &str,
+            _: &str,
+        ) -> Result<Option<EmailMessage>, String> {
+            Ok(None)
+        }
+        async fn set_flags(
+            &mut self,
+            _: &str,
+            _: u32,
+            _: &[&str],
+            _: &[&str],
+        ) -> Result<(), String> {
+            Ok(())
+        }
+        async fn copy_message(&mut self, _: &str, _: u32, _: &str) -> Result<(), String> {
+            Ok(())
+        }
         async fn move_message(&mut self, _: &str, uid: u32, _: &str) -> Result<(), String> {
-            self.removed_uids.push(uid); Ok(())
+            self.removed_uids.push(uid);
+            Ok(())
         }
         async fn expunge_uid(&mut self, _: &str, uid: u32) -> Result<(), String> {
-            self.removed_uids.push(uid); Ok(())
+            self.removed_uids.push(uid);
+            Ok(())
         }
-        async fn append(&mut self, _: &str, _: &[u8]) -> Result<(), String> { Ok(()) }
-        async fn fetch_threads(&mut self, _: &str) -> Result<Option<Vec<Vec<u32>>>, String> { Ok(None) }
+        async fn append(&mut self, _: &str, _: &[u8]) -> Result<(), String> {
+            Ok(())
+        }
+        async fn fetch_threads(&mut self, _: &str) -> Result<Option<Vec<Vec<u32>>>, String> {
+            Ok(None)
+        }
     }
 
     let msgs = vec![
-        MessageHeader { uid: 1, from: "alice@x.com".to_owned(),
-                        subject: "Alpha".to_owned(), date: String::new(), seen: true, message_id: String::new(),
-            flagged: false },
-        MessageHeader { uid: 2, from: "bob@x.com".to_owned(),
-                        subject: "Beta".to_owned(), date: String::new(), seen: true, message_id: String::new(),
-            flagged: false },
+        MessageHeader {
+            uid: 1,
+            from: "alice@x.com".to_owned(),
+            subject: "Alpha".to_owned(),
+            date: String::new(),
+            seen: true,
+            message_id: String::new(),
+            flagged: false,
+        },
+        MessageHeader {
+            uid: 2,
+            from: "bob@x.com".to_owned(),
+            subject: "Beta".to_owned(),
+            date: String::new(),
+            seen: true,
+            message_id: String::new(),
+            flagged: false,
+        },
     ];
 
     let provider = EmailClientProvider::new()
         .with_oauth_token("fake")
-        .with_imap(Box::new(StubImap2 { messages: msgs, removed_uids: vec![] }));
+        .with_imap(Box::new(StubImap2 {
+            messages: msgs,
+            removed_uids: vec![],
+        }));
 
     let mut renderer = AppRenderer::new();
     register_no_init(&mut renderer, Box::new(provider));
@@ -4575,19 +6125,34 @@ fn ctrl_d_from_message_list_removes_message() {
     renderer.coordinate = Coordinate::General;
     sicompass::list::create_list_current_layer(&mut renderer);
 
-    let before_len = renderer.ffon[0].as_obj().map(|o| o.children.len()).unwrap_or(0);
+    let before_len = renderer.ffon[0]
+        .as_obj()
+        .map(|o| o.children.len())
+        .unwrap_or(0);
     assert_eq!(before_len, 2, "pre-condition: must start with 2 messages");
 
     press_ctrl(&mut renderer, Keycode::D);
 
-    assert!(renderer.error_message.is_empty(),
-        "delete must succeed; got: {:?}", renderer.error_message);
+    assert!(
+        renderer.error_message.is_empty(),
+        "delete must succeed; got: {:?}",
+        renderer.error_message
+    );
 
     // Root must still be the INBOX message list.
-    let root_key = renderer.ffon[0].as_obj().map(|o| o.key.as_str()).unwrap_or("");
-    assert_eq!(root_key, "INBOX", "root key must remain INBOX after delete from message list");
+    let root_key = renderer.ffon[0]
+        .as_obj()
+        .map(|o| o.key.as_str())
+        .unwrap_or("");
+    assert_eq!(
+        root_key, "INBOX",
+        "root key must remain INBOX after delete from message list"
+    );
 
-    let after_len = renderer.ffon[0].as_obj().map(|o| o.children.len()).unwrap_or(0);
+    let after_len = renderer.ffon[0]
+        .as_obj()
+        .map(|o| o.children.len())
+        .unwrap_or(0);
     let cursor = renderer.current_id.last().unwrap_or(0);
     assert!(
         after_len == 0 || cursor < after_len,
@@ -4619,11 +6184,15 @@ fn placeholder_escape_removes_inserted_element() {
     assert!(!r.placeholder_insert_mode);
     // Placeholder must be gone.
     assert_eq!(
-        r.ffon[0].as_obj().unwrap().children.len(), pre_len,
+        r.ffon[0].as_obj().unwrap().children.len(),
+        pre_len,
         "escape should remove the freshly inserted placeholder"
     );
     // current_id must be restored.
-    assert_eq!(r.current_id, pre_id, "escape should restore the pre-insert current_id");
+    assert_eq!(
+        r.current_id, pre_id,
+        "escape should restore the pre-insert current_id"
+    );
 }
 
 /// Ctrl+A appends a placeholder then Escape removes it.
@@ -4662,13 +6231,17 @@ fn persistent_i_placeholder_escape_does_not_remove() {
     assert_eq!(r.coordinate, Coordinate::General);
     // The I_PLACEHOLDER element must still be present.
     assert_eq!(
-        r.ffon[0].as_obj().unwrap().children.len(), pre_len,
+        r.ffon[0].as_obj().unwrap().children.len(),
+        pre_len,
         "persistent I_PLACEHOLDER must survive Escape"
     );
-    let still_has_placeholder = r.ffon[0].as_obj().unwrap().children.iter().any(|e| {
-        matches!(e, FfonElement::Str(s) if sicompass_sdk::placeholders::is_i_placeholder(s))
-    });
-    assert!(still_has_placeholder, "I_PLACEHOLDER element must still be in the FFON after Escape");
+    let still_has_placeholder = r.ffon[0].as_obj().unwrap().children.iter().any(
+        |e| matches!(e, FfonElement::Str(s) if sicompass_sdk::placeholders::is_i_placeholder(s)),
+    );
+    assert!(
+        still_has_placeholder,
+        "I_PLACEHOLDER element must still be in the FFON after Escape"
+    );
 }
 
 /// Ctrl+I in the file browser inserts a `<input></input>` placeholder; Escape
@@ -4677,7 +6250,9 @@ fn persistent_i_placeholder_escape_does_not_remove() {
 fn filebrowser_ctrl_i_escape_removes_placeholder() {
     let mut h = Harness::new();
     std::fs::create_dir(h.tmp_path().join("Downloads")).unwrap();
-    let fb_idx = h.provider_idx("filebrowser").expect("filebrowser not found");
+    let fb_idx = h
+        .provider_idx("filebrowser")
+        .expect("filebrowser not found");
 
     navigate_to_provider(h.r(), fb_idx);
     press_right(h.r()); // enter filebrowser at depth 2
@@ -4688,17 +6263,24 @@ fn filebrowser_ctrl_i_escape_removes_placeholder() {
 
     press_ctrl(h.r(), Keycode::I); // inserts <input></input>, enters Insert
     assert_eq!(h.renderer.coordinate, Coordinate::Insert);
-    assert_eq!(h.renderer.ffon[fb_idx].as_obj().unwrap().children.len(), pre_len + 1,
-        "Ctrl+I should insert a placeholder element");
+    assert_eq!(
+        h.renderer.ffon[fb_idx].as_obj().unwrap().children.len(),
+        pre_len + 1,
+        "Ctrl+I should insert a placeholder element"
+    );
 
     press_escape(h.r());
 
     assert_eq!(h.renderer.coordinate, Coordinate::General);
     assert_eq!(
-        h.renderer.ffon[fb_idx].as_obj().unwrap().children.len(), pre_len,
+        h.renderer.ffon[fb_idx].as_obj().unwrap().children.len(),
+        pre_len,
         "Escape should remove the filebrowser placeholder"
     );
-    assert_eq!(h.renderer.current_id, pre_id, "Escape should restore the pre-insert current_id");
+    assert_eq!(
+        h.renderer.current_id, pre_id,
+        "Escape should restore the pre-insert current_id"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -4747,7 +6329,9 @@ fn compose_body_delete_undo_syncs_draft_body() {
     // Position cursor on "line1" (depth 3: [0=provider, 0=body_obj, 0=line1]).
     renderer.current_id = {
         let mut id = IdArray::new();
-        id.push(0); id.push(0); id.push(0);
+        id.push(0);
+        id.push(0);
+        id.push(0);
         id
     };
     renderer.coordinate = Coordinate::General;
@@ -4757,25 +6341,40 @@ fn compose_body_delete_undo_syncs_draft_body() {
     sicompass::handlers::handle_delete_body_element(&mut renderer);
 
     // Verify "line1" is gone from FFON.
-    let body_children_post_delete = renderer.ffon[0].as_obj().unwrap()
-        .children[0].as_obj().unwrap().children.clone();
-    assert_eq!(body_children_post_delete.len(), 1,
-        "after delete body must have 1 child; got: {:?}", body_children_post_delete);
+    let body_children_post_delete = renderer.ffon[0].as_obj().unwrap().children[0]
+        .as_obj()
+        .unwrap()
+        .children
+        .clone();
+    assert_eq!(
+        body_children_post_delete.len(),
+        1,
+        "after delete body must have 1 child; got: {:?}",
+        body_children_post_delete
+    );
 
     // Undo the delete — should restore "line1".
     press_ctrl(&mut renderer, Keycode::Z);
 
-    let body_children_post_undo = renderer.ffon[0].as_obj().unwrap()
-        .children[0].as_obj().unwrap().children.clone();
-    assert_eq!(body_children_post_undo.len(), 2,
-        "after undo body must have 2 children again; got: {:?}", body_children_post_undo);
+    let body_children_post_undo = renderer.ffon[0].as_obj().unwrap().children[0]
+        .as_obj()
+        .unwrap()
+        .children
+        .clone();
+    assert_eq!(
+        body_children_post_undo.len(),
+        2,
+        "after undo body must have 2 children again; got: {:?}",
+        body_children_post_undo
+    );
 
     // fetch_subtree_children must return the 2-element body (reads from compose.draft.body
     // which sync_ffon_body_children kept in sync).
     let fetched = renderer.providers[0].fetch_subtree_children();
     assert!(
         fetched.as_ref().map(|v| v.len() == 2).unwrap_or(false),
-        "fetch_subtree_children after undo must return 2 elements; got: {:?}", fetched
+        "fetch_subtree_children after undo must return 2 elements; got: {:?}",
+        fetched
     );
 }
 
@@ -4807,7 +6406,9 @@ fn compose_body_delete_undo_redo_syncs_draft_body() {
 
     renderer.current_id = {
         let mut id = IdArray::new();
-        id.push(0); id.push(0); id.push(0);
+        id.push(0);
+        id.push(0);
+        id.push(0);
         id
     };
     renderer.coordinate = Coordinate::General;
@@ -4815,19 +6416,27 @@ fn compose_body_delete_undo_redo_syncs_draft_body() {
 
     // Delete → undo → redo.
     sicompass::handlers::handle_delete_body_element(&mut renderer);
-    press_ctrl(&mut renderer, Keycode::Z);       // undo
+    press_ctrl(&mut renderer, Keycode::Z); // undo
     press_ctrl_shift(&mut renderer, Keycode::Z); // redo
 
-    let body_children = renderer.ffon[0].as_obj().unwrap()
-        .children[0].as_obj().unwrap().children.clone();
-    assert_eq!(body_children.len(), 1,
-        "after redo body must have 1 child again; got: {:?}", body_children);
+    let body_children = renderer.ffon[0].as_obj().unwrap().children[0]
+        .as_obj()
+        .unwrap()
+        .children
+        .clone();
+    assert_eq!(
+        body_children.len(),
+        1,
+        "after redo body must have 1 child again; got: {:?}",
+        body_children
+    );
 
     // compose.draft.body must also reflect the post-redo (deleted) state.
     let fetched = renderer.providers[0].fetch_subtree_children();
     assert!(
         fetched.as_ref().map(|v| v.len() == 1).unwrap_or(false),
-        "fetch_subtree_children after redo must return 1 element; got: {:?}", fetched
+        "fetch_subtree_children after redo must return 1 element; got: {:?}",
+        fetched
     );
 }
 
@@ -4861,7 +6470,9 @@ fn compose_body_insert_undo_redo_syncs_draft_body() {
     // Position on line1 at [0, 0, 0].
     renderer.current_id = {
         let mut id = IdArray::new();
-        id.push(0); id.push(0); id.push(0);
+        id.push(0);
+        id.push(0);
+        id.push(0);
         id
     };
     renderer.coordinate = Coordinate::General;
@@ -4874,7 +6485,8 @@ fn compose_body_insert_undo_redo_syncs_draft_body() {
         "placeholder_insert_mode must be set after Ctrl+A in compose body"
     );
     assert_eq!(
-        renderer.coordinate, Coordinate::Insert,
+        renderer.coordinate,
+        Coordinate::Insert,
         "must enter Insert after Ctrl+A"
     );
 
@@ -4883,69 +6495,109 @@ fn compose_body_insert_undo_redo_syncs_draft_body() {
     press_enter(&mut renderer);
 
     assert_eq!(
-        renderer.coordinate, Coordinate::General,
+        renderer.coordinate,
+        Coordinate::General,
         "must return to General after commit"
     );
 
     // Verify "line2" appears in FFON body children.
-    let body_after_insert = renderer.ffon[0].as_obj().unwrap()
-        .children[0].as_obj().unwrap().children.clone();
+    let body_after_insert = renderer.ffon[0].as_obj().unwrap().children[0]
+        .as_obj()
+        .unwrap()
+        .children
+        .clone();
     assert_eq!(
-        body_after_insert.len(), 2,
-        "body must have 2 children after insert; got: {:?}", body_after_insert
+        body_after_insert.len(),
+        2,
+        "body must have 2 children after insert; got: {:?}",
+        body_after_insert
     );
-    let has_line2 = body_after_insert.iter().any(|e| {
-        matches!(e, FfonElement::Str(s) if s.contains("line2"))
-    });
-    assert!(has_line2, "body must contain line2 after insert; got: {:?}", body_after_insert);
+    let has_line2 = body_after_insert
+        .iter()
+        .any(|e| matches!(e, FfonElement::Str(s) if s.contains("line2")));
+    assert!(
+        has_line2,
+        "body must contain line2 after insert; got: {:?}",
+        body_after_insert
+    );
 
     // fetch_subtree_children must return both elements (compose.draft.body synced).
     let fetched_after = renderer.providers[0].fetch_subtree_children();
     assert!(
-        fetched_after.as_ref().map(|v| v.len() == 2).unwrap_or(false),
-        "fetch_subtree_children must return 2 after insert; got: {:?}", fetched_after
+        fetched_after
+            .as_ref()
+            .map(|v| v.len() == 2)
+            .unwrap_or(false),
+        "fetch_subtree_children must return 2 after insert; got: {:?}",
+        fetched_after
     );
 
     // Undo — should remove line2.
     press_ctrl(&mut renderer, Keycode::Z);
 
-    let body_after_undo = renderer.ffon[0].as_obj().unwrap()
-        .children[0].as_obj().unwrap().children.clone();
+    let body_after_undo = renderer.ffon[0].as_obj().unwrap().children[0]
+        .as_obj()
+        .unwrap()
+        .children
+        .clone();
     assert_eq!(
-        body_after_undo.len(), 1,
-        "body must have 1 child after undo; got: {:?}", body_after_undo
+        body_after_undo.len(),
+        1,
+        "body must have 1 child after undo; got: {:?}",
+        body_after_undo
     );
-    let has_line2_after_undo = body_after_undo.iter().any(|e| {
-        matches!(e, FfonElement::Str(s) if s.contains("line2"))
-    });
-    assert!(!has_line2_after_undo, "line2 must be gone after undo; got: {:?}", body_after_undo);
+    let has_line2_after_undo = body_after_undo
+        .iter()
+        .any(|e| matches!(e, FfonElement::Str(s) if s.contains("line2")));
+    assert!(
+        !has_line2_after_undo,
+        "line2 must be gone after undo; got: {:?}",
+        body_after_undo
+    );
 
     // compose.draft.body must also be synced after undo.
     let fetched_after_undo = renderer.providers[0].fetch_subtree_children();
     assert!(
-        fetched_after_undo.as_ref().map(|v| v.len() == 1).unwrap_or(false),
-        "fetch_subtree_children must return 1 after undo; got: {:?}", fetched_after_undo
+        fetched_after_undo
+            .as_ref()
+            .map(|v| v.len() == 1)
+            .unwrap_or(false),
+        "fetch_subtree_children must return 1 after undo; got: {:?}",
+        fetched_after_undo
     );
 
     // Redo — should restore line2.
     press_ctrl_shift(&mut renderer, Keycode::Z);
 
-    let body_after_redo = renderer.ffon[0].as_obj().unwrap()
-        .children[0].as_obj().unwrap().children.clone();
+    let body_after_redo = renderer.ffon[0].as_obj().unwrap().children[0]
+        .as_obj()
+        .unwrap()
+        .children
+        .clone();
     assert_eq!(
-        body_after_redo.len(), 2,
-        "body must have 2 children after redo; got: {:?}", body_after_redo
+        body_after_redo.len(),
+        2,
+        "body must have 2 children after redo; got: {:?}",
+        body_after_redo
     );
-    let has_line2_after_redo = body_after_redo.iter().any(|e| {
-        matches!(e, FfonElement::Str(s) if s.contains("line2"))
-    });
-    assert!(has_line2_after_redo, "line2 must be restored after redo; got: {:?}", body_after_redo);
+    let has_line2_after_redo = body_after_redo
+        .iter()
+        .any(|e| matches!(e, FfonElement::Str(s) if s.contains("line2")));
+    assert!(
+        has_line2_after_redo,
+        "line2 must be restored after redo; got: {:?}",
+        body_after_redo
+    );
 
     // compose.draft.body must be synced after redo too.
     let fetched_after_redo = renderer.providers[0].fetch_subtree_children();
     assert!(
-        fetched_after_redo.as_ref().map(|v| v.len() == 2).unwrap_or(false),
-        "fetch_subtree_children must return 2 after redo; got: {:?}", fetched_after_redo
+        fetched_after_redo
+            .as_ref()
+            .map(|v| v.len() == 2)
+            .unwrap_or(false),
+        "fetch_subtree_children must return 2 after redo; got: {:?}",
+        fetched_after_redo
     );
 }
 
@@ -4977,7 +6629,9 @@ fn compose_body_insert_records_only_text_chunks() {
 
     renderer.current_id = {
         let mut id = IdArray::new();
-        id.push(0); id.push(0); id.push(0);
+        id.push(0);
+        id.push(0);
+        id.push(0);
         id
     };
     renderer.coordinate = Coordinate::General;
@@ -4988,15 +6642,20 @@ fn compose_body_insert_records_only_text_chunks() {
     type_text(&mut renderer, "line2");
     press_enter(&mut renderer);
 
-    let recorded: Vec<&TimelineEntry> =
-        renderer.active_timeline().entries[baseline..].iter().collect();
+    let recorded: Vec<&TimelineEntry> = renderer.active_timeline().entries[baseline..]
+        .iter()
+        .collect();
     assert!(
-        recorded.iter().all(|e| matches!(e, TimelineEntry::TextChunk { .. })),
+        recorded
+            .iter()
+            .all(|e| matches!(e, TimelineEntry::TextChunk { .. })),
         "compose-body insertion must record only TextChunks (no Structural), got: {recorded:?}"
     );
     assert_eq!(
-        recorded.len(), 1,
-        "single-burst typing must collapse to one TextChunk, got {}", recorded.len()
+        recorded.len(),
+        1,
+        "single-burst typing must collapse to one TextChunk, got {}",
+        recorded.len()
     );
 }
 
@@ -5028,7 +6687,9 @@ fn compose_body_insert_into_empty_undo_syncs_draft_body() {
     // Position on the I_PLACEHOLDER at [0, 0, 0].
     renderer.current_id = {
         let mut id = IdArray::new();
-        id.push(0); id.push(0); id.push(0);
+        id.push(0);
+        id.push(0);
+        id.push(0);
         id
     };
     renderer.coordinate = Coordinate::General;
@@ -5036,41 +6697,74 @@ fn compose_body_insert_into_empty_undo_syncs_draft_body() {
 
     // Ctrl+A → insert placeholder, enter Insert.
     press_ctrl(&mut renderer, Keycode::A);
-    assert!(renderer.placeholder_insert_mode, "placeholder_insert_mode must be set");
+    assert!(
+        renderer.placeholder_insert_mode,
+        "placeholder_insert_mode must be set"
+    );
 
     // Type "hello" and commit via Enter.
     type_text(&mut renderer, "hello");
     press_enter(&mut renderer);
 
     // Verify "hello" appears in FFON.
-    let body_after = renderer.ffon[0].as_obj().unwrap()
-        .children[0].as_obj().unwrap().children.clone();
-    let has_hello = body_after.iter().any(|e| matches!(e, FfonElement::Str(s) if s.contains("hello")));
-    assert!(has_hello, "body must contain 'hello' after insert; got: {:?}", body_after);
+    let body_after = renderer.ffon[0].as_obj().unwrap().children[0]
+        .as_obj()
+        .unwrap()
+        .children
+        .clone();
+    let has_hello = body_after
+        .iter()
+        .any(|e| matches!(e, FfonElement::Str(s) if s.contains("hello")));
+    assert!(
+        has_hello,
+        "body must contain 'hello' after insert; got: {:?}",
+        body_after
+    );
 
     // draft.body synced.
     let fetched = renderer.providers[0].fetch_subtree_children();
     assert!(
-        fetched.as_ref().map(|v| v.iter().any(|e| matches!(e, FfonElement::Str(s) if s.contains("hello")))).unwrap_or(false),
-        "fetch_subtree_children must contain 'hello'; got: {:?}", fetched
+        fetched
+            .as_ref()
+            .map(|v| v
+                .iter()
+                .any(|e| matches!(e, FfonElement::Str(s) if s.contains("hello"))))
+            .unwrap_or(false),
+        "fetch_subtree_children must contain 'hello'; got: {:?}",
+        fetched
     );
 
     // Undo — should remove "hello".
     press_ctrl(&mut renderer, Keycode::Z);
 
-    let body_after_undo = renderer.ffon[0].as_obj().unwrap()
-        .children[0].as_obj().unwrap().children.clone();
-    let has_hello_after_undo = body_after_undo.iter().any(|e| {
-        matches!(e, FfonElement::Str(s) if s.contains("hello"))
-    });
-    assert!(!has_hello_after_undo, "'hello' must be gone after undo; got: {:?}", body_after_undo);
+    let body_after_undo = renderer.ffon[0].as_obj().unwrap().children[0]
+        .as_obj()
+        .unwrap()
+        .children
+        .clone();
+    let has_hello_after_undo = body_after_undo
+        .iter()
+        .any(|e| matches!(e, FfonElement::Str(s) if s.contains("hello")));
+    assert!(
+        !has_hello_after_undo,
+        "'hello' must be gone after undo; got: {:?}",
+        body_after_undo
+    );
 
     // draft.body must NOT contain "hello" after undo.
     let fetched_undo = renderer.providers[0].fetch_subtree_children();
-    let still_has_hello = fetched_undo.as_ref()
-        .map(|v| v.iter().any(|e| matches!(e, FfonElement::Str(s) if s.contains("hello"))))
+    let still_has_hello = fetched_undo
+        .as_ref()
+        .map(|v| {
+            v.iter()
+                .any(|e| matches!(e, FfonElement::Str(s) if s.contains("hello")))
+        })
         .unwrap_or(false);
-    assert!(!still_has_hello, "draft.body must not contain 'hello' after undo; got: {:?}", fetched_undo);
+    assert!(
+        !still_has_hello,
+        "draft.body must not contain 'hello' after undo; got: {:?}",
+        fetched_undo
+    );
 }
 
 /// Undoing the only inserted body element must leave an I_PLACEHOLDER ("i"), not a
@@ -5101,7 +6795,9 @@ fn compose_body_undo_last_element_restores_i_placeholder() {
 
     renderer.current_id = {
         let mut id = IdArray::new();
-        id.push(0); id.push(0); id.push(0);
+        id.push(0);
+        id.push(0);
+        id.push(0);
         id
     };
     renderer.coordinate = Coordinate::General;
@@ -5109,54 +6805,86 @@ fn compose_body_undo_last_element_restores_i_placeholder() {
 
     // Ctrl+A → append placeholder, enter Insert.
     press_ctrl(&mut renderer, Keycode::A);
-    assert!(renderer.placeholder_insert_mode, "must enter placeholder insert mode");
+    assert!(
+        renderer.placeholder_insert_mode,
+        "must enter placeholder insert mode"
+    );
 
     // Type "only" and commit via Enter.
     type_text(&mut renderer, "only");
     press_enter(&mut renderer);
 
     // Verify "only" is in body.
-    let body_after_insert = renderer.ffon[0].as_obj().unwrap()
-        .children[0].as_obj().unwrap().children.clone();
-    let has_only = body_after_insert.iter().any(|e| matches!(e, FfonElement::Str(s) if s.contains("only")));
-    assert!(has_only, "body must contain 'only' after insert; got: {:?}", body_after_insert);
+    let body_after_insert = renderer.ffon[0].as_obj().unwrap().children[0]
+        .as_obj()
+        .unwrap()
+        .children
+        .clone();
+    let has_only = body_after_insert
+        .iter()
+        .any(|e| matches!(e, FfonElement::Str(s) if s.contains("only")));
+    assert!(
+        has_only,
+        "body must contain 'only' after insert; got: {:?}",
+        body_after_insert
+    );
 
     // Undo — the body should be empty again, and the sole remaining element
     // must be I_PLACEHOLDER ("i <input></input>"), not bare "<input></input>".
     press_ctrl(&mut renderer, Keycode::Z);
 
-    let body_after_undo = renderer.ffon[0].as_obj().unwrap()
-        .children[0].as_obj().unwrap().children.clone();
+    let body_after_undo = renderer.ffon[0].as_obj().unwrap().children[0]
+        .as_obj()
+        .unwrap()
+        .children
+        .clone();
     assert_eq!(
-        body_after_undo.len(), 1,
-        "body must have 1 child after undo; got: {:?}", body_after_undo
+        body_after_undo.len(),
+        1,
+        "body must have 1 child after undo; got: {:?}",
+        body_after_undo
     );
     assert!(
         matches!(&body_after_undo[0], FfonElement::Str(s) if s == I_PLACEHOLDER),
-        "sole body child after undo must be I_PLACEHOLDER; got: {:?}", body_after_undo
+        "sole body child after undo must be I_PLACEHOLDER; got: {:?}",
+        body_after_undo
     );
 
     // draft.body must also reflect the I_PLACEHOLDER (not bare "<input></input>").
     let fetched = renderer.providers[0].fetch_subtree_children();
     // An empty MailBody::Text("") produces no children from body_to_compose_children,
     // so fetched may be empty or contain the placeholder — either way "only" must be gone.
-    let has_only_in_draft = fetched.as_ref()
-        .map(|v| v.iter().any(|e| matches!(e, FfonElement::Str(s) if s.contains("only"))))
+    let has_only_in_draft = fetched
+        .as_ref()
+        .map(|v| {
+            v.iter()
+                .any(|e| matches!(e, FfonElement::Str(s) if s.contains("only")))
+        })
         .unwrap_or(false);
-    assert!(!has_only_in_draft, "draft must not contain 'only' after undo; got: {:?}", fetched);
+    assert!(
+        !has_only_in_draft,
+        "draft must not contain 'only' after undo; got: {:?}",
+        fetched
+    );
 
     // Redo — "only" should come back as the SOLE body child (no extra I_PLACEHOLDER).
     press_ctrl_shift(&mut renderer, Keycode::Z);
 
-    let body_after_redo = renderer.ffon[0].as_obj().unwrap()
-        .children[0].as_obj().unwrap().children.clone();
+    let body_after_redo = renderer.ffon[0].as_obj().unwrap().children[0]
+        .as_obj()
+        .unwrap()
+        .children
+        .clone();
     assert_eq!(
-        body_after_redo.len(), 1,
-        "after redo body must have exactly 1 child (no extra I_PLACEHOLDER); got: {:?}", body_after_redo
+        body_after_redo.len(),
+        1,
+        "after redo body must have exactly 1 child (no extra I_PLACEHOLDER); got: {:?}",
+        body_after_redo
     );
     assert!(
         matches!(&body_after_redo[0], FfonElement::Str(s) if s.contains("only")),
-        "sole child after redo must be the restored element; got: {:?}", body_after_redo
+        "sole child after redo must be the restored element; got: {:?}",
+        body_after_redo
     );
 }
 
@@ -5186,7 +6914,9 @@ fn compose_body_delete_undo_single_element_no_extra_placeholder() {
 
     renderer.current_id = {
         let mut id = IdArray::new();
-        id.push(0); id.push(0); id.push(0);
+        id.push(0);
+        id.push(0);
+        id.push(0);
         id
     };
     renderer.coordinate = Coordinate::General;
@@ -5195,26 +6925,40 @@ fn compose_body_delete_undo_single_element_no_extra_placeholder() {
     // Delete the only body element.
     sicompass::handlers::handle_delete_body_element(&mut renderer);
 
-    let body_after_delete = renderer.ffon[0].as_obj().unwrap()
-        .children[0].as_obj().unwrap().children.clone();
-    assert_eq!(body_after_delete.len(), 1, "after delete body must have I_PLACEHOLDER");
+    let body_after_delete = renderer.ffon[0].as_obj().unwrap().children[0]
+        .as_obj()
+        .unwrap()
+        .children
+        .clone();
+    assert_eq!(
+        body_after_delete.len(),
+        1,
+        "after delete body must have I_PLACEHOLDER"
+    );
     assert!(
         matches!(&body_after_delete[0], FfonElement::Str(s) if s == I_PLACEHOLDER),
-        "after delete must be I_PLACEHOLDER; got: {:?}", body_after_delete
+        "after delete must be I_PLACEHOLDER; got: {:?}",
+        body_after_delete
     );
 
     // Undo — must restore "only" as sole child, no extra I_PLACEHOLDER.
     press_ctrl(&mut renderer, Keycode::Z);
 
-    let body_after_undo = renderer.ffon[0].as_obj().unwrap()
-        .children[0].as_obj().unwrap().children.clone();
+    let body_after_undo = renderer.ffon[0].as_obj().unwrap().children[0]
+        .as_obj()
+        .unwrap()
+        .children
+        .clone();
     assert_eq!(
-        body_after_undo.len(), 1,
-        "after undo body must have exactly 1 child; got: {:?}", body_after_undo
+        body_after_undo.len(),
+        1,
+        "after undo body must have exactly 1 child; got: {:?}",
+        body_after_undo
     );
     assert!(
         matches!(&body_after_undo[0], FfonElement::Str(s) if s.contains("only")),
-        "sole child after undo must be the restored element; got: {:?}", body_after_undo
+        "sole child after undo must be the restored element; got: {:?}",
+        body_after_undo
     );
 }
 
@@ -5231,8 +6975,7 @@ fn compose_body_delete_undo_single_element_no_extra_placeholder() {
 #[test]
 fn chat_client_needs_refresh_drives_renderer_redraw() {
     // Build a ChatClientProvider with no sync thread — flag is driven manually.
-    let mut chat = sicompass_chatclient::ChatClientProvider::new()
-        .with_sync_disabled();
+    let mut chat = sicompass_chatclient::ChatClientProvider::new().with_sync_disabled();
 
     // Set credentials so fetch() returns the rooms list, not the "configure…" placeholder.
     chat.test_set_credentials("https://matrix.org", "test_token");
@@ -5262,7 +7005,10 @@ fn chat_client_needs_refresh_drives_renderer_redraw() {
     };
 
     // The flag must still be set (no drain has run yet).
-    assert!(renderer.providers[0].needs_refresh(), "flag must be set before drain");
+    assert!(
+        renderer.providers[0].needs_refresh(),
+        "flag must be set before drain"
+    );
 
     // Simulate the per-frame needs_refresh drain from view.rs:
     // clear the flag *before* rebuild so a signal arriving mid-rebuild is preserved.
@@ -5271,15 +7017,30 @@ fn chat_client_needs_refresh_drives_renderer_redraw() {
     sicompass::list::create_list_current_layer(&mut renderer);
 
     // Flag must be cleared after the drain.
-    assert!(!renderer.providers[0].needs_refresh(), "flag must be cleared after drain");
+    assert!(
+        !renderer.providers[0].needs_refresh(),
+        "flag must be cleared after drain"
+    );
 
     // FFON tree must contain both rooms (rebuilt from cache).
     let root = &renderer.ffon[0];
     let children = &root.as_obj().unwrap().children;
-    let has_test_room = children.iter().any(|e| e.as_obj().map_or(false, |o| o.key == "Test Room"));
-    let has_another = children.iter().any(|e| e.as_obj().map_or(false, |o| o.key == "Another Room"));
-    assert!(has_test_room, "FFON must contain 'Test Room' after refresh; children: {:?}", children);
-    assert!(has_another, "FFON must contain 'Another Room' after refresh; children: {:?}", children);
+    let has_test_room = children
+        .iter()
+        .any(|e| e.as_obj().map_or(false, |o| o.key == "Test Room"));
+    let has_another = children
+        .iter()
+        .any(|e| e.as_obj().map_or(false, |o| o.key == "Another Room"));
+    assert!(
+        has_test_room,
+        "FFON must contain 'Test Room' after refresh; children: {:?}",
+        children
+    );
+    assert!(
+        has_another,
+        "FFON must contain 'Another Room' after refresh; children: {:?}",
+        children
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -5294,15 +7055,32 @@ struct RefreshTrackingProvider {
 impl RefreshTrackingProvider {
     fn new() -> (Self, std::sync::Arc<std::sync::Mutex<Option<String>>>) {
         let shared = std::sync::Arc::new(std::sync::Mutex::new(None));
-        (RefreshTrackingProvider { last_command: shared.clone() }, shared)
+        (
+            RefreshTrackingProvider {
+                last_command: shared.clone(),
+            },
+            shared,
+        )
     }
 }
 
 impl Provider for RefreshTrackingProvider {
-    fn name(&self) -> &str { "tracking" }
-    fn fetch(&mut self) -> Vec<FfonElement> { vec![FfonElement::new_str("item")] }
-    fn commands(&self) -> Vec<String> { vec!["refresh".to_owned()] }
-    fn handle_command(&mut self, cmd: &str, _: &str, _: i32, _: &mut String) -> Option<FfonElement> {
+    fn name(&self) -> &str {
+        "tracking"
+    }
+    fn fetch(&mut self) -> Vec<FfonElement> {
+        vec![FfonElement::new_str("item")]
+    }
+    fn commands(&self) -> Vec<String> {
+        vec!["refresh".to_owned()]
+    }
+    fn handle_command(
+        &mut self,
+        cmd: &str,
+        _: &str,
+        _: i32,
+        _: &mut String,
+    ) -> Option<FfonElement> {
         *self.last_command.lock().unwrap() = Some(cmd.to_owned());
         None
     }
@@ -5314,7 +7092,9 @@ fn f5_dispatches_refresh_command_when_provider_exposes_it() {
 
     let mut renderer = AppRenderer::new();
     let mut root = FfonElement::new_obj("tracking");
-    root.as_obj_mut().unwrap().push(FfonElement::new_str("item"));
+    root.as_obj_mut()
+        .unwrap()
+        .push(FfonElement::new_str("item"));
     renderer.ffon = vec![root];
     renderer.providers = vec![Box::new(p)];
     renderer.current_id = {
@@ -5374,17 +7154,34 @@ fn webbrowser_form_html_produces_input_cells() {
     assert_eq!(form.key, "form_1");
 
     let has_email = form.children.iter().any(|e| {
-        e.as_str().map_or(false, |s| s.contains("<input>") && s.contains("Email address"))
+        e.as_str().map_or(false, |s| {
+            s.contains("<input>") && s.contains("Email address")
+        })
     });
-    assert!(has_email, "email field missing from form children: {:?}", form.children);
+    assert!(
+        has_email,
+        "email field missing from form children: {:?}",
+        form.children
+    );
 
     let has_submit = form.children.iter().any(|e| {
-        e.as_str().map_or(false, |s| s.contains("<button>submit:form_1</button>"))
+        e.as_str()
+            .map_or(false, |s| s.contains("<button>submit:form_1</button>"))
     });
-    assert!(has_submit, "submit button missing from form children: {:?}", form.children);
+    assert!(
+        has_submit,
+        "submit button missing from form children: {:?}",
+        form.children
+    );
 
-    assert!(map.contains_key("form_1/Email address"), "form_map missing email key");
-    assert!(map.contains_key("form_1/Log in"), "form_map missing submit key");
+    assert!(
+        map.contains_key("form_1/Email address"),
+        "form_map missing email key"
+    );
+    assert!(
+        map.contains_key("form_1/Log in"),
+        "form_map missing submit key"
+    );
 }
 
 #[test]
@@ -5407,12 +7204,20 @@ fn webbrowser_form_commit_returns_false_and_patches_cache() {
     // cell must not carry a spurious <id> prefix.
     let form = elems[0].as_obj().expect("form_1 Obj");
     assert_eq!(form.key, "form_1");
-    let field = form.children.iter()
+    let field = form
+        .children
+        .iter()
         .find(|e| e.as_str().map_or(false, |s| s.contains("<input>")))
         .and_then(|e| e.as_str())
         .expect("editable field in form");
-    assert!(!field.contains("<id>"), "form field must not have spurious <id> prefix: {field}");
-    assert!(map.contains_key("form_1/Query"), "form_map must contain field key");
+    assert!(
+        !field.contains("<id>"),
+        "form field must not have spurious <id> prefix: {field}"
+    );
+    assert!(
+        map.contains_key("form_1/Query"),
+        "form_map must contain field key"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -5424,8 +7229,7 @@ fn webbrowser_form_commit_returns_false_and_patches_cache() {
 /// room so the parent label in the UI shows the room name.
 #[test]
 fn chat_navigate_right_loads_room_without_f5() {
-    let mut chat = sicompass_chatclient::ChatClientProvider::new()
-        .with_sync_disabled();
+    let mut chat = sicompass_chatclient::ChatClientProvider::new().with_sync_disabled();
     chat.test_set_credentials("https://matrix.org", "test_token");
     chat.test_seed_room("!abc:matrix.org", "Matrix.org");
 
@@ -5450,7 +7254,8 @@ fn chat_navigate_right_loads_room_without_f5() {
     press_right(&mut renderer);
     assert_eq!(renderer.current_id.depth(), 2, "should be at room list");
     assert_eq!(
-        renderer.ffon[0].as_obj().unwrap().key, "chat client",
+        renderer.ffon[0].as_obj().unwrap().key,
+        "chat client",
         "root key must be 'chat client' at room list"
     );
 
@@ -5462,9 +7267,15 @@ fn chat_navigate_right_loads_room_without_f5() {
 
     // The room contents were fetched without F5 and grafted onto the room Obj.
     let room_children = sicompass_sdk::ffon::get_ffon_at_id(&renderer.ffon, &renderer.current_id)
-        .map(<[_]>::to_vec).unwrap_or_default();
-    let has_input = room_children.iter().any(|e| e.as_str().map_or(false, |s| s.contains("<input>")));
-    assert!(has_input, "room must have <input> child after right-arrow (no F5); children: {room_children:?}");
+        .map(<[_]>::to_vec)
+        .unwrap_or_default();
+    let has_input = room_children
+        .iter()
+        .any(|e| e.as_str().map_or(false, |s| s.contains("<input>")));
+    assert!(
+        has_input,
+        "room must have <input> child after right-arrow (no F5); children: {room_children:?}"
+    );
     // The provider root key stays the display name in the deep model.
     assert_eq!(renderer.ffon[0].as_obj().unwrap().key, "chat client");
     let _ = room_pos;
@@ -5474,8 +7285,13 @@ fn chat_navigate_right_loads_room_without_f5() {
     assert_eq!(renderer.current_id.depth(), 2);
     assert_eq!(renderer.ffon[0].as_obj().unwrap().key, "chat client");
     let children = &renderer.ffon[0].as_obj().unwrap().children;
-    let has_room = children.iter().any(|e| e.as_obj().map_or(false, |o| o.key == "Matrix.org"));
-    assert!(has_room, "rooms list must reappear after left; children: {children:?}");
+    let has_room = children
+        .iter()
+        .any(|e| e.as_obj().map_or(false, |o| o.key == "Matrix.org"));
+    assert!(
+        has_room,
+        "rooms list must reappear after left; children: {children:?}"
+    );
 }
 
 /// Pressing Enter on a bare `<input></input>` element (empty old content) must
@@ -5492,7 +7308,9 @@ fn empty_input_enter_calls_commit_edit() {
         captured: Arc<Mutex<Option<String>>>,
     }
     impl Provider for CommitCapture {
-        fn name(&self) -> &str { "capture" }
+        fn name(&self) -> &str {
+            "capture"
+        }
         fn fetch(&mut self) -> Vec<FfonElement> {
             vec![FfonElement::new_str("<input></input>".to_owned())]
         }
@@ -5500,15 +7318,25 @@ fn empty_input_enter_calls_commit_edit() {
             *self.captured.lock().unwrap() = Some(new_content.to_owned());
             true
         }
-        fn push_path(&mut self, seg: &str) { self.path = format!("/{seg}"); }
-        fn pop_path(&mut self) { self.path = "/".to_owned(); }
-        fn current_path(&self) -> &str { &self.path }
-        fn set_current_path(&mut self, p: &str) { self.path = p.to_owned(); }
+        fn push_path(&mut self, seg: &str) {
+            self.path = format!("/{seg}");
+        }
+        fn pop_path(&mut self) {
+            self.path = "/".to_owned();
+        }
+        fn current_path(&self) -> &str {
+            &self.path
+        }
+        fn set_current_path(&mut self, p: &str) {
+            self.path = p.to_owned();
+        }
     }
 
     let mut renderer = AppRenderer::new();
     let mut root = FfonElement::new_obj("capture");
-    root.as_obj_mut().unwrap().push(FfonElement::new_str("<input></input>".to_owned()));
+    root.as_obj_mut()
+        .unwrap()
+        .push(FfonElement::new_str("<input></input>".to_owned()));
     renderer.ffon.push(root);
     renderer.providers.push(Box::new(CommitCapture {
         path: "/".to_owned(),
@@ -5528,8 +7356,11 @@ fn empty_input_enter_calls_commit_edit() {
     press_enter(&mut renderer);
 
     let committed = captured.lock().unwrap().clone();
-    assert_eq!(committed.as_deref(), Some("hello"),
-        "commit_edit must be called with the typed content for empty <input></input>");
+    assert_eq!(
+        committed.as_deref(),
+        Some("hello"),
+        "commit_edit must be called with the typed content for empty <input></input>"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -5551,10 +7382,14 @@ fn chat_unread_badge_embedded_in_key() {
     let children = chat.fetch();
 
     // Badge is in the key; no child nodes.
-    let room_obj = children
-        .iter()
-        .find(|e| e.as_obj().map_or(false, |o| o.key == "Noisy Channel [mention:1]"));
-    assert!(room_obj.is_some(), "room with badge key must appear; got: {children:?}");
+    let room_obj = children.iter().find(|e| {
+        e.as_obj()
+            .map_or(false, |o| o.key == "Noisy Channel [mention:1]")
+    });
+    assert!(
+        room_obj.is_some(),
+        "room with badge key must appear; got: {children:?}"
+    );
     assert!(
         room_obj.unwrap().as_obj().unwrap().children.is_empty(),
         "room obj must have no children so navigation reaches the provider fetch"
@@ -5605,31 +7440,45 @@ fn email_compose_cc_bcc_fields_appear_and_commit() {
     p.push_path("compose");
     let items = p.fetch();
     assert!(
-        items.iter().any(|e| e.as_str().map_or(false, |s| s.starts_with("Cc:"))),
+        items
+            .iter()
+            .any(|e| e.as_str().map_or(false, |s| s.starts_with("Cc:"))),
         "compose view must include Cc: field; got: {items:?}"
     );
     assert!(
-        items.iter().any(|e| e.as_str().map_or(false, |s| s.starts_with("Bcc:"))),
+        items
+            .iter()
+            .any(|e| e.as_str().map_or(false, |s| s.starts_with("Bcc:"))),
         "compose view must include Bcc: field; got: {items:?}"
     );
 
     // commit_edit at the Cc segment must return true and the value must appear
     // in the next compose fetch.
     p.push_path("Cc");
-    assert!(p.commit_edit("", "cc@example.com"), "commit_edit at Cc must return true");
+    assert!(
+        p.commit_edit("", "cc@example.com"),
+        "commit_edit at Cc must return true"
+    );
     p.pop_path();
     let items2 = p.fetch();
     assert!(
-        items2.iter().any(|e| e.as_str().map_or(false, |s| s.contains("cc@example.com"))),
+        items2
+            .iter()
+            .any(|e| e.as_str().map_or(false, |s| s.contains("cc@example.com"))),
         "compose view must reflect committed Cc value; got: {items2:?}"
     );
 
     p.push_path("Bcc");
-    assert!(p.commit_edit("", "bcc@example.com"), "commit_edit at Bcc must return true");
+    assert!(
+        p.commit_edit("", "bcc@example.com"),
+        "commit_edit at Bcc must return true"
+    );
     p.pop_path();
     let items3 = p.fetch();
     assert!(
-        items3.iter().any(|e| e.as_str().map_or(false, |s| s.contains("bcc@example.com"))),
+        items3
+            .iter()
+            .any(|e| e.as_str().map_or(false, |s| s.contains("bcc@example.com"))),
         "compose view must reflect committed Bcc value; got: {items3:?}"
     );
 }
@@ -5671,16 +7520,19 @@ fn email_compose_commit_to_field_keeps_cursor_on_to() {
     // Enter insert on the To field, type an address, commit with Enter.
     press(&mut renderer, Keycode::I);
     assert_eq!(
-        renderer.coordinate, Coordinate::Insert,
+        renderer.coordinate,
+        Coordinate::Insert,
         "press i must enter Insert on the To field"
     );
     type_text(&mut renderer, "alice@example.com");
     press_enter(&mut renderer);
 
     assert_eq!(
-        renderer.current_id.last(), Some(to_idx),
+        renderer.current_id.last(),
+        Some(to_idx),
         "cursor must stay on the To field after commit, not jump to an empty \
-         Cc/Bcc/Subject field; got id {:?}", renderer.current_id
+         Cc/Bcc/Subject field; got id {:?}",
+        renderer.current_id
     );
 }
 
@@ -5699,7 +7551,9 @@ fn chat_mark_read_clears_local_unread_count() {
     // Sanity: badge in room list before marking read.
     let list_before = chat.fetch();
     assert!(
-        list_before.iter().any(|e| e.as_obj().map_or(false, |o| o.key == "General [unread:2]")),
+        list_before
+            .iter()
+            .any(|e| e.as_obj().map_or(false, |o| o.key == "General [unread:2]")),
         "unread badge must be in key before mark read; got: {list_before:?}"
     );
 
@@ -5712,7 +7566,9 @@ fn chat_mark_read_clears_local_unread_count() {
     chat.pop_path();
     let list_after = chat.fetch();
     assert!(
-        list_after.iter().any(|e| e.as_obj().map_or(false, |o| o.key == "General")),
+        list_after
+            .iter()
+            .any(|e| e.as_obj().map_or(false, |o| o.key == "General")),
         "badge must be gone after mark read; got: {list_after:?}"
     );
 }
@@ -5732,7 +7588,8 @@ fn text_editor_provider_lists_directory_and_parses_file() {
     std::fs::write(
         root.join("code.txt"),
         "functions:\n{\n  fn foo\n  fn bar\n}\nend",
-    ).unwrap();
+    )
+    .unwrap();
     std::fs::create_dir(root.join("subdir")).unwrap();
 
     let mut editor = sicompass_sdk::create_provider_by_name("texteditor")
@@ -5741,35 +7598,60 @@ fn text_editor_provider_lists_directory_and_parses_file() {
 
     // Directory listing contains all three entries.
     let items = editor.fetch();
-    let names: Vec<String> = items.iter().filter_map(|e| {
-        e.as_obj().map(|o| o.key.clone())
-            .or_else(|| e.as_str().map(|s| s.to_string()))
-    }).collect();
-    assert!(names.iter().any(|n| n.contains("readme.txt")), "expected readme.txt in {names:?}");
-    assert!(names.iter().any(|n| n.contains("code.txt")),   "expected code.txt in {names:?}");
-    assert!(names.iter().any(|n| n.contains("subdir")),     "expected subdir in {names:?}");
+    let names: Vec<String> = items
+        .iter()
+        .filter_map(|e| {
+            e.as_obj()
+                .map(|o| o.key.clone())
+                .or_else(|| e.as_str().map(|s| s.to_string()))
+        })
+        .collect();
+    assert!(
+        names.iter().any(|n| n.contains("readme.txt")),
+        "expected readme.txt in {names:?}"
+    );
+    assert!(
+        names.iter().any(|n| n.contains("code.txt")),
+        "expected code.txt in {names:?}"
+    );
+    assert!(
+        names.iter().any(|n| n.contains("subdir")),
+        "expected subdir in {names:?}"
+    );
 
     // Entering a file returns its parsed FFON content.
     // Elements are wrapped in <input> and annotated with <src=N>; strip for assertions.
     editor.push_path("code.txt");
     let file_items = editor.fetch();
-    assert_eq!(file_items.len(), 2, "code.txt should parse into 2 top-level elements");
-    let section = file_items[0].as_obj().expect("first element must be an Obj section");
+    assert_eq!(
+        file_items.len(),
+        2,
+        "code.txt should parse into 2 top-level elements"
+    );
+    let section = file_items[0]
+        .as_obj()
+        .expect("first element must be an Obj section");
     assert_eq!(
         sicompass_sdk::tags::strip_display(&section.key),
         "functions:",
         "section key should strip to 'functions:'"
     );
     assert_eq!(section.children.len(), 2);
-    let end_raw = file_items[1].as_str().expect("second element should be a Str");
+    let end_raw = file_items[1]
+        .as_str()
+        .expect("second element should be a Str");
     assert_eq!(sicompass_sdk::tags::strip_display(end_raw), "end");
 
     // Navigating into a section returns its children (stripped keys).
     editor.push_path("functions:");
     let section_items = editor.fetch();
     assert_eq!(section_items.len(), 2);
-    let foo_raw = section_items[0].as_str().expect("first child should be a Str");
-    let bar_raw = section_items[1].as_str().expect("second child should be a Str");
+    let foo_raw = section_items[0]
+        .as_str()
+        .expect("first child should be a Str");
+    let bar_raw = section_items[1]
+        .as_str()
+        .expect("second child should be a Str");
     assert_eq!(sicompass_sdk::tags::strip_display(foo_raw), "fn foo");
     assert_eq!(sicompass_sdk::tags::strip_display(bar_raw), "fn bar");
 
@@ -5795,13 +7677,18 @@ fn harness_with_text_editor() -> (AppRenderer, TempDir) {
     let mut renderer = AppRenderer::new();
 
     // Filebrowser at "/" so it doesn't depend on a real directory.
-    register(&mut renderer, sicompass_sdk::create_provider_by_name("filebrowser").unwrap());
+    register(
+        &mut renderer,
+        sicompass_sdk::create_provider_by_name("filebrowser").unwrap(),
+    );
     renderer.providers[0].set_current_path("/");
     {
         let children = renderer.providers[0].fetch();
         let dn = renderer.providers[0].display_name().to_owned();
         let mut root_elem = FfonElement::new_obj(&dn);
-        for child in children { root_elem.as_obj_mut().unwrap().push(child); }
+        for child in children {
+            root_elem.as_obj_mut().unwrap().push(child);
+        }
         renderer.ffon[0] = root_elem;
     }
 
@@ -5811,7 +7698,9 @@ fn harness_with_text_editor() -> (AppRenderer, TempDir) {
     let children = editor.fetch();
     let dn = editor.display_name().to_owned();
     let mut root_elem = FfonElement::new_obj(&dn);
-    for child in children { root_elem.as_obj_mut().unwrap().push(child); }
+    for child in children {
+        root_elem.as_obj_mut().unwrap().push(child);
+    }
     renderer.ffon.push(root_elem);
     renderer.providers.push(editor);
 
@@ -5822,26 +7711,42 @@ fn harness_with_text_editor() -> (AppRenderer, TempDir) {
 #[test]
 fn entering_text_editor_provider_keeps_general() {
     let (mut r, _tmp) = harness_with_text_editor();
-    let editor_idx = r.providers.iter().position(|p| p.name() == "texteditor").unwrap();
+    let editor_idx = r
+        .providers
+        .iter()
+        .position(|p| p.name() == "texteditor")
+        .unwrap();
     navigate_to_provider(&mut r, editor_idx);
     assert_eq!(r.coordinate, Coordinate::General, "before entry: General");
 
     press_right(&mut r);
     assert_eq!(r.current_id.depth(), 2, "should be inside editor provider");
-    assert_eq!(r.coordinate, Coordinate::General, "should auto-switch to General");
+    assert_eq!(
+        r.coordinate,
+        Coordinate::General,
+        "should auto-switch to General"
+    );
 }
 
 #[test]
 fn inside_text_editor_i_yields_insert() {
     let (mut r, _tmp) = harness_with_text_editor();
-    let editor_idx = r.providers.iter().position(|p| p.name() == "texteditor").unwrap();
+    let editor_idx = r
+        .providers
+        .iter()
+        .position(|p| p.name() == "texteditor")
+        .unwrap();
     navigate_to_provider(&mut r, editor_idx);
     press_right(&mut r); // enters editor → General
     assert_eq!(r.coordinate, Coordinate::General);
 
     // The editor provider enters Insert; Enter routes to commit_edit for disk writes.
     press(&mut r, Keycode::I);
-    assert_eq!(r.coordinate, Coordinate::Insert, "'i' in editor provider should give Insert (Enter routes to commit_edit for disk writes)");
+    assert_eq!(
+        r.coordinate,
+        Coordinate::Insert,
+        "'i' in editor provider should give Insert (Enter routes to commit_edit for disk writes)"
+    );
 }
 
 #[test]
@@ -5857,16 +7762,31 @@ fn text_editor_directory_entries_are_obj() {
     ed.on_setting_change("textEditorPath", tmp.path().to_str().unwrap());
     let items = ed.fetch();
 
-    let file_entry = items.iter().find(|e| {
-        let k = match e { FfonElement::Str(s) => s.as_str(), FfonElement::Obj(o) => o.key.as_str() };
-        k.contains("readme.md")
-    }).expect("readme.md must be in listing");
-    assert!(file_entry.is_obj(), "file entry must be Obj — right-arrow enters its contents");
+    let file_entry = items
+        .iter()
+        .find(|e| {
+            let k = match e {
+                FfonElement::Str(s) => s.as_str(),
+                FfonElement::Obj(o) => o.key.as_str(),
+            };
+            k.contains("readme.md")
+        })
+        .expect("readme.md must be in listing");
+    assert!(
+        file_entry.is_obj(),
+        "file entry must be Obj — right-arrow enters its contents"
+    );
 
-    let dir_entry = items.iter().find(|e| {
-        let k = match e { FfonElement::Str(s) => s.as_str(), FfonElement::Obj(o) => o.key.as_str() };
-        k.contains("subdir")
-    }).expect("subdir must be in listing");
+    let dir_entry = items
+        .iter()
+        .find(|e| {
+            let k = match e {
+                FfonElement::Str(s) => s.as_str(),
+                FfonElement::Obj(o) => o.key.as_str(),
+            };
+            k.contains("subdir")
+        })
+        .expect("subdir must be in listing");
     assert!(dir_entry.is_obj(), "directory entry must be Obj");
 }
 
@@ -5874,17 +7794,24 @@ fn text_editor_directory_entries_are_obj() {
 fn text_editor_right_arrow_opens_file() {
     // Pressing right on a file Obj entry should open the file content.
     let (mut r, _tmp) = harness_with_text_editor();
-    let editor_idx = r.providers.iter().position(|p| p.name() == "texteditor").unwrap();
+    let editor_idx = r
+        .providers
+        .iter()
+        .position(|p| p.name() == "texteditor")
+        .unwrap();
     navigate_to_provider(&mut r, editor_idx);
     press_right(&mut r); // enter editor directory → General at depth 2
 
     // Find the hello.txt entry and move cursor to it.
     let file_idx = {
         let children = r.ffon[editor_idx].as_obj().unwrap().children.as_slice();
-        children.iter().position(|e| match e {
-            FfonElement::Obj(o) => o.key.contains("hello.txt"),
-            _ => false,
-        }).expect("hello.txt must be in listing as Obj")
+        children
+            .iter()
+            .position(|e| match e {
+                FfonElement::Obj(o) => o.key.contains("hello.txt"),
+                _ => false,
+            })
+            .expect("hello.txt must be in listing as Obj")
     };
     r.current_id.set(1, file_idx);
     sicompass::list::create_list_current_layer(&mut r);
@@ -5894,10 +7821,16 @@ fn text_editor_right_arrow_opens_file() {
     assert_eq!(r.current_id.depth(), 3, "descends into the file content");
 
     // File content should now be grafted onto the file Obj.
-    let content_children = r.ffon[editor_idx].as_obj().unwrap()
-        .children[file_idx].as_obj().unwrap().children.clone();
+    let content_children = r.ffon[editor_idx].as_obj().unwrap().children[file_idx]
+        .as_obj()
+        .unwrap()
+        .children
+        .clone();
     let has_content = content_children.iter().any(|e| {
-        let k = match e { FfonElement::Str(s) => s.as_str(), FfonElement::Obj(o) => o.key.as_str() };
+        let k = match e {
+            FfonElement::Str(s) => s.as_str(),
+            FfonElement::Obj(o) => o.key.as_str(),
+        };
         sicompass_sdk::tags::strip_display(k).contains("fn main")
     });
     assert!(has_content, "file content should be visible after opening");
@@ -5909,20 +7842,31 @@ fn text_editor_right_arrow_opens_file() {
         FfonElement::Obj(o) => o.key.contains("hello.txt"),
         _ => false,
     });
-    assert!(back_to_dir, "should be back at directory listing after left");
+    assert!(
+        back_to_dir,
+        "should be back at directory listing after left"
+    );
 }
 
 #[test]
 fn leaving_text_editor_provider_keeps_general() {
     let (mut r, _tmp) = harness_with_text_editor();
-    let editor_idx = r.providers.iter().position(|p| p.name() == "texteditor").unwrap();
+    let editor_idx = r
+        .providers
+        .iter()
+        .position(|p| p.name() == "texteditor")
+        .unwrap();
     navigate_to_provider(&mut r, editor_idx);
     press_right(&mut r); // enter → General
     assert_eq!(r.coordinate, Coordinate::General);
 
     press_left(&mut r);
     assert_eq!(r.current_id.depth(), 1, "should be back at root");
-    assert_eq!(r.coordinate, Coordinate::General, "should revert to General");
+    assert_eq!(
+        r.coordinate,
+        Coordinate::General,
+        "should revert to General"
+    );
 }
 
 #[test]
@@ -5932,7 +7876,11 @@ fn entering_filebrowser_keeps_general() {
     navigate_to_provider(&mut r, 0);
     press_right(&mut r);
     assert_eq!(r.current_id.depth(), 2);
-    assert_eq!(r.coordinate, Coordinate::General, "filebrowser keeps General");
+    assert_eq!(
+        r.coordinate,
+        Coordinate::General,
+        "filebrowser keeps General"
+    );
 }
 
 #[test]
@@ -5940,10 +7888,16 @@ fn entering_text_editor_does_not_clobber_non_general_coordinate() {
     let (mut r, _tmp) = harness_with_text_editor();
     // Simulate a non-General coordinate (e.g. user is in a search overlay).
     r.coordinate = Coordinate::Insert;
-    let editor_idx = r.providers.iter().position(|p| p.name() == "texteditor").unwrap();
+    let editor_idx = r
+        .providers
+        .iter()
+        .position(|p| p.name() == "texteditor")
+        .unwrap();
     // Directly invoke navigate_right_raw so the key-dispatch routing for Insert mode
     // doesn't interfere — we're testing the guard inside navigate_right_raw itself.
-    while r.current_id.depth() > 1 { r.current_id.pop(); }
+    while r.current_id.depth() > 1 {
+        r.current_id.pop();
+    }
     let cur = r.current_id.get(0).unwrap_or(0);
     if cur < editor_idx {
         for _ in 0..(editor_idx - cur) {
@@ -5951,7 +7905,11 @@ fn entering_text_editor_does_not_clobber_non_general_coordinate() {
         }
     }
     sicompass::handlers::navigate_right_raw(&mut r);
-    assert_eq!(r.coordinate, Coordinate::Insert, "non-General coordinate must not be clobbered");
+    assert_eq!(
+        r.coordinate,
+        Coordinate::Insert,
+        "non-General coordinate must not be clobbered"
+    );
 }
 
 /// After creating a file via Ctrl+I in the editor, the coordinate must return
@@ -5960,10 +7918,18 @@ fn entering_text_editor_does_not_clobber_non_general_coordinate() {
 #[test]
 fn text_editor_ctrl_i_create_file_restores_general() {
     let (mut r, tmp) = harness_with_text_editor();
-    let editor_idx = r.providers.iter().position(|p| p.name() == "texteditor").unwrap();
+    let editor_idx = r
+        .providers
+        .iter()
+        .position(|p| p.name() == "texteditor")
+        .unwrap();
     navigate_to_provider(&mut r, editor_idx);
     press_right(&mut r); // enter editor directory → General
-    assert_eq!(r.coordinate, Coordinate::General, "should be General after entering editor");
+    assert_eq!(
+        r.coordinate,
+        Coordinate::General,
+        "should be General after entering editor"
+    );
 
     // Ctrl+I → enters Insert with prefixed_insert_mode
     press_ctrl(&mut r, Keycode::I);
@@ -5973,9 +7939,15 @@ fn text_editor_ctrl_i_create_file_restores_general() {
     type_text(&mut r, "newfile.txt");
     press_enter(&mut r);
 
-    assert_eq!(r.coordinate, Coordinate::General,
-        "after file creation in editor, coordinate must restore to General");
-    assert!(tmp.path().join("newfile.txt").exists(), "file must be created on disk");
+    assert_eq!(
+        r.coordinate,
+        Coordinate::General,
+        "after file creation in editor, coordinate must restore to General"
+    );
+    assert!(
+        tmp.path().join("newfile.txt").exists(),
+        "file must be created on disk"
+    );
 }
 
 /// After creating a directory via Ctrl+I in the editor (using '+' prefix),
@@ -5983,7 +7955,11 @@ fn text_editor_ctrl_i_create_file_restores_general() {
 #[test]
 fn text_editor_ctrl_i_create_dir_restores_general() {
     let (mut r, tmp) = harness_with_text_editor();
-    let editor_idx = r.providers.iter().position(|p| p.name() == "texteditor").unwrap();
+    let editor_idx = r
+        .providers
+        .iter()
+        .position(|p| p.name() == "texteditor")
+        .unwrap();
     navigate_to_provider(&mut r, editor_idx);
     press_right(&mut r); // enter editor directory → General
     assert_eq!(r.coordinate, Coordinate::General);
@@ -5994,9 +7970,15 @@ fn text_editor_ctrl_i_create_dir_restores_general() {
     type_text(&mut r, "+subdir");
     press_enter(&mut r);
 
-    assert_eq!(r.coordinate, Coordinate::General,
-        "after directory creation in editor, coordinate must restore to General");
-    assert!(tmp.path().join("subdir").is_dir(), "directory must be created on disk");
+    assert_eq!(
+        r.coordinate,
+        Coordinate::General,
+        "after directory creation in editor, coordinate must restore to General"
+    );
+    assert!(
+        tmp.path().join("subdir").is_dir(),
+        "directory must be created on disk"
+    );
 }
 
 /// Navigating into a subdirectory (Obj with no FFON children) works and refreshes contents.
@@ -6007,7 +7989,11 @@ fn text_editor_right_arrow_into_subdir() {
     std::fs::create_dir(tmp.path().join("subdir")).unwrap();
     std::fs::write(tmp.path().join("subdir/child.txt"), "").unwrap();
 
-    let editor_idx = r.providers.iter().position(|p| p.name() == "texteditor").unwrap();
+    let editor_idx = r
+        .providers
+        .iter()
+        .position(|p| p.name() == "texteditor")
+        .unwrap();
     navigate_to_provider(&mut r, editor_idx);
     press_right(&mut r); // enter editor root dir listing
 
@@ -6016,22 +8002,33 @@ fn text_editor_right_arrow_into_subdir() {
 
     let dir_idx = {
         let children = r.ffon[editor_idx].as_obj().unwrap().children.as_slice();
-        children.iter().position(|e| match e {
-            FfonElement::Obj(o) => sicompass_sdk::tags::strip_display(&o.key).contains("subdir"),
-            _ => false,
-        }).expect("subdir must appear as Obj in listing")
+        children
+            .iter()
+            .position(|e| match e {
+                FfonElement::Obj(o) => {
+                    sicompass_sdk::tags::strip_display(&o.key).contains("subdir")
+                }
+                _ => false,
+            })
+            .expect("subdir must appear as Obj in listing")
     };
     r.current_id.set(1, dir_idx);
     sicompass::list::create_list_current_layer(&mut r);
 
     // Right arrow on an Obj dir with no FFON children must navigate into it.
     let navigated = sicompass::handlers::navigate_right_raw(&mut r);
-    assert!(navigated, "right-arrow on editor subdir (Obj) must navigate in");
+    assert!(
+        navigated,
+        "right-arrow on editor subdir (Obj) must navigate in"
+    );
     sicompass::list::create_list_current_layer(&mut r);
 
     // After navigation the subdir Obj holds the subdir's contents (child.txt).
-    let subdir_children = r.ffon[editor_idx].as_obj().unwrap()
-        .children[dir_idx].as_obj().unwrap().children.clone();
+    let subdir_children = r.ffon[editor_idx].as_obj().unwrap().children[dir_idx]
+        .as_obj()
+        .unwrap()
+        .children
+        .clone();
     let has_child = subdir_children.iter().any(|e| match e {
         FfonElement::Obj(o) => sicompass_sdk::tags::strip_display(&o.key).contains("child.txt"),
         _ => false,
@@ -6045,17 +8042,26 @@ fn text_editor_empty_subdir_seeds_i_placeholder() {
     let (mut r, tmp) = harness_with_text_editor();
     std::fs::create_dir(tmp.path().join("empty_dir")).unwrap();
 
-    let editor_idx = r.providers.iter().position(|p| p.name() == "texteditor").unwrap();
+    let editor_idx = r
+        .providers
+        .iter()
+        .position(|p| p.name() == "texteditor")
+        .unwrap();
     navigate_to_provider(&mut r, editor_idx);
     press_right(&mut r);
     press(&mut r, Keycode::F5); // refresh to pick up empty_dir
 
     let dir_idx = {
         let children = r.ffon[editor_idx].as_obj().unwrap().children.as_slice();
-        children.iter().position(|e| match e {
-            FfonElement::Obj(o) => sicompass_sdk::tags::strip_display(&o.key).contains("empty_dir"),
-            _ => false,
-        }).expect("empty_dir must be in listing")
+        children
+            .iter()
+            .position(|e| match e {
+                FfonElement::Obj(o) => {
+                    sicompass_sdk::tags::strip_display(&o.key).contains("empty_dir")
+                }
+                _ => false,
+            })
+            .expect("empty_dir must be in listing")
     };
     r.current_id.set(1, dir_idx);
     sicompass::list::create_list_current_layer(&mut r);
@@ -6063,13 +8069,19 @@ fn text_editor_empty_subdir_seeds_i_placeholder() {
     sicompass::handlers::navigate_right_raw(&mut r);
     sicompass::list::create_list_current_layer(&mut r);
 
-    let children = r.ffon[editor_idx].as_obj().unwrap()
-        .children[dir_idx].as_obj().unwrap().children.clone();
+    let children = r.ffon[editor_idx].as_obj().unwrap().children[dir_idx]
+        .as_obj()
+        .unwrap()
+        .children
+        .clone();
     let has_placeholder = children.iter().any(|e| match e {
         FfonElement::Str(s) => sicompass_sdk::placeholders::is_i_placeholder(s),
         _ => false,
     });
-    assert!(has_placeholder, "empty subdir must seed I_PLACEHOLDER for creation affordance");
+    assert!(
+        has_placeholder,
+        "empty subdir must seed I_PLACEHOLDER for creation affordance"
+    );
 }
 
 /// Pressing `i` on the I_PLACEHOLDER in an empty editor subdir, typing a plain
@@ -6080,7 +8092,11 @@ fn text_editor_i_on_placeholder_creates_file() {
     let (mut r, tmp) = harness_with_text_editor();
     std::fs::create_dir(tmp.path().join("mydir")).unwrap();
 
-    let editor_idx = r.providers.iter().position(|p| p.name() == "texteditor").unwrap();
+    let editor_idx = r
+        .providers
+        .iter()
+        .position(|p| p.name() == "texteditor")
+        .unwrap();
     navigate_to_provider(&mut r, editor_idx);
     press_right(&mut r);
     press(&mut r, Keycode::F5);
@@ -6099,15 +8115,29 @@ fn text_editor_i_on_placeholder_creates_file() {
 
     // Press `i` → should detect I_PLACEHOLDER prefix → placeholder_insert_mode.
     press(&mut r, Keycode::I);
-    assert_eq!(r.coordinate, Coordinate::Insert, "i on I_PLACEHOLDER must enter Insert");
-    assert!(r.placeholder_insert_mode, "i on I_PLACEHOLDER must set placeholder_insert_mode");
+    assert_eq!(
+        r.coordinate,
+        Coordinate::Insert,
+        "i on I_PLACEHOLDER must enter Insert"
+    );
+    assert!(
+        r.placeholder_insert_mode,
+        "i on I_PLACEHOLDER must set placeholder_insert_mode"
+    );
 
     // Type a plain name and confirm.
     type_text(&mut r, "notes.txt");
     press_enter(&mut r);
 
-    assert_eq!(r.coordinate, Coordinate::General, "must return to General after creation");
-    assert!(tmp.path().join("mydir/notes.txt").exists(), "file must be created on disk");
+    assert_eq!(
+        r.coordinate,
+        Coordinate::General,
+        "must return to General after creation"
+    );
+    assert!(
+        tmp.path().join("mydir/notes.txt").exists(),
+        "file must be created on disk"
+    );
 }
 
 /// Typing `+name` on the I_PLACEHOLDER creates a directory.
@@ -6116,7 +8146,11 @@ fn text_editor_i_on_placeholder_creates_dir_with_plus_prefix() {
     let (mut r, tmp) = harness_with_text_editor();
     std::fs::create_dir(tmp.path().join("mydir2")).unwrap();
 
-    let editor_idx = r.providers.iter().position(|p| p.name() == "texteditor").unwrap();
+    let editor_idx = r
+        .providers
+        .iter()
+        .position(|p| p.name() == "texteditor")
+        .unwrap();
     navigate_to_provider(&mut r, editor_idx);
     press_right(&mut r);
     press(&mut r, Keycode::F5);
@@ -6134,7 +8168,10 @@ fn text_editor_i_on_placeholder_creates_dir_with_plus_prefix() {
     press_enter(&mut r);
 
     assert_eq!(r.coordinate, Coordinate::General);
-    assert!(tmp.path().join("mydir2/subdir").is_dir(), "directory must be created on disk with + prefix");
+    assert!(
+        tmp.path().join("mydir2/subdir").is_dir(),
+        "directory must be created on disk with + prefix"
+    );
 }
 
 /// User's repro: create file → right (open) → I_PLACEHOLDER → i → type "first"
@@ -6145,15 +8182,26 @@ fn text_editor_two_consecutive_writes_both_show_in_list() {
     let (mut r, tmp) = harness_with_text_editor();
     std::fs::write(tmp.path().join("notes.txt"), "").unwrap();
 
-    let editor_idx = r.providers.iter().position(|p| p.name() == "texteditor").unwrap();
+    let editor_idx = r
+        .providers
+        .iter()
+        .position(|p| p.name() == "texteditor")
+        .unwrap();
     navigate_to_provider(&mut r, editor_idx);
     press_right(&mut r); // enter editor dir
     press(&mut r, Keycode::F5); // pick up notes.txt
 
     // Move cursor onto notes.txt and open it.
-    let file_idx = r.ffon[editor_idx].as_obj().unwrap().children.iter()
+    let file_idx = r.ffon[editor_idx]
+        .as_obj()
+        .unwrap()
+        .children
+        .iter()
         .position(|e| {
-            let k = match e { FfonElement::Str(s) => s.as_str(), FfonElement::Obj(o) => o.key.as_str() };
+            let k = match e {
+                FfonElement::Str(s) => s.as_str(),
+                FfonElement::Obj(o) => o.key.as_str(),
+            };
             k.contains("notes.txt")
         })
         .expect("notes.txt must be in listing");
@@ -6177,18 +8225,29 @@ fn text_editor_two_consecutive_writes_both_show_in_list() {
     let written = std::fs::read_to_string(tmp.path().join("notes.txt")).unwrap();
     assert_eq!(written, "first", "first write must reach disk");
 
-    let after_first: Vec<String> = r.ffon[editor_idx].as_obj().unwrap()
-        .children[file_idx].as_obj().unwrap().children.iter()
+    let after_first: Vec<String> = r.ffon[editor_idx].as_obj().unwrap().children[file_idx]
+        .as_obj()
+        .unwrap()
+        .children
+        .iter()
         .map(|e| match e {
             FfonElement::Str(s) => sicompass_sdk::tags::strip_display(s),
             FfonElement::Obj(o) => sicompass_sdk::tags::strip_display(&o.key),
         })
         .collect();
-    assert_eq!(after_first, vec!["first".to_owned()], "list must show the first line after commit");
+    assert_eq!(
+        after_first,
+        vec!["first".to_owned()],
+        "list must show the first line after commit"
+    );
 
     // Second write: Ctrl+A → placeholder after the current line, type "second", Enter.
     press_ctrl(&mut r, Keycode::A);
-    assert_eq!(r.coordinate, Coordinate::Insert, "Ctrl+A must enter insert mode");
+    assert_eq!(
+        r.coordinate,
+        Coordinate::Insert,
+        "Ctrl+A must enter insert mode"
+    );
     type_text(&mut r, "second");
     press_enter(&mut r);
 
@@ -6196,15 +8255,19 @@ fn text_editor_two_consecutive_writes_both_show_in_list() {
     assert_eq!(written, "first\nsecond", "second write must reach disk");
 
     // Critical: list must show both elements WITHOUT pressing F5.
-    let after_second: Vec<String> = r.ffon[editor_idx].as_obj().unwrap()
-        .children[file_idx].as_obj().unwrap().children.iter()
+    let after_second: Vec<String> = r.ffon[editor_idx].as_obj().unwrap().children[file_idx]
+        .as_obj()
+        .unwrap()
+        .children
+        .iter()
         .map(|e| match e {
             FfonElement::Str(s) => sicompass_sdk::tags::strip_display(s),
             FfonElement::Obj(o) => sicompass_sdk::tags::strip_display(&o.key),
         })
         .collect();
     assert_eq!(
-        after_second, vec!["first".to_owned(), "second".to_owned()],
+        after_second,
+        vec!["first".to_owned(), "second".to_owned()],
         "second element must appear in list without F5"
     );
 }
@@ -6216,14 +8279,25 @@ fn text_editor_three_consecutive_writes_all_show_in_list() {
     let (mut r, tmp) = harness_with_text_editor();
     std::fs::write(tmp.path().join("notes.txt"), "").unwrap();
 
-    let editor_idx = r.providers.iter().position(|p| p.name() == "texteditor").unwrap();
+    let editor_idx = r
+        .providers
+        .iter()
+        .position(|p| p.name() == "texteditor")
+        .unwrap();
     navigate_to_provider(&mut r, editor_idx);
     press_right(&mut r);
     press(&mut r, Keycode::F5);
 
-    let file_idx = r.ffon[editor_idx].as_obj().unwrap().children.iter()
+    let file_idx = r.ffon[editor_idx]
+        .as_obj()
+        .unwrap()
+        .children
+        .iter()
         .position(|e| {
-            let k = match e { FfonElement::Str(s) => s.as_str(), FfonElement::Obj(o) => o.key.as_str() };
+            let k = match e {
+                FfonElement::Str(s) => s.as_str(),
+                FfonElement::Obj(o) => o.key.as_str(),
+            };
             k.contains("notes.txt")
         })
         .expect("notes.txt must be in listing");
@@ -6248,17 +8322,24 @@ fn text_editor_three_consecutive_writes_all_show_in_list() {
     press_enter(&mut r);
 
     let written = std::fs::read_to_string(tmp.path().join("notes.txt")).unwrap();
-    assert_eq!(written, "first\nsecond\nthird", "three writes must reach disk in order");
+    assert_eq!(
+        written, "first\nsecond\nthird",
+        "three writes must reach disk in order"
+    );
 
-    let labels: Vec<String> = r.ffon[editor_idx].as_obj().unwrap()
-        .children[file_idx].as_obj().unwrap().children.iter()
+    let labels: Vec<String> = r.ffon[editor_idx].as_obj().unwrap().children[file_idx]
+        .as_obj()
+        .unwrap()
+        .children
+        .iter()
         .map(|e| match e {
             FfonElement::Str(s) => sicompass_sdk::tags::strip_display(s),
             FfonElement::Obj(o) => sicompass_sdk::tags::strip_display(&o.key),
         })
         .collect();
     assert_eq!(
-        labels, vec!["first".to_owned(), "second".to_owned(), "third".to_owned()],
+        labels,
+        vec!["first".to_owned(), "second".to_owned(), "third".to_owned()],
         "all three lines must show in the list"
     );
 }
@@ -6270,14 +8351,25 @@ fn text_editor_many_consecutive_writes_all_show_in_list() {
     let (mut r, tmp) = harness_with_text_editor();
     std::fs::write(tmp.path().join("log.txt"), "").unwrap();
 
-    let editor_idx = r.providers.iter().position(|p| p.name() == "texteditor").unwrap();
+    let editor_idx = r
+        .providers
+        .iter()
+        .position(|p| p.name() == "texteditor")
+        .unwrap();
     navigate_to_provider(&mut r, editor_idx);
     press_right(&mut r);
     press(&mut r, Keycode::F5);
 
-    let file_idx = r.ffon[editor_idx].as_obj().unwrap().children.iter()
+    let file_idx = r.ffon[editor_idx]
+        .as_obj()
+        .unwrap()
+        .children
+        .iter()
         .position(|e| {
-            let k = match e { FfonElement::Str(s) => s.as_str(), FfonElement::Obj(o) => o.key.as_str() };
+            let k = match e {
+                FfonElement::Str(s) => s.as_str(),
+                FfonElement::Obj(o) => o.key.as_str(),
+            };
             k.contains("log.txt")
         })
         .expect("log.txt must be in listing");
@@ -6294,25 +8386,40 @@ fn text_editor_many_consecutive_writes_all_show_in_list() {
     // Nine more Ctrl+A inserts.
     for n in 1..10 {
         press_ctrl(&mut r, Keycode::A);
-        assert_eq!(r.coordinate, Coordinate::Insert,
-            "Ctrl+A iteration {n} must enter Insert (coord stayed in General after previous commit)");
+        assert_eq!(
+            r.coordinate,
+            Coordinate::Insert,
+            "Ctrl+A iteration {n} must enter Insert (coord stayed in General after previous commit)"
+        );
         type_text(&mut r, &format!("line{n}"));
         press_enter(&mut r);
     }
 
-    let expected_disk = (0..10).map(|n| format!("line{n}")).collect::<Vec<_>>().join("\n");
+    let expected_disk = (0..10)
+        .map(|n| format!("line{n}"))
+        .collect::<Vec<_>>()
+        .join("\n");
     let written = std::fs::read_to_string(tmp.path().join("log.txt")).unwrap();
-    assert_eq!(written, expected_disk, "all ten writes must reach disk in order");
+    assert_eq!(
+        written, expected_disk,
+        "all ten writes must reach disk in order"
+    );
 
-    let labels: Vec<String> = r.ffon[editor_idx].as_obj().unwrap()
-        .children[file_idx].as_obj().unwrap().children.iter()
+    let labels: Vec<String> = r.ffon[editor_idx].as_obj().unwrap().children[file_idx]
+        .as_obj()
+        .unwrap()
+        .children
+        .iter()
         .map(|e| match e {
             FfonElement::Str(s) => sicompass_sdk::tags::strip_display(s),
             FfonElement::Obj(o) => sicompass_sdk::tags::strip_display(&o.key),
         })
         .collect();
     let expected_labels: Vec<String> = (0..10).map(|n| format!("line{n}")).collect();
-    assert_eq!(labels, expected_labels, "all ten lines must show in the list");
+    assert_eq!(
+        labels, expected_labels,
+        "all ten lines must show in the list"
+    );
 }
 
 /// Typing `name:` on the I_PLACEHOLDER creates a directory (colon suffix).
@@ -6321,7 +8428,11 @@ fn text_editor_i_on_placeholder_creates_dir_with_colon_suffix() {
     let (mut r, tmp) = harness_with_text_editor();
     std::fs::create_dir(tmp.path().join("mydir3")).unwrap();
 
-    let editor_idx = r.providers.iter().position(|p| p.name() == "texteditor").unwrap();
+    let editor_idx = r
+        .providers
+        .iter()
+        .position(|p| p.name() == "texteditor")
+        .unwrap();
     navigate_to_provider(&mut r, editor_idx);
     press_right(&mut r);
     press(&mut r, Keycode::F5);
@@ -6339,7 +8450,10 @@ fn text_editor_i_on_placeholder_creates_dir_with_colon_suffix() {
     press_enter(&mut r);
 
     assert_eq!(r.coordinate, Coordinate::General);
-    assert!(tmp.path().join("mydir3/data").is_dir(), "directory must be created on disk with : suffix");
+    assert!(
+        tmp.path().join("mydir3/data").is_dir(),
+        "directory must be created on disk with : suffix"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -6462,7 +8576,10 @@ fn assert_mru_valid(r: &AppRenderer) {
         (0..r.tabs.len()).collect::<Vec<_>>(),
         "tab_mru is a permutation of tab indices"
     );
-    assert_eq!(r.tab_mru[0], r.active_tab, "tab_mru front is the active tab");
+    assert_eq!(
+        r.tab_mru[0], r.active_tab,
+        "tab_mru front is the active tab"
+    );
 }
 
 #[test]
@@ -6501,10 +8618,19 @@ fn t_opens_switcher_with_button_prefixes_in_mru_order() {
     assert_eq!(h.renderer.coordinate, Coordinate::TabSwitcher);
     // Items follow MRU order, carry the real tab index in their id, and render
     // with the `-b` button prefix.
-    let ids: Vec<usize> = h.renderer.total_list.iter()
-        .map(|it| it.id.last().unwrap()).collect();
+    let ids: Vec<usize> = h
+        .renderer
+        .total_list
+        .iter()
+        .map(|it| it.id.last().unwrap())
+        .collect();
     assert_eq!(ids, vec![2, 1, 0]);
-    assert!(h.renderer.total_list.iter().all(|it| it.label.starts_with("-b ")));
+    assert!(
+        h.renderer
+            .total_list
+            .iter()
+            .all(|it| it.label.starts_with("-b "))
+    );
     // Highlight starts on the current tab (1st item, `tab_mru[0]`).
     assert_eq!(h.renderer.list_index, 0);
 }
@@ -6512,7 +8638,9 @@ fn t_opens_switcher_with_button_prefixes_in_mru_order() {
 #[test]
 fn switcher_breadcrumb_follows_navigated_children() {
     let mut h = Harness::new();
-    let fb_idx = h.provider_idx("filebrowser").expect("filebrowser not found");
+    let fb_idx = h
+        .provider_idx("filebrowser")
+        .expect("filebrowser not found");
 
     // Second tab so the switcher has >1 entry; it becomes the active tab.
     press_ctrl(h.r(), Keycode::T);
@@ -6520,12 +8648,19 @@ fn switcher_breadcrumb_follows_navigated_children() {
     // Navigate the active tab into `subdir` (depth 3) so it has a child path.
     navigate_to_provider(h.r(), fb_idx);
     press_right(h.r()); // enter filebrowser (depth 2, listing tmp)
-    let idx = h.renderer.total_list.iter()
+    let idx = h
+        .renderer
+        .total_list
+        .iter()
         .position(|i| i.label.contains("subdir"))
         .expect("subdir not in listing");
     let cur = h.renderer.list_index;
-    for _ in 0..idx.saturating_sub(cur) { press_down(h.r()); }
-    for _ in 0..cur.saturating_sub(idx) { press_up(h.r()); }
+    for _ in 0..idx.saturating_sub(cur) {
+        press_down(h.r());
+    }
+    for _ in 0..cur.saturating_sub(idx) {
+        press_up(h.r());
+    }
     press_right(h.r()); // enter subdir (depth 3)
     assert_eq!(h.renderer.current_id.depth(), 3, "should be inside subdir");
 
@@ -6535,18 +8670,32 @@ fn switcher_breadcrumb_follows_navigated_children() {
 
     // Every row uses the "-b" button prefix; the harness has no terminal, so the
     // PID falls back to "- ".
-    assert!(h.renderer.total_list.iter().all(|it| it.label.starts_with("-b ")));
+    assert!(
+        h.renderer
+            .total_list
+            .iter()
+            .all(|it| it.label.starts_with("-b "))
+    );
 
     // The active tab's row shows the full Ctrl+F-style path: the provider root
     // (its display name) followed by the navigated children ("subdir").
     let fb_name = h.renderer.providers[fb_idx].display_name();
-    let active_item = h.renderer.total_list.iter()
+    let active_item = h
+        .renderer
+        .total_list
+        .iter()
         .find(|it| it.id.last() == Some(active))
         .expect("active tab present in switcher");
-    assert!(active_item.label.contains("subdir"),
-        "breadcrumb should follow navigated children, got: {:?}", active_item.label);
-    assert!(active_item.label.contains(&fb_name),
-        "breadcrumb should start at the provider root {fb_name:?}, got: {:?}", active_item.label);
+    assert!(
+        active_item.label.contains("subdir"),
+        "breadcrumb should follow navigated children, got: {:?}",
+        active_item.label
+    );
+    assert!(
+        active_item.label.contains(&fb_name),
+        "breadcrumb should start at the provider root {fb_name:?}, got: {:?}",
+        active_item.label
+    );
 }
 
 #[test]
@@ -6555,8 +8704,8 @@ fn t_switcher_enter_confirms_highlighted_tab() {
     press_ctrl(h.r(), Keycode::T);
     press_ctrl(h.r(), Keycode::T); // active 2, mru [2,1,0]
 
-    press(h.r(), Keycode::T);       // index 0 → current tab 2
-    press_down(h.r());              // index 1 → tab 1
+    press(h.r(), Keycode::T); // index 0 → current tab 2
+    press_down(h.r()); // index 1 → tab 1
     press_enter(h.r());
 
     assert_eq!(h.renderer.coordinate, Coordinate::General);
@@ -6583,9 +8732,9 @@ fn t_switcher_arrows_navigate_then_enter() {
     press_ctrl(h.r(), Keycode::T);
     press_ctrl(h.r(), Keycode::T); // active 2, mru [2,1,0]
 
-    press(h.r(), Keycode::T);    // index 0 → current tab 2
-    press_down(h.r());           // index 1 → tab 1
-    press_down(h.r());           // index 2 → tab 0
+    press(h.r(), Keycode::T); // index 0 → current tab 2
+    press_down(h.r()); // index 1 → tab 1
+    press_down(h.r()); // index 2 → tab 0
     press_enter(h.r());
 
     assert_eq!(h.renderer.active_tab, 0);
@@ -6644,16 +8793,22 @@ fn commit_is_noop_for_sticky_t_palette() {
     press(h.r(), Keycode::T); // sticky entry (not held)
     // A stray Ctrl release must not commit the sticky palette.
     sicompass::handlers::handle_tab_switcher_commit(h.r());
-    assert_eq!(h.renderer.coordinate, Coordinate::TabSwitcher,
-        "sticky palette stays open on Ctrl release");
+    assert_eq!(
+        h.renderer.coordinate,
+        Coordinate::TabSwitcher,
+        "sticky palette stays open on Ctrl release"
+    );
 }
 
 #[test]
 fn t_is_noop_with_single_tab() {
     let mut h = Harness::new();
     press(h.r(), Keycode::T);
-    assert_eq!(h.renderer.coordinate, Coordinate::General,
-        "t does nothing with only one tab");
+    assert_eq!(
+        h.renderer.coordinate,
+        Coordinate::General,
+        "t does nothing with only one tab"
+    );
 }
 
 /// Open the switcher over two tabs with distinct navigation breadcrumbs: tab 0
@@ -6667,27 +8822,41 @@ fn switcher_over_two_named_tabs() -> (String, Harness) {
     // Tab 0 → file browser, navigated into `subdir`.
     navigate_to_provider(h.r(), fb);
     press_right(h.r()); // enter filebrowser (depth 2, listing tmp)
-    let idx = h.renderer.total_list.iter()
+    let idx = h
+        .renderer
+        .total_list
+        .iter()
         .position(|i| i.label.contains("subdir"))
         .expect("subdir not in listing");
     let cur = h.renderer.list_index;
-    for _ in 0..idx.saturating_sub(cur) { press_down(h.r()); }
-    for _ in 0..cur.saturating_sub(idx) { press_up(h.r()); }
+    for _ in 0..idx.saturating_sub(cur) {
+        press_down(h.r());
+    }
+    for _ in 0..cur.saturating_sub(idx) {
+        press_up(h.r());
+    }
     press_right(h.r()); // into subdir (depth 3)
 
     // Tab 1 clones the location, then navigates back to the root and parks its
     // cursor on `alpha.txt` so its breadcrumb ("alpha.txt") is distinct from
     // tab 0's ("subdir > …").
     press_ctrl(h.r(), Keycode::T); // tab 1 (active), also inside subdir
-    press_left(h.r());             // tab 1 → filebrowser root
-    let aidx = h.renderer.total_list.iter()
+    press_left(h.r()); // tab 1 → filebrowser root
+    let aidx = h
+        .renderer
+        .total_list
+        .iter()
         .position(|i| i.label.contains("alpha.txt"))
         .expect("alpha.txt not in listing");
     let cur = h.renderer.list_index;
-    for _ in 0..aidx.saturating_sub(cur) { press_down(h.r()); }
-    for _ in 0..cur.saturating_sub(aidx) { press_up(h.r()); }
+    for _ in 0..aidx.saturating_sub(cur) {
+        press_down(h.r());
+    }
+    for _ in 0..cur.saturating_sub(aidx) {
+        press_up(h.r());
+    }
 
-    press(h.r(), Keycode::T);      // open switcher, mru [1, 0]
+    press(h.r(), Keycode::T); // open switcher, mru [1, 0]
     ("subdir".to_string(), h)
 }
 
@@ -6697,13 +8866,22 @@ fn switcher_filters_by_typed_query_and_enter_switches() {
     assert_eq!(h.renderer.active_tab, 1, "started on the web-browser tab");
 
     type_text(h.r(), &fb_name); // filter down to the file-browser tab
-    assert!(!h.renderer.filtered_list_indices.is_empty(), "query matches a tab");
-    assert_eq!(h.renderer.current_list_item().and_then(|it| it.id.last()), Some(0),
-        "best match is the file-browser tab (id 0)");
+    assert!(
+        !h.renderer.filtered_list_indices.is_empty(),
+        "query matches a tab"
+    );
+    assert_eq!(
+        h.renderer.current_list_item().and_then(|it| it.id.last()),
+        Some(0),
+        "best match is the file-browser tab (id 0)"
+    );
 
     press_enter(h.r());
     assert_eq!(h.renderer.coordinate, Coordinate::General);
-    assert_eq!(h.renderer.active_tab, 0, "Enter switches to the filtered tab");
+    assert_eq!(
+        h.renderer.active_tab, 0,
+        "Enter switches to the filtered tab"
+    );
 }
 
 #[test]
@@ -6717,9 +8895,19 @@ fn switcher_backspace_widens_filter() {
     for _ in 0..fb_name.chars().count() {
         press(h.r(), Keycode::Backspace);
     }
-    assert!(h.renderer.input_buffer.is_empty(), "query cleared by backspace");
-    assert!(h.renderer.filtered_list_indices.is_empty(), "empty query = unfiltered");
-    assert_eq!(h.renderer.active_list_len(), total, "all tabs visible again");
+    assert!(
+        h.renderer.input_buffer.is_empty(),
+        "query cleared by backspace"
+    );
+    assert!(
+        h.renderer.filtered_list_indices.is_empty(),
+        "empty query = unfiltered"
+    );
+    assert_eq!(
+        h.renderer.active_list_len(),
+        total,
+        "all tabs visible again"
+    );
 }
 
 #[test]
@@ -6729,7 +8917,10 @@ fn switcher_escape_clears_query_and_keeps_tab() {
     press_escape(h.r());
 
     assert_eq!(h.renderer.coordinate, Coordinate::General);
-    assert!(h.renderer.input_buffer.is_empty(), "escape clears the query buffer");
+    assert!(
+        h.renderer.input_buffer.is_empty(),
+        "escape clears the query buffer"
+    );
     assert_eq!(h.renderer.active_tab, 1, "escape does not switch tabs");
 }
 
@@ -6739,14 +8930,18 @@ fn switcher_ignores_activation_t_in_query() {
     let (_fb_name, mut h) = switcher_over_two_named_tabs();
     assert!(h.renderer.input_buffer.is_empty());
     type_text(h.r(), "t"); // simulates the activation key's text event
-    assert!(h.renderer.input_buffer.is_empty(),
-        "the activation 't' is ignored while the query is empty");
+    assert!(
+        h.renderer.input_buffer.is_empty(),
+        "the activation 't' is ignored while the query is empty"
+    );
 }
 
 #[test]
 fn switcher_parked_settings_tab_resolves_without_dash() {
     let mut h = Harness::new();
-    let settings_idx = h.provider_idx("settings").expect("settings provider exists");
+    let settings_idx = h
+        .provider_idx("settings")
+        .expect("settings provider exists");
 
     // New tab pointed at the shared settings provider, then switch away so the
     // settings tab becomes parked. Settings is never parked into a tab's content,
@@ -6757,14 +8952,20 @@ fn switcher_parked_settings_tab_resolves_without_dash() {
     press_ctrl(h.r(), Keycode::_1); // back to tab 0; tab 1 (settings) now parked
 
     press(h.r(), Keycode::T);
-    let item = h.renderer.total_list.iter()
+    let item = h
+        .renderer
+        .total_list
+        .iter()
         .find(|it| it.id.last() == Some(1))
         .expect("parked settings tab present in switcher");
     // The shared-provider path resolves to a well-formed "-b" button row with no
     // "—" fallback (and without panicking on the out-of-parked-range index).
     assert!(item.label.starts_with("-b "), "got: {:?}", item.label);
-    assert!(!item.label.contains('—'),
-        "parked settings tab must not fall back to a dash, got: {:?}", item.label);
+    assert!(
+        !item.label.contains('—'),
+        "parked settings tab must not fall back to a dash, got: {:?}",
+        item.label
+    );
 }
 
 #[test]
@@ -6796,7 +8997,10 @@ fn tab_switch_preserves_per_tab_navigation() {
     // Move within tab 1.
     press_down(h.r());
     let tab1_path = h.renderer.current_id.clone();
-    assert_ne!(tab0_path, tab1_path, "navigation should diverge between tabs");
+    assert_ne!(
+        tab0_path, tab1_path,
+        "navigation should diverge between tabs"
+    );
 
     press_ctrl(h.r(), Keycode::_1);
     assert_eq!(h.renderer.current_id, tab0_path);
@@ -6812,9 +9016,15 @@ struct BusyProvider {
 }
 
 impl Provider for BusyProvider {
-    fn name(&self) -> &str { "busybox" }
-    fn fetch(&mut self) -> Vec<FfonElement> { Vec::new() }
-    fn is_busy(&self) -> bool { self.busy }
+    fn name(&self) -> &str {
+        "busybox"
+    }
+    fn fetch(&mut self) -> Vec<FfonElement> {
+        Vec::new()
+    }
+    fn is_busy(&self) -> bool {
+        self.busy
+    }
 }
 
 #[test]
@@ -6825,7 +9035,11 @@ fn ctrl_w_non_busy_tab_closes_immediately() {
 
     press_ctrl(h.r(), Keycode::W);
 
-    assert_eq!(h.renderer.tabs.len(), 1, "non-busy tab closes without a prompt");
+    assert_eq!(
+        h.renderer.tabs.len(),
+        1,
+        "non-busy tab closes without a prompt"
+    );
     assert_ne!(h.renderer.coordinate, Coordinate::ConfirmCloseTab);
 }
 
@@ -6839,14 +9053,27 @@ fn ctrl_w_busy_tab_shows_confirmation_with_button_prefixes() {
     press_ctrl(h.r(), Keycode::W);
 
     assert_eq!(h.renderer.coordinate, Coordinate::ConfirmCloseTab);
-    assert_eq!(h.renderer.tabs.len(), 2, "busy tab is NOT closed before confirmation");
+    assert_eq!(
+        h.renderer.tabs.len(),
+        2,
+        "busy tab is NOT closed before confirmation"
+    );
     assert_eq!(h.renderer.total_list.len(), 2, "Cancel + Close options");
     // Both options render with the `-b` button list prefix.
-    assert!(h.renderer.total_list[0].label.starts_with("-b "),
-        "cancel option should carry the -b prefix, got {:?}", h.renderer.total_list[0].label);
-    assert!(h.renderer.total_list[1].label.starts_with("-b "),
-        "close option should carry the -b prefix, got {:?}", h.renderer.total_list[1].label);
-    assert_eq!(h.renderer.list_index, 0, "cursor defaults to the safe Cancel option");
+    assert!(
+        h.renderer.total_list[0].label.starts_with("-b "),
+        "cancel option should carry the -b prefix, got {:?}",
+        h.renderer.total_list[0].label
+    );
+    assert!(
+        h.renderer.total_list[1].label.starts_with("-b "),
+        "close option should carry the -b prefix, got {:?}",
+        h.renderer.total_list[1].label
+    );
+    assert_eq!(
+        h.renderer.list_index, 0,
+        "cursor defaults to the safe Cancel option"
+    );
 }
 
 #[test]
@@ -6892,11 +9119,21 @@ fn enabling_app_in_settings_propagates_to_all_tabs() {
     sicompass::programs::apply_pending_settings(h.r(), &queue, false);
 
     // Active tab (live providers) has it.
-    assert!(h.renderer.providers.iter().any(|p| p.name() == "webbrowser"),
-        "active tab should have the newly enabled provider");
+    assert!(
+        h.renderer
+            .providers
+            .iter()
+            .any(|p| p.name() == "webbrowser"),
+        "active tab should have the newly enabled provider"
+    );
     // Inactive tab's parked set has it too.
-    assert!(h.renderer.tabs[inactive].providers.iter().any(|p| p.name() == "webbrowser"),
-        "inactive tab should ALSO have the newly enabled provider");
+    assert!(
+        h.renderer.tabs[inactive]
+            .providers
+            .iter()
+            .any(|p| p.name() == "webbrowser"),
+        "inactive tab should ALSO have the newly enabled provider"
+    );
 
     // Now disable it again — both tabs lose it.
     let queue: sicompass::programs::SettingsQueue = std::sync::Arc::new(std::sync::Mutex::new(
@@ -6904,10 +9141,20 @@ fn enabling_app_in_settings_propagates_to_all_tabs() {
     ));
     sicompass::programs::apply_pending_settings(h.r(), &queue, false);
 
-    assert!(!h.renderer.providers.iter().any(|p| p.name() == "webbrowser"),
-        "active tab should drop the disabled provider");
-    assert!(!h.renderer.tabs[inactive].providers.iter().any(|p| p.name() == "webbrowser"),
-        "inactive tab should ALSO drop the disabled provider");
+    assert!(
+        !h.renderer
+            .providers
+            .iter()
+            .any(|p| p.name() == "webbrowser"),
+        "active tab should drop the disabled provider"
+    );
+    assert!(
+        !h.renderer.tabs[inactive]
+            .providers
+            .iter()
+            .any(|p| p.name() == "webbrowser"),
+        "inactive tab should ALSO drop the disabled provider"
+    );
 }
 
 /// Regression: the user reported that after restart, landing in the "second
@@ -6928,14 +9175,25 @@ fn enabling_app_in_settings_propagates_to_all_tabs() {
 #[test]
 fn startup_language_drain_does_not_collapse_inactive_provider() {
     let mut h = Harness::new(); // filebrowser(0) + shared settings
-    register(&mut h.renderer, sicompass_sdk::create_provider_by_name("tutorial").unwrap());
+    register(
+        &mut h.renderer,
+        sicompass_sdk::create_provider_by_name("tutorial").unwrap(),
+    );
     let tut = h.provider_idx("tutorial").unwrap();
 
     let before = h.renderer.ffon[tut].as_obj().unwrap().children.len();
-    assert!(before > 0, "tutorial root must have children after register");
+    assert!(
+        before > 0,
+        "tutorial root must have children after register"
+    );
 
     // Filebrowser active => the tutorial is an INACTIVE provider.
-    h.renderer.current_id = { let mut id = IdArray::new(); id.push(0); id.push(0); id };
+    h.renderer.current_id = {
+        let mut id = IdArray::new();
+        id.push(0);
+        id.push(0);
+        id
+    };
 
     // Startup drain (skip_enable = true) of the saved language.
     let queue: sicompass::programs::SettingsQueue = std::sync::Arc::new(std::sync::Mutex::new(
@@ -6969,7 +9227,11 @@ fn language_change_refreshes_parked_tab_root_keys() {
 
     // The parked tab's root key is re-derived from its own provider.
     let expected = h.renderer.tabs[inactive].providers[0].display_name();
-    let actual = h.renderer.tabs[inactive].ffon[0].as_obj().unwrap().key.clone();
+    let actual = h.renderer.tabs[inactive].ffon[0]
+        .as_obj()
+        .unwrap()
+        .key
+        .clone();
     assert_eq!(actual, expected, "parked tab root key should be refreshed");
     assert_ne!(actual, "STALE");
 }
@@ -6988,7 +9250,10 @@ fn language_change_collapses_inactive_tutorial_and_announces() {
     let mut renderer = AppRenderer::new();
 
     // Provider 0: tutorial (will be inactive). Provider 1: settings (active).
-    register(&mut renderer, sicompass_sdk::create_provider_by_name("tutorial").unwrap());
+    register(
+        &mut renderer,
+        sicompass_sdk::create_provider_by_name("tutorial").unwrap(),
+    );
     let mut settings = sicompass_sdk::create_provider_by_name("settings").unwrap();
     settings.set_config_path(settings_tmp.path().join("settings.json"));
     register(&mut renderer, settings);
@@ -7084,11 +9349,20 @@ fn tab_switch_announces_via_pending_announcement() {
     press_ctrl(h.r(), Keycode::Tab);
     sicompass::handlers::handle_tab_switcher_commit(h.r());
 
-    let raw = h.renderer.pending_announcement.as_ref()
+    let raw = h
+        .renderer
+        .pending_announcement
+        .as_ref()
         .expect("Ctrl+Tab commit must produce an announcement");
     let text = strip_announcement_sentinel(raw);
-    assert!(text.starts_with("tab "), "announcement should start with 'tab ', got: {text:?}");
-    assert!(text.contains("/"), "announcement should contain N/M, got: {text:?}");
+    assert!(
+        text.starts_with("tab "),
+        "announcement should start with 'tab ', got: {text:?}"
+    );
+    assert!(
+        text.contains("/"),
+        "announcement should contain N/M, got: {text:?}"
+    );
 }
 
 #[test]
@@ -7104,15 +9378,29 @@ fn tabs_persist_to_settings_provider() {
     let cfg = h.settings_path();
     let data = std::fs::read_to_string(&cfg).expect("settings.json should exist after a tab op");
     let json: serde_json::Value = serde_json::from_str(&data).unwrap();
-    let sicompass_section = json.get("sicompass")
+    let sicompass_section = json
+        .get("sicompass")
         .and_then(|v| v.as_object())
         .expect("sicompass section must exist");
-    assert!(sicompass_section.get("tabs").and_then(|v| v.as_str()).is_some(),
-        "tabs key should be persisted as a string");
-    assert!(sicompass_section.get("activeTab").and_then(|v| v.as_str()).is_some(),
-        "activeTab key should be persisted as a string");
+    assert!(
+        sicompass_section
+            .get("tabs")
+            .and_then(|v| v.as_str())
+            .is_some(),
+        "tabs key should be persisted as a string"
+    );
+    assert!(
+        sicompass_section
+            .get("activeTab")
+            .and_then(|v| v.as_str())
+            .is_some(),
+        "activeTab key should be persisted as a string"
+    );
     assert_eq!(
-        sicompass_section.get("activeTab").and_then(|v| v.as_str()).unwrap(),
+        sicompass_section
+            .get("activeTab")
+            .and_then(|v| v.as_str())
+            .unwrap(),
         "1",
         "activeTab should be 1 after Ctrl+T"
     );
@@ -7127,7 +9415,9 @@ fn load_tabs_state_restores_persisted_layout() {
     press_ctrl(h.r(), Keycode::T);
     // Capture the persisted nav fields (TabSnapshot now owns per-tab provider
     // instances, so it is neither Clone nor PartialEq — compare nav only).
-    let expected_tabs: Vec<(sicompass_sdk::ffon::IdArray, String)> = h.renderer.tabs
+    let expected_tabs: Vec<(sicompass_sdk::ffon::IdArray, String)> = h
+        .renderer
+        .tabs
         .iter()
         .map(|t| (t.current_id.clone(), t.provider_path.clone()))
         .collect();
@@ -7148,16 +9438,19 @@ fn load_tabs_state_restores_persisted_layout() {
         serde_json::Value::Array(a) => a,
         _ => panic!("tabs should serialize to a JSON array"),
     };
-    let parsed: Vec<(IdArray, String)> = arr.into_iter().map(|v| {
-        let obj = v.as_object().unwrap();
-        let ids = obj.get("id").unwrap().as_array().unwrap();
-        let path = obj.get("path").unwrap().as_str().unwrap().to_owned();
-        let mut id = IdArray::new();
-        for n in ids {
-            id.push(n.as_u64().unwrap() as usize);
-        }
-        (id, path)
-    }).collect();
+    let parsed: Vec<(IdArray, String)> = arr
+        .into_iter()
+        .map(|v| {
+            let obj = v.as_object().unwrap();
+            let ids = obj.get("id").unwrap().as_array().unwrap();
+            let path = obj.get("path").unwrap().as_str().unwrap().to_owned();
+            let mut id = IdArray::new();
+            for n in ids {
+                id.push(n.as_u64().unwrap() as usize);
+            }
+            (id, path)
+        })
+        .collect();
     let parsed_active: usize = active_str.parse().unwrap();
 
     assert_eq!(parsed, expected_tabs);
@@ -7181,17 +9474,27 @@ fn apply_tabs_section_keeps_tab_timelines_parallel_to_tabs() {
     );
     let mut sec = serde_json::Map::new();
     sec.insert("tabs".to_owned(), serde_json::Value::String(tabs_json));
-    sec.insert("activeTab".to_owned(), serde_json::Value::String("2".to_owned()));
+    sec.insert(
+        "activeTab".to_owned(),
+        serde_json::Value::String("2".to_owned()),
+    );
 
     sicompass::programs::apply_tabs_section(h.r(), &sec);
 
-    assert_eq!(h.renderer.tabs.len(), 3, "all three persisted tabs should load");
+    assert_eq!(
+        h.renderer.tabs.len(),
+        3,
+        "all three persisted tabs should load"
+    );
     assert_eq!(
         h.renderer.tab_timelines.len(),
         h.renderer.tabs.len(),
         "tab_timelines must stay parallel to tabs after load",
     );
-    assert_eq!(h.renderer.active_tab, 2, "saved active tab should be restored");
+    assert_eq!(
+        h.renderer.active_tab, 2,
+        "saved active tab should be restored"
+    );
 
     // Would have panicked before the fix: active_tab=2 indexed a 1-element vec.
     let _ = h.renderer.active_timeline_mut();
@@ -7212,7 +9515,10 @@ fn load_active_tab_clamps_stale_cursor_past_end() {
         FfonElement::Obj(o) => o.children.len(),
         _ => 0,
     };
-    assert!(children_len >= 1, "harness should produce at least one child");
+    assert!(
+        children_len >= 1,
+        "harness should produce at least one child"
+    );
 
     // Forge a snapshot whose cursor sits well past the actual children.
     let mut id = sicompass_sdk::ffon::IdArray::new();
@@ -7253,7 +9559,10 @@ fn load_active_tab_pops_stale_levels_for_webbrowser() {
         FfonElement::Obj(o) => o.children.len(),
         _ => 0,
     };
-    assert_eq!(children_len, 1, "fresh webbrowser should expose just the URL bar");
+    assert_eq!(
+        children_len, 1,
+        "fresh webbrowser should expose just the URL bar"
+    );
 
     // Forge a snapshot whose cursor is buried inside a page tree that no
     // longer exists: `[wb_idx, 0, 3, 1]` — `[wb_idx, 0]` is a `Str` so the
@@ -7298,8 +9607,12 @@ fn load_active_tab_preserves_valid_deep_cursor() {
     h.renderer.providers[fb_idx].set_current_path("/");
     let mut root = FfonElement::new_obj("file browser");
     let mut mid = FfonElement::new_obj("mid");
-    mid.as_obj_mut().unwrap().push(FfonElement::new_str("leaf-a"));
-    mid.as_obj_mut().unwrap().push(FfonElement::new_str("leaf-b"));
+    mid.as_obj_mut()
+        .unwrap()
+        .push(FfonElement::new_str("leaf-a"));
+    mid.as_obj_mut()
+        .unwrap()
+        .push(FfonElement::new_str("leaf-b"));
     root.as_obj_mut().unwrap().push(mid);
     h.renderer.ffon[fb_idx] = root;
 
@@ -7335,7 +9648,8 @@ fn load_active_tab_preserves_valid_deep_cursor() {
 #[test]
 fn load_active_tab_settings_deep_cursor_restores_into_correct_section() {
     let mut h = Harness::new();
-    let settings_idx = h.provider_idx("settings")
+    let settings_idx = h
+        .provider_idx("settings")
         .expect("settings provider must be registered");
 
     // Build a fully-fetched settings tree as it'd look at runtime, so
@@ -7351,8 +9665,12 @@ fn load_active_tab_settings_deep_cursor_restores_into_correct_section() {
     // Locate the sicompass section.
     let sicompass_section_idx = {
         let r = h.renderer.ffon[settings_idx].as_obj().unwrap();
-        r.children.iter().position(|c| matches!(c, FfonElement::Obj(o)
-            if sicompass_sdk::tags::strip_display(&o.key) == "sicompass"))
+        r.children
+            .iter()
+            .position(|c| {
+                matches!(c, FfonElement::Obj(o)
+            if sicompass_sdk::tags::strip_display(&o.key) == "sicompass")
+            })
             .expect("sicompass section must be present")
     };
 
@@ -7360,17 +9678,22 @@ fn load_active_tab_settings_deep_cursor_restores_into_correct_section() {
     // (The exact one doesn't matter — what matters is the cursor doesn't
     // get redirected into a *different* section.)
     let (radio_idx_in_section, radio_child_count) = {
-        let sicompass_obj = h.renderer.ffon[settings_idx]
-            .as_obj().unwrap()
-            .children[sicompass_section_idx]
-            .as_obj().unwrap();
-        let pos = sicompass_obj.children.iter().position(|c|
-            matches!(c, FfonElement::Obj(o) if o.key.contains("<radio>")))
+        let sicompass_obj = h.renderer.ffon[settings_idx].as_obj().unwrap().children
+            [sicompass_section_idx]
+            .as_obj()
+            .unwrap();
+        let pos = sicompass_obj
+            .children
+            .iter()
+            .position(|c| matches!(c, FfonElement::Obj(o) if o.key.contains("<radio>")))
             .expect("sicompass should have at least one radio");
         let n = sicompass_obj.children[pos].as_obj().unwrap().children.len();
         (pos, n)
     };
-    assert!(radio_child_count > 0, "radio should have at least one option");
+    assert!(
+        radio_child_count > 0,
+        "radio should have at least one option"
+    );
 
     // Save a depth-4 cursor pointing at the first option of that radio,
     // and a provider_path that the OLD buggy code would split into
@@ -7384,23 +9707,31 @@ fn load_active_tab_settings_deep_cursor_restores_into_correct_section() {
     // Force `provider_path` to differ from `current_path()` so the rebuild
     // branch in load_active_tab actually fires (it skips otherwise).
     h.renderer.providers[settings_idx].set_current_path("/");
-    h.renderer.tabs[0] = sicompass::app_state::TabSnapshot::nav_only(cursor.clone(), "/sicompass/language".to_owned());
+    h.renderer.tabs[0] = sicompass::app_state::TabSnapshot::nav_only(
+        cursor.clone(),
+        "/sicompass/language".to_owned(),
+    );
     h.renderer.active_tab = 0;
     h.renderer.load_active_tab();
 
     // The restored cursor must still descend through `settings →
     // sicompass-section → that-radio → option`, NOT through a sibling
     // section. Verify by walking the tree.
-    assert_eq!(h.renderer.current_id.get(0), Some(settings_idx),
-        "should still be in the settings provider");
-    assert_eq!(h.renderer.current_id.get(1), Some(sicompass_section_idx),
-        "second level must remain the sicompass section");
+    assert_eq!(
+        h.renderer.current_id.get(0),
+        Some(settings_idx),
+        "should still be in the settings provider"
+    );
+    assert_eq!(
+        h.renderer.current_id.get(1),
+        Some(sicompass_section_idx),
+        "second level must remain the sicompass section"
+    );
 
     // The node at depth-2 must still be an Obj keyed as the sicompass
     // section (key may be translated; we strip display tags).
-    let depth2_obj = h.renderer.ffon[settings_idx]
-        .as_obj().unwrap()
-        .children[sicompass_section_idx]
+    let depth2_obj = h.renderer.ffon[settings_idx].as_obj().unwrap().children
+        [sicompass_section_idx]
         .as_obj()
         .expect("depth-2 must resolve to an Obj (the sicompass section)");
     assert_eq!(
@@ -7426,16 +9757,23 @@ fn tab_switch_restores_provider_path_after_other_tab_navigates() {
     // Navigate to "subdir" (which we know was created by Harness::new).
     let subdir_idx = {
         let provider_root = h.renderer.ffon[fb_idx].as_obj().unwrap();
-        provider_root.children.iter().position(|c| matches!(c, FfonElement::Obj(o)
-            if sicompass_sdk::tags::strip_display(&o.key).contains("subdir")))
+        provider_root
+            .children
+            .iter()
+            .position(|c| {
+                matches!(c, FfonElement::Obj(o)
+            if sicompass_sdk::tags::strip_display(&o.key).contains("subdir"))
+            })
             .expect("subdir must be in the listing")
     };
     h.renderer.current_id.set(1, subdir_idx);
     sicompass::list::create_list_current_layer(h.r());
     press_right(h.r()); // into subdir
     let tab1_path_before = sicompass::provider::current_path(h.r()).to_owned();
-    assert!(tab1_path_before.ends_with("subdir"),
-        "expected to be inside subdir, got {tab1_path_before:?}");
+    assert!(
+        tab1_path_before.ends_with("subdir"),
+        "expected to be inside subdir, got {tab1_path_before:?}"
+    );
 
     // Open a second tab (duplicate of tab 1, both inside subdir).
     press_ctrl(h.r(), Keycode::T);
@@ -7446,21 +9784,35 @@ fn tab_switch_restores_provider_path_after_other_tab_navigates() {
     // r.ffon[fb_idx] for the parent directory.
     press_left(h.r());
     let tab2_path_after = sicompass::provider::current_path(h.r()).to_owned();
-    assert_ne!(tab1_path_before, tab2_path_after,
-        "Left in tab 2 should change the file browser's path");
+    assert_ne!(
+        tab1_path_before, tab2_path_after,
+        "Left in tab 2 should change the file browser's path"
+    );
 
     // Switch back to tab 1: the file browser should be re-set to subdir, and
     // the FFON tree should reflect subdir contents (containing nested.txt).
     press_ctrl(h.r(), Keycode::_1);
     let tab1_path_restored = sicompass::provider::current_path(h.r()).to_owned();
-    assert_eq!(tab1_path_restored, tab1_path_before,
-        "switching back to tab 1 must restore its saved provider path");
+    assert_eq!(
+        tab1_path_restored, tab1_path_before,
+        "switching back to tab 1 must restore its saved provider path"
+    );
 
     // The FFON tree at the file browser root now reflects subdir; verify
     // nested.txt is present in the list.
-    let labels: Vec<String> = h.renderer.total_list.iter().map(|i| i.label.clone()).collect();
-    let any_nested = labels.iter().any(|l| sicompass_sdk::tags::strip_display(l).contains("nested.txt"));
-    assert!(any_nested, "tab 1 listing must contain nested.txt after restore, got {labels:?}");
+    let labels: Vec<String> = h
+        .renderer
+        .total_list
+        .iter()
+        .map(|i| i.label.clone())
+        .collect();
+    let any_nested = labels
+        .iter()
+        .any(|l| sicompass_sdk::tags::strip_display(l).contains("nested.txt"));
+    assert!(
+        any_nested,
+        "tab 1 listing must contain nested.txt after restore, got {labels:?}"
+    );
 }
 
 /// Regression: navigating between programs at root (depth 1) must update the
@@ -7491,15 +9843,19 @@ fn entering_program_from_root_updates_active_tab_snapshot() {
     navigate_to_provider(h.r(), fb_idx);
 
     press_right(h.r());
-    assert!(h.renderer.current_id.depth() >= 2,
-        "Right from root should push into the provider");
+    assert!(
+        h.renderer.current_id.depth() >= 2,
+        "Right from root should push into the provider"
+    );
 
     let snap_current_id = h.renderer.tabs[h.renderer.active_tab].current_id.clone();
     let snap_provider_path = h.renderer.tabs[h.renderer.active_tab].provider_path.clone();
     assert_eq!(snap_current_id, h.renderer.current_id);
     let live_path = sicompass::provider::current_path(h.r()).to_owned();
-    assert_eq!(snap_provider_path, live_path,
-        "active tab snapshot must capture provider path after entering");
+    assert_eq!(
+        snap_provider_path, live_path,
+        "active tab snapshot must capture provider path after entering"
+    );
 }
 
 /// Root navigation persists to settings.json so `config` follows on restart.
@@ -7510,21 +9866,28 @@ fn root_navigation_persists_to_settings() {
     let expected_first_id = h.renderer.current_id.get(0).unwrap_or(0);
 
     let cfg = h.settings_path();
-    let data = std::fs::read_to_string(&cfg)
-        .expect("settings.json should exist after root navigation");
+    let data =
+        std::fs::read_to_string(&cfg).expect("settings.json should exist after root navigation");
     let json: serde_json::Value = serde_json::from_str(&data).unwrap();
-    let tabs_str = json.get("sicompass")
+    let tabs_str = json
+        .get("sicompass")
         .and_then(|v| v.as_object())
         .and_then(|s| s.get("tabs"))
         .and_then(|v| v.as_str())
         .expect("tabs key should be persisted after navigation");
     let arr = serde_json::from_str::<serde_json::Value>(tabs_str).unwrap();
     let first_id_arr = arr.as_array().unwrap()[0]
-        .as_object().unwrap()
-        .get("id").unwrap()
-        .as_array().unwrap();
-    assert_eq!(first_id_arr[0].as_u64().unwrap() as usize, expected_first_id,
-        "persisted tab's first index must match post-navigation provider");
+        .as_object()
+        .unwrap()
+        .get("id")
+        .unwrap()
+        .as_array()
+        .unwrap();
+    assert_eq!(
+        first_id_arr[0].as_u64().unwrap() as usize,
+        expected_first_id,
+        "persisted tab's first index must match post-navigation provider"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -7574,7 +9937,11 @@ fn terminal_auto_enters_and_leaves_dashboard_on_alt_screen() {
 
     // Submit a one-liner that opens the alt screen, sleeps long enough for
     // us to observe the entered state, then closes it.
-    let term_idx = renderer.providers.iter().position(|p| p.name() == "terminal").unwrap();
+    let term_idx = renderer
+        .providers
+        .iter()
+        .position(|p| p.name() == "terminal")
+        .unwrap();
     let submitted = renderer.providers[term_idx]
         .commit_edit("", "printf '\\033[?1049h'; sleep 1; printf '\\033[?1049l'");
     if !submitted {
@@ -7593,7 +9960,10 @@ fn terminal_auto_enters_and_leaves_dashboard_on_alt_screen() {
         }
         thread::sleep(Duration::from_millis(20));
     }
-    assert!(entered, "expected auto-enter into Dashboard after alt-screen-h");
+    assert!(
+        entered,
+        "expected auto-enter into Dashboard after alt-screen-h"
+    );
 
     // Continue ticking until the trailing alt-screen-l is observed and we
     // auto-leave back to the prior coordinate.
@@ -7607,7 +9977,10 @@ fn terminal_auto_enters_and_leaves_dashboard_on_alt_screen() {
         }
         thread::sleep(Duration::from_millis(20));
     }
-    assert!(left, "expected auto-leave from Dashboard after alt-screen-l");
+    assert!(
+        left,
+        "expected auto-leave from Dashboard after alt-screen-l"
+    );
 }
 
 #[cfg(unix)]
@@ -7630,7 +10003,11 @@ fn auto_leave_lands_in_general_mode_even_if_user_was_in_insert() {
     renderer.input_buffer = "btop".to_owned();
     renderer.cursor_position = 4;
 
-    let term_idx = renderer.providers.iter().position(|p| p.name() == "terminal").unwrap();
+    let term_idx = renderer
+        .providers
+        .iter()
+        .position(|p| p.name() == "terminal")
+        .unwrap();
     if !renderer.providers[term_idx]
         .commit_edit("", "printf '\\033[?1049h'; sleep 1; printf '\\033[?1049l'")
     {
@@ -7643,8 +10020,11 @@ fn auto_leave_lands_in_general_mode_even_if_user_was_in_insert() {
         pump_tick(&mut renderer);
         thread::sleep(Duration::from_millis(20));
     }
-    assert_eq!(renderer.coordinate, Coordinate::Dashboard,
-        "expected auto-enter into Dashboard");
+    assert_eq!(
+        renderer.coordinate,
+        Coordinate::Dashboard,
+        "expected auto-enter into Dashboard"
+    );
 
     // Pump until we're back out (auto-leave).
     let deadline = Instant::now() + Duration::from_secs(5);
@@ -7652,17 +10032,26 @@ fn auto_leave_lands_in_general_mode_even_if_user_was_in_insert() {
         pump_tick(&mut renderer);
         thread::sleep(Duration::from_millis(20));
     }
-    assert_ne!(renderer.coordinate, Coordinate::Dashboard,
-        "expected auto-leave from Dashboard");
+    assert_ne!(
+        renderer.coordinate,
+        Coordinate::Dashboard,
+        "expected auto-leave from Dashboard"
+    );
 
     // The fix: regardless of what mode the user was in before auto-launch,
     // auto-leave returns them to a clean General mode with no stale Insert
     // state. Otherwise `i`/`a` would type literally instead of switching
     // back into Insert.
-    assert_eq!(renderer.coordinate, Coordinate::General,
-        "auto-leave must land in General mode, not the pre-launch Insert mode");
-    assert!(renderer.input_buffer.is_empty(),
-        "auto-leave must clear stale input_buffer; got {:?}", renderer.input_buffer);
+    assert_eq!(
+        renderer.coordinate,
+        Coordinate::General,
+        "auto-leave must land in General mode, not the pre-launch Insert mode"
+    );
+    assert!(
+        renderer.input_buffer.is_empty(),
+        "auto-leave must clear stale input_buffer; got {:?}",
+        renderer.input_buffer
+    );
 }
 
 #[cfg(unix)]
@@ -7678,15 +10067,21 @@ fn terminal_manual_d_keypress_is_blocked() {
     register_terminal_in_shell(&mut renderer);
     sicompass::list::create_list_current_layer(&mut renderer);
 
-    let term_idx = renderer.providers.iter().position(|p| p.name() == "terminal").unwrap();
+    let term_idx = renderer
+        .providers
+        .iter()
+        .position(|p| p.name() == "terminal")
+        .unwrap();
     if !renderer.providers[term_idx].commit_edit("", "true") {
         return;
     }
 
     let coord_before = renderer.coordinate;
     sicompass::handlers::handle_dashboard(&mut renderer);
-    assert_eq!(renderer.coordinate, coord_before,
-        "manual handle_dashboard must be a no-op for the terminal provider");
+    assert_eq!(
+        renderer.coordinate, coord_before,
+        "manual handle_dashboard must be a no-op for the terminal provider"
+    );
 }
 
 #[cfg(unix)]
@@ -7699,7 +10094,11 @@ fn esc_in_interactive_dashboard_does_not_exit() {
     register_terminal_in_shell(&mut renderer);
     sicompass::list::create_list_current_layer(&mut renderer);
 
-    let term_idx = renderer.providers.iter().position(|p| p.name() == "terminal").unwrap();
+    let term_idx = renderer
+        .providers
+        .iter()
+        .position(|p| p.name() == "terminal")
+        .unwrap();
     if !renderer.providers[term_idx].commit_edit("", "true") {
         return;
     }
@@ -7709,8 +10108,11 @@ fn esc_in_interactive_dashboard_does_not_exit() {
     assert_eq!(renderer.coordinate, Coordinate::Dashboard);
 
     press_escape(&mut renderer);
-    assert_eq!(renderer.coordinate, Coordinate::Dashboard,
-        "Esc must be forwarded to the interactive dashboard program, not exit");
+    assert_eq!(
+        renderer.coordinate,
+        Coordinate::Dashboard,
+        "Esc must be forwarded to the interactive dashboard program, not exit"
+    );
 }
 
 #[cfg(unix)]
@@ -7725,7 +10127,11 @@ fn ctrl_c_in_interactive_dashboard_does_not_exit() {
     register_terminal_in_shell(&mut renderer);
     sicompass::list::create_list_current_layer(&mut renderer);
 
-    let term_idx = renderer.providers.iter().position(|p| p.name() == "terminal").unwrap();
+    let term_idx = renderer
+        .providers
+        .iter()
+        .position(|p| p.name() == "terminal")
+        .unwrap();
     if !renderer.providers[term_idx].commit_edit("", "true") {
         return;
     }
@@ -7734,8 +10140,11 @@ fn ctrl_c_in_interactive_dashboard_does_not_exit() {
     assert_eq!(renderer.coordinate, Coordinate::Dashboard);
 
     press_ctrl(&mut renderer, Keycode::C);
-    assert_eq!(renderer.coordinate, Coordinate::Dashboard,
-        "Ctrl+C must be forwarded to the program (SIGINT), not exit the dashboard");
+    assert_eq!(
+        renderer.coordinate,
+        Coordinate::Dashboard,
+        "Ctrl+C must be forwarded to the program (SIGINT), not exit the dashboard"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -7745,7 +10154,10 @@ fn ctrl_c_in_interactive_dashboard_does_not_exit() {
 /// Register a terminal whose browse view is re-rooted at `path`, so the listing
 /// is a known set of directories instead of whatever `/` happens to hold.
 fn register_terminal_rooted_at(renderer: &mut AppRenderer, path: &std::path::Path) {
-    register(renderer, sicompass_sdk::create_provider_by_name("terminal").unwrap());
+    register(
+        renderer,
+        sicompass_sdk::create_provider_by_name("terminal").unwrap(),
+    );
     renderer.providers[0].set_current_path(path.to_str().unwrap());
     let children = renderer.providers[0].fetch();
     renderer.ffon[0].as_obj_mut().unwrap().children = children;
@@ -7766,11 +10178,19 @@ fn terminal_opens_on_a_folder_listing() {
     register_terminal_rooted_at(&mut renderer, &root);
     press_right(&mut renderer);
 
-    let labels: Vec<&str> = renderer.total_list.iter().map(|i| i.label.as_str()).collect();
+    let labels: Vec<&str> = renderer
+        .total_list
+        .iter()
+        .map(|i| i.label.as_str())
+        .collect();
     // Directories render as plain `+` (navigable, not renameable); the file is
     // not listed at all.
     assert_eq!(labels, vec!["+ workspace"], "got {labels:?}");
-    assert_eq!(renderer.providers[0].process_id(), None, "browsing spawns no PTY");
+    assert_eq!(
+        renderer.providers[0].process_id(),
+        None,
+        "browsing spawns no PTY"
+    );
 }
 
 #[test]
@@ -7784,7 +10204,7 @@ fn terminal_colon_opens_a_shell_in_the_focused_folder() {
     ensure_builtins();
     let mut renderer = AppRenderer::new();
     register_terminal_rooted_at(&mut renderer, &root);
-    press_right(&mut renderer);              // into the provider, cursor on `workspace`
+    press_right(&mut renderer); // into the provider, cursor on `workspace`
     assert_eq!(renderer.providers[0].current_path(), root.to_str().unwrap());
 
     press_colon(&mut renderer);
@@ -7796,14 +10216,24 @@ fn terminal_colon_opens_a_shell_in_the_focused_folder() {
         ws.to_str().unwrap(),
         "`:` descends into the focused folder on the way in",
     );
-    let last = renderer.total_list.last().expect("shell list should not be empty");
-    assert!(last.label.starts_with("+i "), "expected the input slot; got {:?}", last.label);
+    let last = renderer
+        .total_list
+        .last()
+        .expect("shell list should not be empty");
+    assert!(
+        last.label.starts_with("+i "),
+        "expected the input slot; got {:?}",
+        last.label
+    );
     assert!(
         last.label.contains("workspace$ ") || last.label.contains("workspace> "),
         "prompt should sit in the focused folder; got {:?}",
         last.label,
     );
-    assert!(renderer.providers[0].process_id().is_some(), "`:` spawns the PTY");
+    assert!(
+        renderer.providers[0].process_id().is_some(),
+        "`:` spawns the PTY"
+    );
 }
 
 /// Close and cold-start: map the live navigation through the real persistence
@@ -7851,9 +10281,15 @@ fn terminal_restart_with_a_shell_open_lands_on_the_focused_folder() {
     assert_eq!(renderer.providers[0].current_path(), ws.to_str().unwrap());
 
     let restarted = restart_terminal(&renderer);
-    assert!(!restarted.total_list.is_empty(), "must not land on an empty list");
+    assert!(
+        !restarted.total_list.is_empty(),
+        "must not land on an empty list"
+    );
     assert_eq!(
-        restarted.total_list.get(restarted.list_index).map(|i| i.label.as_str()),
+        restarted
+            .total_list
+            .get(restarted.list_index)
+            .map(|i| i.label.as_str()),
         Some("+ workspace"),
         "back on the folder the shell was running in",
     );
@@ -7890,7 +10326,7 @@ fn terminal_restart_follows_a_cd_typed_before_closing() {
     let mut renderer = AppRenderer::new();
     register_terminal_rooted_at(&mut renderer, &root);
     press_right(&mut renderer);
-    press_down(&mut renderer);   // sorted: `elsewhere` leads, `workspace` follows
+    press_down(&mut renderer); // sorted: `elsewhere` leads, `workspace` follows
     press_colon(&mut renderer);
     assert_eq!(renderer.providers[0].current_path(), ws.to_str().unwrap());
 
@@ -7906,7 +10342,10 @@ fn terminal_restart_follows_a_cd_typed_before_closing() {
 
     let mut restarted = restart_terminal(&renderer);
     assert_eq!(
-        restarted.total_list.get(restarted.list_index).map(|i| i.label.as_str()),
+        restarted
+            .total_list
+            .get(restarted.list_index)
+            .map(|i| i.label.as_str()),
         Some("+ elsewhere"),
         "restart lands on the folder the shell was left in",
     );
@@ -7959,7 +10398,10 @@ fn terminal_escape_follows_a_cd_typed_in_the_shell() {
         "back in the parent of where the shell ended up",
     );
     assert_eq!(
-        renderer.total_list.get(renderer.list_index).map(|i| i.label.as_str()),
+        renderer
+            .total_list
+            .get(renderer.list_index)
+            .map(|i| i.label.as_str()),
         Some("+ elsewhere"),
         "cursor follows the cd, not the folder `:` was pressed on",
     );
@@ -7978,13 +10420,17 @@ fn terminal_folder_without_subfolders_shows_no_insert_placeholder() {
     ensure_builtins();
     let mut renderer = AppRenderer::new();
     register_terminal_rooted_at(&mut renderer, &root);
-    press_right(&mut renderer);              // into the provider
+    press_right(&mut renderer); // into the provider
     let before = renderer.current_id.clone();
 
-    press_right(&mut renderer);              // `workspace` has no subfolders
+    press_right(&mut renderer); // `workspace` has no subfolders
 
     assert_eq!(renderer.current_id, before, "Right on it does nothing");
-    let labels: Vec<&str> = renderer.total_list.iter().map(|i| i.label.as_str()).collect();
+    let labels: Vec<&str> = renderer
+        .total_list
+        .iter()
+        .map(|i| i.label.as_str())
+        .collect();
     assert_eq!(labels, vec!["+ workspace"], "no `i` placeholder anywhere");
     assert_eq!(
         renderer.providers[0].current_path(),
@@ -8009,7 +10455,11 @@ fn terminal_colon_on_an_empty_folder_opens_a_shell_where_it_stands() {
     let mut renderer = AppRenderer::new();
     register_terminal_rooted_at(&mut renderer, &root);
     press_right(&mut renderer);
-    assert_eq!(renderer.total_list.len(), 1, "empty dir shows the `i` placeholder");
+    assert_eq!(
+        renderer.total_list.len(),
+        1,
+        "empty dir shows the `i` placeholder"
+    );
 
     press_colon(&mut renderer);
 
@@ -8029,7 +10479,7 @@ fn terminal_escape_returns_to_the_folder_listing() {
     let mut renderer = AppRenderer::new();
     register_terminal_rooted_at(&mut renderer, &root);
     press_right(&mut renderer);
-    press_colon(&mut renderer);              // shell, running in `workspace`
+    press_colon(&mut renderer); // shell, running in `workspace`
     assert!(renderer.total_list.last().unwrap().label.starts_with("+i "));
     let pid = renderer.providers[0].process_id();
 
@@ -8037,10 +10487,21 @@ fn terminal_escape_returns_to_the_folder_listing() {
 
     // Escape undoes the `:`: back to the listing `:` was pressed in, with the
     // cursor on the folder itself — not inside it, where there may be nothing.
-    let labels: Vec<&str> = renderer.total_list.iter().map(|i| i.label.as_str()).collect();
-    assert_eq!(labels, vec!["+ workspace"], "Escape backs out to the folder");
+    let labels: Vec<&str> = renderer
+        .total_list
+        .iter()
+        .map(|i| i.label.as_str())
+        .collect();
     assert_eq!(
-        renderer.total_list.get(renderer.list_index).map(|i| i.label.as_str()),
+        labels,
+        vec!["+ workspace"],
+        "Escape backs out to the folder"
+    );
+    assert_eq!(
+        renderer
+            .total_list
+            .get(renderer.list_index)
+            .map(|i| i.label.as_str()),
         Some("+ workspace"),
         "cursor lands back on the folder the shell was opened from",
     );
@@ -8072,21 +10533,28 @@ fn terminal_left_is_inert_in_the_shell_and_escape_pops_the_path() {
     ensure_builtins();
     let mut renderer = AppRenderer::new();
     register_terminal_rooted_at(&mut renderer, &root);
-    press_right(&mut renderer);              // into the provider, cursor on `workspace`
-    press_colon(&mut renderer);              // descends + shell, running in `workspace`
+    press_right(&mut renderer); // into the provider, cursor on `workspace`
+    press_colon(&mut renderer); // descends + shell, running in `workspace`
     assert_eq!(renderer.providers[0].current_path(), ws.to_str().unwrap());
     let in_shell = renderer.current_id.clone();
 
     press_left(&mut renderer);
 
-    assert_eq!(renderer.current_id, in_shell, "Left is a no-op in the shell");
+    assert_eq!(
+        renderer.current_id, in_shell,
+        "Left is a no-op in the shell"
+    );
     assert_eq!(renderer.providers[0].current_path(), ws.to_str().unwrap());
     assert!(renderer.total_list.last().unwrap().label.starts_with("+i "));
 
     // Escape is what leaves, and the path pops with it.
     press_escape(&mut renderer);
     assert_eq!(renderer.providers[0].current_path(), root.to_str().unwrap());
-    let labels: Vec<&str> = renderer.total_list.iter().map(|i| i.label.as_str()).collect();
+    let labels: Vec<&str> = renderer
+        .total_list
+        .iter()
+        .map(|i| i.label.as_str())
+        .collect();
     assert_eq!(labels, vec!["+ workspace"]);
 
     // And `:` again lands on the real directory, not a doubled one.
@@ -8128,7 +10596,10 @@ fn colon_still_opens_the_command_palette_for_other_providers() {
     // The terminal branch in `handle_colon` must not leak to anyone else.
     ensure_builtins();
     let mut renderer = AppRenderer::new();
-    register(&mut renderer, sicompass_sdk::create_provider_by_name("filebrowser").unwrap());
+    register(
+        &mut renderer,
+        sicompass_sdk::create_provider_by_name("filebrowser").unwrap(),
+    );
     sicompass::list::create_list_current_layer(&mut renderer);
     press_right(&mut renderer);
 
@@ -8151,9 +10622,15 @@ fn terminal_input_slot_renders_as_plus_i() {
     // Descend into the terminal provider and press `:` to reach the shell.
     register_terminal_in_shell(&mut renderer);
 
-    let last = renderer.total_list.last().expect("terminal list should not be empty");
-    assert!(last.label.starts_with("+i "),
-        "terminal input slot should render as `+i`; got {:?}", last.label);
+    let last = renderer
+        .total_list
+        .last()
+        .expect("terminal list should not be empty");
+    assert!(
+        last.label.starts_with("+i "),
+        "terminal input slot should render as `+i`; got {:?}",
+        last.label
+    );
 }
 
 #[test]
@@ -8178,14 +10655,18 @@ fn enter_on_history_button_fills_input() {
     assert_eq!(renderer.current_id, slot_id);
     assert_eq!(renderer.coordinate, Coordinate::General);
     let slot_key = slot_key_at(&renderer, &slot_id);
-    assert!(slot_key.contains("<input>git status</input>"),
-        "slot <input> should hold the picked command; got {slot_key:?}");
+    assert!(
+        slot_key.contains("<input>git status</input>"),
+        "slot <input> should hold the picked command; got {slot_key:?}"
+    );
 
     // The value survives a re-fetch — the provider persisted it.
     let refetched = renderer.providers[0].fetch();
     let key = &refetched.last().unwrap().as_obj().unwrap().key;
-    assert!(key.contains("<input>git status</input>"),
-        "re-fetched +i slot should keep the filled value; got {key:?}");
+    assert!(
+        key.contains("<input>git status</input>"),
+        "re-fetched +i slot should keep the filled value; got {key:?}"
+    );
 }
 
 #[test]
@@ -8203,8 +10684,11 @@ fn general_enter_on_live_input_slot_does_not_descend_into_history() {
 
     // Depth, not the exact id: committing appends a scrollback entry, which
     // shifts the slot's index within its own level.
-    assert_eq!(renderer.current_id.depth(), slot_id.depth(),
-        "General-mode Enter on the +i slot must not descend into history");
+    assert_eq!(
+        renderer.current_id.depth(),
+        slot_id.depth(),
+        "General-mode Enter on the +i slot must not descend into history"
+    );
 }
 
 #[test]
@@ -8229,11 +10713,17 @@ fn search_enter_on_history_button_fills_input() {
 
     press_enter(&mut renderer);
 
-    assert_eq!(renderer.coordinate, Coordinate::General, "search mode should exit");
+    assert_eq!(
+        renderer.coordinate,
+        Coordinate::General,
+        "search mode should exit"
+    );
     assert_eq!(renderer.current_id, slot_id, "focus moved onto the +i slot");
     let slot_key = slot_key_at(&renderer, &slot_id);
-    assert!(slot_key.contains("<input>git log</input>"),
-        "search Enter should fill the +i <input>; got {slot_key:?}");
+    assert!(
+        slot_key.contains("<input>git log</input>"),
+        "search Enter should fill the +i <input>; got {slot_key:?}"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -8245,8 +10735,8 @@ fn search_enter_on_history_button_fills_input() {
 // don't call these yet — step 4+ wires them in.
 
 use sicompass::state as state_mod;
-use sicompass_sdk::timeline::{NavKind, StructuralOp, StructuralPayload, TimelineEntry};
 use sicompass_sdk::ffon::IdArray;
+use sicompass_sdk::timeline::{NavKind, StructuralOp, StructuralPayload, TimelineEntry};
 use std::thread::sleep;
 use std::time::Duration;
 
@@ -8564,8 +11054,12 @@ fn arrow_up_down_burst_does_not_record_anything() {
     navigate_to_provider(h.r(), fb_idx);
     press_right(h.r());
     let before_count = h.renderer.active_timeline().entries.len();
-    for _ in 0..5 { press_down(h.r()); }
-    for _ in 0..3 { press_up(h.r()); }
+    for _ in 0..5 {
+        press_down(h.r());
+    }
+    for _ in 0..3 {
+        press_up(h.r());
+    }
     assert_eq!(
         h.renderer.active_timeline().entries.len(),
         before_count,
@@ -8628,12 +11122,21 @@ fn task_input_via_update_state_emits_text_chunk() {
     h.renderer.input_buffer = "renamed_label".to_string();
     h.renderer.cursor_position = h.renderer.input_buffer.len();
     let before_count = h.renderer.active_timeline().entries.len();
-    sicompass::state::update_state(h.r(), sicompass::app_state::Task::Input, sicompass::app_state::History::None);
+    sicompass::state::update_state(
+        h.r(),
+        sicompass::app_state::Task::Input,
+        sicompass::app_state::History::None,
+    );
     let after_count = h.renderer.active_timeline().entries.len();
-    assert!(after_count > before_count, "Task::Input emitted at least one entry");
+    assert!(
+        after_count > before_count,
+        "Task::Input emitted at least one entry"
+    );
     let new_entries: Vec<_> = h.renderer.active_timeline().entries[before_count..].to_vec();
     assert!(
-        new_entries.iter().any(|e| matches!(e, TimelineEntry::TextChunk { .. })),
+        new_entries
+            .iter()
+            .any(|e| matches!(e, TimelineEntry::TextChunk { .. })),
         "expected a TextChunk among new entries, got {:?}",
         new_entries
     );
@@ -8654,12 +11157,19 @@ fn append_emits_structural_inserted_entry() {
         sicompass::app_state::History::None,
     );
     let after_count = h.renderer.active_timeline().entries.len();
-    assert!(after_count > before_count, "Task::Append recorded at least one entry");
+    assert!(
+        after_count > before_count,
+        "Task::Append recorded at least one entry"
+    );
     let new_entries: Vec<_> = h.renderer.active_timeline().entries[before_count..].to_vec();
     assert!(
         new_entries.iter().any(|e| matches!(
             e,
-            TimelineEntry::Structural { op: StructuralOp::Append, payload: StructuralPayload::Inserted(_), .. }
+            TimelineEntry::Structural {
+                op: StructuralOp::Append,
+                payload: StructuralPayload::Inserted(_),
+                ..
+            }
         )),
         "expected Structural{{Append, Inserted}}, got {:?}",
         new_entries
@@ -8692,7 +11202,11 @@ fn delete_emits_structural_removed_entry() {
     assert!(
         new_entries.iter().any(|e| matches!(
             e,
-            TimelineEntry::Structural { op: StructuralOp::Delete, payload: StructuralPayload::Removed(_), .. }
+            TimelineEntry::Structural {
+                op: StructuralOp::Delete,
+                payload: StructuralPayload::Removed(_),
+                ..
+            }
         )),
         "expected Structural{{Delete, Removed}}, got {:?}",
         new_entries
@@ -8723,7 +11237,10 @@ fn fscreate_directory_emits_fsop_create_obj() {
     match &new_entries[0] {
         TimelineEntry::FsOp { op, after, .. } => {
             assert_eq!(*op, FsOpKind::Create);
-            assert!(matches!(after, Some(FfonElement::Obj(_))), "directory = Obj");
+            assert!(
+                matches!(after, Some(FfonElement::Obj(_))),
+                "directory = Obj"
+            );
         }
         other => panic!("expected FsOp::Create, got {:?}", other),
     }
@@ -8783,7 +11300,10 @@ fn fscreate_file_undoes_in_one_step() {
     // ...so one ctrl-Z fully reverses it.
     state_mod::walk_back(h.r());
     settle_provider_ops(h.r());
-    assert!(!path.exists(), "one walk_back should remove the created file");
+    assert!(
+        !path.exists(),
+        "one walk_back should remove the created file"
+    );
     std::fs::remove_file(&path).ok();
 }
 
@@ -8816,7 +11336,7 @@ fn nested_create_undo_redo_keeps_list(child_prefix: &str, child_name: &str) {
     // Undo every step — each must leave a non-empty list.
     for n in 1..=depth {
         state_mod::walk_back(h.r());
-    settle_provider_ops(h.r());
+        settle_provider_ops(h.r());
         assert!(
             !h.renderer.total_list.is_empty(),
             "list went blank after walk_back {n} (current_id={:?})",
@@ -8826,7 +11346,7 @@ fn nested_create_undo_redo_keeps_list(child_prefix: &str, child_name: &str) {
     // Redo every step — each must leave a non-empty list.
     for n in 1..=depth {
         state_mod::walk_forward(h.r());
-    settle_provider_ops(h.r());
+        settle_provider_ops(h.r());
         assert!(
             !h.renderer.total_list.is_empty(),
             "list went blank after walk_forward {n} (current_id={:?})",
@@ -8858,15 +11378,25 @@ fn undo_of_filebrowser_delete_stays_in_folder() {
     navigate_to_provider(h.r(), fb_idx);
     press_right(h.r()); // into the filebrowser root listing
     // Descend into `subdir`.
-    let subdir_idx = h.renderer.total_list.iter()
+    let subdir_idx = h
+        .renderer
+        .total_list
+        .iter()
         .position(|it| it.label.contains("subdir"))
         .expect("subdir in listing");
     h.renderer.list_index = subdir_idx;
     h.renderer.current_id = h.renderer.total_list[subdir_idx].id.clone();
     press_right(h.r());
-    assert_eq!(h.renderer.current_id.depth(), 3, "cursor should be inside subdir");
+    assert_eq!(
+        h.renderer.current_id.depth(),
+        3,
+        "cursor should be inside subdir"
+    );
     // Select nested.txt and delete it.
-    let nested_idx = h.renderer.total_list.iter()
+    let nested_idx = h
+        .renderer
+        .total_list
+        .iter()
         .position(|it| it.label.contains("nested.txt"))
         .expect("nested.txt in subdir");
     h.renderer.list_index = nested_idx;
@@ -8917,10 +11447,16 @@ fn timeline_view_open_and_escape_keeps_files() {
     for p in files {
         assert!(h.tmp.path().join(p).exists(), "{p} should be created");
     }
-    assert!(h.tmp.path().join("zfolder").is_dir(), "zfolder should be created");
+    assert!(
+        h.tmp.path().join("zfolder").is_dir(),
+        "zfolder should be created"
+    );
 
     press(h.r(), Keycode::Z); // z → timeline view
-    assert_eq!(h.renderer.coordinate, sicompass::app_state::Coordinate::TimelineView);
+    assert_eq!(
+        h.renderer.coordinate,
+        sicompass::app_state::Coordinate::TimelineView
+    );
     press_down(h.r()); // navigate the timeline view
     press_down(h.r());
     press_escape(h.r()); // escape back out
@@ -8962,13 +11498,25 @@ fn create_files_undo_redo_disk_consistency() {
     // One undo removes exactly one file (the last created), not more.
     state_mod::walk_back(h.r());
     settle_provider_ops(h.r());
-    assert!(!h.tmp.path().join("dc3.txt").exists(), "undo removes dc3.txt");
-    assert!(h.tmp.path().join("dc2.txt").exists(), "undo must not touch dc2.txt");
-    assert!(h.tmp.path().join("dc1.txt").exists(), "undo must not touch dc1.txt");
+    assert!(
+        !h.tmp.path().join("dc3.txt").exists(),
+        "undo removes dc3.txt"
+    );
+    assert!(
+        h.tmp.path().join("dc2.txt").exists(),
+        "undo must not touch dc2.txt"
+    );
+    assert!(
+        h.tmp.path().join("dc1.txt").exists(),
+        "undo must not touch dc1.txt"
+    );
     // Redo restores it.
     state_mod::walk_forward(h.r());
     settle_provider_ops(h.r());
-    assert!(h.tmp.path().join("dc3.txt").exists(), "redo restores dc3.txt");
+    assert!(
+        h.tmp.path().join("dc3.txt").exists(),
+        "redo restores dc3.txt"
+    );
     for p in files {
         std::fs::remove_file(h.tmp.path().join(p)).ok();
     }
@@ -8995,8 +11543,7 @@ fn fsrename_emits_fsop_rename() {
     h.renderer.cursor_position = 0;
     type_text(h.r(), "renamed_unique.txt");
     press_enter(h.r());
-    let new_entries: Vec<_> =
-        h.renderer.active_timeline().entries[before_count..].to_vec();
+    let new_entries: Vec<_> = h.renderer.active_timeline().entries[before_count..].to_vec();
     // Renaming (including typing the new name) must collapse into a single
     // undo step — no leftover per-keystroke TextChunks.
     assert_eq!(
@@ -9006,7 +11553,9 @@ fn fsrename_emits_fsop_rename() {
         new_entries
     );
     match &new_entries[0] {
-        TimelineEntry::FsOp { op, before, after, .. } => {
+        TimelineEntry::FsOp {
+            op, before, after, ..
+        } => {
             assert_eq!(*op, FsOpKind::Rename);
             assert!(before.is_some());
             assert!(after.is_some());
@@ -9037,20 +11586,32 @@ fn settings_checkbox_emits_provider_op_and_undoes() {
 
     // The new value should be persisted to JSON.
     let written = std::fs::read_to_string(tmp.path().join("settings.json")).unwrap();
-    assert!(written.contains("\"test.enableFeature\": true"), "value persisted: {}", written);
+    assert!(
+        written.contains("\"test.enableFeature\": true"),
+        "value persisted: {}",
+        written
+    );
 
     // provider.undo should restore the prior value.
     let mut err = String::new();
     sicompass_sdk::block_on(p.undo(&entries[0], &mut err));
     assert!(err.is_empty(), "undo error: {}", err);
     let written = std::fs::read_to_string(tmp.path().join("settings.json")).unwrap();
-    assert!(written.contains("\"test.enableFeature\": false"), "value reverted on undo: {}", written);
+    assert!(
+        written.contains("\"test.enableFeature\": false"),
+        "value reverted on undo: {}",
+        written
+    );
 
     // provider.redo should re-apply the change.
     sicompass_sdk::block_on(p.redo(&entries[0], &mut err));
     assert!(err.is_empty(), "redo error: {}", err);
     let written = std::fs::read_to_string(tmp.path().join("settings.json")).unwrap();
-    assert!(written.contains("\"test.enableFeature\": true"), "value re-applied on redo: {}", written);
+    assert!(
+        written.contains("\"test.enableFeature\": true"),
+        "value re-applied on redo: {}",
+        written
+    );
 }
 
 #[test]
@@ -9060,19 +11621,33 @@ fn settings_radio_emits_provider_op_and_undoes() {
     let tmp = TempDir::new().unwrap();
     p.set_config_path(tmp.path().join("settings.json"));
     p.add_section("test");
-    p.add_radio("test", "Direction", "test.dir", &["north", "south"], "north");
+    p.add_radio(
+        "test",
+        "Direction",
+        "test.dir",
+        &["north", "south"],
+        "north",
+    );
 
     p.on_radio_change("Direction", "south");
     let entries = p.take_timeline_entries();
     assert_eq!(entries.len(), 1);
     let written = std::fs::read_to_string(tmp.path().join("settings.json")).unwrap();
-    assert!(written.contains("\"test.dir\": \"south\""), "wrote south: {}", written);
+    assert!(
+        written.contains("\"test.dir\": \"south\""),
+        "wrote south: {}",
+        written
+    );
 
     let mut err = String::new();
     sicompass_sdk::block_on(p.undo(&entries[0], &mut err));
     assert!(err.is_empty(), "undo error: {}", err);
     let written = std::fs::read_to_string(tmp.path().join("settings.json")).unwrap();
-    assert!(written.contains("\"test.dir\": \"north\""), "reverted on undo: {}", written);
+    assert!(
+        written.contains("\"test.dir\": \"north\""),
+        "reverted on undo: {}",
+        written
+    );
 }
 
 #[test]
@@ -9089,13 +11664,21 @@ fn settings_text_emits_provider_op_and_undoes() {
     let entries = p.take_timeline_entries();
     assert_eq!(entries.len(), 1);
     let written = std::fs::read_to_string(tmp.path().join("settings.json")).unwrap();
-    assert!(written.contains("\"test.greeting\": \"bonjour\""), "wrote new value: {}", written);
+    assert!(
+        written.contains("\"test.greeting\": \"bonjour\""),
+        "wrote new value: {}",
+        written
+    );
 
     let mut err = String::new();
     sicompass_sdk::block_on(p.undo(&entries[0], &mut err));
     assert!(err.is_empty(), "undo error: {}", err);
     let written = std::fs::read_to_string(tmp.path().join("settings.json")).unwrap();
-    assert!(written.contains("\"test.greeting\": \"hello\""), "reverted on undo: {}", written);
+    assert!(
+        written.contains("\"test.greeting\": \"hello\""),
+        "reverted on undo: {}",
+        written
+    );
 }
 
 // ---- Step 11: unified-timeline gate flip ----------------------------------
@@ -9201,7 +11784,10 @@ fn unified_undo_reverts_file_deletion_with_snapshot() {
     assert!(
         new_entries.iter().any(|e| matches!(
             e,
-            TimelineEntry::FsOp { op: sicompass_sdk::timeline::FsOpKind::Delete, .. }
+            TimelineEntry::FsOp {
+                op: sicompass_sdk::timeline::FsOpKind::Delete,
+                ..
+            }
         )),
         "delete_item_by_name emitted FsOp::Delete"
     );
@@ -9221,13 +11807,19 @@ fn unified_undo_reverts_file_deletion_with_snapshot() {
 fn double_tap_home_from_deep_nav_shows_root_from_top() {
     let mut h = Harness::new();
     let settings_idx = h.provider_idx("settings").unwrap();
-    assert!(settings_idx > 0, "settings should not be the first provider");
+    assert!(
+        settings_idx > 0,
+        "settings should not be the first provider"
+    );
 
     // Descend into a non-first provider so we have depth > 1 and a non-zero
     // alphabetical position for the originating provider.
     navigate_to_provider(h.r(), settings_idx);
     press_right(h.r());
-    assert!(h.renderer.current_id.depth() > 1, "should be inside the provider");
+    assert!(
+        h.renderer.current_id.depth() > 1,
+        "should be inside the provider"
+    );
 
     // Double-tap Home — two presses well within DELTA_MS (400ms).
     press(h.r(), Keycode::Home);
@@ -9252,7 +11844,9 @@ fn simple_search_right_then_escape_stays_in_navigated_node() {
     // Right-arrow at end-of-search descends into the highlighted node; Escape
     // immediately after must stay there, not revert to the pre-search location.
     let mut h = Harness::new();
-    let fb_idx = h.provider_idx("filebrowser").expect("filebrowser not found");
+    let fb_idx = h
+        .provider_idx("filebrowser")
+        .expect("filebrowser not found");
     navigate_to_provider(h.r(), fb_idx);
     press_right(h.r()); // enter filebrowser listing
     let path_before = sicompass::provider::current_path(&h.renderer).to_owned();
@@ -9287,7 +11881,9 @@ fn simple_search_right_then_escape_stays_in_navigated_node() {
 fn extended_search_right_then_escape_stays_in_navigated_node() {
     // Same invariant for ExtendedSearch.
     let mut h = Harness::new();
-    let fb_idx = h.provider_idx("filebrowser").expect("filebrowser not found");
+    let fb_idx = h
+        .provider_idx("filebrowser")
+        .expect("filebrowser not found");
     navigate_to_provider(h.r(), fb_idx);
     press_right(h.r());
     let path_before = sicompass::provider::current_path(&h.renderer).to_owned();
@@ -9337,7 +11933,9 @@ fn clear_timeline(r: &mut AppRenderer) {
 #[test]
 fn simple_search_enter_records_navigate() {
     let mut h = Harness::new();
-    let fb_idx = h.provider_idx("filebrowser").expect("filebrowser not found");
+    let fb_idx = h
+        .provider_idx("filebrowser")
+        .expect("filebrowser not found");
     navigate_to_provider(h.r(), fb_idx);
     press_right(h.r());
 
@@ -9350,11 +11948,23 @@ fn simple_search_enter_records_navigate() {
 
     assert_eq!(h.renderer.coordinate, Coordinate::General);
     let entries = &h.renderer.active_timeline().entries;
-    assert_eq!(entries.len(), 1, "search-Enter should record exactly one Navigate");
+    assert_eq!(
+        entries.len(),
+        1,
+        "search-Enter should record exactly one Navigate"
+    );
     match &entries[0] {
-        sicompass_sdk::timeline::TimelineEntry::Navigate { from_id, to_id, kind, .. } => {
+        sicompass_sdk::timeline::TimelineEntry::Navigate {
+            from_id,
+            to_id,
+            kind,
+            ..
+        } => {
             assert_eq!(*from_id, pre_id, "from_id must be the pre-Tab cursor");
-            assert_eq!(*to_id, h.renderer.current_id, "to_id must be the selected item");
+            assert_eq!(
+                *to_id, h.renderer.current_id,
+                "to_id must be the selected item"
+            );
             assert_eq!(*kind, sicompass_sdk::timeline::NavKind::ArrowRight);
         }
         other => panic!("expected Navigate, got {:?}", other),
@@ -9373,7 +11983,9 @@ fn extended_search_enter_records_navigate() {
     // force movement, we step down to beta.txt first and then search for
     // "alpha" — Enter should jump back to alpha.txt at index 0.
     let mut h = Harness::new();
-    let fb_idx = h.provider_idx("filebrowser").expect("filebrowser not found");
+    let fb_idx = h
+        .provider_idx("filebrowser")
+        .expect("filebrowser not found");
     navigate_to_provider(h.r(), fb_idx);
     press_right(h.r());
     press_down(h.r()); // step off index 0 so search-Enter must move us
@@ -9388,7 +12000,11 @@ fn extended_search_enter_records_navigate() {
 
     assert_eq!(h.renderer.coordinate, Coordinate::General);
     let entries = &h.renderer.active_timeline().entries;
-    assert_eq!(entries.len(), 1, "ExtendedSearch Enter should record one Navigate");
+    assert_eq!(
+        entries.len(),
+        1,
+        "ExtendedSearch Enter should record one Navigate"
+    );
     match &entries[0] {
         sicompass_sdk::timeline::TimelineEntry::Navigate { from_id, kind, .. } => {
             assert_eq!(*from_id, pre_id);
@@ -9407,7 +12023,9 @@ fn extended_search_enter_records_navigate() {
 #[test]
 fn simple_search_escape_does_not_record() {
     let mut h = Harness::new();
-    let fb_idx = h.provider_idx("filebrowser").expect("filebrowser not found");
+    let fb_idx = h
+        .provider_idx("filebrowser")
+        .expect("filebrowser not found");
     navigate_to_provider(h.r(), fb_idx);
     press_right(h.r());
 
@@ -9428,7 +12046,9 @@ fn simple_search_escape_does_not_record() {
 #[test]
 fn extended_search_escape_does_not_record() {
     let mut h = Harness::new();
-    let fb_idx = h.provider_idx("filebrowser").expect("filebrowser not found");
+    let fb_idx = h
+        .provider_idx("filebrowser")
+        .expect("filebrowser not found");
     navigate_to_provider(h.r(), fb_idx);
     press_right(h.r());
 
@@ -9449,7 +12069,9 @@ fn extended_search_escape_does_not_record() {
 #[test]
 fn simple_search_right_at_end_records_navigate() {
     let mut h = Harness::new();
-    let fb_idx = h.provider_idx("filebrowser").expect("filebrowser not found");
+    let fb_idx = h
+        .provider_idx("filebrowser")
+        .expect("filebrowser not found");
     navigate_to_provider(h.r(), fb_idx);
     press_right(h.r());
 
@@ -9470,7 +12092,12 @@ fn simple_search_right_at_end_records_navigate() {
     let entries = &h.renderer.active_timeline().entries;
     assert_eq!(entries.len(), 1, "Right-at-end should record one Navigate");
     match &entries[0] {
-        sicompass_sdk::timeline::TimelineEntry::Navigate { from_id, kind, to_path, .. } => {
+        sicompass_sdk::timeline::TimelineEntry::Navigate {
+            from_id,
+            kind,
+            to_path,
+            ..
+        } => {
             assert_eq!(*from_id, pre_id);
             assert_eq!(*kind, sicompass_sdk::timeline::NavKind::ArrowRight);
             assert_eq!(to_path.as_deref(), Some(path_in_subdir.as_str()));
@@ -9493,7 +12120,9 @@ fn simple_search_right_at_end_records_navigate() {
 #[test]
 fn extended_search_right_at_end_records_navigate() {
     let mut h = Harness::new();
-    let fb_idx = h.provider_idx("filebrowser").expect("filebrowser not found");
+    let fb_idx = h
+        .provider_idx("filebrowser")
+        .expect("filebrowser not found");
     navigate_to_provider(h.r(), fb_idx);
     press_right(h.r());
 
@@ -9512,7 +12141,11 @@ fn extended_search_right_at_end_records_navigate() {
         path_in_subdir,
     );
     let entries = &h.renderer.active_timeline().entries;
-    assert_eq!(entries.len(), 1, "Right-at-end in ExtendedSearch should record one Navigate");
+    assert_eq!(
+        entries.len(),
+        1,
+        "Right-at-end in ExtendedSearch should record one Navigate"
+    );
     match &entries[0] {
         sicompass_sdk::timeline::TimelineEntry::Navigate { from_id, kind, .. } => {
             assert_eq!(*from_id, pre_id);
@@ -9526,21 +12159,24 @@ fn extended_search_right_at_end_records_navigate() {
         h.renderer.current_id, pre_id,
         "ctrl-Z after ExtendedSearch right-at-end must restore the pre-Ctrl+F cursor",
     );
-    assert_eq!(
-        sicompass::provider::current_path(&h.renderer),
-        pre_path,
-    );
+    assert_eq!(sicompass::provider::current_path(&h.renderer), pre_path,);
 }
 
 #[test]
 fn simple_search_left_at_cursor_zero_records_navigate() {
     let mut h = Harness::new();
-    let fb_idx = h.provider_idx("filebrowser").expect("filebrowser not found");
+    let fb_idx = h
+        .provider_idx("filebrowser")
+        .expect("filebrowser not found");
     navigate_to_provider(h.r(), fb_idx);
     press_right(h.r()); // descend into filebrowser root
 
     // Descend one more level so Left-at-0 has somewhere to move out to.
-    let subdir_idx = h.renderer.total_list.iter().position(|it| it.label.contains("subdir"))
+    let subdir_idx = h
+        .renderer
+        .total_list
+        .iter()
+        .position(|it| it.label.contains("subdir"))
         .expect("subdir not in listing");
     h.renderer.list_index = subdir_idx;
     h.renderer.current_id = h.renderer.total_list[subdir_idx].id.clone();
@@ -9555,7 +12191,11 @@ fn simple_search_left_at_cursor_zero_records_navigate() {
     press_left(h.r());
 
     let entries = &h.renderer.active_timeline().entries;
-    assert_eq!(entries.len(), 1, "Left-at-0 in SimpleSearch should record one Navigate");
+    assert_eq!(
+        entries.len(),
+        1,
+        "Left-at-0 in SimpleSearch should record one Navigate"
+    );
     match &entries[0] {
         sicompass_sdk::timeline::TimelineEntry::Navigate { from_id, kind, .. } => {
             assert_eq!(*from_id, pre_id);
@@ -9598,7 +12238,10 @@ fn simple_search_enter_at_root_records_navigate() {
     press_down(h.r()); // move from filebrowser to settings within search
     press_enter(h.r());
 
-    assert_ne!(h.renderer.current_id, pre_id, "Enter should have moved cursor");
+    assert_ne!(
+        h.renderer.current_id, pre_id,
+        "Enter should have moved cursor"
+    );
     let entries = &h.renderer.active_timeline().entries;
     assert_eq!(
         entries.len(),
@@ -9635,25 +12278,42 @@ fn general_right_from_root_records_navigate_with_none_from_path() {
     press_right(h.r());
 
     let entries = &h.renderer.active_timeline().entries;
-    assert_eq!(entries.len(), 1, "Right at depth-1 must record exactly one Navigate");
+    assert_eq!(
+        entries.len(),
+        1,
+        "Right at depth-1 must record exactly one Navigate"
+    );
     match &entries[0] {
-        sicompass_sdk::timeline::TimelineEntry::Navigate { from_id, from_path, to_path, .. } => {
+        sicompass_sdk::timeline::TimelineEntry::Navigate {
+            from_id,
+            from_path,
+            to_path,
+            ..
+        } => {
             assert_eq!(*from_id, pre_id);
             assert_eq!(*from_path, None, "depth-1 origin must have from_path=None");
-            assert!(to_path.is_some(), "depth-2 destination in filebrowser must have to_path=Some(..)");
+            assert!(
+                to_path.is_some(),
+                "depth-2 destination in filebrowser must have to_path=Some(..)"
+            );
         }
         other => panic!("expected Navigate, got {:?}", other),
     }
 
     press_ctrl(h.r(), Keycode::Z);
-    assert_eq!(h.renderer.current_id, pre_id, "ctrl-Z must restore depth-1 cursor");
+    assert_eq!(
+        h.renderer.current_id, pre_id,
+        "ctrl-Z must restore depth-1 cursor"
+    );
 }
 
 fn refresh_filebrowser_root(h: &mut Harness, fb_idx: usize) {
     let children = h.renderer.providers[fb_idx].fetch();
     let display_name = h.renderer.providers[fb_idx].display_name().to_owned();
     let mut root_elem = FfonElement::new_obj(&display_name);
-    for child in children { root_elem.as_obj_mut().unwrap().push(child); }
+    for child in children {
+        root_elem.as_obj_mut().unwrap().push(child);
+    }
     h.renderer.ffon[fb_idx] = root_elem;
     sicompass::list::create_list_current_layer(h.r());
 }
@@ -9666,23 +12326,42 @@ fn general_left_to_root_records_navigate_with_none_to_path() {
     // to "/" so a single Left actually reaches depth-1 (otherwise Left at
     // depth-2 pops to the parent directory and stays at depth-2).
     let mut h = Harness::new();
-    let fb_idx = h.provider_idx("filebrowser").expect("filebrowser not found");
+    let fb_idx = h
+        .provider_idx("filebrowser")
+        .expect("filebrowser not found");
     h.renderer.providers[fb_idx].set_current_path("/");
     refresh_filebrowser_root(&mut h, fb_idx);
 
     press_right(h.r()); // depth-1 → depth-2
-    assert_eq!(h.renderer.current_id.depth(), 2, "Right should descend into filebrowser");
+    assert_eq!(
+        h.renderer.current_id.depth(),
+        2,
+        "Right should descend into filebrowser"
+    );
     let pre_id = h.renderer.current_id.clone();
     let pre_path = sicompass::provider::current_path(&h.renderer).to_owned();
     clear_timeline(h.r());
 
     press_left(h.r());
 
-    assert_eq!(h.renderer.current_id.depth(), 1, "Left should pop back to root");
+    assert_eq!(
+        h.renderer.current_id.depth(),
+        1,
+        "Left should pop back to root"
+    );
     let entries = &h.renderer.active_timeline().entries;
-    assert_eq!(entries.len(), 1, "Left from depth-2 must record one Navigate");
+    assert_eq!(
+        entries.len(),
+        1,
+        "Left from depth-2 must record one Navigate"
+    );
     match &entries[0] {
-        sicompass_sdk::timeline::TimelineEntry::Navigate { from_id, from_path, to_path, .. } => {
+        sicompass_sdk::timeline::TimelineEntry::Navigate {
+            from_id,
+            from_path,
+            to_path,
+            ..
+        } => {
             assert_eq!(*from_id, pre_id);
             assert_eq!(from_path.as_deref(), Some(pre_path.as_str()));
             assert_eq!(*to_path, None, "depth-1 destination must have to_path=None");
@@ -9691,7 +12370,10 @@ fn general_left_to_root_records_navigate_with_none_to_path() {
     }
 
     press_ctrl(h.r(), Keycode::Z);
-    assert_eq!(h.renderer.current_id, pre_id, "ctrl-Z must restore depth-2 cursor");
+    assert_eq!(
+        h.renderer.current_id, pre_id,
+        "ctrl-Z must restore depth-2 cursor"
+    );
     assert_eq!(
         sicompass::provider::current_path(&h.renderer),
         pre_path,
@@ -9735,13 +12417,26 @@ fn general_right_into_settings_records_path_not_provider_name() {
     // Step 1: depth-1 → depth-2 (cursor leaves the root list, enters settings).
     // from_path=None (depth-1 origin), to_path=Some("/") (depth-2 inside provider).
     press_right(h.r());
-    assert_eq!(h.renderer.current_id.depth(), 2, "Right should descend into settings");
+    assert_eq!(
+        h.renderer.current_id.depth(),
+        2,
+        "Right should descend into settings"
+    );
     let path_at_settings_root = sicompass::provider::current_path(&h.renderer).to_owned();
     {
         let entries = &h.renderer.active_timeline().entries;
-        assert_eq!(entries.len(), 1, "Right at depth-1 must record one Navigate");
+        assert_eq!(
+            entries.len(),
+            1,
+            "Right at depth-1 must record one Navigate"
+        );
         match &entries[0] {
-            sicompass_sdk::timeline::TimelineEntry::Navigate { from_id, from_path, to_path, .. } => {
+            sicompass_sdk::timeline::TimelineEntry::Navigate {
+                from_id,
+                from_path,
+                to_path,
+                ..
+            } => {
                 assert_eq!(*from_id, pre_root_id);
                 assert_eq!(*from_path, None, "depth-1 origin must have from_path=None");
                 assert_eq!(
@@ -9772,9 +12467,13 @@ fn general_right_into_settings_records_path_not_provider_name() {
     // The two consecutive Right presses inside the provider coalesce into one
     // Navigate entry; from_path is the pre-Tab settings root, to_path is the
     // section path.
-    let last = entries.last().expect("at least one Navigate entry recorded");
+    let last = entries
+        .last()
+        .expect("at least one Navigate entry recorded");
     match last {
-        sicompass_sdk::timeline::TimelineEntry::Navigate { from_path, to_path, .. } => {
+        sicompass_sdk::timeline::TimelineEntry::Navigate {
+            from_path, to_path, ..
+        } => {
             assert!(
                 from_path.is_some(),
                 "non-filebrowser provider must capture from_path once inside it",
@@ -9800,7 +12499,7 @@ fn timeline_entry_label_collapses_identical_paths() {
     // (sibling motion doesn't change the path). The timeline view must show a
     // single path instead of "X → X", so the user sees the path they're at
     // rather than the same string repeated.
-    use sicompass::list::{timeline_entry_label, TimelineProviderInfo};
+    use sicompass::list::{TimelineProviderInfo, timeline_entry_label};
     use sicompass_sdk::ffon::IdArray;
     let mut from_id = IdArray::new();
     from_id.push(0);
@@ -9856,7 +12555,11 @@ fn simple_search_enter_at_root_with_typing_records_navigate() {
     let mut h = Harness::new();
     assert_eq!(h.renderer.current_id.depth(), 1, "must start at root");
     let pre_id = h.renderer.current_id.clone();
-    assert_eq!(pre_id.get(0), Some(0), "must start on the filebrowser provider");
+    assert_eq!(
+        pre_id.get(0),
+        Some(0),
+        "must start on the filebrowser provider"
+    );
     clear_timeline(h.r());
 
     press_tab(h.r());
@@ -9911,7 +12614,9 @@ fn simple_search_right_at_root_records_navigate() {
         entries.len(),
     );
     match &entries[0] {
-        sicompass_sdk::timeline::TimelineEntry::Navigate { from_path, to_path, .. } => {
+        sicompass_sdk::timeline::TimelineEntry::Navigate {
+            from_path, to_path, ..
+        } => {
             assert_eq!(
                 *from_path, None,
                 "from_path must be None at depth=1 origin (avoids misleading `/ → /` view)",
@@ -9936,7 +12641,9 @@ fn simple_search_right_at_root_records_navigate() {
 #[test]
 fn search_up_down_within_search_does_not_record() {
     let mut h = Harness::new();
-    let fb_idx = h.provider_idx("filebrowser").expect("filebrowser not found");
+    let fb_idx = h
+        .provider_idx("filebrowser")
+        .expect("filebrowser not found");
     navigate_to_provider(h.r(), fb_idx);
     press_right(h.r());
 
@@ -9974,27 +12681,52 @@ struct SilentCheckboxStrProvider {
 }
 
 impl SilentCheckboxStrProvider {
-    fn new() -> Self { Self { path: "/".into(), checked: false } }
+    fn new() -> Self {
+        Self {
+            path: "/".into(),
+            checked: false,
+        }
+    }
 }
 
 impl Provider for SilentCheckboxStrProvider {
-    fn name(&self) -> &str { "silent_checkbox_str" }
-    fn display_name(&self) -> String { "Silent CB Str".to_owned() }
+    fn name(&self) -> &str {
+        "silent_checkbox_str"
+    }
+    fn display_name(&self) -> String {
+        "Silent CB Str".to_owned()
+    }
     fn fetch(&mut self) -> Vec<FfonElement> {
-        let tag = if self.checked { "<checkbox checked>" } else { "<checkbox>" };
+        let tag = if self.checked {
+            "<checkbox checked>"
+        } else {
+            "<checkbox>"
+        };
         vec![FfonElement::Str(format!("{tag}Toggle me"))]
     }
     fn push_path(&mut self, segment: &str) {
-        if self.path == "/" { self.path = format!("/{segment}"); }
-        else { self.path.push('/'); self.path.push_str(segment); }
-    }
-    fn pop_path(&mut self) {
-        if self.path == "/" { return; }
-        if let Some(idx) = self.path.rfind('/') {
-            self.path = if idx == 0 { "/".into() } else { self.path[..idx].to_owned() };
+        if self.path == "/" {
+            self.path = format!("/{segment}");
+        } else {
+            self.path.push('/');
+            self.path.push_str(segment);
         }
     }
-    fn current_path(&self) -> &str { &self.path }
+    fn pop_path(&mut self) {
+        if self.path == "/" {
+            return;
+        }
+        if let Some(idx) = self.path.rfind('/') {
+            self.path = if idx == 0 {
+                "/".into()
+            } else {
+                self.path[..idx].to_owned()
+            };
+        }
+    }
+    fn current_path(&self) -> &str {
+        &self.path
+    }
 }
 
 /// Same as `SilentCheckboxStrProvider` but the checkbox is an Obj with two
@@ -10005,29 +12737,51 @@ struct SilentCheckboxObjProvider {
 }
 
 impl SilentCheckboxObjProvider {
-    fn new() -> Self { Self { path: "/".into() } }
+    fn new() -> Self {
+        Self { path: "/".into() }
+    }
 }
 
 impl Provider for SilentCheckboxObjProvider {
-    fn name(&self) -> &str { "silent_checkbox_obj" }
-    fn display_name(&self) -> String { "Silent CB Obj".to_owned() }
+    fn name(&self) -> &str {
+        "silent_checkbox_obj"
+    }
+    fn display_name(&self) -> String {
+        "Silent CB Obj".to_owned()
+    }
     fn fetch(&mut self) -> Vec<FfonElement> {
         let mut obj = FfonElement::new_obj("<checkbox>Section");
-        obj.as_obj_mut().unwrap().push(FfonElement::Str("child-a".into()));
-        obj.as_obj_mut().unwrap().push(FfonElement::Str("child-b".into()));
+        obj.as_obj_mut()
+            .unwrap()
+            .push(FfonElement::Str("child-a".into()));
+        obj.as_obj_mut()
+            .unwrap()
+            .push(FfonElement::Str("child-b".into()));
         vec![obj]
     }
     fn push_path(&mut self, segment: &str) {
-        if self.path == "/" { self.path = format!("/{segment}"); }
-        else { self.path.push('/'); self.path.push_str(segment); }
-    }
-    fn pop_path(&mut self) {
-        if self.path == "/" { return; }
-        if let Some(idx) = self.path.rfind('/') {
-            self.path = if idx == 0 { "/".into() } else { self.path[..idx].to_owned() };
+        if self.path == "/" {
+            self.path = format!("/{segment}");
+        } else {
+            self.path.push('/');
+            self.path.push_str(segment);
         }
     }
-    fn current_path(&self) -> &str { &self.path }
+    fn pop_path(&mut self) {
+        if self.path == "/" {
+            return;
+        }
+        if let Some(idx) = self.path.rfind('/') {
+            self.path = if idx == 0 {
+                "/".into()
+            } else {
+                self.path[..idx].to_owned()
+            };
+        }
+    }
+    fn current_path(&self) -> &str {
+        &self.path
+    }
 }
 
 /// A provider that yields a `<radio>` Obj nested inside two `Obj` sections, so
@@ -10038,33 +12792,57 @@ struct DeepSilentRadioProvider {
 }
 
 impl DeepSilentRadioProvider {
-    fn new() -> Self { Self { path: "/".into() } }
+    fn new() -> Self {
+        Self { path: "/".into() }
+    }
 }
 
 impl Provider for DeepSilentRadioProvider {
-    fn name(&self) -> &str { "deep_silent_radio" }
-    fn display_name(&self) -> String { "Deep Silent Radio".to_owned() }
+    fn name(&self) -> &str {
+        "deep_silent_radio"
+    }
+    fn display_name(&self) -> String {
+        "Deep Silent Radio".to_owned()
+    }
     fn fetch(&mut self) -> Vec<FfonElement> {
         let mut section = FfonElement::new_obj("Section A");
         let mut inner = FfonElement::new_obj("Inner B");
         let mut group = FfonElement::new_obj("<radio>Mode");
-        group.as_obj_mut().unwrap().push(FfonElement::Str("<checked>auto".into()));
-        group.as_obj_mut().unwrap().push(FfonElement::Str("manual".into()));
+        group
+            .as_obj_mut()
+            .unwrap()
+            .push(FfonElement::Str("<checked>auto".into()));
+        group
+            .as_obj_mut()
+            .unwrap()
+            .push(FfonElement::Str("manual".into()));
         inner.as_obj_mut().unwrap().push(group);
         section.as_obj_mut().unwrap().push(inner);
         vec![section]
     }
     fn push_path(&mut self, segment: &str) {
-        if self.path == "/" { self.path = format!("/{segment}"); }
-        else { self.path.push('/'); self.path.push_str(segment); }
-    }
-    fn pop_path(&mut self) {
-        if self.path == "/" { return; }
-        if let Some(idx) = self.path.rfind('/') {
-            self.path = if idx == 0 { "/".into() } else { self.path[..idx].to_owned() };
+        if self.path == "/" {
+            self.path = format!("/{segment}");
+        } else {
+            self.path.push('/');
+            self.path.push_str(segment);
         }
     }
-    fn current_path(&self) -> &str { &self.path }
+    fn pop_path(&mut self) {
+        if self.path == "/" {
+            return;
+        }
+        if let Some(idx) = self.path.rfind('/') {
+            self.path = if idx == 0 {
+                "/".into()
+            } else {
+                self.path[..idx].to_owned()
+            };
+        }
+    }
+    fn current_path(&self) -> &str {
+        &self.path
+    }
 }
 
 /// A provider that yields a `<radio>` Obj with three Str children (one
@@ -10075,30 +12853,57 @@ struct SilentRadioProvider {
 }
 
 impl SilentRadioProvider {
-    fn new() -> Self { Self { path: "/".into() } }
+    fn new() -> Self {
+        Self { path: "/".into() }
+    }
 }
 
 impl Provider for SilentRadioProvider {
-    fn name(&self) -> &str { "silent_radio" }
-    fn display_name(&self) -> String { "Silent Radio".to_owned() }
+    fn name(&self) -> &str {
+        "silent_radio"
+    }
+    fn display_name(&self) -> String {
+        "Silent Radio".to_owned()
+    }
     fn fetch(&mut self) -> Vec<FfonElement> {
         let mut group = FfonElement::new_obj("<radio>Direction");
-        group.as_obj_mut().unwrap().push(FfonElement::Str("<checked>north".into()));
-        group.as_obj_mut().unwrap().push(FfonElement::Str("south".into()));
-        group.as_obj_mut().unwrap().push(FfonElement::Str("east".into()));
+        group
+            .as_obj_mut()
+            .unwrap()
+            .push(FfonElement::Str("<checked>north".into()));
+        group
+            .as_obj_mut()
+            .unwrap()
+            .push(FfonElement::Str("south".into()));
+        group
+            .as_obj_mut()
+            .unwrap()
+            .push(FfonElement::Str("east".into()));
         vec![group]
     }
     fn push_path(&mut self, segment: &str) {
-        if self.path == "/" { self.path = format!("/{segment}"); }
-        else { self.path.push('/'); self.path.push_str(segment); }
-    }
-    fn pop_path(&mut self) {
-        if self.path == "/" { return; }
-        if let Some(idx) = self.path.rfind('/') {
-            self.path = if idx == 0 { "/".into() } else { self.path[..idx].to_owned() };
+        if self.path == "/" {
+            self.path = format!("/{segment}");
+        } else {
+            self.path.push('/');
+            self.path.push_str(segment);
         }
     }
-    fn current_path(&self) -> &str { &self.path }
+    fn pop_path(&mut self) {
+        if self.path == "/" {
+            return;
+        }
+        if let Some(idx) = self.path.rfind('/') {
+            self.path = if idx == 0 {
+                "/".into()
+            } else {
+                self.path[..idx].to_owned()
+            };
+        }
+    }
+    fn current_path(&self) -> &str {
+        &self.path
+    }
 }
 
 /// Build a renderer with a single silent provider registered at index 0.
@@ -10114,7 +12919,9 @@ fn harness_with_silent(provider: Box<dyn Provider>) -> AppRenderer {
 
 fn set_cursor(r: &mut AppRenderer, path: &[usize]) {
     let mut id = sicompass_sdk::ffon::IdArray::new();
-    for p in path { id.push(*p); }
+    for p in path {
+        id.push(*p);
+    }
     r.current_id = id;
     sicompass::list::create_list_current_layer(r);
 }
@@ -10154,10 +12961,15 @@ fn unified_undo_reverts_silent_checkbox_str_toggle_via_enter() {
     let entries: Vec<_> = r.active_timeline().entries[before_count..].to_vec();
     assert_eq!(entries.len(), 1, "atomic single entry, got {:?}", entries);
     match &entries[0] {
-        TimelineEntry::TextChunk { id, before, after, .. } => {
+        TimelineEntry::TextChunk {
+            id, before, after, ..
+        } => {
             assert_eq!(id, &id_before);
             assert_eq!(before, &FfonElement::Str("<checkbox>Toggle me".into()));
-            assert_eq!(after, &FfonElement::Str("<checkbox checked>Toggle me".into()));
+            assert_eq!(
+                after,
+                &FfonElement::Str("<checkbox checked>Toggle me".into())
+            );
         }
         other => panic!("expected TextChunk, got {:?}", other),
     }
@@ -10167,13 +12979,21 @@ fn unified_undo_reverts_silent_checkbox_str_toggle_via_enter() {
     let undone = sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &id_before)
         .and_then(|a| a.get(id_before.last().unwrap_or(0)).cloned())
         .unwrap();
-    assert_eq!(undone, FfonElement::Str("<checkbox>Toggle me".into()), "undo reverts");
+    assert_eq!(
+        undone,
+        FfonElement::Str("<checkbox>Toggle me".into()),
+        "undo reverts"
+    );
 
     press_ctrl_shift(&mut r, Keycode::Z);
     let redone = sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &id_before)
         .and_then(|a| a.get(id_before.last().unwrap_or(0)).cloned())
         .unwrap();
-    assert_eq!(redone, FfonElement::Str("<checkbox checked>Toggle me".into()), "redo re-applies");
+    assert_eq!(
+        redone,
+        FfonElement::Str("<checkbox checked>Toggle me".into()),
+        "redo re-applies"
+    );
 }
 
 #[test]
@@ -10268,7 +13088,12 @@ fn unified_undo_reverts_silent_radio_toggle_via_enter() {
     let pre_children: Vec<FfonElement> = sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &child_id)
         .map(|a| a.to_vec())
         .unwrap();
-    assert_eq!(pre_children.len(), 3, "expected 3 radio options, got {:?}", pre_children);
+    assert_eq!(
+        pre_children.len(),
+        3,
+        "expected 3 radio options, got {:?}",
+        pre_children
+    );
     assert_eq!(pre_children[0].as_str(), Some("<checked>north"));
     assert_eq!(pre_children[1].as_str(), Some("south"));
 
@@ -10296,12 +13121,16 @@ fn unified_undo_reverts_silent_radio_toggle_via_enter() {
                     if let FfonElement::Obj(o) = before {
                         assert_eq!(o.children[0].as_str(), Some("<checked>north"));
                         assert_eq!(o.children[1].as_str(), Some("south"));
-                    } else { panic!("before should be Obj"); }
+                    } else {
+                        panic!("before should be Obj");
+                    }
                     // The 'after' should show south checked.
                     if let FfonElement::Obj(o) = after {
                         assert_eq!(o.children[0].as_str(), Some("north"));
                         assert_eq!(o.children[1].as_str(), Some("<checked>south"));
-                    } else { panic!("after should be Obj"); }
+                    } else {
+                        panic!("after should be Obj");
+                    }
                 }
                 other => panic!("expected Replaced payload, got {:?}", other),
             }
@@ -10312,10 +13141,9 @@ fn unified_undo_reverts_silent_radio_toggle_via_enter() {
     // Ctrl-Z restores north as the checked option, and the cursor lands
     // *inside* the radio children on the now-checked option (north at idx 0).
     press_ctrl(&mut r, Keycode::Z);
-    let undone_children: Vec<FfonElement> =
-        sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &child_id)
-            .map(|a| a.to_vec())
-            .unwrap();
+    let undone_children: Vec<FfonElement> = sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &child_id)
+        .map(|a| a.to_vec())
+        .unwrap();
     assert_eq!(undone_children[0].as_str(), Some("<checked>north"));
     assert_eq!(undone_children[1].as_str(), Some("south"));
     let mut north_id = parent_id.clone();
@@ -10330,15 +13158,17 @@ fn unified_undo_reverts_silent_radio_toggle_via_enter() {
         r.total_list.len(),
         3,
         "after undo the rendered list must show the three radio options, got {:?}",
-        r.total_list.iter().map(|i| i.label.clone()).collect::<Vec<_>>(),
+        r.total_list
+            .iter()
+            .map(|i| i.label.clone())
+            .collect::<Vec<_>>(),
     );
 
     // Ctrl-Shift-Z re-selects south, and the cursor follows it back.
     press_ctrl_shift(&mut r, Keycode::Z);
-    let redone_children: Vec<FfonElement> =
-        sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &child_id)
-            .map(|a| a.to_vec())
-            .unwrap();
+    let redone_children: Vec<FfonElement> = sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &child_id)
+        .map(|a| a.to_vec())
+        .unwrap();
     assert_eq!(redone_children[0].as_str(), Some("north"));
     assert_eq!(redone_children[1].as_str(), Some("<checked>south"));
     let mut south_id = parent_id.clone();
@@ -10368,35 +13198,63 @@ fn unified_undo_after_leaving_radio_group_keeps_list_visible() {
 
     press_enter(&mut r); // toggle records Structural::Replace
     press_left(&mut r); // exit children records Navigate
-    assert_eq!(r.current_id.depth(), 4, "Left moved cursor up to the radio group");
+    assert_eq!(
+        r.current_id.depth(),
+        4,
+        "Left moved cursor up to the radio group"
+    );
 
     // Ctrl-Z undoes the most-recent entry — Navigate-Left — restoring the
     // cursor inside the radio children. The toggle remains applied. The
     // rendered list must still show the radio options.
     press_ctrl(&mut r, Keycode::Z);
     let mut expected = sicompass_sdk::ffon::IdArray::new();
-    for p in [0, 0, 0, 0, 1] { expected.push(p); }
-    assert_eq!(r.current_id, expected, "Navigate undo restored cursor to where Left started");
+    for p in [0, 0, 0, 0, 1] {
+        expected.push(p);
+    }
+    assert_eq!(
+        r.current_id, expected,
+        "Navigate undo restored cursor to where Left started"
+    );
     assert_eq!(
         r.total_list.len(),
         2,
         "rendered list must still show the two radio options after Navigate undo; got {:?}",
-        r.total_list.iter().map(|i| i.label.clone()).collect::<Vec<_>>(),
+        r.total_list
+            .iter()
+            .map(|i| i.label.clone())
+            .collect::<Vec<_>>(),
     );
     let labels: Vec<String> = r.total_list.iter().map(|i| i.label.clone()).collect();
-    assert!(labels.iter().any(|l| l.contains("auto")), "list must show 'auto', got {:?}", labels);
-    assert!(labels.iter().any(|l| l.contains("manual")), "list must show 'manual', got {:?}", labels);
+    assert!(
+        labels.iter().any(|l| l.contains("auto")),
+        "list must show 'auto', got {:?}",
+        labels
+    );
+    assert!(
+        labels.iter().any(|l| l.contains("manual")),
+        "list must show 'manual', got {:?}",
+        labels
+    );
 
     // A second Ctrl-Z reverts the radio toggle and lands the cursor on the
     // now-checked option (auto, index 0) inside the children.
     press_ctrl(&mut r, Keycode::Z);
     match r.active_timeline().entries.first().unwrap() {
         TimelineEntry::Structural { .. } => {}
-        other => panic!("expected Structural entry at the bottom of the stack, got {:?}", other),
+        other => panic!(
+            "expected Structural entry at the bottom of the stack, got {:?}",
+            other
+        ),
     }
     let mut expected2 = sicompass_sdk::ffon::IdArray::new();
-    for p in [0, 0, 0, 0, 0] { expected2.push(p); }
-    assert_eq!(r.current_id, expected2, "second undo lands cursor on the now-checked option");
+    for p in [0, 0, 0, 0, 0] {
+        expected2.push(p);
+    }
+    assert_eq!(
+        r.current_id, expected2,
+        "second undo lands cursor on the now-checked option"
+    );
 
     // A third Ctrl-Z (if there's a prior Navigate for entering the radio)
     // would walk back further; what matters here is that walk_back never
@@ -10404,7 +13262,10 @@ fn unified_undo_after_leaving_radio_group_keeps_list_visible() {
     // view scrolled to the top (scroll_offset == 0), so a high list_index
     // (e.g. a radio that lives at position 2 in its parent section) does
     // not push the list view off the top.
-    assert_eq!(r.scroll_offset, 0, "walk_back must not force a scroll based on list_index");
+    assert_eq!(
+        r.scroll_offset, 0,
+        "walk_back must not force a scroll based on list_index"
+    );
 }
 
 #[test]
@@ -10424,9 +13285,17 @@ fn unified_undo_reverts_deep_radio_toggle_shows_list() {
     // After Enter, FFON now has "manual" checked. Verify timeline entry shape.
     let entry = r.active_timeline().entries.last().cloned().unwrap();
     match &entry {
-        TimelineEntry::Structural { id, op: StructuralOp::Replace, payload: StructuralPayload::Replaced { .. } } => {
+        TimelineEntry::Structural {
+            id,
+            op: StructuralOp::Replace,
+            payload: StructuralPayload::Replaced { .. },
+        } => {
             // id must be the radio group's slot: [0, 0, 0, 0] (depth 4).
-            assert_eq!(id.depth(), 4, "Replace id should be the radio group at depth 4");
+            assert_eq!(
+                id.depth(),
+                4,
+                "Replace id should be the radio group at depth 4"
+            );
         }
         other => panic!("expected Structural::Replace, got {:?}", other),
     }
@@ -10435,7 +13304,9 @@ fn unified_undo_reverts_deep_radio_toggle_shows_list() {
     // in the rendered list, with the cursor on the now-checked option.
     press_ctrl(&mut r, Keycode::Z);
     let mut expected_cursor = sicompass_sdk::ffon::IdArray::new();
-    for p in [0, 0, 0, 0, 0] { expected_cursor.push(p); }
+    for p in [0, 0, 0, 0, 0] {
+        expected_cursor.push(p);
+    }
     assert_eq!(
         r.current_id, expected_cursor,
         "undo must land cursor at the now-checked option inside the radio children",
@@ -10444,13 +13315,18 @@ fn unified_undo_reverts_deep_radio_toggle_shows_list() {
         r.total_list.len(),
         2,
         "rendered list must show the two radio options after undo at depth 5; got {:?}",
-        r.total_list.iter().map(|i| i.label.clone()).collect::<Vec<_>>(),
+        r.total_list
+            .iter()
+            .map(|i| i.label.clone())
+            .collect::<Vec<_>>(),
     );
 
     // Ctrl-Shift-Z brings us back to "manual" checked, cursor on manual.
     press_ctrl_shift(&mut r, Keycode::Z);
     let mut after_cursor = sicompass_sdk::ffon::IdArray::new();
-    for p in [0, 0, 0, 0, 1] { after_cursor.push(p); }
+    for p in [0, 0, 0, 0, 1] {
+        after_cursor.push(p);
+    }
     assert_eq!(r.current_id, after_cursor);
     assert_eq!(r.total_list.len(), 2);
 }
@@ -10482,9 +13358,8 @@ fn renderer_with_settings_checkbox(
 fn unified_undo_settings_checkbox_via_enter_records_single_provider_op() {
     use sicompass_sdk::timeline::TimelineEntry;
 
-    let (mut r, _tmp) = renderer_with_settings_checkbox(
-        "test", "Enable feature", "test.enableFeature", false,
-    );
+    let (mut r, _tmp) =
+        renderer_with_settings_checkbox("test", "Enable feature", "test.enableFeature", false);
 
     let before_count = r.active_timeline().entries.len();
     press_enter(&mut r);
@@ -10492,7 +13367,8 @@ fn unified_undo_settings_checkbox_via_enter_records_single_provider_op() {
     // Settings emits a ProviderOp; the fallback TextChunk MUST NOT also fire.
     let entries: Vec<_> = r.active_timeline().entries[before_count..].to_vec();
     assert_eq!(
-        entries.len(), 1,
+        entries.len(),
+        1,
         "must record exactly one entry — settings provider's ProviderOp, NOT also a TextChunk fallback. got {:?}",
         entries,
     );
@@ -10517,7 +13393,13 @@ fn renderer_with_settings_radio() -> (AppRenderer, TempDir) {
     let mut settings = sicompass_settings::SettingsProvider::new_headless();
     settings.set_config_path(tmp.path().join("settings.json"));
     settings.add_section("test");
-    settings.add_radio("test", "Direction", "test.dir", &["north", "south"], "north");
+    settings.add_radio(
+        "test",
+        "Direction",
+        "test.dir",
+        &["north", "south"],
+        "north",
+    );
     let mut renderer = AppRenderer::new();
     register(&mut renderer, Box::new(settings));
     set_cursor(&mut renderer, &[0, 1, 0, 1]);
@@ -10537,7 +13419,8 @@ fn unified_undo_settings_radio_via_enter_does_not_double_record() {
     // Structural::Replace MUST NOT also fire.
     let entries: Vec<_> = r.active_timeline().entries[before_count..].to_vec();
     assert_eq!(
-        entries.len(), 1,
+        entries.len(),
+        1,
         "must record exactly one entry — settings provider's ProviderOp, NOT also a Structural::Replace fallback. got {:?}",
         entries,
     );
@@ -10568,22 +13451,29 @@ fn settings_text_input_commit_keeps_section_intact() {
 
     // Edit the text input: enter Insert, type a value, commit with Enter.
     press(&mut r, Keycode::I);
-    assert_eq!(r.coordinate, Coordinate::Insert, "press i must enter Insert on the text setting");
+    assert_eq!(
+        r.coordinate,
+        Coordinate::Insert,
+        "press i must enter Insert on the text setting"
+    );
     type_text(&mut r, "example.com");
     press_enter(&mut r);
 
     // The "test" section must still hold exactly its own text entry — not the
     // whole settings tree (sicompass + test) nested inside it.
     let sec_obj = r.ffon[0].as_obj().unwrap().children[1]
-        .as_obj().expect("test section must stay an Obj");
+        .as_obj()
+        .expect("test section must stay an Obj");
     assert_eq!(
-        sec_obj.children.len(), 1,
+        sec_obj.children.len(),
+        1,
         "section must keep exactly its one text entry, not a nested tree; got {:?}",
         sec_obj.children,
     );
     assert!(
         matches!(&sec_obj.children[0], FfonElement::Str(s) if s.contains("example.com") && s.contains("<input>")),
-        "section child must be the committed text input; got {:?}", sec_obj.children[0],
+        "section child must be the committed text input; got {:?}",
+        sec_obj.children[0],
     );
 
     // current_id must still resolve to that text input after the commit.
@@ -10591,7 +13481,8 @@ fn settings_text_input_commit_keeps_section_intact() {
         .and_then(|a| a.get(r.current_id.last().unwrap_or(0)));
     assert!(
         matches!(cur, Some(FfonElement::Str(s)) if s.contains("<input>")),
-        "current_id must still point at the text input after commit; got {:?}", cur,
+        "current_id must still point at the text input after commit; got {:?}",
+        cur,
     );
 }
 
@@ -10624,7 +13515,11 @@ fn simple_search_enter_on_checkbox_jumps_without_toggling() {
     type_text(&mut r, "Toggle");
     press_enter(&mut r);
 
-    assert_eq!(r.coordinate, Coordinate::General, "Enter must leave search mode");
+    assert_eq!(
+        r.coordinate,
+        Coordinate::General,
+        "Enter must leave search mode"
+    );
     assert_eq!(r.current_id, target, "cursor must land on the checkbox");
     assert_eq!(
         element_at_cursor(&r),
@@ -10659,7 +13554,11 @@ fn extended_search_enter_on_checkbox_jumps_without_toggling() {
     type_text(&mut r, "Toggle");
     press_enter(&mut r);
 
-    assert_eq!(r.coordinate, Coordinate::General, "Enter must leave extended search");
+    assert_eq!(
+        r.coordinate,
+        Coordinate::General,
+        "Enter must leave extended search"
+    );
     assert_eq!(r.current_id, target, "cursor must land on the checkbox");
     assert_eq!(
         element_at_cursor(&r),
@@ -10681,15 +13580,27 @@ fn simple_search_enter_on_radio_jumps_without_selecting() {
     type_text(&mut r, "east");
     press_enter(&mut r);
 
-    assert_eq!(r.coordinate, Coordinate::General, "Enter must leave search mode");
+    assert_eq!(
+        r.coordinate,
+        Coordinate::General,
+        "Enter must leave search mode"
+    );
     assert_eq!(r.current_id.last(), Some(2), "cursor must land on east");
 
     let children: Vec<FfonElement> = sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &group_id)
         .map(|a| a.to_vec())
         .unwrap();
-    assert_eq!(children[0].as_str(), Some("<checked>north"), "north stays selected");
+    assert_eq!(
+        children[0].as_str(),
+        Some("<checked>north"),
+        "north stays selected"
+    );
     assert_eq!(children[1].as_str(), Some("south"));
-    assert_eq!(children[2].as_str(), Some("east"), "east must not become checked");
+    assert_eq!(
+        children[2].as_str(),
+        Some("east"),
+        "east must not become checked"
+    );
     assert!(
         r.active_timeline().entries[before_count..]
             .iter()
@@ -10704,8 +13615,11 @@ fn simple_search_enter_on_radio_jumps_without_selecting() {
         .map(|a| a.to_vec())
         .unwrap();
     assert_eq!(children[0].as_str(), Some("north"));
-    assert_eq!(children[2].as_str(), Some("<checked>east"),
-        "Enter in General must still select the radio option");
+    assert_eq!(
+        children[2].as_str(),
+        Some("<checked>east"),
+        "Enter in General must still select the radio option"
+    );
 }
 
 #[test]
@@ -10719,14 +13633,26 @@ fn extended_search_enter_on_radio_jumps_without_selecting() {
     type_text(&mut r, "east");
     press_enter(&mut r);
 
-    assert_eq!(r.coordinate, Coordinate::General, "Enter must leave extended search");
+    assert_eq!(
+        r.coordinate,
+        Coordinate::General,
+        "Enter must leave extended search"
+    );
     assert_eq!(r.current_id.last(), Some(2), "cursor must land on east");
 
     let children: Vec<FfonElement> = sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &group_id)
         .map(|a| a.to_vec())
         .unwrap();
-    assert_eq!(children[0].as_str(), Some("<checked>north"), "north stays selected");
-    assert_eq!(children[2].as_str(), Some("east"), "east must not become checked");
+    assert_eq!(
+        children[0].as_str(),
+        Some("<checked>north"),
+        "north stays selected"
+    );
+    assert_eq!(
+        children[2].as_str(),
+        Some("east"),
+        "east must not become checked"
+    );
 }
 
 /// A `<password>` settings field masks its value: the live FFON keeps the real
@@ -10748,8 +13674,15 @@ fn settings_password_field_masks_value_everywhere() {
     // Pressing `i` must enter insert on a password field (the editable-element
     // shortcut gate must recognize <password>, not just <input>).
     press(&mut r, Keycode::I);
-    assert_eq!(r.coordinate, Coordinate::Insert, "i must enter Insert on a password field");
-    assert!(r.input_is_password, "password field must set input_is_password");
+    assert_eq!(
+        r.coordinate,
+        Coordinate::Insert,
+        "i must enter Insert on a password field"
+    );
+    assert!(
+        r.input_is_password,
+        "password field must set input_is_password"
+    );
 
     type_text(&mut r, "s3cr3t");
     // The buffer holds the real value (editing works), but the live FFON element
@@ -10765,9 +13698,15 @@ fn settings_password_field_masks_value_everywhere() {
     // Cursoring over the masked value announces `*`, never the real character.
     r.cursor_position = r.input_buffer.len();
     press_shift_left(&mut r);
-    let announced = r.pending_announcement.as_deref().unwrap_or("")
+    let announced = r
+        .pending_announcement
+        .as_deref()
+        .unwrap_or("")
         .trim_end_matches('\u{200B}');
-    assert_eq!(announced, "*", "cursoring over a password char must announce '*'");
+    assert_eq!(
+        announced, "*",
+        "cursoring over a password char must announce '*'"
+    );
 
     press_enter(&mut r);
 
@@ -10776,13 +13715,15 @@ fn settings_password_field_masks_value_everywhere() {
     let sec = r.ffon[0].as_obj().unwrap().children[1].as_obj().unwrap();
     assert!(
         matches!(&sec.children[0], FfonElement::Str(s) if s.contains("<password>s3cr3t</password>")),
-        "committed FFON must store the real value; got {:?}", sec.children[0],
+        "committed FFON must store the real value; got {:?}",
+        sec.children[0],
     );
     let masked_label = r.total_list.iter().find(|it| it.label.contains("API key"));
     if let Some(item) = masked_label {
         assert!(
             item.label.contains("******") && !item.label.contains("s3cr3t"),
-            "rendered label must be masked, not plaintext; got {:?}", item.label,
+            "rendered label must be masked, not plaintext; got {:?}",
+            item.label,
         );
     }
 }
@@ -10805,9 +13746,9 @@ fn tutorial_input_renderer(initial: &str) -> AppRenderer {
     provider.init();
     let display_name = provider.display_name().to_owned();
     let mut root = FfonElement::new_obj(&display_name);
-    root.as_obj_mut().unwrap().push(FfonElement::Str(
-        format!("<input>{initial}</input>"),
-    ));
+    root.as_obj_mut()
+        .unwrap()
+        .push(FfonElement::Str(format!("<input>{initial}</input>")));
     renderer.ffon.push(root);
     renderer.providers.push(provider);
 
@@ -10848,16 +13789,34 @@ fn tutorial_input_pause_splits_chunks_so_undo_steps_through_typing() {
     );
 
     press_enter(&mut renderer);
-    assert_eq!(renderer.coordinate, Coordinate::General, "Enter must exit insert mode");
+    assert_eq!(
+        renderer.coordinate,
+        Coordinate::General,
+        "Enter must exit insert mode"
+    );
 
     // Confirm both chunks are still TextChunks with the right after-states.
     let entries: Vec<_> = renderer.active_timeline().entries[baseline..baseline + 2].to_vec();
-    let after_strs: Vec<String> = entries.iter().map(|e| match e {
-        TimelineEntry::TextChunk { after: FfonElement::Str(s), .. } => s.clone(),
-        other => panic!("expected TextChunk(Str), got {:?}", other),
-    }).collect();
-    assert!(after_strs[0].contains("hello worlder"), "first chunk after = {:?}", after_strs[0]);
-    assert!(after_strs[1].contains("hello worlderer"), "second chunk after = {:?}", after_strs[1]);
+    let after_strs: Vec<String> = entries
+        .iter()
+        .map(|e| match e {
+            TimelineEntry::TextChunk {
+                after: FfonElement::Str(s),
+                ..
+            } => s.clone(),
+            other => panic!("expected TextChunk(Str), got {:?}", other),
+        })
+        .collect();
+    assert!(
+        after_strs[0].contains("hello worlder"),
+        "first chunk after = {:?}",
+        after_strs[0]
+    );
+    assert!(
+        after_strs[1].contains("hello worlderer"),
+        "second chunk after = {:?}",
+        after_strs[1]
+    );
 
     // ctrl-Z: revert the most-recent chunk → FFON should be back to "hello worlder".
     sicompass::state::walk_back(&mut renderer);
@@ -10897,8 +13856,14 @@ fn tutorial_input_typing_within_idle_window_merges_to_one_chunk() {
         "five keystrokes within TEXT_CHUNK_IDLE_MS must merge into one TextChunk, got {recorded}"
     );
     match renderer.active_timeline().entries.last().unwrap() {
-        TimelineEntry::TextChunk { after: FfonElement::Str(s), .. } => {
-            assert!(s.contains("hiabcde"), "merged after should reflect final buffer, got: {s:?}");
+        TimelineEntry::TextChunk {
+            after: FfonElement::Str(s),
+            ..
+        } => {
+            assert!(
+                s.contains("hiabcde"),
+                "merged after should reflect final buffer, got: {s:?}"
+            );
         }
         other => panic!("expected TextChunk(Str), got {:?}", other),
     }
@@ -10915,14 +13880,23 @@ fn tutorial_input_escape_reverts_ffon_and_drops_chunks() {
 
     type_text(&mut renderer, "world");
     // Confirm typing recorded something AND mutated FFON.
-    assert!(renderer.active_timeline().entries.len() > baseline,
-        "typing must record TextChunks");
+    assert!(
+        renderer.active_timeline().entries.len() > baseline,
+        "typing must record TextChunks"
+    );
     let elem = &renderer.ffon[0].as_obj().unwrap().children[0];
-    assert!(elem.as_str().unwrap().contains("helloworld"),
-        "FFON must reflect in-progress edit, got: {:?}", elem);
+    assert!(
+        elem.as_str().unwrap().contains("helloworld"),
+        "FFON must reflect in-progress edit, got: {:?}",
+        elem
+    );
 
     press_escape(&mut renderer);
-    assert_eq!(renderer.coordinate, Coordinate::General, "Escape must exit insert mode");
+    assert_eq!(
+        renderer.coordinate,
+        Coordinate::General,
+        "Escape must exit insert mode"
+    );
 
     // FFON restored to the snapshot.
     let elem = &renderer.ffon[0].as_obj().unwrap().children[0];
@@ -10933,10 +13907,14 @@ fn tutorial_input_escape_reverts_ffon_and_drops_chunks() {
     );
     // Timeline truncated back to baseline.
     assert_eq!(
-        renderer.active_timeline().entries.len(), baseline,
+        renderer.active_timeline().entries.len(),
+        baseline,
         "Escape must drop all per-keystroke TextChunks recorded during the abandoned session"
     );
-    assert!(renderer.insert_session.is_none(), "session must be cleared after Escape");
+    assert!(
+        renderer.insert_session.is_none(),
+        "session must be cleared after Escape"
+    );
 }
 
 /// Enter after typing keeps both the typed text AND the per-keystroke
@@ -10950,15 +13928,25 @@ fn tutorial_input_enter_keeps_typed_text_and_chunks() {
     type_text(&mut renderer, "ya");
     press_enter(&mut renderer);
 
-    assert_eq!(renderer.coordinate, Coordinate::General, "Enter must exit insert mode");
+    assert_eq!(
+        renderer.coordinate,
+        Coordinate::General,
+        "Enter must exit insert mode"
+    );
     let elem = &renderer.ffon[0].as_obj().unwrap().children[0];
-    assert!(elem.as_str().unwrap().contains("hiya"),
-        "typed text must remain after Enter, got: {:?}", elem);
+    assert!(
+        elem.as_str().unwrap().contains("hiya"),
+        "typed text must remain after Enter, got: {:?}",
+        elem
+    );
     assert!(
         renderer.active_timeline().entries.len() > baseline,
         "TextChunks from typing must remain in the timeline after Enter"
     );
-    assert!(renderer.insert_session.is_none(), "session must be cleared after Enter");
+    assert!(
+        renderer.insert_session.is_none(),
+        "session must be cleared after Enter"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -11014,14 +14002,18 @@ fn tutorial_placeholder_str_commit_undo_restores_i_placeholder() {
     let mut renderer = tutorial_placeholder_renderer();
 
     press(&mut renderer, Keycode::I);
-    assert!(renderer.placeholder_insert_mode,
-        "press i on I_PLACEHOLDER must enter placeholder_insert_mode");
+    assert!(
+        renderer.placeholder_insert_mode,
+        "press i on I_PLACEHOLDER must enter placeholder_insert_mode"
+    );
     let baseline = renderer.active_timeline().entries.len();
     type_text(&mut renderer, "hello");
     press_enter(&mut renderer);
 
     // Element should now be Str("<input>hello</input>").
-    let parent = renderer.ffon[0].as_obj().unwrap().children[0].as_obj().unwrap();
+    let parent = renderer.ffon[0].as_obj().unwrap().children[0]
+        .as_obj()
+        .unwrap();
     let child = &parent.children[0];
     assert!(
         matches!(child, FfonElement::Str(s) if s == "<input>hello</input>"),
@@ -11043,7 +14035,9 @@ fn tutorial_placeholder_str_commit_undo_restores_i_placeholder() {
 
     // ctrl-Z must restore the I_PLACEHOLDER in one step.
     sicompass::state::walk_back(&mut renderer);
-    let parent = renderer.ffon[0].as_obj().unwrap().children[0].as_obj().unwrap();
+    let parent = renderer.ffon[0].as_obj().unwrap().children[0]
+        .as_obj()
+        .unwrap();
     let child = &parent.children[0];
     assert!(
         matches!(child, FfonElement::Str(s) if s == I_PLACEHOLDER),
@@ -11052,7 +14046,9 @@ fn tutorial_placeholder_str_commit_undo_restores_i_placeholder() {
 
     // ctrl-Shift-Z must restore the typed Str.
     sicompass::state::walk_forward(&mut renderer);
-    let parent = renderer.ffon[0].as_obj().unwrap().children[0].as_obj().unwrap();
+    let parent = renderer.ffon[0].as_obj().unwrap().children[0]
+        .as_obj()
+        .unwrap();
     let child = &parent.children[0];
     assert!(
         matches!(child, FfonElement::Str(s) if s == "<input>hello</input>"),
@@ -11075,9 +14071,13 @@ fn tutorial_placeholder_obj_commit_undo_restores_i_placeholder() {
     press_enter(&mut renderer);
 
     // Element should now be Obj { key: "hello", children: [Str("")] }.
-    let parent = renderer.ffon[0].as_obj().unwrap().children[0].as_obj().unwrap();
+    let parent = renderer.ffon[0].as_obj().unwrap().children[0]
+        .as_obj()
+        .unwrap();
     let child = &parent.children[0];
-    let obj = child.as_obj().expect("after +hello the placeholder must become an Obj");
+    let obj = child
+        .as_obj()
+        .expect("after +hello the placeholder must become an Obj");
     assert_eq!(obj.key, "hello", "Obj key must be the typed name");
 
     // One timeline entry — no Structural::Replace.
@@ -11094,7 +14094,9 @@ fn tutorial_placeholder_obj_commit_undo_restores_i_placeholder() {
 
     // ctrl-Z must restore the I_PLACEHOLDER in one step.
     sicompass::state::walk_back(&mut renderer);
-    let parent = renderer.ffon[0].as_obj().unwrap().children[0].as_obj().unwrap();
+    let parent = renderer.ffon[0].as_obj().unwrap().children[0]
+        .as_obj()
+        .unwrap();
     let child = &parent.children[0];
     assert!(
         matches!(child, FfonElement::Str(s) if s == I_PLACEHOLDER),
@@ -11103,7 +14105,9 @@ fn tutorial_placeholder_obj_commit_undo_restores_i_placeholder() {
 
     // ctrl-Shift-Z must restore the typed Obj.
     sicompass::state::walk_forward(&mut renderer);
-    let parent = renderer.ffon[0].as_obj().unwrap().children[0].as_obj().unwrap();
+    let parent = renderer.ffon[0].as_obj().unwrap().children[0]
+        .as_obj()
+        .unwrap();
     let child = &parent.children[0];
     assert!(
         child.as_obj().map_or(false, |o| o.key == "hello"),
@@ -11128,7 +14132,10 @@ fn editing_obj_input_preserves_children() {
     // Sanity: the parent is the Obj we want to edit, with one I_PLACEHOLDER child.
     let parent = &renderer.ffon[0].as_obj().unwrap().children[0];
     assert!(
-        parent.as_obj().map_or(false, |o| o.key.contains("+i input example") && o.children.len() == 1),
+        parent
+            .as_obj()
+            .map_or(false, |o| o.key.contains("+i input example")
+                && o.children.len() == 1),
         "parent must be the +i input example Obj with one I_PLACEHOLDER child, got: {parent:?}"
     );
 
@@ -11138,14 +14145,17 @@ fn editing_obj_input_preserves_children() {
     press_enter(&mut renderer);
 
     // Children must survive the commit.
-    let parent = renderer.ffon[0].as_obj().unwrap().children[0].as_obj()
+    let parent = renderer.ffon[0].as_obj().unwrap().children[0]
+        .as_obj()
         .expect("parent must still be an Obj after commit");
     assert!(
         parent.key.contains("<input>edited</input>"),
-        "parent key must reflect the typed content, got: {:?}", parent.key
+        "parent key must reflect the typed content, got: {:?}",
+        parent.key
     );
     assert_eq!(
-        parent.children.len(), 1,
+        parent.children.len(),
+        1,
         "parent must still have exactly one child (the I_PLACEHOLDER), got {}",
         parent.children.len()
     );
@@ -11190,8 +14200,14 @@ fn tutorial_placeholder_typing_pause_splits_chunks() {
     );
 
     // Final state: Obj { key: "hello" }.
-    let parent = renderer.ffon[0].as_obj().unwrap().children[0].as_obj().unwrap();
-    assert!(parent.children[0].as_obj().map_or(false, |o| o.key == "hello"));
+    let parent = renderer.ffon[0].as_obj().unwrap().children[0]
+        .as_obj()
+        .unwrap();
+    assert!(
+        parent.children[0]
+            .as_obj()
+            .map_or(false, |o| o.key == "hello")
+    );
 
     // Tail chunk's `after` was rewritten to the Obj.
     let tail = renderer.active_timeline().entries.last().unwrap();
@@ -11202,14 +14218,20 @@ fn tutorial_placeholder_typing_pause_splits_chunks() {
 
     // Walk back twice: 2nd-burst → 1st-burst → I_PLACEHOLDER.
     sicompass::state::walk_back(&mut renderer); // undo 2nd burst (from Obj)
-    let child = &renderer.ffon[0].as_obj().unwrap().children[0].as_obj().unwrap().children[0];
+    let child = &renderer.ffon[0].as_obj().unwrap().children[0]
+        .as_obj()
+        .unwrap()
+        .children[0];
     assert!(
         matches!(child, FfonElement::Str(s) if s.contains("+he") && !s.contains("+hello")),
         "first ctrl-Z must restore the 1st-burst end state, got: {child:?}"
     );
 
     sicompass::state::walk_back(&mut renderer); // undo 1st burst
-    let child = &renderer.ffon[0].as_obj().unwrap().children[0].as_obj().unwrap().children[0];
+    let child = &renderer.ffon[0].as_obj().unwrap().children[0]
+        .as_obj()
+        .unwrap()
+        .children[0];
     assert!(
         matches!(child, FfonElement::Str(s) if s == I_PLACEHOLDER),
         "second ctrl-Z must restore the I_PLACEHOLDER, got: {child:?}"
@@ -11224,18 +14246,30 @@ fn tutorial_placeholder_typing_pause_splits_chunks() {
 /// enabled-but-unfocused terminal polling its shell every frame.
 struct AlwaysTickProvider;
 impl Provider for AlwaysTickProvider {
-    fn name(&self) -> &str { "alwaystick" }
-    fn fetch(&mut self) -> Vec<FfonElement> { vec![FfonElement::new_str("x")] }
-    fn tick(&mut self) -> bool { true }
+    fn name(&self) -> &str {
+        "alwaystick"
+    }
+    fn fetch(&mut self) -> Vec<FfonElement> {
+        vec![FfonElement::new_str("x")]
+    }
+    fn tick(&mut self) -> bool {
+        true
+    }
 }
 
 /// A provider that asks to be taken fullscreen the moment it is ticked, and
 /// keeps asking. Stands in for a plugin trying to grab the screen.
 struct GrabbyDashboardProvider;
 impl Provider for GrabbyDashboardProvider {
-    fn name(&self) -> &str { "grabby" }
-    fn fetch(&mut self) -> Vec<FfonElement> { vec![FfonElement::new_str("x")] }
-    fn tick(&mut self) -> bool { true }
+    fn name(&self) -> &str {
+        "grabby"
+    }
+    fn fetch(&mut self) -> Vec<FfonElement> {
+        vec![FfonElement::new_str("x")]
+    }
+    fn tick(&mut self) -> bool {
+        true
+    }
     fn dashboard_kind(&self) -> sicompass_sdk::DashboardKind {
         sicompass_sdk::DashboardKind::Interactive
     }
@@ -11248,9 +14282,15 @@ impl Provider for GrabbyDashboardProvider {
 /// guard below.
 struct ShoutyProvider;
 impl Provider for ShoutyProvider {
-    fn name(&self) -> &str { "shouty" }
-    fn fetch(&mut self) -> Vec<FfonElement> { vec![FfonElement::new_str("x")] }
-    fn tick(&mut self) -> bool { true }
+    fn name(&self) -> &str {
+        "shouty"
+    }
+    fn fetch(&mut self) -> Vec<FfonElement> {
+        vec![FfonElement::new_str("x")]
+    }
+    fn tick(&mut self) -> bool {
+        true
+    }
     fn take_error(&mut self) -> Option<String> {
         Some("Session expired, re-enter your password".to_string())
     }
@@ -11259,8 +14299,12 @@ impl Provider for ShoutyProvider {
 /// A provider whose `tick()` never reports an update.
 struct QuietProvider;
 impl Provider for QuietProvider {
-    fn name(&self) -> &str { "quiet" }
-    fn fetch(&mut self) -> Vec<FfonElement> { vec![FfonElement::new_str("x")] }
+    fn name(&self) -> &str {
+        "quiet"
+    }
+    fn fetch(&mut self) -> Vec<FfonElement> {
+        vec![FfonElement::new_str("x")]
+    }
 }
 
 /// `run_provider_ticks` must report `active_tick_update` only for the *active*
@@ -11281,7 +14325,11 @@ fn background_provider_tick_does_not_signal_active_refresh() {
     r.ffon.push(FfonElement::new_obj("quiet"));
 
     // Cursor on provider 1: provider 0 ticking is a *background* update.
-    r.current_id = { let mut id = IdArray::new(); id.push(1); id };
+    r.current_id = {
+        let mut id = IdArray::new();
+        id.push(1);
+        id
+    };
     let (active_update, _) = sicompass::events::run_provider_ticks(&mut r);
     assert!(
         !active_update,
@@ -11289,7 +14337,11 @@ fn background_provider_tick_does_not_signal_active_refresh() {
     );
 
     // Cursor on provider 0: its tick is now an active update.
-    r.current_id = { let mut id = IdArray::new(); id.push(0); id };
+    r.current_id = {
+        let mut id = IdArray::new();
+        id.push(0);
+        id
+    };
     let (active_update, _) = sicompass::events::run_provider_ticks(&mut r);
     assert!(
         active_update,
@@ -11309,17 +14361,26 @@ struct SlowLoadProvider {
     request: Option<sicompass_sdk::NavigationRequest>,
 }
 impl Provider for SlowLoadProvider {
-    fn name(&self) -> &str { "slowload" }
+    fn name(&self) -> &str {
+        "slowload"
+    }
     fn fetch(&mut self) -> Vec<FfonElement> {
         if !self.loaded {
-            return vec![FfonElement::new_str("<input>https://x</input>"), FfonElement::new_str("Loading…")];
+            return vec![
+                FfonElement::new_str("<input>https://x</input>"),
+                FfonElement::new_str("Loading…"),
+            ];
         }
         let mut page = FfonElement::new_obj("<input>https://x</input>");
-        page.as_obj_mut().unwrap().push(FfonElement::new_str("page body"));
+        page.as_obj_mut()
+            .unwrap()
+            .push(FfonElement::new_str("page body"));
         vec![page]
     }
     fn tick(&mut self) -> bool {
-        if self.loaded || self.request.is_some() { return false; }
+        if self.loaded || self.request.is_some() {
+            return false;
+        }
         // The background load just finished.
         self.loaded = true;
         self.request = Some(sicompass_sdk::NavigationRequest::EnterChildren);
@@ -11332,13 +14393,21 @@ impl Provider for SlowLoadProvider {
 
 fn slow_load_renderer() -> AppRenderer {
     let mut r = AppRenderer::new();
-    r.providers.push(Box::new(SlowLoadProvider { loaded: false, request: None }));
+    r.providers.push(Box::new(SlowLoadProvider {
+        loaded: false,
+        request: None,
+    }));
     let mut root = FfonElement::new_obj("slowload");
     for child in r.providers[0].fetch() {
         root.as_obj_mut().unwrap().push(child);
     }
     r.ffon = vec![root];
-    r.current_id = { let mut id = IdArray::new(); id.push(0); id.push(0); id };
+    r.current_id = {
+        let mut id = IdArray::new();
+        id.push(0);
+        id.push(0);
+        id
+    };
     sicompass::list::create_list_current_layer(&mut r);
     r
 }
@@ -11348,7 +14417,11 @@ fn slow_load_renderer() -> AppRenderer {
 #[test]
 fn navigation_request_enters_content_when_background_load_lands() {
     let mut r = slow_load_renderer();
-    assert_eq!(r.current_id.depth(), 2, "cursor starts on the top-level row");
+    assert_eq!(
+        r.current_id.depth(),
+        2,
+        "cursor starts on the top-level row"
+    );
 
     let (active_update, _) = sicompass::events::run_provider_ticks(&mut r);
     assert!(active_update);
@@ -11356,9 +14429,14 @@ fn navigation_request_enters_content_when_background_load_lands() {
     sicompass::list::create_list_current_layer(&mut r);
 
     assert!(sicompass::events::apply_navigation_requests(&mut r));
-    assert_eq!(r.current_id.depth(), 3, "cursor should be inside the loaded content");
+    assert_eq!(
+        r.current_id.depth(),
+        3,
+        "cursor should be inside the loaded content"
+    );
     assert!(
-        r.current_list_item().map_or(false, |it| it.label.contains("page body")),
+        r.current_list_item()
+            .map_or(false, |it| it.label.contains("page body")),
         "cursor should be on the page body, got: {:?}",
         r.current_list_item().map(|it| it.label.clone())
     );
@@ -11386,7 +14464,11 @@ fn navigation_request_ignored_for_background_provider() {
     // A second provider, and the cursor parked on it.
     r.providers.push(Box::new(QuietProvider));
     r.ffon.push(FfonElement::new_obj("quiet"));
-    r.current_id = { let mut id = IdArray::new(); id.push(1); id };
+    r.current_id = {
+        let mut id = IdArray::new();
+        id.push(1);
+        id
+    };
     let before = r.current_id.clone();
 
     sicompass::events::run_provider_ticks(&mut r);
@@ -11408,7 +14490,11 @@ fn dashboard_request_ignored_for_background_provider() {
     r.providers.push(Box::new(QuietProvider));
     r.ffon.push(FfonElement::new_obj("grabby"));
     r.ffon.push(FfonElement::new_obj("quiet"));
-    r.current_id = { let mut id = IdArray::new(); id.push(1); id };
+    r.current_id = {
+        let mut id = IdArray::new();
+        id.push(1);
+        id
+    };
     let before = r.current_id.clone();
 
     // Several frames: a single ignored request is not the property under test.
@@ -11437,13 +14523,24 @@ fn background_provider_error_never_reaches_the_status_line() {
     r.providers.push(Box::new(QuietProvider));
     r.ffon.push(FfonElement::new_obj("shouty"));
     r.ffon.push(FfonElement::new_obj("quiet"));
-    r.current_id = { let mut id = IdArray::new(); id.push(1); id };
+    r.current_id = {
+        let mut id = IdArray::new();
+        id.push(1);
+        id
+    };
 
     sicompass::events::drain_provider_errors(&mut r);
-    assert_eq!(r.error_message, "", "a background provider must not write the status line");
+    assert_eq!(
+        r.error_message, "",
+        "a background provider must not write the status line"
+    );
 
     // On its own tab the very same error is legitimate, and shows.
-    r.current_id = { let mut id = IdArray::new(); id.push(0); id };
+    r.current_id = {
+        let mut id = IdArray::new();
+        id.push(0);
+        id
+    };
     sicompass::events::drain_provider_errors(&mut r);
     assert!(r.error_message.contains("Session expired"));
 }
@@ -11457,7 +14554,11 @@ fn dashboard_request_honored_for_active_provider() {
     let mut r = AppRenderer::new();
     r.providers.push(Box::new(GrabbyDashboardProvider));
     r.ffon.push(FfonElement::new_obj("grabby"));
-    r.current_id = { let mut id = IdArray::new(); id.push(0); id };
+    r.current_id = {
+        let mut id = IdArray::new();
+        id.push(0);
+        id
+    };
 
     pump_tick(&mut r);
 
@@ -11473,7 +14574,10 @@ fn navigate_right_into_folder_resets_scroll_offset() {
     let fb_idx = h.provider_idx("filebrowser").unwrap();
     navigate_to_provider(h.r(), fb_idx);
     press_right(h.r()); // into the filebrowser root listing
-    let subdir_idx = h.renderer.total_list.iter()
+    let subdir_idx = h
+        .renderer
+        .total_list
+        .iter()
         .position(|it| it.label.contains("subdir"))
         .expect("subdir in listing");
     h.renderer.list_index = subdir_idx;
@@ -11503,12 +14607,21 @@ fn undo_navigate_into_child_repopulates_collapsed_subtree() {
     navigate_to_provider(h.r(), fb_idx);
     press_right(h.r()); // into fb root
     // descend into subdir (grafts subdir.children = [nested.txt])
-    let si = h.renderer.total_list.iter()
-        .position(|i| i.label.contains("subdir")).unwrap();
+    let si = h
+        .renderer
+        .total_list
+        .iter()
+        .position(|i| i.label.contains("subdir"))
+        .unwrap();
     h.renderer.list_index = si;
     h.renderer.current_id = h.renderer.total_list[si].id.clone();
     press_right(h.r());
-    assert!(h.renderer.total_list.iter().any(|i| i.label.contains("nested.txt")));
+    assert!(
+        h.renderer
+            .total_list
+            .iter()
+            .any(|i| i.label.contains("nested.txt"))
+    );
     // back out, then create a file at root — this refreshes the root listing
     // and collapses subdir's in-memory subtree to an empty lazy folder.
     press_left(h.r());
@@ -11521,11 +14634,22 @@ fn undo_navigate_into_child_repopulates_collapsed_subtree() {
     state_mod::walk_back(h.r());
     settle_provider_ops(h.r());
     // cursor is back inside subdir AND its contents are visible again.
-    assert_eq!(h.renderer.current_id.depth(), 3, "cursor lands inside subdir");
+    assert_eq!(
+        h.renderer.current_id.depth(),
+        3,
+        "cursor lands inside subdir"
+    );
     assert!(
-        h.renderer.total_list.iter().any(|i| i.label.contains("nested.txt")),
+        h.renderer
+            .total_list
+            .iter()
+            .any(|i| i.label.contains("nested.txt")),
         "undo of the navigate must repopulate subdir, got {:?}",
-        h.renderer.total_list.iter().map(|i| i.label.clone()).collect::<Vec<_>>()
+        h.renderer
+            .total_list
+            .iter()
+            .map(|i| i.label.clone())
+            .collect::<Vec<_>>()
     );
     std::fs::remove_file(h.tmp.path().join("zz.txt")).ok();
 }
@@ -11539,8 +14663,12 @@ fn redo_of_filebrowser_delete_removes_disk_and_ffon() {
     let fb_idx = h.provider_idx("filebrowser").unwrap();
     navigate_to_provider(h.r(), fb_idx);
     press_right(h.r()); // into fb root
-    let ai = h.renderer.total_list.iter()
-        .position(|i| i.label.contains("alpha.txt")).unwrap();
+    let ai = h
+        .renderer
+        .total_list
+        .iter()
+        .position(|i| i.label.contains("alpha.txt"))
+        .unwrap();
     h.renderer.list_index = ai;
     h.renderer.current_id = h.renderer.total_list[ai].id.clone();
     let alpha = h.tmp.path().join("alpha.txt");
@@ -11552,7 +14680,10 @@ fn redo_of_filebrowser_delete_removes_disk_and_ffon() {
     settle_provider_ops(h.r()); // undo -> restored
     assert!(alpha.exists(), "undo restores alpha.txt on disk");
     assert!(
-        h.renderer.total_list.iter().any(|i| i.label.contains("alpha.txt")),
+        h.renderer
+            .total_list
+            .iter()
+            .any(|i| i.label.contains("alpha.txt")),
         "undo restores alpha.txt in the list"
     );
 
@@ -11560,9 +14691,16 @@ fn redo_of_filebrowser_delete_removes_disk_and_ffon() {
     settle_provider_ops(h.r()); // redo -> deleted again
     assert!(!alpha.exists(), "redo deletes alpha.txt from disk again");
     assert!(
-        !h.renderer.total_list.iter().any(|i| i.label.contains("alpha.txt")),
+        !h.renderer
+            .total_list
+            .iter()
+            .any(|i| i.label.contains("alpha.txt")),
         "redo must also remove alpha.txt from the list, got {:?}",
-        h.renderer.total_list.iter().map(|i| i.label.clone()).collect::<Vec<_>>()
+        h.renderer
+            .total_list
+            .iter()
+            .map(|i| i.label.clone())
+            .collect::<Vec<_>>()
     );
 }
 
@@ -11593,14 +14731,20 @@ fn setup_texteditor(root: &Path) -> AppRenderer {
 
 /// Move the list cursor onto the first entry whose label contains `needle`.
 fn cursor_to_label(r: &mut AppRenderer, needle: &str) {
-    let idx = r.total_list.iter()
+    let idx = r
+        .total_list
+        .iter()
         .position(|it| it.label.contains(needle))
         .unwrap_or_else(|| panic!("entry {needle:?} not in list"));
     let cur = r.list_index;
     if idx > cur {
-        for _ in 0..(idx - cur) { press_down(r); }
+        for _ in 0..(idx - cur) {
+            press_down(r);
+        }
     } else {
-        for _ in 0..(cur - idx) { press_up(r); }
+        for _ in 0..(cur - idx) {
+            press_up(r);
+        }
     }
 }
 
@@ -11619,18 +14763,34 @@ fn texteditor_file_deletion_is_undoable() {
 
     press_ctrl(&mut renderer, Keycode::Z);
     assert!(target.exists(), "ctrl-Z restored the deleted file");
-    assert_eq!(std::fs::read_to_string(&target).unwrap(), "important content");
+    assert_eq!(
+        std::fs::read_to_string(&target).unwrap(),
+        "important content"
+    );
     assert!(
-        renderer.total_list.iter().any(|i| i.label.contains("doomed.txt")),
+        renderer
+            .total_list
+            .iter()
+            .any(|i| i.label.contains("doomed.txt")),
         "undo restores doomed.txt in the list"
     );
 
     press_ctrl_shift(&mut renderer, Keycode::Z);
-    assert!(!target.exists(), "ctrl-shift-Z re-deleted the file from disk");
     assert!(
-        !renderer.total_list.iter().any(|i| i.label.contains("doomed.txt")),
+        !target.exists(),
+        "ctrl-shift-Z re-deleted the file from disk"
+    );
+    assert!(
+        !renderer
+            .total_list
+            .iter()
+            .any(|i| i.label.contains("doomed.txt")),
         "redo also removes doomed.txt from the list, got {:?}",
-        renderer.total_list.iter().map(|i| i.label.clone()).collect::<Vec<_>>()
+        renderer
+            .total_list
+            .iter()
+            .map(|i| i.label.clone())
+            .collect::<Vec<_>>()
     );
 }
 
@@ -11723,7 +14883,10 @@ fn texteditor_line_edit_is_undoable() {
     type_text(&mut renderer, "X");
     press_enter(&mut renderer);
     let after_edit = std::fs::read_to_string(&file).unwrap();
-    assert_ne!(after_edit, "alpha\nbeta\ngamma", "editing the line changed the file");
+    assert_ne!(
+        after_edit, "alpha\nbeta\ngamma",
+        "editing the line changed the file"
+    );
 
     press_ctrl(&mut renderer, Keycode::Z);
     assert_eq!(
@@ -11760,13 +14923,15 @@ fn texteditor_first_line_of_new_file_is_undoable() {
 
     press_ctrl(&mut renderer, Keycode::Z);
     assert_eq!(
-        std::fs::read_to_string(&file).unwrap(), "",
+        std::fs::read_to_string(&file).unwrap(),
+        "",
         "ctrl-Z must remove the first line written into a new file"
     );
 
     press_ctrl_shift(&mut renderer, Keycode::Z);
     assert_eq!(
-        std::fs::read_to_string(&file).unwrap(), "line 1",
+        std::fs::read_to_string(&file).unwrap(),
+        "line 1",
         "ctrl-shift-Z must restore the first line"
     );
 }
@@ -11781,25 +14946,43 @@ fn texteditor_create_edit_undo_redo_roundtrip() {
     let ffff = tmp.path().join("eeee/ffff");
     let mut r = setup_texteditor(tmp.path());
     press_right(&mut r);
-    press_ctrl(&mut r, Keycode::A); type_text(&mut r, "eeee:"); press_enter(&mut r);
+    press_ctrl(&mut r, Keycode::A);
+    type_text(&mut r, "eeee:");
+    press_enter(&mut r);
     cursor_to_label(&mut r, "eeee");
     press_right(&mut r);
-    press_ctrl(&mut r, Keycode::A); type_text(&mut r, "ffff"); press_enter(&mut r);
+    press_ctrl(&mut r, Keycode::A);
+    type_text(&mut r, "ffff");
+    press_enter(&mut r);
     cursor_to_label(&mut r, "ffff");
     press_right(&mut r);
-    press(&mut r, Keycode::I); type_text(&mut r, "line 1"); press_enter(&mut r);
-    press_ctrl(&mut r, Keycode::A); type_text(&mut r, "line 2"); press_enter(&mut r);
-    press_ctrl(&mut r, Keycode::A); type_text(&mut r, "line 3"); press_enter(&mut r);
+    press(&mut r, Keycode::I);
+    type_text(&mut r, "line 1");
+    press_enter(&mut r);
+    press_ctrl(&mut r, Keycode::A);
+    type_text(&mut r, "line 2");
+    press_enter(&mut r);
+    press_ctrl(&mut r, Keycode::A);
+    type_text(&mut r, "line 3");
+    press_enter(&mut r);
     press_up(&mut r);
     press_ctrl(&mut r, Keycode::D); // delete "line 2"
     assert_eq!(std::fs::read_to_string(&ffff).unwrap(), "line 1\nline 3");
 
-    for _ in 0..16 { press_ctrl(&mut r, Keycode::Z); }
-    assert!(!ffff.exists(), "after full undo, the file must be gone from disk");
+    for _ in 0..16 {
+        press_ctrl(&mut r, Keycode::Z);
+    }
+    assert!(
+        !ffff.exists(),
+        "after full undo, the file must be gone from disk"
+    );
 
-    for _ in 0..16 { press_ctrl_shift(&mut r, Keycode::Z); }
+    for _ in 0..16 {
+        press_ctrl_shift(&mut r, Keycode::Z);
+    }
     assert_eq!(
-        std::fs::read_to_string(&ffff).unwrap(), "line 1\nline 3",
+        std::fs::read_to_string(&ffff).unwrap(),
+        "line 1\nline 3",
         "after full redo, the file content must be restored exactly"
     );
 }
@@ -11814,12 +14997,20 @@ fn texteditor_undo_into_restored_file_shows_content() {
     let tmp = TempDir::new().unwrap();
     let mut r = setup_texteditor(tmp.path());
     press_right(&mut r); // into the editor listing
-    press_ctrl(&mut r, Keycode::A); type_text(&mut r, "aaa:"); press_enter(&mut r);
+    press_ctrl(&mut r, Keycode::A);
+    type_text(&mut r, "aaa:");
+    press_enter(&mut r);
     press_right(&mut r); // into aaa
-    press_ctrl(&mut r, Keycode::A); type_text(&mut r, "bbbb"); press_enter(&mut r);
+    press_ctrl(&mut r, Keycode::A);
+    type_text(&mut r, "bbbb");
+    press_enter(&mut r);
     press_right(&mut r); // into bbbb (empty file)
-    press(&mut r, Keycode::I); type_text(&mut r, "l1"); press_enter(&mut r);
-    press_ctrl(&mut r, Keycode::A); type_text(&mut r, "l2"); press_enter(&mut r);
+    press(&mut r, Keycode::I);
+    type_text(&mut r, "l1");
+    press_enter(&mut r);
+    press_ctrl(&mut r, Keycode::A);
+    type_text(&mut r, "l2");
+    press_enter(&mut r);
     press_ctrl(&mut r, Keycode::D); // delete the l2 line
     press_left(&mut r); // out to aaa
     press_ctrl(&mut r, Keycode::D); // delete file bbbb
@@ -11843,7 +15034,10 @@ fn texteditor_undo_into_restored_file_shows_content() {
                 r.total_list.iter().any(|it| it.label.contains("l1"))
                     || r.total_list.iter().any(|it| it.label == "i"),
                 "inside restored file, expected its line(s) or the empty placeholder, got {:?}",
-                r.total_list.iter().map(|it| it.label.clone()).collect::<Vec<_>>(),
+                r.total_list
+                    .iter()
+                    .map(|it| it.label.clone())
+                    .collect::<Vec<_>>(),
             );
         }
     }
@@ -11870,20 +15064,33 @@ fn texteditor_undo_of_delete_keeps_dir_file_prefix() {
     let mut checked = false;
     for _ in 0..10 {
         press_ctrl(&mut r, Keycode::Z);
-        let file_lbl = r.total_list.iter()
-            .find(|it| it.label.contains("myfile.txt")).map(|it| it.label.clone());
-        let dir_lbl = r.total_list.iter()
-            .find(|it| it.label.contains("myfolder")).map(|it| it.label.clone());
+        let file_lbl = r
+            .total_list
+            .iter()
+            .find(|it| it.label.contains("myfile.txt"))
+            .map(|it| it.label.clone());
+        let dir_lbl = r
+            .total_list
+            .iter()
+            .find(|it| it.label.contains("myfolder"))
+            .map(|it| it.label.clone());
         if let (Some(f), Some(d)) = (file_lbl, dir_lbl) {
-            assert!(f.starts_with("+fi"),
-                "restored file must keep its `+fi` prefix, got {f:?}");
-            assert!(d.starts_with("+di"),
-                "restored folder must keep its `+di` prefix, got {d:?}");
+            assert!(
+                f.starts_with("+fi"),
+                "restored file must keep its `+fi` prefix, got {f:?}"
+            );
+            assert!(
+                d.starts_with("+di"),
+                "restored folder must keep its `+di` prefix, got {d:?}"
+            );
             checked = true;
             break;
         }
     }
-    assert!(checked, "both entries should reappear in the listing after undo");
+    assert!(
+        checked,
+        "both entries should reappear in the listing after undo"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -11902,11 +15109,20 @@ fn c_opens_controls_palette_with_three_buttons() {
     assert_eq!(r.current_command, CommandPhase::Controls);
     assert_eq!(r.total_list.len(), 3);
     // Rendered as buttons (announced "button"): `-b ` prefix from build_str_label.
-    assert!(r.total_list.iter().all(|it| it.label.starts_with("-b ")),
-        "labels: {:?}", r.total_list.iter().map(|it| it.label.clone()).collect::<Vec<_>>());
+    assert!(
+        r.total_list.iter().all(|it| it.label.starts_with("-b ")),
+        "labels: {:?}",
+        r.total_list
+            .iter()
+            .map(|it| it.label.clone())
+            .collect::<Vec<_>>()
+    );
     // Stable action keys live in nav_path, in min/max/close order.
-    let keys: Vec<&str> = r.total_list.iter()
-        .filter_map(|it| it.nav_path.as_deref()).collect();
+    let keys: Vec<&str> = r
+        .total_list
+        .iter()
+        .filter_map(|it| it.nav_path.as_deref())
+        .collect();
     assert_eq!(keys, vec!["minimize", "maximize", "close"]);
 }
 
@@ -11932,6 +15148,9 @@ fn controls_palette_maximize_label_tracks_state() {
     r.window_is_maximized = true;
     dispatch_key(&mut r, Some(Keycode::C), Mod::empty());
     // Middle button reads "restore" when the window is maximized.
-    assert!(r.total_list[1].label.contains("restore"),
-        "got {:?}", r.total_list[1].label);
+    assert!(
+        r.total_list[1].label.contains("restore"),
+        "got {:?}",
+        r.total_list[1].label
+    );
 }
