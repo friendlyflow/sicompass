@@ -178,6 +178,33 @@
                 uv tool install graphifyy >/dev/null 2>&1 || true;
               fi
 
+              # Do NOT add -fuse-ld=lld for the host target here. It halves
+              # linker memory, which is tempting on a small machine, but gcc
+              # then invokes ld.lld directly and bypasses Nix's ld wrapper,
+              # which is what injects the store paths into RUNPATH. The
+              # binaries still link, so a plain `cargo build` looks fine, and
+              # then every test binary dies at startup with
+              #   error while loading shared libraries: libssl.so.3
+              # because its RUNPATH is only the placeholder outputs/out/lib.
+              # (lld is still in buildInputs above: the wasm guests invoke
+              # wasm-ld directly, where no rpath injection is involved.)
+
+              # Cap parallel cargo jobs by RAM as well as cores. A single rustc
+              # on this workspace can hold ~1 GB (chromiumoxide is the worst,
+              # and Cargo.toml pins it to opt-level 2 even in dev), so -j nproc
+              # overcommits badly on a small machine while a browser and an
+              # editor are also resident. One job per 2 GB, never above nproc.
+              # A no-op on any machine with enough RAM to cover its cores.
+              if [ -r /proc/meminfo ] && [ -z "$CARGO_BUILD_JOBS" ]; then
+                _gb=$(awk '/MemTotal/{printf "%d", $2/1048576}' /proc/meminfo);
+                _cap=$((_gb / 2));
+                [ "$_cap" -lt 1 ] && _cap=1;
+                if [ "$_cap" -lt "$(nproc)" ]; then
+                  export CARGO_BUILD_JOBS="$_cap";
+                fi
+                unset _gb _cap;
+              fi
+
               # Drop into fish for interactive shells only. `nix develop -c <cmd>`
               # and tooling (Claude Code's Bash tool, CI) get no tty; exec'ing
               # fish there would replace the process and silently discard the
