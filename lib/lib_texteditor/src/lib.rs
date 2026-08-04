@@ -41,6 +41,35 @@ pub fn register_translations() {
 use sicompass_sdk::{register_builtin_manifest, register_provider_factory};
 use std::path::{Path, PathBuf};
 
+/// Move `path` to the OS trash.
+///
+/// On macOS the `trash` crate defaults to `DeleteMethod::Finder`, which spawns
+/// `osascript` and drives Finder over an Apple event for every single delete.
+/// That needs Finder to be running and responsive, asks the user for an
+/// automation permission, plays the trash sound, and serializes badly:
+/// concurrent deletes contend on the same Apple event queue and start failing,
+/// which surfaces here as a delete silently reporting failure.
+/// `NsFileManager` calls `trashItemAtURL` directly instead — faster, silent,
+/// no extra permission, no running Finder required.
+///
+/// The tradeoff is that some macOS versions do not record the "Put Back"
+/// entry, so restoring from the Finder side may mean dragging the item out of
+/// the Trash. In-app undo is unaffected: it restores from the snapshot
+/// [`sicompass_sdk::fs_trash::snapshot_for_delete`] took before the delete.
+#[cfg(target_os = "macos")]
+fn trash_delete(path: &Path) -> Result<(), trash::Error> {
+    use trash::macos::{DeleteMethod, TrashContextExtMacos};
+    let mut ctx = trash::TrashContext::default();
+    ctx.set_delete_method(DeleteMethod::NsFileManager);
+    ctx.delete(path)
+}
+
+/// See the macOS variant above; everywhere else the crate default is fine.
+#[cfg(not(target_os = "macos"))]
+fn trash_delete(path: &Path) -> Result<(), trash::Error> {
+    trash::delete(path)
+}
+
 // ---------------------------------------------------------------------------
 // TextEditorProvider
 // ---------------------------------------------------------------------------
@@ -536,7 +565,7 @@ impl Provider for TextEditorProvider {
         // Snapshot before trashing so an undo can restore even if the OS trash
         // is later emptied (see `sicompass_sdk::fs_trash`).
         let side_effect = sicompass_sdk::fs_trash::snapshot_for_delete(&full);
-        if trash::delete(&full).is_err() {
+        if trash_delete(&full).is_err() {
             return false;
         }
         // Reinsert with the original tagged key (`<dir>`/`<file>` + `<input>`),

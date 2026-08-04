@@ -1473,10 +1473,14 @@ pub struct AppState {
     // ---- Vulkan core --------------------------------------------------------
     pub entry: ash::Entry,
     pub instance: ash::Instance,
+    /// `None` when the driver does not expose `VK_EXT_debug_utils`, which is
+    /// the normal case on macOS, where MoltenVK is loaded as the driver rather
+    /// than through the loader and so offers no layers or debug extensions.
     #[cfg(debug_assertions)]
-    pub debug_utils: ash::ext::debug_utils::Instance,
-    #[cfg(debug_assertions)]
-    pub debug_messenger: ash::vk::DebugUtilsMessengerEXT,
+    pub debug: Option<(
+        ash::ext::debug_utils::Instance,
+        ash::vk::DebugUtilsMessengerEXT,
+    )>,
     pub surface_loader: ash::khr::surface::Instance,
     pub surface: ash::vk::SurfaceKHR,
     pub physical_device: ash::vk::PhysicalDevice,

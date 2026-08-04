@@ -260,12 +260,26 @@
               #
               # FALLBACK rather than DYLD_LIBRARY_PATH: the fallback list is
               # consulted last, so it cannot shadow a system framework the way
-              # the Linux LD_LIBRARY_PATH note warns about. (Note that System
-              # Integrity Protection strips DYLD_* across an exec of any
-              # protected binary, e.g. /bin/sh. The shell `nix develop` drops
-              # you into is a store bash, so the variable survives for
-              # anything launched from here.)
+              # the Linux LD_LIBRARY_PATH note warns about.
+              #
+              # This variable cannot be relied on, and SDL_VULKAN_LIBRARY below
+              # is what actually carries the day. System Integrity Protection
+              # strips every DYLD_* variable across an exec of a protected
+              # binary, and /bin is protected, so the `exec "$_sh"` at the end
+              # of this hook destroys it for anyone whose login shell is
+              # /bin/zsh, which is the macOS default. It survives only for
+              # `nix develop -c <cmd>`, which does not exec a login shell.
+              # Kept for exactly that case, and for libraries other than the
+              # Vulkan pair.
               export DYLD_FALLBACK_LIBRARY_PATH="${vulkan-loader}/lib:${moltenvk}/lib:${sdl3}/lib:${freetype}/lib:${libwebp}/lib:${curl.out}/lib:$HOME/lib:/usr/local/lib:/usr/lib";
+
+              # The SIP-proof half of the above: an ordinary variable name, so
+              # it survives the exec into the user's shell. SDL3 reads it for
+              # its own loader (SDL_HINT_VULKAN_LIBRARY) and sicompass reads
+              # the same name in `load_vulkan_entry`, so one value steers both.
+              # Point it at MoltenVK directly rather than the loader, since
+              # MoltenVK exports the Vulkan entry points itself.
+              export SDL_VULKAN_LIBRARY="${moltenvk}/lib/libMoltenVK.dylib";
 
               # One ICD, always present, and its manifest carries an absolute
               # store path. So unlike the Linux branch there is nothing to
