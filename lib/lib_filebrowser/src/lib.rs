@@ -37,6 +37,35 @@ pub fn register_translations() {
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
+/// Move `path` to the OS trash.
+///
+/// On macOS the `trash` crate defaults to `DeleteMethod::Finder`, which spawns
+/// `osascript` and drives Finder over an Apple event for every single delete.
+/// That needs Finder to be running and responsive, asks the user for an
+/// automation permission, plays the trash sound, and serializes badly:
+/// concurrent deletes contend on the same Apple event queue and start failing,
+/// which surfaces here as `delete_item` returning `false` for no visible
+/// reason. `NsFileManager` calls `trashItemAtURL` directly instead — faster,
+/// silent, no extra permission, no running Finder required.
+///
+/// The tradeoff is that some macOS versions do not record the "Put Back"
+/// entry, so restoring from the Finder side may mean dragging the item out of
+/// the Trash. In-app undo is unaffected: it restores from the snapshot
+/// [`sicompass_sdk::fs_trash::snapshot_for_delete`] took before the delete.
+#[cfg(target_os = "macos")]
+fn trash_delete(path: &Path) -> Result<(), trash::Error> {
+    use trash::macos::{DeleteMethod, TrashContextExtMacos};
+    let mut ctx = trash::TrashContext::default();
+    ctx.set_delete_method(DeleteMethod::NsFileManager);
+    ctx.delete(path)
+}
+
+/// See the macOS variant above; everywhere else the crate default is fine.
+#[cfg(not(target_os = "macos"))]
+fn trash_delete(path: &Path) -> Result<(), trash::Error> {
+    trash::delete(path)
+}
+
 // ---------------------------------------------------------------------------
 // Sort mode
 // ---------------------------------------------------------------------------
@@ -241,7 +270,7 @@ impl Provider for FilebrowserProvider {
             .map(|m| m.is_dir())
             .unwrap_or(false);
         let side_effect = sicompass_sdk::fs_trash::snapshot_for_delete(&full);
-        if trash::delete(&full).is_ok() {
+        if trash_delete(&full).is_ok() {
             let before_elem = if is_dir {
                 FfonElement::new_obj(&name_clean)
             } else {
@@ -302,7 +331,7 @@ impl Provider for FilebrowserProvider {
             FsSideEffect::None => None,
         };
         if let Some(path) = path {
-            if let Err(e) = trash::delete(path) {
+            if let Err(e) = trash_delete(path) {
                 register_translations();
                 let mut args = localize::Args::new();
                 args.set("err", e.to_string());
@@ -1561,12 +1590,41 @@ mod tests {
 
         let mut err = String::new();
         sicompass_sdk::block_on(p.undo(&entries[0], &mut err));
-        assert!(
-            err.is_empty(),
-            "undo should auto-restore from OS trash: {err}"
-        );
-        assert!(target.exists(), "oversized file restored from OS trash");
-        assert_eq!(std::fs::read(&target).unwrap(), big);
+
+        // The outcome is platform-split because the capability is. `trash`
+        // exposes `os_limited` (and so a programmatic restore) on Windows and
+        // the freedesktop platforms only; on macOS
+        // `fs_trash::restore_from_os_trash` is compiled to an unconditional
+        // `Err`. Asserting the real behaviour on both sides keeps the test
+        // meaningful everywhere instead of silently covering nothing on macOS.
+        #[cfg(not(any(target_os = "macos", target_os = "ios", target_os = "android")))]
+        {
+            assert!(
+                err.is_empty(),
+                "undo should auto-restore from OS trash: {err}"
+            );
+            assert!(target.exists(), "oversized file restored from OS trash");
+            assert_eq!(std::fs::read(&target).unwrap(), big);
+        }
+
+        // Where no programmatic restore exists, undo must still fail loudly
+        // and point the user at a manual restore, never silently report
+        // success while leaving the file in the trash.
+        #[cfg(any(target_os = "macos", target_os = "ios", target_os = "android"))]
+        {
+            assert!(
+                !err.is_empty(),
+                "undo must report an error where OS-trash restore is unsupported"
+            );
+            assert!(
+                err.contains("huge.bin"),
+                "error must name the file the user has to restore: {err}"
+            );
+            assert!(
+                !target.exists(),
+                "file stays in the OS trash when restore is unsupported"
+            );
+        }
     }
 
     #[test]

@@ -269,6 +269,13 @@ const VALIDATION_LAYERS: &[&CStr] = &[];
 
 const DEVICE_EXTENSIONS: &[&CStr] = &[ash::khr::swapchain::NAME];
 
+/// Absolute path to the Vulkan library to load, overriding the search below.
+///
+/// SDL3 defines and reads this one itself (`SDL_HINT_VULKAN_LIBRARY`); it is
+/// reused here so a single variable steers both SDL's loader and ash's.
+#[cfg(target_os = "macos")]
+pub const VULKAN_LIBRARY_ENV: &str = "SDL_VULKAN_LIBRARY";
+
 // ---------------------------------------------------------------------------
 // Vulkan loader
 // ---------------------------------------------------------------------------
@@ -317,6 +324,25 @@ pub unsafe fn load_vulkan_entry() -> Result<ash::Entry, String> {
             match ash::Entry::load_from(&bundled) {
                 Ok(entry) => return Ok(entry),
                 Err(e) => tried.push(format!("{}: {e}", bundled.display())),
+            }
+        }
+
+        // An explicit absolute path, which is the only thing that works when
+        // the library lives somewhere dyld will not look and
+        // DYLD_FALLBACK_LIBRARY_PATH cannot be used to point at it. That is
+        // the Nix dev shell on macOS: System Integrity Protection strips
+        // DYLD_* across an exec of any protected binary, and the user's login
+        // shell is normally /bin/zsh, so the variable never survives into an
+        // interactive shell. A plain (non-DYLD_) variable does survive.
+        //
+        // Deliberately the same name SDL3 reads for its own loader, so one
+        // variable configures both halves rather than having a sicompass-only
+        // spelling that has to be kept in sync.
+        if let Some(path) = std::env::var_os(VULKAN_LIBRARY_ENV) {
+            let path = std::path::PathBuf::from(path);
+            match ash::Entry::load_from(&path) {
+                Ok(entry) => return Ok(entry),
+                Err(e) => tried.push(format!("{} (${VULKAN_LIBRARY_ENV}): {e}", path.display())),
             }
         }
 
@@ -954,16 +980,42 @@ pub fn build_app() -> Result<AppState, SiError> {
         .map(|s| CString::new(s.as_str()).unwrap().into_raw() as *const i8)
         .collect();
 
+    // Everything optional added below is checked against this first. An
+    // instance extension the driver does not advertise makes `create_instance`
+    // fail outright with ERROR_EXTENSION_NOT_PRESENT rather than degrade, so
+    // asking blindly turns a missing nicety into a refusal to start.
+    #[allow(unused_variables)]
+    let available_exts =
+        unsafe { entry.enumerate_instance_extension_properties(None) }.unwrap_or_default();
+    #[allow(unused)]
+    let has_ext = |wanted: &CStr| {
+        available_exts.iter().any(|ext| {
+            ext.extension_name_as_c_str()
+                .is_ok_and(|name| name == wanted)
+        })
+    };
+
+    // MoltenVK-as-driver exposes no debug extensions.
     #[cfg(debug_assertions)]
-    {
+    let debug_utils_available = has_ext(ash::ext::debug_utils::NAME);
+    #[cfg(debug_assertions)]
+    if debug_utils_available {
         ext_names_raw.push(ash::ext::debug_utils::NAME.as_ptr());
     }
 
-    // On macOS the GPU is reached through MoltenVK, which the loader only
-    // exposes as a "portability" driver. Without ENUMERATE_PORTABILITY_KHR and
-    // its extension, `create_instance` succeeds and then
-    // `enumerate_physical_devices` returns an empty list, which reads as "no
-    // GPU" rather than "wrong instance flags".
+    // On macOS the GPU is reached through MoltenVK. Reached *through the
+    // loader*, MoltenVK is exposed as a "portability" driver, and without
+    // ENUMERATE_PORTABILITY_KHR and its extension `create_instance` succeeds
+    // and then `enumerate_physical_devices` returns an empty list, which reads
+    // as "no GPU" rather than "wrong instance flags".
+    //
+    // But VK_KHR_portability_enumeration is implemented *by the loader*, so it
+    // is absent whenever MoltenVK is loaded directly as the driver — the .app
+    // bundle path and the SDL_VULKAN_LIBRARY path in `load_vulkan_entry` both
+    // do exactly that. There it must not be requested, and it is not needed
+    // either: with no loader in between there is no portability filtering to
+    // opt out of, and the device enumerates normally. Hence a probe rather
+    // than an unconditional push.
     //
     // VK_KHR_get_physical_device_properties2 is required by
     // VK_KHR_portability_enumeration on a 1.0 instance. Staying at 1.0 rather
@@ -971,13 +1023,34 @@ pub fn build_app() -> Result<AppState, SiError> {
     #[allow(unused_mut)]
     let mut instance_flags = vk::InstanceCreateFlags::empty();
     #[cfg(target_os = "macos")]
-    {
+    if has_ext(ash::khr::portability_enumeration::NAME) {
         ext_names_raw.push(ash::khr::portability_enumeration::NAME.as_ptr());
-        ext_names_raw.push(ash::khr::get_physical_device_properties2::NAME.as_ptr());
+        if has_ext(ash::khr::get_physical_device_properties2::NAME) {
+            ext_names_raw.push(ash::khr::get_physical_device_properties2::NAME.as_ptr());
+        }
         instance_flags |= vk::InstanceCreateFlags::ENUMERATE_PORTABILITY_KHR;
     }
 
-    let layer_names_raw: Vec<*const i8> = VALIDATION_LAYERS.iter().map(|s| s.as_ptr()).collect();
+    // Only ask for layers the driver actually has. `create_instance` fails
+    // outright with ERROR_LAYER_NOT_PRESENT for an unknown layer name, so
+    // requesting the validation layer unconditionally makes every debug build
+    // unrunnable wherever it is not installed. That is the normal case on
+    // macOS: MoltenVK is loaded as the driver rather than through the loader
+    // (see `load_vulkan_entry`), and a driver exposes no layers at all.
+    // Validation is a development aid, so drop it and run rather than refuse
+    // to start.
+    let available_layers =
+        unsafe { entry.enumerate_instance_layer_properties() }.unwrap_or_default();
+    let layer_names_raw: Vec<*const i8> = VALIDATION_LAYERS
+        .iter()
+        .filter(|wanted| {
+            available_layers.iter().any(|have| {
+                have.layer_name_as_c_str()
+                    .is_ok_and(|name| name == **wanted)
+            })
+        })
+        .map(|s| s.as_ptr())
+        .collect();
 
     let instance_info = vk::InstanceCreateInfo::default()
         .application_info(&app_info)
@@ -993,21 +1066,25 @@ pub fn build_app() -> Result<AppState, SiError> {
 
     // ---- Debug messenger (debug builds only) --------------------------------
     #[cfg(debug_assertions)]
-    let (debug_utils, debug_messenger) = unsafe {
-        let du = ash::ext::debug_utils::Instance::new(&entry, &instance);
-        let msg_info = vk::DebugUtilsMessengerCreateInfoEXT::default()
-            .message_severity(
-                vk::DebugUtilsMessageSeverityFlagsEXT::WARNING
-                    | vk::DebugUtilsMessageSeverityFlagsEXT::ERROR,
-            )
-            .message_type(
-                vk::DebugUtilsMessageTypeFlagsEXT::GENERAL
-                    | vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION
-                    | vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE,
-            )
-            .pfn_user_callback(Some(vulkan_debug_callback));
-        let messenger = du.create_debug_utils_messenger(&msg_info, None)?;
-        (du, messenger)
+    let debug = if debug_utils_available {
+        unsafe {
+            let du = ash::ext::debug_utils::Instance::new(&entry, &instance);
+            let msg_info = vk::DebugUtilsMessengerCreateInfoEXT::default()
+                .message_severity(
+                    vk::DebugUtilsMessageSeverityFlagsEXT::WARNING
+                        | vk::DebugUtilsMessageSeverityFlagsEXT::ERROR,
+                )
+                .message_type(
+                    vk::DebugUtilsMessageTypeFlagsEXT::GENERAL
+                        | vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION
+                        | vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE,
+                )
+                .pfn_user_callback(Some(vulkan_debug_callback));
+            let messenger = du.create_debug_utils_messenger(&msg_info, None)?;
+            Some((du, messenger))
+        }
+    } else {
+        None
     };
 
     // ---- Vulkan surface (SDL3 bridge) ----------------------------------------
@@ -1154,9 +1231,7 @@ pub fn build_app() -> Result<AppState, SiError> {
         entry,
         instance,
         #[cfg(debug_assertions)]
-        debug_utils,
-        #[cfg(debug_assertions)]
-        debug_messenger,
+        debug,
         surface_loader,
         surface,
         physical_device,
@@ -1442,8 +1517,9 @@ pub fn cleanup(app: &mut AppState) {
         app.device.destroy_device(None);
 
         #[cfg(debug_assertions)]
-        app.debug_utils
-            .destroy_debug_utils_messenger(app.debug_messenger, None);
+        if let Some((debug_utils, messenger)) = &app.debug {
+            debug_utils.destroy_debug_utils_messenger(*messenger, None);
+        }
 
         app.surface_loader.destroy_surface(app.surface, None);
         app.instance.destroy_instance(None);
