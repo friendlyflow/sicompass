@@ -16,13 +16,17 @@ binary, so there is nothing to install alongside it.
 
 ### Windows
 
+Download `sicompass-x86_64-pc-windows-msvc.msi` from the Releases page and
+double-click it. Or install from PowerShell:
+
 ```powershell
-irm https://github.com/friendlyflow/sicompass/releases/latest/download/sicompass-installer.ps1 | iex
+powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://github.com/friendlyflow/sicompass/releases/latest/download/sicompass-installer.ps1 | iex"
 ```
 
-Or download `sicompass-x86_64-pc-windows-msvc.msi` from the Releases page and
-double-click it. The installer adds a Start Menu entry and puts sicompass on
-your PATH.
+Keep the `powershell ...` wrapper. Without it the installer aborts on Windows'
+default execution policy and closes your terminal before you can read why.
+
+Either way, press the Windows key and type `sicompass` to launch it.
 
 ### macOS
 

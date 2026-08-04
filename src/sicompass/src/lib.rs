@@ -25,6 +25,7 @@ pub mod rectangle;
 pub mod resources;
 pub mod shaders;
 pub mod shortcuts;
+pub mod start_menu;
 pub mod state;
 pub mod text;
 pub mod unicode_search;
