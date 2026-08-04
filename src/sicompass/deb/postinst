@@ -1,0 +1,42 @@
+#!/bin/sh
+#
+# Refresh the desktop's icon cache and application database after install.
+#
+# The .deb already puts the icons in the right place
+# (/usr/share/icons/hicolor/<size>/apps/sicompass.png) and installs
+# /usr/share/applications/sicompass.desktop, but nothing tells the running
+# desktop to look at them. Worse, if another package has left an
+# /usr/share/icons/hicolor/icon-theme.cache behind, GTK reads that cache and
+# never stats the new files at all. Either way the menu entry appears with no
+# icon, which is the bug this script fixes.
+#
+# Debian policy requires this of any package shipping icons or desktop
+# entries; debhelper normally generates it from dh_icons and dh_desktop.
+# cargo-packager cannot: its DebianConfig has no field for maintainer scripts
+# and its control-file writer emits only `control` and `md5sums`. So
+# scripts/deb-add-maintainer-scripts.sh injects this file into the .deb after
+# cargo-packager has produced it.
+
+set -e
+
+case "$1" in
+    configure | abort-upgrade | abort-deconfigure | abort-remove)
+        # Bump the directory mtime *first*. That is what makes GTK and KDE
+        # treat an existing cache as stale, and on a system with neither
+        # updater installed it is the only thing that happens here.
+        touch --no-create /usr/share/icons/hicolor 2>/dev/null || true
+
+        # `update-icon-caches` is Debian's wrapper: it refreshes a cache only
+        # where one already exists, which is the behaviour policy asks for.
+        # `gtk-update-icon-cache` is the fallback for systems without it.
+        if command -v update-icon-caches >/dev/null 2>&1; then
+            update-icon-caches /usr/share/icons/hicolor || true
+        elif command -v gtk-update-icon-cache >/dev/null 2>&1; then
+            gtk-update-icon-cache -q -t -f /usr/share/icons/hicolor || true
+        fi
+
+        if command -v update-desktop-database >/dev/null 2>&1; then
+            update-desktop-database -q /usr/share/applications || true
+        fi
+        ;;
+esac

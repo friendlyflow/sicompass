@@ -65,6 +65,8 @@ before-packaging-command = "cargo build --release --features bundled-sdl3 -p sic
 # AppImage; the .icns becomes the .app bundle icon.
 icons = [
     "../../assets/icons/16x16.png",
+    "../../assets/icons/22x22.png",
+    "../../assets/icons/24x24.png",
     "../../assets/icons/32x32.png",
     "../../assets/icons/48x48.png",
     "../../assets/icons/64x64.png",
@@ -118,13 +120,33 @@ target = "licenses/THIRD-PARTY-LICENSES.html"
 # stay dynamic and are needed for colour emoji to render.
 depends = ["libvulkan1", "at-spi2-core", "libssl3", "libpng16-16", "zlib1g"]
 
+# Use the real desktop entry instead of cargo-packager's template, which knows
+# only Name/Comment/Exec/Icon/Categories and would ship `Name=sicompass` with
+# an empty `Categories=` and no `StartupWMClass`.
+#
+# This is a Handlebars template as far as cargo-packager is concerned, but the
+# file contains no `{{...}}`, so it is copied through verbatim.
+#
+# It reaches the AppImage too: `appimage::package` builds its AppDir by calling
+# `deb::generate_data`, which is what reads this key. That is the only way to
+# fix the AppImage's entry, since `AppImageConfig` has no template field of its
+# own. Without it the AppImage gets the bare template above and desktop
+# integration has nothing useful to install.
+desktop-template = "../../assets/sicompass.desktop"
+
 # Key is the SOURCE, value is the path inside the package. That is the
 # opposite of what cargo-packager's own documentation says, but it is what
 # `copy_custom_files` does: `for (src, target) in files.iter()`. Getting it
 # backwards fails with an I/O error naming the absolute target path, which
 # reads like a permissions problem and is not.
+# The `.desktop` file is not here: `desktop-template` above already installs
+# it, and doing it from both places would leave the AppImage on the stub
+# (`appimage::package` reads `desktop-template`, but copies `appimage.files`
+# rather than `deb.files`).
+#
+# Only the scalable icon needs copying by hand. cargo-packager's `icons` list
+# handles the PNGs but skips anything that is not a `.png`.
 [package.metadata.packager.deb.files]
-"../../assets/sicompass.desktop" = "/usr/share/applications/sicompass.desktop"
 "../../assets/icons/sicompass.svg" = "/usr/share/icons/hicolor/scalable/apps/sicompass.svg"
 
 [package.metadata.packager.appimage]
@@ -142,6 +164,12 @@ excluded-libraries = [
     "libwayland*",
     "libxkbcommon*",
 ]
+
+# The AppImage has its own custom-file list, so the scalable icon has to be
+# named twice. Same source, same destination, same key-is-the-source quirk as
+# `deb.files` above.
+[package.metadata.packager.appimage.files]
+"../../assets/icons/sicompass.svg" = "/usr/share/icons/hicolor/scalable/apps/sicompass.svg"
 
 [package.metadata.packager.macos]
 # Must stay equal to MACOSX_DEPLOYMENT_TARGET in .cargo/config.toml, or the
@@ -171,6 +199,30 @@ license = "GPL-3.0-only"
 url = "https://github.com/friendlyflow/sicompass"
 # Same reasoning as the .deb `depends` above.
 requires = { vulkan-loader = "*", at-spi2-core = "*", openssl-libs = "*", libpng = "*", zlib = "*" }
+
+# The RPM equivalent of src/sicompass/deb/postinst, and required by the Fedora
+# packaging guidelines for the same reason: installing the icons is not enough,
+# something has to invalidate the desktop's icon cache or the menu entry shows
+# up with no icon. Bumping the directory mtime comes first, because that is
+# what makes GTK and KDE distrust a cache another package left behind.
+#
+# Kept inline rather than pointing at a file: cargo-generate-rpm reads the
+# value as a path if one exists and as the script body otherwise, and a
+# multi-line string can never be mistaken for a path.
+#
+# `|| :` on every line — a failing scriptlet makes rpm report the whole
+# transaction as failed, and none of this is worth that.
+post_install_script = """
+touch --no-create /usr/share/icons/hicolor >/dev/null 2>&1 || :
+gtk-update-icon-cache -q -t -f /usr/share/icons/hicolor >/dev/null 2>&1 || :
+update-desktop-database -q /usr/share/applications >/dev/null 2>&1 || :
+"""
+
+post_uninstall_script = """
+touch --no-create /usr/share/icons/hicolor >/dev/null 2>&1 || :
+gtk-update-icon-cache -q -t -f /usr/share/icons/hicolor >/dev/null 2>&1 || :
+update-desktop-database -q /usr/share/applications >/dev/null 2>&1 || :
+"""
 
 assets = [
     { source = "target/release/sicompass", dest = "/usr/bin/sicompass", mode = "755" },

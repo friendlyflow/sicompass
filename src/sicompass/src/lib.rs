@@ -16,6 +16,7 @@ pub mod checkmark;
 pub mod events;
 pub mod fonts;
 pub mod handlers;
+pub mod icon;
 pub mod image;
 pub mod list;
 pub mod plugin_manifest;
