@@ -118,7 +118,13 @@ target = "licenses/THIRD-PARTY-LICENSES.html"
 # that way, so the binary does not depend on a /usr/local copy that will not
 # exist on a user's machine), but the libpng and zlib it was built against
 # stay dynamic and are needed for colour emoji to render.
-depends = ["libvulkan1", "at-spi2-core", "libssl3", "libpng16-16", "zlib1g"]
+#
+# xvfb is what lets the web browser provider run Chrome headed on an invisible
+# X11 display, which is the mode that websites see as a normal browser. No
+# desktop distribution installs it by default, and without it the provider
+# falls back to Chrome's headless mode, which some sites block
+# (`linux_chrome_launch` in lib/lib_webbrowser/src/lib.rs).
+depends = ["libvulkan1", "at-spi2-core", "libssl3", "libpng16-16", "zlib1g", "xvfb"]
 
 # Use the real desktop entry instead of cargo-packager's template, which knows
 # only Name/Comment/Exec/Icon/Categories and would ship `Name=sicompass` with
@@ -197,8 +203,12 @@ frameworks = ["/opt/homebrew/lib/libMoltenVK.dylib"]
 summary = "Use your whole computer from the keyboard, with no mouse needed"
 license = "GPL-3.0-only"
 url = "https://github.com/friendlyflow/sicompass"
-# Same reasoning as the .deb `depends` above.
-requires = { vulkan-loader = "*", at-spi2-core = "*", openssl-libs = "*", libpng = "*", zlib = "*" }
+# Same reasoning as the .deb `depends` above. Xvfb is requested by file rather
+# than by package name because the name is not portable: Fedora and RHEL ship
+# it as xorg-x11-server-Xvfb, openSUSE as part of xorg-x11-server-extra. Every
+# one of them provides /usr/bin/Xvfb, and rpm indexes bin directories, so the
+# file dependency resolves on all three.
+requires = { vulkan-loader = "*", at-spi2-core = "*", openssl-libs = "*", libpng = "*", zlib = "*", "/usr/bin/Xvfb" = "*" }
 
 # The RPM equivalent of src/sicompass/deb/postinst, and required by the Fedora
 # packaging guidelines for the same reason: installing the icons is not enough,

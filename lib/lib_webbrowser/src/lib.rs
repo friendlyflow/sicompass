@@ -1,9 +1,10 @@
 //! Web browser provider — Rust port of `lib_webbrowser/`.
 //!
-//! Fetches a URL via a real Chrome browser (via chromiumoxide + xvfb-run on
-//! Linux, or headless Chrome on macOS/Windows), parses the rendered HTML with
-//! scraper (html5ever), and converts the DOM to a flat FFON tree of strings
-//! and objects that mirrors the C provider's lexbor-based output.
+//! Fetches a URL via a real Chrome browser (chromiumoxide, kept off the user's
+//! screen by xvfb-run on Linux and by off-screen window placement on Windows),
+//! parses the rendered HTML with scraper (html5ever), and converts the DOM to a
+//! flat FFON tree of strings and objects that mirrors the C provider's
+//! lexbor-based output.
 //!
 //! ## FFON tree layout
 //!
@@ -1448,33 +1449,44 @@ mod win_hide {
     }
 }
 
-/// On Linux, return a wrapper script that runs Chrome on an invisible virtual
-/// X11 display, so the browser never appears on the user's real screen.
-///
-/// Preference order:
-/// 1. `xvfb-run -a` — the standard helper; it allocates a display and cleans up.
-/// 2. Bare `Xvfb` — if `xvfb-run` is missing but `Xvfb` exists, emulate what
-///    xvfb-run does (start our own Xvfb on a free display, run Chrome against
-///    it, tear both down on exit). This keeps Chrome invisible even on systems
-///    that ship `Xvfb` without the `xvfb-run` wrapper (e.g. some Nix setups).
-/// 3. Neither present — fall back to the plain Chrome binary, which opens a
-///    visible window. This is a last resort, not the normal path.
+/// How Chrome is started on Linux.
 #[cfg(target_os = "linux")]
-fn chrome_via_xvfb() -> Result<std::path::PathBuf, String> {
-    let chrome =
-        find_chrome_executable().ok_or_else(|| "Chrome/Chromium not found in PATH".to_owned())?;
-    let chrome = chrome.to_string_lossy();
+enum LinuxChrome {
+    /// Path to a wrapper script that runs *headed* Chrome on an invisible
+    /// virtual X11 display. The preferred mode: headed Chrome passes the
+    /// bot-detection that fingerprints and blocks headless.
+    VirtualDisplay(std::path::PathBuf),
+    /// Path to the plain Chrome binary, to be launched in Chrome's own
+    /// headless mode because no virtual display is available on this machine.
+    /// Some sites block headless, but it is the only remaining way to keep
+    /// Chrome off the user's screen — see `linux_chrome_launch`.
+    Headless(std::path::PathBuf),
+}
 
-    let script = if which::which("xvfb-run").is_ok() {
-        format!(
+/// Which virtual-display helper is present on this machine.
+#[cfg(target_os = "linux")]
+enum XvfbHelper {
+    /// `xvfb-run` — the standard wrapper; it allocates a display and cleans up.
+    Run,
+    /// Bare `Xvfb`, without the `xvfb-run` wrapper (e.g. some Nix setups).
+    Bare,
+}
+
+/// The shell script that starts Chrome on an invisible X11 display.
+///
+/// Split out from `linux_chrome_launch` so the generated script can be tested
+/// without an actual Xvfb on the machine running the tests.
+#[cfg(target_os = "linux")]
+fn xvfb_wrapper_script(chrome: &str, helper: XvfbHelper) -> String {
+    match helper {
+        XvfbHelper::Run => format!(
             "#!/bin/sh\nunset WAYLAND_DISPLAY\nexec xvfb-run -a {chrome} --ozone-platform=x11 \"$@\"\n"
-        )
-    } else if which::which("Xvfb").is_ok() {
+        ),
         // Emulate xvfb-run: pick a free display number, start Xvfb on it, run
         // Chrome (backgrounded so we keep the shell alive), and kill both Xvfb
         // and Chrome on any exit signal. Chrome inherits our stdout/stderr, so
         // chromiumoxide still reads its "DevTools listening on ws://…" line.
-        format!(
+        XvfbHelper::Bare => format!(
             "#!/bin/sh\n\
              unset WAYLAND_DISPLAY\n\
              d=99\n\
@@ -1487,12 +1499,63 @@ fn chrome_via_xvfb() -> Result<std::path::PathBuf, String> {
              cp=$!\n\
              trap 'kill $cp $xp 2>/dev/null' EXIT HUP INT TERM\n\
              wait $cp\n"
-        )
+        ),
+    }
+}
+
+/// Decide how Chrome will be started on Linux, so that it is never visible on
+/// the user's screen.
+///
+/// Preference order:
+/// 1. `xvfb-run -a` — headed Chrome on a virtual display. Best compatibility:
+///    the browser is a normal headed Chrome as far as any website can tell.
+/// 2. Bare `Xvfb` — same thing, with the `xvfb-run` logic inlined into our own
+///    wrapper script, for systems that ship `Xvfb` without the wrapper.
+/// 3. Neither present — Chrome's own headless mode.
+///
+/// Step 3 exists because most desktop distributions (Mint, Ubuntu, Debian,
+/// Fedora, …) do not install Xvfb by default, so a released build lands there
+/// on a normal user's machine while a dev build inside `nix develop` takes
+/// step 1. Launching plain headed Chrome there would put a real window on the
+/// screen that takes the keyboard focus, and the screen reader follows it out
+/// of sicompass. Headless risks being blocked by a few bot-detecting sites;
+/// stealing focus from a screen-reader user breaks the whole app. Installing
+/// `xvfb` restores step 1, which is why the .deb and .rpm depend on it.
+#[cfg(target_os = "linux")]
+fn linux_chrome_launch() -> Result<LinuxChrome, String> {
+    let chrome = find_chrome_executable().ok_or_else(|| {
+        "Chrome/Chromium not found. \
+         Install Chrome or set SICOMPASS_CHROME_PATH to the browser executable."
+            .to_owned()
+    })?;
+    linux_chrome_launch_with(detect_xvfb_helper(), chrome)
+}
+
+/// Which of the two virtual-display helpers this machine has, if either.
+#[cfg(target_os = "linux")]
+fn detect_xvfb_helper() -> Option<XvfbHelper> {
+    if which::which("xvfb-run").is_ok() {
+        Some(XvfbHelper::Run)
+    } else if which::which("Xvfb").is_ok() {
+        Some(XvfbHelper::Bare)
     } else {
-        // No virtual display available: Chrome will open a visible window.
-        return Ok(std::path::PathBuf::from(chrome.into_owned()));
+        None
+    }
+}
+
+/// The decision half of `linux_chrome_launch`, with the machine probe passed
+/// in so a test can exercise the no-Xvfb path on a machine that has Xvfb (and
+/// the reverse).
+#[cfg(target_os = "linux")]
+fn linux_chrome_launch_with(
+    helper: Option<XvfbHelper>,
+    chrome: std::path::PathBuf,
+) -> Result<LinuxChrome, String> {
+    let Some(helper) = helper else {
+        return Ok(LinuxChrome::Headless(chrome));
     };
 
+    let script = xvfb_wrapper_script(&chrome.to_string_lossy(), helper);
     let wrapper = std::env::temp_dir().join("sicompass-xvfb-chrome.sh");
     std::fs::write(&wrapper, &script).map_err(|e| format!("failed to write Xvfb wrapper: {e}"))?;
     #[cfg(unix)]
@@ -1500,7 +1563,7 @@ fn chrome_via_xvfb() -> Result<std::path::PathBuf, String> {
         use std::os::unix::fs::PermissionsExt;
         let _ = std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o755));
     }
-    Ok(wrapper)
+    Ok(LinuxChrome::VirtualDisplay(wrapper))
 }
 
 fn chromium_runtime() -> &'static tokio::runtime::Runtime {
@@ -1622,10 +1685,12 @@ fn chrome_profile_dir() -> std::path::PathBuf {
         .unwrap_or_else(|| std::env::temp_dir().join("sicompass-chrome"))
 }
 
-/// Linux: use xvfb-run so Chrome runs headed on an invisible X11 display.
+/// Linux: run Chrome headed on an invisible X11 display when Xvfb is available,
+/// and in Chrome's own headless mode when it is not. Either way, no Chrome
+/// window ever reaches the user's screen — see `linux_chrome_launch`.
 #[cfg(target_os = "linux")]
 async fn launch_browser() -> Result<BrowserSession, String> {
-    let exe = chrome_via_xvfb()?;
+    let launch = linux_chrome_launch()?;
 
     // Persistent profile dir (see chrome_profile_dir) so cookies/logins survive
     // restarts; also clean up any stale SingletonLock from a crashed launch.
@@ -1633,8 +1698,17 @@ async fn launch_browser() -> Result<BrowserSession, String> {
     let _ = std::fs::create_dir_all(&profile_dir);
     let _ = std::fs::remove_file(profile_dir.join("SingletonLock"));
 
-    let config = BrowserConfig::builder()
-        .with_head()
+    // `--headless=new` rather than the old headless mode: it is the same
+    // browser binary as headed Chrome, so the stealth script still has a real
+    // window.chrome and a full DOM to patch.
+    let (builder, exe, mode) = match launch {
+        LinuxChrome::VirtualDisplay(exe) => (BrowserConfig::builder().with_head(), exe, "xvfb"),
+        LinuxChrome::Headless(exe) => {
+            (BrowserConfig::builder().new_headless_mode(), exe, "headless")
+        }
+    };
+
+    let config = builder
         .arg("--disable-blink-features=AutomationControlled")
         .arg("--no-first-run")
         .arg("--no-default-browser-check")
@@ -1645,7 +1719,7 @@ async fn launch_browser() -> Result<BrowserSession, String> {
         .map_err(|e| format!("chromium config error: {e}"))?;
     let (browser, mut handler) = Browser::launch(config)
         .await
-        .map_err(|e| format!("failed to launch Chrome (xvfb): {e}"))?;
+        .map_err(|e| format!("failed to launch Chrome ({mode}): {e}"))?;
     tokio::spawn(async move { while handler.next().await.is_some() {} });
     Ok(BrowserSession { browser })
 }
@@ -2529,6 +2603,66 @@ async fn await_stable_url(page: &chromiumoxide::Page, budget: tokio::time::Durat
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ---- Linux Chrome launch mode ----
+
+    // Without xvfb-run or Xvfb — the state of a stock Mint / Ubuntu / Fedora
+    // desktop, and of every released build outside `nix develop` — Chrome has
+    // to run headless. The old behaviour here was a visible Chrome window that
+    // stole the keyboard focus, and with it the screen reader.
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn no_xvfb_falls_back_to_headless_not_a_visible_window() {
+        let chrome = std::path::PathBuf::from("/usr/bin/google-chrome");
+        let launch = linux_chrome_launch_with(None, chrome.clone()).expect("decision");
+        match launch {
+            LinuxChrome::Headless(exe) => assert_eq!(exe, chrome),
+            LinuxChrome::VirtualDisplay(_) => panic!("no Xvfb present, cannot use one"),
+        }
+    }
+
+    // With a helper present, Chrome runs headed behind a wrapper script that
+    // owns the invisible display.
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn xvfb_present_runs_headed_behind_a_wrapper() {
+        for helper in [XvfbHelper::Run, XvfbHelper::Bare] {
+            let launch =
+                linux_chrome_launch_with(Some(helper), std::path::PathBuf::from("/usr/bin/chromium"))
+                    .expect("decision");
+            let LinuxChrome::VirtualDisplay(wrapper) = launch else {
+                panic!("a helper is present, so Chrome must run on a virtual display");
+            };
+            let script = std::fs::read_to_string(&wrapper).expect("wrapper written");
+            assert!(script.starts_with("#!/bin/sh"), "wrapper must be a shell script");
+            assert!(script.contains("/usr/bin/chromium"), "wrapper must run Chrome");
+        }
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn xvfb_run_script_hands_chrome_a_virtual_display() {
+        let script = xvfb_wrapper_script("/usr/bin/google-chrome", XvfbHelper::Run);
+        assert!(script.contains("xvfb-run -a /usr/bin/google-chrome"));
+        // Chrome must not pick the compositor over the virtual X11 display.
+        assert!(script.contains("unset WAYLAND_DISPLAY"));
+        assert!(script.contains("--ozone-platform=x11"));
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn bare_xvfb_script_starts_and_tears_down_its_own_server() {
+        let script = xvfb_wrapper_script("/usr/bin/google-chrome", XvfbHelper::Bare);
+        assert!(script.contains("Xvfb :$d"), "must start its own X server");
+        assert!(
+            script.contains("DISPLAY=:$d /usr/bin/google-chrome"),
+            "Chrome must run against that server"
+        );
+        assert!(
+            script.contains("trap 'kill $cp $xp 2>/dev/null' EXIT HUP INT TERM"),
+            "both processes must be killed on exit"
+        );
+    }
 
     // ---- html_to_ffon unit tests ----
 
