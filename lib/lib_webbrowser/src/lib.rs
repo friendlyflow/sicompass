@@ -272,11 +272,6 @@ impl WebbrowserProvider {
                     self.form_map = form_map;
                 }
                 Err(e) => {
-                    #[cfg(not(target_os = "windows"))]
-                    {
-                        // Drop the session so the next attempt starts fresh.
-                        self.live = None;
-                    }
                     self.cached_page = Some(CachedPage {
                         url: url.to_owned(),
                         elements: vec![FfonElement::new_str(format!("Error loading {url}: {e}"))],
@@ -284,9 +279,9 @@ impl WebbrowserProvider {
                     self.form_map = FormMap::new();
                 }
             }
+            self.current_url = url.to_owned();
             self.content_landed();
         }
-        self.current_url = url.to_owned();
     }
 
     /// A page the user navigated to is now readable: turn the armed
@@ -1703,9 +1698,11 @@ async fn launch_browser() -> Result<BrowserSession, String> {
     // window.chrome and a full DOM to patch.
     let (builder, exe, mode) = match launch {
         LinuxChrome::VirtualDisplay(exe) => (BrowserConfig::builder().with_head(), exe, "xvfb"),
-        LinuxChrome::Headless(exe) => {
-            (BrowserConfig::builder().new_headless_mode(), exe, "headless")
-        }
+        LinuxChrome::Headless(exe) => (
+            BrowserConfig::builder().new_headless_mode(),
+            exe,
+            "headless",
+        ),
     };
 
     let config = builder
@@ -2627,15 +2624,23 @@ mod tests {
     #[cfg(target_os = "linux")]
     fn xvfb_present_runs_headed_behind_a_wrapper() {
         for helper in [XvfbHelper::Run, XvfbHelper::Bare] {
-            let launch =
-                linux_chrome_launch_with(Some(helper), std::path::PathBuf::from("/usr/bin/chromium"))
-                    .expect("decision");
+            let launch = linux_chrome_launch_with(
+                Some(helper),
+                std::path::PathBuf::from("/usr/bin/chromium"),
+            )
+            .expect("decision");
             let LinuxChrome::VirtualDisplay(wrapper) = launch else {
                 panic!("a helper is present, so Chrome must run on a virtual display");
             };
             let script = std::fs::read_to_string(&wrapper).expect("wrapper written");
-            assert!(script.starts_with("#!/bin/sh"), "wrapper must be a shell script");
-            assert!(script.contains("/usr/bin/chromium"), "wrapper must run Chrome");
+            assert!(
+                script.starts_with("#!/bin/sh"),
+                "wrapper must be a shell script"
+            );
+            assert!(
+                script.contains("/usr/bin/chromium"),
+                "wrapper must run Chrome"
+            );
         }
     }
 
