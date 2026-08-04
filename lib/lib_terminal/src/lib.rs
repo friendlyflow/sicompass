@@ -1543,18 +1543,25 @@ mod tests {
 
     #[test]
     fn push_and_pop_path_walk_the_browse_tree() {
+        // Compared as `Path`, not as string literals: `push_path` joins with the
+        // platform separator, so this walk reads `/home/nico` on Unix and
+        // `/home\nico` on Windows. Both name the same place, and the place is
+        // what this test is about. Spelling it `/home/nico` here asserted the
+        // separator too, which no caller depends on and which the browse tree
+        // cannot honour anyway, since it holds real filesystem paths.
+        let root = Path::new("/");
         let mut p = TerminalProvider::new();
         p.push_path("home");
         p.push_path("nico");
-        assert_eq!(p.current_path(), "/home/nico");
+        assert_eq!(Path::new(p.current_path()), root.join("home").join("nico"));
         assert!(!p.at_root());
         p.pop_path();
-        assert_eq!(p.current_path(), "/home");
+        assert_eq!(Path::new(p.current_path()), root.join("home"));
         p.pop_path();
-        assert_eq!(p.current_path(), "/");
+        assert_eq!(Path::new(p.current_path()), root);
         // Clamped at the root: Left out of the provider must not walk past `/`.
         p.pop_path();
-        assert_eq!(p.current_path(), "/");
+        assert_eq!(Path::new(p.current_path()), root);
         assert!(p.at_root());
     }
 
