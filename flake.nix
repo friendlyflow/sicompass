@@ -145,8 +145,19 @@
               export PKG_CONFIG_PATH="${sdl3}/lib/pkgconfig:${libxkbcommon.dev}/lib/pkgconfig:$PKG_CONFIG_PATH";
               export LIBRARY_PATH="${sdl3}/lib:${libxkbcommon}/lib:${wayland}/lib:$LIBRARY_PATH";
 
-              # Library path for Vulkan and other runtime deps
-              export LD_LIBRARY_PATH="${libwebp}/lib:${freetype}/lib:${vulkan-loader}/lib:${vulkan-validation-layers}/lib:${curl}/lib:${sdl3}/lib:${libxkbcommon}/lib:${wayland}/lib:/usr/lib/x86_64-linux-gnu";
+              # Library path for Vulkan and other runtime deps.
+              #
+              # Store paths only: LD_LIBRARY_PATH outranks the DT_RUNPATH Nix
+              # bakes into its binaries, so a system lib dir here is resolved
+              # first by *every* binary in the shell. On a distro whose glibc is
+              # older than nixpkgs' (Mint 22.3 ships 2.39, nixpkgs-unstable is on
+              # 2.42), adding /usr/lib/x86_64-linux-gnu bricks the shell: sh, rm
+              # and uname all die with "version `GLIBC_2.42' not found".
+              #
+              # The system Mesa ICD does not need it. radeon_icd.json names its
+              # driver relatively ("libvulkan_radeon.so"), but ldconfig indexes
+              # that lib, so the loader's dlopen finds it via ld.so.cache.
+              export LD_LIBRARY_PATH="${libwebp}/lib:${freetype}/lib:${vulkan-loader}/lib:${vulkan-validation-layers}/lib:${curl}/lib:${sdl3}/lib:${libxkbcommon}/lib:${wayland}/lib";
               export VULKAN_SDK="${vulkan-headers}";
               export VK_LAYER_PATH="${vulkan-validation-layers}/share/vulkan/explicit_layer.d";
 
