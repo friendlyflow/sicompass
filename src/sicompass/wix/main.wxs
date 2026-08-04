@@ -186,13 +186,12 @@
               reference to the File above, so it stays correct wherever the
               user redirects APPLICATIONFOLDER.
 
-              The `(sicompass)` in the name is load-bearing, not clutter.
+              The name matching the binary is load-bearing, not a coincidence.
               Start menu search matches word prefixes within the shortcut
-              name, so "Silicon's Compass" alone is reachable by typing
-              "silicon" or "compass" but NOT by typing "sicompass", which is
-              what the binary, the packages and the docs all call it. The
-              parenthetical adds "sicompass" as its own word so every name a
-              user might reasonably try finds the app.
+              name, so it has to contain "sicompass" as a word of its own,
+              which is what the binary, the packages and the docs all call it.
+              A unit test in src/start_menu.rs keeps this Name and its
+              SHORTCUT_NAME identical.
             -->
             <Directory Id='ProgramMenuFolder'/>
         </Directory>
@@ -201,7 +200,7 @@
             <Component Id='StartMenuShortcut' Guid='*'>
                 <Shortcut
                     Id='AppStartMenuShortcut'
-                    Name="Silicon's Compass (sicompass)"
+                    Name="Sicompass"
                     Description='Use your whole computer from the keyboard'
                     Target='[#exe0]'
                     WorkingDirectory='Bin'

@@ -45,10 +45,11 @@ pub const NO_START_MENU_ENV: &str = "SICOMPASS_NO_START_MENU";
 /// the Program Files rule above), but if a user ever manages to have both, one
 /// name means one Start Menu entry rather than two that look unrelated.
 ///
-/// The `(sicompass)` is load-bearing. Start Menu search matches word prefixes,
-/// so `Silicon's Compass` alone cannot be found by typing `sicompass`, which is
-/// what the binary and every package call it.
-pub const SHORTCUT_NAME: &str = "Silicon's Compass (sicompass)";
+/// Matching the binary name is load-bearing. Start Menu search matches word
+/// prefixes, so the display name has to contain `sicompass` as a word of its
+/// own, which is what the binary and every package call it. A unit test below
+/// enforces that, so a future rename cannot quietly make the app unfindable.
+pub const SHORTCUT_NAME: &str = "Sicompass";
 
 /// Create the Start Menu shortcut if it is missing, on a background thread.
 ///
@@ -354,12 +355,12 @@ mod tests {
 
     #[test]
     fn shortcut_name_is_findable_by_typing_the_binary_name() {
-        // Start Menu search matches word prefixes, so the binary name has to
-        // start a word of its own.
+        // Start Menu search matches word prefixes, case-insensitively, so the
+        // binary name has to start a word of its own.
         assert!(
             SHORTCUT_NAME
                 .split(|c: char| !c.is_alphanumeric())
-                .any(|word| word == "sicompass"),
+                .any(|word| word.eq_ignore_ascii_case("sicompass")),
             "{SHORTCUT_NAME:?} cannot be found by typing `sicompass`"
         );
     }

@@ -46,7 +46,7 @@ product-name = "sicompass"
 identifier = "com.friendlyflow.sicompass"
 description = "Use your whole computer from the keyboard, with no mouse needed"
 long-description = """
-Silicon's Compass presents every screen as a tree of lists and lets you move \
+Sicompass presents every screen as a tree of lists and lets you move \
 through it entirely from the keyboard. Files, settings, email and any other \
 data are navigated the same way, with native screen reader support on Linux, \
 macOS and Windows.

@@ -284,7 +284,7 @@
             desktopItems = [
               (pkgs.makeDesktopItem {
                 name = "sicompass";
-                desktopName = "Silicon's Compass";
+                desktopName = "Sicompass";
                 genericName = "Keyboard Navigator";
                 comment = "Use your whole computer from the keyboard, with no mouse needed";
                 exec = "sicompass %F";
