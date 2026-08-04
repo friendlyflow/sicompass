@@ -94,6 +94,16 @@ archive and the `curl ... | sh` installer cannot, so they additionally need
 desktop Linux. If sicompass exits with a message about a missing shared
 library, install those and try again.
 
+The web browser reads pages with a real Chrome or Chromium, which is not
+bundled, so install one if you want to use it. Chrome never appears on your
+screen. When `xvfb` is installed it runs as a normal browser on an invisible
+display, which is what a website expects to see, and the `.deb` and `.rpm`
+pull `xvfb` in for you. Without it Chrome runs headless instead, which a few
+sites detect and block. That is the case for the AppImage, the plain archive
+and the `curl ... | sh` installer, so if a page refuses to load there, install
+it yourself with `sudo apt install xvfb` or
+`sudo dnf install xorg-x11-server-Xvfb`.
+
 ### Checking that it worked
 
 ```bash

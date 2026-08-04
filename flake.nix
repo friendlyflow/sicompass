@@ -342,8 +342,14 @@
               # VK_ICD_FILENAMES: on NixOS the drivers live in
               # /run/opengl-driver and the loader finds them itself, and
               # pinning a path that does not exist makes it report zero ICDs.
+              # xvfb-run on PATH is what lets the web browser provider run
+              # Chrome headed on an invisible X11 display. Without it the
+              # provider falls back to Chrome's own headless mode, which some
+              # sites block. Same reason the dev shell carries it, and the same
+              # reason the .deb and .rpm depend on xvfb.
               wrapProgram $out/bin/sicompass \
                 --set SICOMPASS_RESOURCE_DIR $out/share/sicompass \
+                --prefix PATH : "${pkgs.lib.makeBinPath (with pkgs; [ xvfb-run ])}" \
                 --prefix LD_LIBRARY_PATH : "${pkgs.lib.makeLibraryPath (with pkgs; [
                   vulkan-loader
                   libxkbcommon
