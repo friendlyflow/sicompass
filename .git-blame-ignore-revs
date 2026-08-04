@@ -1,0 +1,11 @@
+# Commits that changed formatting only, and should not show up in `git blame`.
+#
+# GitHub applies this file automatically. Locally, enable it once with:
+#
+#     git config blame.ignoreRevsFile .git-blame-ignore-revs
+#
+# Only add commits that are provably free of semantic change, i.e. the whole
+# diff is the output of a formatter run.
+
+# style: rustfmt the workspace
+940274e272ef71858359830651a1fdb657c2eb3a
