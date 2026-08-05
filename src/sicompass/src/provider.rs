@@ -1590,6 +1590,23 @@ mod tests {
     use sicompass_sdk::ffon::{FfonElement, IdArray};
     use sicompass_sdk::provider::Provider;
 
+    /// Serialises the tests that use `AUTH_REGISTRY`.
+    ///
+    /// The registry is process-global and cargo runs tests in parallel, so one
+    /// test's `clear_auth_registry` would land between another's `register_auth`
+    /// and its assertion, which then read back `None`. Each test holds this for
+    /// its whole body and starts from an empty registry.
+    static AUTH_REGISTRY_LOCK: Mutex<()> = Mutex::new(());
+
+    /// Take the auth-registry lock and hand back an empty registry.
+    fn auth_registry_guard() -> std::sync::MutexGuard<'static, ()> {
+        // A test that panicked while holding this poisoned it, which says
+        // nothing about the registry — take it regardless.
+        let guard = AUTH_REGISTRY_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        clear_auth_registry();
+        guard
+    }
+
     /// Minimal provider for testing.
     struct MockProvider {
         name: String,
@@ -2022,24 +2039,22 @@ mod tests {
 
     #[test]
     fn register_auth_and_find() {
-        clear_auth_registry();
+        let _registry = auth_registry_guard();
         register_auth("https://example.com", "secret123");
         let key = find_api_key_for_url("https://example.com/api/data");
         assert_eq!(key.as_deref(), Some("secret123"));
-        clear_auth_registry();
     }
 
     #[test]
     fn find_api_key_no_match() {
-        clear_auth_registry();
+        let _registry = auth_registry_guard();
         register_auth("https://example.com", "secret");
         assert!(find_api_key_for_url("https://other.com/foo").is_none());
-        clear_auth_registry();
     }
 
     #[test]
     fn register_auth_multiple() {
-        clear_auth_registry();
+        let _registry = auth_registry_guard();
         register_auth("https://a.com", "key_a");
         register_auth("https://b.com", "key_b");
         assert_eq!(
@@ -2050,16 +2065,14 @@ mod tests {
             find_api_key_for_url("https://b.com/path").as_deref(),
             Some("key_b")
         );
-        clear_auth_registry();
     }
 
     #[test]
     fn register_auth_prefix_match() {
-        clear_auth_registry();
+        let _registry = auth_registry_guard();
         register_auth("https://api.example.com", "bearer_token");
         assert!(find_api_key_for_url("https://api.example.com/v1/data").is_some());
         assert!(find_api_key_for_url("https://example.com/v1/data").is_none());
-        clear_auth_registry();
     }
 
     // --- dispatch_refresh_command ---
