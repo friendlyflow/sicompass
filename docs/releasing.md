@@ -111,10 +111,23 @@ Since nothing runs on commit, all of this is manual.
 
 1. Bump `version` in `[workspace.package]` in the root `Cargo.toml`. The flake
    reads it from there, so nothing else needs bumping.
-2. Bump the version in the `README.md` download links. The `.deb`, `.rpm` and
-   AppImage carry the version in their file name, so their
-   `releases/latest/download/...` URLs 404 the moment a new release exists.
-   `grep -c 0\\.1\\.9 README.md` after bumping should return 0.
+2. Bump the version in the `README.md` download links, as soon as the version
+   is known and in the same commit as step 1. The `.deb`, `.rpm` and AppImage
+   are the only assets whose file name carries the version, and the README
+   names all three literally, once in the download table and again in the
+   `apt` / `dnf` / `chmod +x` snippets below it. Their
+   `releases/latest/download/...` URLs 404 the moment a new release exists, so
+   a stale README breaks every Linux download link while the other platforms
+   keep working, which is why it is easy to miss.
+
+   ```sh
+   sed -i 's/OLD/NEW/g' README.md   # e.g. 0.1.10 -> 0.1.11
+   grep -c 'OLD' README.md          # must print 0
+   ```
+
+   Do not wait until after the release: it was skipped for 0.1.11 and had to be
+   fixed afterwards, leaving the published README pointing at 0.1.10 files that
+   no longer resolve.
 3. Update `CHANGELOG.md`. cargo-dist parses it into
    `announcement_github_body`, which `release-publish.yml` writes into the
    release notes verbatim. Without an entry the notes are generic boilerplate.
