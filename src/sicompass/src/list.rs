@@ -174,6 +174,28 @@ fn collect_scroll_items_recursive(
     }
 }
 
+/// Whether a file name is hidden by the Ctrl+O open dialog, which lists only
+/// `.json` files.
+///
+/// Single source of truth: `create_list_current_layer` filters the list with
+/// it and `handlers::handle_enter_general` validates the selection with it, so
+/// the two cannot drift apart.
+pub fn open_flow_hides_name(name: &str) -> bool {
+    !name.ends_with(".json")
+}
+
+/// Element-level form of [`open_flow_hides_name`]. Directories (`Obj`) are
+/// always shown, so only `Str` entries — files — are ever hidden.
+pub fn open_flow_hides(elem: &FfonElement) -> bool {
+    match elem {
+        FfonElement::Str(s) => {
+            let name = tags::extract_input(s).unwrap_or_else(|| s.clone());
+            open_flow_hides_name(&name)
+        }
+        FfonElement::Obj(_) => false,
+    }
+}
+
 /// Rebuild `total_list` from the FFON tree at `current_id`, and restore
 /// `list_index` to the item matching `current_id.last()`.
 pub fn create_list_current_layer(renderer: &mut AppRenderer) {
@@ -236,13 +258,8 @@ pub fn create_list_current_layer(renderer: &mut AppRenderer) {
 
     for (i, elem) in ffon_slice.iter().enumerate() {
         // In the Ctrl+O open flow, hide non-.json files (directories still shown).
-        if filter_json {
-            if let FfonElement::Str(s) = elem {
-                let name = tags::extract_input(s).unwrap_or_else(|| s.clone());
-                if !name.ends_with(".json") {
-                    continue;
-                }
-            }
+        if filter_json && open_flow_hides(elem) {
+            continue;
         }
 
         let mut item_id = base_id.clone();
@@ -264,15 +281,43 @@ pub fn create_list_current_layer(renderer: &mut AppRenderer) {
         });
     }
 
-    // Restore list_index to the item matching current_id.last()
+    // Restore list_index to the item matching current_id.last().
     let selected_raw = renderer.current_id.last().unwrap_or(0);
-    let new_index = items
+    match items
         .iter()
         .position(|item| item.id.last() == Some(selected_raw))
-        .unwrap_or(0);
+    {
+        Some(pos) => renderer.list_index = pos,
+        None if filter_json => {
+            // The cursor is parked on an entry this rebuild hid. Prefer the
+            // next visible entry below, else the nearest above. Deliberately
+            // direction-agnostic: the arrow handlers own direction (they move
+            // `list_index` and derive `current_id` from it), so this only
+            // catches the direction-less entry points — opening the dialog,
+            // Right into a subdirectory, a provider refresh. If nothing is
+            // visible at all, `current_id` stays put and `handle_enter_general`
+            // reports the empty folder.
+            let pos = items
+                .iter()
+                .position(|item| item.id.last() > Some(selected_raw))
+                .or_else(|| {
+                    items
+                        .iter()
+                        .rposition(|item| item.id.last() < Some(selected_raw))
+                })
+                .unwrap_or(0);
+            renderer.list_index = pos;
+            if let Some(raw) = items.get(pos).and_then(|item| item.id.last()) {
+                renderer.current_id.set_last(raw);
+            }
+        }
+        // Outside the open flow `items` is 1:1 with the raw indices, so this
+        // only fires when `current_id` is out of range. Leave `current_id`
+        // alone — normal navigation owns it.
+        None => renderer.list_index = 0,
+    }
 
     renderer.total_list = items;
-    renderer.list_index = new_index;
 
     // Re-apply any existing search filter
     let search = renderer.search_string.clone();
@@ -1641,6 +1686,98 @@ mod tests {
         r.list_index = 5; // out of range
         populate_list_current_layer(&mut r, "hello"); // 1 match
         assert_eq!(r.list_index, 0);
+    }
+
+    // ---- Ctrl+O open flow: filtered list vs raw ffon indices ---------------
+
+    /// Build a filebrowser-shaped layer with the Ctrl+O json filter active and
+    /// the cursor parked on raw index `cursor_raw`, then rebuild the list.
+    fn make_open_flow_renderer(entries: &[FfonElement], cursor_raw: usize) -> AppRenderer {
+        let mut root = FfonElement::new_obj("filebrowser");
+        for entry in entries {
+            root.as_obj_mut().unwrap().push(entry.clone());
+        }
+        let mut r = make_renderer_with_ffon(vec![root]);
+        r.pending_file_browser_open = true;
+        r.current_id = {
+            let mut id = IdArray::new();
+            id.push(0);
+            id.push(cursor_raw);
+            id
+        };
+        create_list_current_layer(&mut r);
+        r
+    }
+
+    fn file(name: &str) -> FfonElement {
+        FfonElement::new_str(format!("<input>{name}</input>"))
+    }
+
+    fn dir(name: &str) -> FfonElement {
+        FfonElement::new_obj(format!("<input>{name}</input>"))
+    }
+
+    #[test]
+    fn open_flow_hides_name_predicate() {
+        assert!(open_flow_hides_name("notes.txt"));
+        assert!(open_flow_hides_name(".DS_Store"));
+        assert!(!open_flow_hides_name("config.json"));
+        // The `<input>` wrapper the filebrowser adds must be unwrapped first.
+        assert!(!open_flow_hides(&file("config.json")));
+        assert!(open_flow_hides(&file("notes.txt")));
+    }
+
+    #[test]
+    fn open_flow_hides_ignores_directories() {
+        // Directories are navigable regardless of their name.
+        assert!(!open_flow_hides(&dir("some-folder")));
+        assert!(!open_flow_hides(&dir(".git")));
+    }
+
+    #[test]
+    fn open_flow_snaps_selection_off_hidden_entry() {
+        // Cursor parked on the hidden `a.txt` at raw 0 must move to `b.json`,
+        // otherwise Enter loads (and the highlight lies about) the wrong file.
+        let r = make_open_flow_renderer(&[file("a.txt"), file("b.json")], 0);
+        assert_eq!(r.total_list.len(), 1);
+        assert_eq!(r.list_index, 0);
+        assert_eq!(r.current_id.last(), Some(1));
+    }
+
+    #[test]
+    fn open_flow_snap_falls_back_to_previous_visible() {
+        // Nothing visible below → snap back to the nearest visible entry above.
+        let r = make_open_flow_renderer(&[file("a.json"), file("b.txt")], 1);
+        assert_eq!(r.total_list.len(), 1);
+        assert_eq!(r.list_index, 0);
+        assert_eq!(r.current_id.last(), Some(0));
+    }
+
+    #[test]
+    fn open_flow_snap_leaves_cursor_when_nothing_visible() {
+        let r = make_open_flow_renderer(&[file("a.txt"), file("b.txt")], 1);
+        assert!(r.total_list.is_empty());
+        assert_eq!(r.current_id.last(), Some(1), "nothing to snap to");
+    }
+
+    #[test]
+    fn open_flow_keeps_directories_visible() {
+        let r = make_open_flow_renderer(&[file("a.txt"), dir("sub"), file("b.json")], 0);
+        assert_eq!(r.total_list.len(), 2);
+        // Snapped forward onto the directory at raw 1.
+        assert_eq!(r.list_index, 0);
+        assert_eq!(r.current_id.last(), Some(1));
+    }
+
+    #[test]
+    fn normal_flow_out_of_range_index_does_not_move_cursor() {
+        // Regression guard: the snap must stay scoped to the open flow. Normal
+        // navigation owns `current_id` and works in raw indices.
+        let mut r = make_renderer_with_items(&["hello", "world"]);
+        r.current_id.set_last(5);
+        create_list_current_layer(&mut r);
+        assert_eq!(r.list_index, 0);
+        assert_eq!(r.current_id.last(), Some(5), "cursor must not be rewritten");
     }
 
     #[test]

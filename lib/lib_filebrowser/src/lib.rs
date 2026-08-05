@@ -84,6 +84,11 @@ pub enum SortMode {
 pub struct FilebrowserProvider {
     current_path: PathBuf,
     show_properties: bool,
+    /// Toggled by the `show/hide hidden files` command. Dot-prefixed entries
+    /// are hidden on every platform, not just Unix: Windows marks hidden with
+    /// a file attribute instead, but a dot prefix is what the rest of the app
+    /// and the user's `.gitignore`-style files assume.
+    show_hidden: bool,
     sort_mode: SortMode,
     /// Stored between `handle_command("open file with")` and `execute_command`.
     open_with_path: Option<PathBuf>,
@@ -99,6 +104,7 @@ impl FilebrowserProvider {
         FilebrowserProvider {
             current_path: PathBuf::from("/"),
             show_properties: false,
+            show_hidden: false,
             sort_mode: SortMode::Alpha,
             open_with_path: None,
             pending_timeline_entries: Vec::new(),
@@ -114,6 +120,10 @@ impl FilebrowserProvider {
         }
         let path = &self.current_path;
         let mut raw = collect_raw_entries(path);
+
+        if !self.show_hidden {
+            raw.retain(|e| !e.name.starts_with('.'));
+        }
 
         match self.sort_mode {
             SortMode::Alpha => raw.sort_by(|a, b| natord::compare_ignore_case(&a.name, &b.name)),
@@ -374,6 +384,7 @@ impl Provider for FilebrowserProvider {
             "create file".into(),
             "open file with".into(),
             "show/hide properties".into(),
+            "show/hide hidden files".into(),
             "sort alphanumerically".into(),
             "sort chronologically".into(),
         ]
@@ -392,6 +403,10 @@ impl Provider for FilebrowserProvider {
             "create file" => Some(FfonElement::Str("<input></input>".into())),
             "show/hide properties" => {
                 self.show_properties = !self.show_properties;
+                None
+            }
+            "show/hide hidden files" => {
+                self.show_hidden = !self.show_hidden;
                 None
             }
             "sort alphanumerically" => {
@@ -476,6 +491,12 @@ impl FilebrowserProvider {
                     break;
                 }
                 let name = entry.file_name().to_string_lossy().into_owned();
+                // Agree with `list_directory`: a deep search that surfaced the
+                // contents of `.git` while the listing hides it would be both
+                // confusing and, on a large repo, most of the item budget.
+                if !self.show_hidden && name.starts_with('.') {
+                    continue;
+                }
                 // Use symlink_metadata to avoid following symlinks (guards against loops)
                 let meta = match entry.path().symlink_metadata() {
                     Ok(m) => m,
@@ -553,11 +574,28 @@ fn collect_raw_entries(path: &Path) -> Vec<RawEntry> {
     let mut entries = Vec::new();
     for e in rd.flatten() {
         let name = e.file_name().to_string_lossy().into_owned();
+        // `DirEntry::metadata` does not traverse symlinks, which is what we
+        // want for the *properties* view: `format_properties` renders the
+        // link's own mode as a leading `l`, and its own size and mtime, the
+        // way `ls -l` does.
         let meta = match e.metadata() {
             Ok(m) => m,
             Err(_) => continue,
         };
-        let is_dir = meta.is_dir();
+        // Navigability is the one thing that has to look through the link.
+        // `is_dir` alone decides whether the entry becomes an `Obj` (the user
+        // can arrow into it, and `navigate_to_path` can walk through it) or a
+        // `Str`, and a symlink to a directory is a directory to anyone using
+        // it. `delete_item` and `copy_recursive` already follow links, so
+        // without this the listing contradicts them. A broken link resolves to
+        // nothing and stays a plain entry.
+        let is_dir = if meta.file_type().is_symlink() {
+            std::fs::metadata(e.path())
+                .map(|m| m.is_dir())
+                .unwrap_or(false)
+        } else {
+            meta.is_dir()
+        };
         let mtime = meta.modified().unwrap_or(SystemTime::UNIX_EPOCH);
         #[cfg(unix)]
         {
@@ -1103,6 +1141,132 @@ mod tests {
         assert!(!p.show_properties);
     }
 
+    /// Names of the entries the provider currently lists, tags stripped.
+    fn entry_names(p: &mut FilebrowserProvider) -> Vec<String> {
+        p.fetch()
+            .iter()
+            .map(|e| {
+                tags::strip_display(
+                    e.as_str()
+                        .or_else(|| e.as_obj().map(|o| o.key.as_str()))
+                        .unwrap_or(""),
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn test_handle_command_toggle_hidden_files() {
+        let (mut p, _dir) = make_provider();
+        assert!(!p.show_hidden, "hidden files are off by default");
+        let mut err = String::new();
+        p.handle_command("show/hide hidden files", "", 0, &mut err);
+        assert!(p.show_hidden);
+        p.handle_command("show/hide hidden files", "", 0, &mut err);
+        assert!(!p.show_hidden);
+    }
+
+    #[test]
+    fn test_list_directory_hides_dotfiles_by_default() {
+        let (mut p, dir) = make_provider();
+        std::fs::write(dir.path().join(".DS_Store"), "").unwrap();
+        std::fs::write(dir.path().join("visible.txt"), "").unwrap();
+        std::fs::create_dir(dir.path().join(".git")).unwrap();
+
+        let labels = entry_names(&mut p);
+        assert!(labels.iter().any(|l| l == "visible.txt"));
+        assert!(!labels.iter().any(|l| l == ".DS_Store"));
+        assert!(!labels.iter().any(|l| l == ".git"));
+
+        let mut err = String::new();
+        p.handle_command("show/hide hidden files", "", 0, &mut err);
+        let labels = entry_names(&mut p);
+        assert!(labels.iter().any(|l| l == ".DS_Store"));
+        assert!(labels.iter().any(|l| l == ".git"));
+    }
+
+    #[test]
+    fn test_deep_search_skips_hidden_when_disabled() {
+        let (mut p, dir) = make_provider();
+        std::fs::create_dir(dir.path().join(".git")).unwrap();
+        std::fs::write(dir.path().join(".git").join("config"), "").unwrap();
+        std::fs::write(dir.path().join("visible.txt"), "").unwrap();
+
+        let results = p.collect_deep_search_items().unwrap_or_default();
+        assert!(results.iter().any(|r| r.label.contains("visible.txt")));
+        assert!(
+            !results.iter().any(|r| r.label.contains(".git")),
+            "deep search must agree with the listing"
+        );
+        assert!(
+            !results.iter().any(|r| r.label.contains("config")),
+            "hidden directories must not be descended into"
+        );
+
+        let mut err = String::new();
+        p.handle_command("show/hide hidden files", "", 0, &mut err);
+        let results = p.collect_deep_search_items().unwrap_or_default();
+        assert!(results.iter().any(|r| r.label.contains(".git")));
+        assert!(results.iter().any(|r| r.label.contains("config")));
+    }
+
+    #[test]
+    fn test_symlinked_directory_is_navigable() {
+        let (mut p, dir) = make_provider();
+        std::fs::create_dir(dir.path().join("real")).unwrap();
+        std::os::unix::fs::symlink(dir.path().join("real"), dir.path().join("link")).unwrap();
+
+        let items = p.fetch();
+        let link = items
+            .iter()
+            .find(|e| {
+                tags::strip_display(
+                    e.as_str()
+                        .or_else(|| e.as_obj().map(|o| o.key.as_str()))
+                        .unwrap_or(""),
+                ) == "link"
+            })
+            .expect("symlink should be listed");
+        assert!(
+            link.as_obj().is_some(),
+            "a symlink to a directory must be an Obj, or the user cannot arrow \
+             into it and navigate_to_path cannot walk through it"
+        );
+    }
+
+    #[test]
+    fn test_broken_symlink_is_not_a_directory() {
+        let (mut p, dir) = make_provider();
+        std::os::unix::fs::symlink(dir.path().join("gone"), dir.path().join("dangling")).unwrap();
+
+        let items = p.fetch();
+        let link = items
+            .iter()
+            .find(|e| tags::strip_display(e.as_str().unwrap_or("")) == "dangling")
+            .expect("broken symlink should still be listed");
+        assert!(link.as_str().is_some(), "a broken link resolves to nothing");
+    }
+
+    #[test]
+    fn test_symlink_properties_still_show_link_mode() {
+        let (mut p, dir) = make_provider();
+        std::fs::create_dir(dir.path().join("real")).unwrap();
+        std::os::unix::fs::symlink(dir.path().join("real"), dir.path().join("link")).unwrap();
+        p.show_properties = true;
+
+        let items = p.fetch();
+        let key = items
+            .iter()
+            .filter_map(|e| e.as_obj())
+            .find(|o| entry_name(&o.key) == "link")
+            .map(|o| o.key.clone())
+            .expect("symlink should be listed as a directory");
+        assert!(
+            key.starts_with('l'),
+            "properties must still describe the link itself, got {key}"
+        );
+    }
+
     #[test]
     fn test_handle_command_sort_chrono() {
         let (mut p, _dir) = make_provider();
@@ -1330,14 +1494,15 @@ mod tests {
     }
 
     #[test]
-    fn test_get_commands_returns_six() {
+    fn test_get_commands_returns_seven() {
         let p = FilebrowserProvider::new();
         let cmds = p.commands();
-        assert_eq!(cmds.len(), 6);
+        assert_eq!(cmds.len(), 7);
         assert!(cmds.contains(&"create directory".to_string()));
         assert!(cmds.contains(&"create file".to_string()));
         assert!(cmds.contains(&"open file with".to_string()));
         assert!(cmds.contains(&"show/hide properties".to_string()));
+        assert!(cmds.contains(&"show/hide hidden files".to_string()));
         assert!(cmds.contains(&"sort alphanumerically".to_string()));
         assert!(cmds.contains(&"sort chronologically".to_string()));
     }

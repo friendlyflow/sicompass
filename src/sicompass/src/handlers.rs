@@ -13,8 +13,29 @@ use sicompass_sdk::tags;
 // Navigation
 // ---------------------------------------------------------------------------
 
+/// True while the Ctrl+O open dialog owns General-mode list navigation.
+///
+/// In this state `total_list` is a *filtered* view of the layer (non-`.json`
+/// files are hidden), so an item's position in the list no longer equals its
+/// raw FFON index. Movement therefore has to step `list_index` and derive
+/// `current_id` from it via `sync_current_id_from_list`, exactly like the
+/// search coordinates do — the raw `current_id ± 1` arithmetic in
+/// `state::update_ids` would land the cursor on hidden entries.
+fn open_flow_list_nav(r: &AppRenderer) -> bool {
+    r.pending_file_browser_open && r.coordinate == Coordinate::General
+}
+
 /// Move selection up in the current list.
 pub fn handle_up(r: &mut AppRenderer) {
+    if open_flow_list_nav(r) {
+        r.error_message.clear();
+        if r.list_index > 0 {
+            r.list_index -= 1;
+            r.sync_current_id_from_list();
+        }
+        r.needs_redraw = true;
+        return;
+    }
     match r.coordinate {
         Coordinate::ScrollSearch | Coordinate::ScrollPrefixSearch => {
             if r.scroll_search_match_count > 0 {
@@ -67,6 +88,15 @@ pub fn handle_up(r: &mut AppRenderer) {
 
 /// Move selection down in the current list.
 pub fn handle_down(r: &mut AppRenderer) {
+    if open_flow_list_nav(r) {
+        r.error_message.clear();
+        if r.list_index + 1 < r.active_list_len() {
+            r.list_index += 1;
+            r.sync_current_id_from_list();
+        }
+        r.needs_redraw = true;
+        return;
+    }
     match r.coordinate {
         Coordinate::ScrollSearch | Coordinate::ScrollPrefixSearch => {
             if r.scroll_search_match_count > 0 {
@@ -708,6 +738,17 @@ pub fn handle_page_up(r: &mut AppRenderer) {
             r.scroll_offset = r.list_index as i32;
             r.speak_current_element();
         }
+        // The open dialog lists a filtered subset, so page by list position.
+        Coordinate::General if open_flow_list_nav(r) => {
+            r.error_message.clear();
+            r.list_index = if r.cached_line_counts.is_empty() {
+                r.list_index.saturating_sub(page_size)
+            } else {
+                step_back_by_lines(&r.cached_line_counts, r.list_index, page_size)
+            };
+            r.sync_current_id_from_list();
+            r.scroll_offset = r.list_index as i32;
+        }
         Coordinate::General => {
             if let Some(slice) = sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &r.current_id) {
                 let max_id = slice.len().saturating_sub(1);
@@ -756,6 +797,21 @@ pub fn handle_page_down(r: &mut AppRenderer) {
                 r.list_index = new_idx;
                 r.scroll_offset = -1;
                 r.speak_current_element();
+            }
+        }
+        // The open dialog lists a filtered subset, so page by list position.
+        Coordinate::General if open_flow_list_nav(r) => {
+            r.error_message.clear();
+            let count = r.active_list_len();
+            if count > 0 {
+                let max_id = count - 1;
+                r.list_index = if r.cached_line_counts.is_empty() {
+                    (r.list_index + page_size).min(max_id)
+                } else {
+                    step_forward_by_lines(&r.cached_line_counts, r.list_index, max_id, page_size)
+                };
+                r.sync_current_id_from_list();
+                r.scroll_offset = -1;
             }
         }
         Coordinate::General => {
@@ -1471,6 +1527,17 @@ pub fn handle_enter_general(r: &mut AppRenderer) {
     }
 
     // File-browser open (Ctrl+O flow): user selected a file → load it into source provider.
+    if r.pending_file_browser_open && is_filebrowser {
+        // A folder with no `.json` files and no subdirectories renders empty,
+        // so there is nothing for the cursor to sit on and `elem_clone` is
+        // whatever raw entry it was left parked on. Say so rather than
+        // reporting the parked file.
+        if r.current_list_item().is_none() {
+            r.error_message = "No .json files in this folder".to_owned();
+            r.needs_redraw = true;
+            return;
+        }
+    }
     if r.pending_file_browser_open && is_filebrowser && matches!(elem_clone, FfonElement::Str(_)) {
         let fname_opt = if tags::has_input(&elem_text) {
             tags::extract_input(&elem_text)
@@ -1479,7 +1546,12 @@ pub fn handle_enter_general(r: &mut AppRenderer) {
         };
 
         if let Some(fname) = fname_opt {
-            if !fname.ends_with(".json") {
+            // Backstop, not the primary UX path: the list is already filtered
+            // to `.json` files by `create_list_current_layer`. It stays because
+            // provider paths that bypass the list builder could still park the
+            // cursor on another file, and loading an arbitrary file into the
+            // user's config tree is worse than an error message.
+            if list::open_flow_hides_name(&fname) {
                 r.error_message = "Please select a .json file".to_owned();
                 r.needs_redraw = true;
                 return;
@@ -1627,11 +1699,9 @@ pub fn handle_enter_search(r: &mut AppRenderer) {
     r.speak_mode_change(None);
     r.search_string.clear();
     list::create_list_current_layer(r);
-    r.list_index = r
-        .current_id
-        .last()
-        .unwrap_or(0)
-        .min(r.active_list_len().saturating_sub(1));
+    // The Ctrl+O open dialog is still filtered at this point (the flag is only
+    // cleared once the file loads), so the raw index is not a list position.
+    r.sync_list_index_from_current_id();
     record_search_exit_navigation(
         r,
         search_from_id,
@@ -3859,7 +3929,11 @@ pub fn handle_file_browser_open(r: &mut AppRenderer) {
 
     r.pending_file_browser_open = true;
     list::create_list_current_layer(r);
+    // Open on the first row. The listing is filtered to `.json` files, so the
+    // raw index the filebrowser left behind may point at a hidden entry —
+    // derive `current_id` from the visible list instead of assuming they match.
     r.list_index = 0;
+    r.sync_current_id_from_list();
     r.scroll_offset = 0;
     r.needs_redraw = true;
 }

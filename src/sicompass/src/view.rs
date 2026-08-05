@@ -402,7 +402,7 @@ pub fn main_loop(app: &mut AppState) {
             // Rebuild the rendered list from the updated ffon tree — same as
             // what handlers.rs does after notify_button_pressed.
             crate::list::create_list_current_layer(&mut app.renderer);
-            app.renderer.list_index = app.renderer.current_id.last().unwrap_or(0);
+            app.renderer.sync_list_index_from_current_id();
             app.renderer.needs_redraw = true;
         }
 
@@ -455,10 +455,10 @@ pub fn main_loop(app: &mut AppState) {
                         app.renderer.list_index = pos;
                     }
                 } else {
-                    app.renderer.list_index = app.renderer.current_id.last().unwrap_or(0);
+                    app.renderer.sync_list_index_from_current_id();
                 }
             } else {
-                app.renderer.list_index = app.renderer.current_id.last().unwrap_or(0);
+                app.renderer.sync_list_index_from_current_id();
             }
             app.renderer.needs_redraw = true;
         }
