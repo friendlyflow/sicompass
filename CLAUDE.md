@@ -93,7 +93,7 @@ the Windows MSI and Nix without a wrapper script.
 
 If you add a file the app reads at runtime, adding it to `include` in
 `dist-workspace.toml` is **not** enough: that reaches the archives only, not
-the installers. See [docs/releasing.md](docs/releasing.md).
+the MSI or the native packages. See [docs/releasing.md](docs/releasing.md).
 
 ## Releasing
 

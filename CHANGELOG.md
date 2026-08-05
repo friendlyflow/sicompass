@@ -3,6 +3,29 @@
 cargo-dist parses this file and uses the matching version's section as the
 GitHub Release body, so entries here are what users read on the download page.
 
+## Unreleased
+
+### The `curl | sh` and `irm | iex` installers are gone
+
+`sicompass-installer.sh` and `sicompass-installer.ps1` are no longer built. Both
+came from cargo-dist templates aimed at command-line tools: they copied a binary
+and edited PATH, with no way to install anything the app depends on. That is
+fine for a CLI and not enough for a windowed app, which needs a Vulkan loader,
+`at-spi2-core` for screen readers, and `xvfb` for the web browser on Linux, and
+MoltenVK on macOS.
+
+Use the package for your system instead. Every platform has one that declares
+its own dependencies:
+
+- **Windows**: the `.msi`, which also adds the Start Menu entry the PowerShell
+  installer never could.
+- **macOS**: the `.dmg`, which bundles MoltenVK.
+- **Linux**: the `.deb`, `.rpm`, AppImage, or `nix run
+  github:friendlyflow/sicompass`.
+
+The portable `.tar.xz` and `.zip` archives are unchanged, for anyone who would
+rather unpack a binary by hand.
+
 ## 0.1.9
 
 ### Downloads for Windows, macOS and Linux
