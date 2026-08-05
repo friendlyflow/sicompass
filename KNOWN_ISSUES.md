@@ -20,16 +20,6 @@ xattr -dr com.apple.quarantine /Applications/sicompass.app
 `notarization-credentials` for cargo-packager. All four are secrets, not
 config-file values.
 
-## macOS rendering is unverified
-
-**Issue**: nobody has run sicompass on real Mac hardware.
-
-CI verifies that macOS compiles and links, and runs `sicompass --check` to
-confirm MoltenVK loads and enumerates a device. What is not verified is whether
-the swapchain formats MoltenVK reports match what `create_swapchain` expects,
-and whether the AccessKit Cocoa adapter actually talks to VoiceOver. Reports
-from Mac users are welcome.
-
 ## Window Maximize Not Working (Cinnamon Desktop)
 
 **Issue**: The maximize button does not properly resize the Vulkan rendering surface on Cinnamon desktop environment.
@@ -52,6 +42,14 @@ from Mac users are welcome.
 - Related to depth/stencil validation fixes in rectangle.c and text.c
 
 ## Fixed Issues
+
+### macOS rendering and VoiceOver are now verified
+
+**Fixed**: sicompass has been run on real Mac hardware. It renders through
+MoltenVK, and VoiceOver speaks the list, mode changes, the typed-character
+echo, and the `w` position report. The AccessKit Cocoa adapter needed a
+macOS-specific tree to get there, see `build_tree_macos` in
+`src/sicompass/src/accesskit_sdl.rs`.
 
 ### Vulkan Validation Errors
 **Fixed**: Added `VkPipelineDepthStencilStateCreateInfo` to rectangle and text pipelines to satisfy render pass requirements.
