@@ -43,7 +43,9 @@ every command with `cd PROJECT_ROOT &&` (the actual absolute project root).**
    `Cargo.toml` (line ~22) and compare it with `git tag --sort=-v:refname | head -1`.
 
    - **If that version has no tag yet**, it was already bumped in a previous
-     commit. That is the version being released. **Skip steps 4 and 5.**
+     commit. That is the version being released. **Skip steps 4 to 6**, but
+     still confirm step 6's `grep` returns 0: the README is bumped by hand and
+     is the piece most often left behind.
    - **If it matches the latest tag**, bump it. Default to a patch bump
      (`0.1.3` -> `0.1.4`), matching release history, unless the user asks for
      minor or major.
@@ -62,31 +64,53 @@ every command with `cd PROJECT_ROOT &&` (the actual absolute project root).**
    what users read on the download page. Without an entry the notes are generic
    boilerplate.
 
-6. **Sync `Cargo.lock`.** `cargo update --workspace --offline` rewrites the
+6. **Bump the versioned filenames in `README.md`.** Do this as soon as the
+   version is known, in the same commit as the `Cargo.toml` bump, rather than
+   after the release lands.
+
+   The `.deb`, `.rpm` and AppImage are the only assets whose *file name*
+   carries the version, and the README names all three literally: once in the
+   download table, and again in the `apt` / `dnf` / `chmod +x` snippets below
+   it. Six or seven occurrences in total. Their
+   `releases/latest/download/...` URLs 404 the moment the new release exists,
+   so a stale README silently breaks every Linux download link, which is the
+   one platform where the links are load-bearing.
+
+   ```sh
+   sed -i 's/OLD/NEW/g' README.md   # e.g. 0.1.10 -> 0.1.11
+   grep -c 'OLD' README.md          # must print 0
+   ```
+
+   The `.msi`, both `.dmg`s, the `.zip` and the `.tar.xz`s are not versioned in
+   their file names, so those links never need touching. After the release is
+   published, `curl -sIL -o /dev/null -w '%{http_code}'` on the three bumped
+   URLs should return 200.
+
+7. **Sync `Cargo.lock`.** `cargo update --workspace --offline` rewrites the
    version of the ~15 workspace member crates without touching external deps.
    Confirm only `Cargo.toml` and `Cargo.lock` changed.
 
-7. **Commit and push `main`** (skip if steps 4 to 6 were all skipped).
+8. **Commit and push `main`** (skip if steps 4 to 7 were all skipped).
 
    ```sh
-   git add Cargo.toml Cargo.lock CHANGELOG.md
+   git add Cargo.toml Cargo.lock CHANGELOG.md README.md
    git commit -m "Release: bump version to X.Y.Z"
    git push origin HEAD:main
    ```
 
    Plain message, no co-author trailer.
 
-8. **Tag and push the tag.**
+9. **Tag and push the tag.**
 
    ```sh
    git tag -a vX.Y.Z -m "Release vX.Y.Z"
    git push origin vX.Y.Z
    ```
 
-9. **Report.** Give the user the Actions URL:
-   https://github.com/friendlyflow/sicompass/actions
+10. **Report.** Give the user the Actions URL:
+    https://github.com/friendlyflow/sicompass/actions
 
-10. **Smoke test after the artifacts appear.** The pipeline has published
+11. **Smoke test after the artifacts appear.** The pipeline has published
     unrunnable binaries before. At minimum, download one package and run
     `sicompass --check`: it reports where resources resolved to and which
     Vulkan devices it sees, which is the whole class of failure that used to
