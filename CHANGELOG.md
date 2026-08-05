@@ -5,6 +5,25 @@ GitHub Release body, so entries here are what users read on the download page.
 
 ## Unreleased
 
+### Linux: the arrow keys keep working after a web page loads
+
+With a screen reader running, opening a page in the web browser left the arrow
+keys dead. Navigation only came back after switching away from sicompass and
+back again.
+
+sicompass loads pages in a Chrome that it starts on an invisible display, so
+that no browser window ever appears on screen and takes the focus. That hides
+Chrome from the screen, but not from the screen reader, because the
+accessibility bus belongs to the whole login session rather than to one
+display. Orca was therefore offered a second application called "Google
+Chrome", carrying a window named after the page that had just been opened, and
+it had somewhere else to go. Chrome only announces itself this way while an
+assistive technology is running, which is why the browser behaved perfectly
+until a screen reader was switched on.
+
+That Chrome is now kept off the accessibility bus entirely, so the screen
+reader sees only sicompass and the arrow keys keep going where they are aimed.
+
 ### macOS: the app starts on a Mac that does not have Homebrew
 
 0.1.10 could not launch on most Macs. It quit immediately, and Console showed
