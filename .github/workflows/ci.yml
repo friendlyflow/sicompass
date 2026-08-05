@@ -153,20 +153,45 @@ jobs:
         if: matrix.subset
         run: "cargo test -p sicompass --lib --features bundled-sdl3 -- shaders:: fonts:: resources::"
 
-      # `--target` where the matrix names one, so this matches the release.
-      # It is the host triple in both macOS cases, so nothing needs installing,
-      # but passing it explicitly is what reproduces the release's link line.
-      - name: Build
+      # Where the build lands, so the checks below can find it. Writing to
+      # $GITHUB_ENV has a different syntax per shell, so this is forced to
+      # bash — which is safe here precisely because it runs no cargo.
+      - name: Locate the release binary
         if: ${{ !matrix.full }}
         shell: bash
         run: |
           if [ -n "${{ matrix.triple }}" ]; then
-            cargo build -p sicompass --release --features bundled-sdl3 --target "${{ matrix.triple }}"
             echo "SICOMPASS_BIN=target/${{ matrix.triple }}/release/sicompass" >> "$GITHUB_ENV"
           else
-            cargo build -p sicompass --release --features bundled-sdl3
             echo "SICOMPASS_BIN=target/release/sicompass" >> "$GITHUB_ENV"
           fi
+
+      # `--target` where the matrix names one, so this matches the release.
+      # It is the host triple in both macOS cases, so nothing needs installing,
+      # but passing it explicitly is what reproduces the release's link line.
+      - name: Build (explicit --target)
+        if: ${{ !matrix.full && matrix.triple != '' }}
+        shell: bash
+        run: cargo build -p sicompass --release --features bundled-sdl3 --target "${{ matrix.triple }}"
+
+      # Deliberately NOT `shell: bash`, and this is the whole point of the
+      # split. On Windows the default shell is PowerShell, and cargo has to
+      # stay there: under Git Bash the MSYS runtime rewrites `PKG_CONFIG_PATH`
+      # into POSIX form (`/c/vcpkg/...`) on the way into the shell, Strawberry
+      # Perl's native pkg-config cannot read that, freetype-sys's probe finds
+      # nothing, and it silently falls back to its vendored FreeType with PNG
+      # support switched off — so every colour emoji disappears.
+      #
+      # This is not hypothetical. A single `shell: bash` here, added to share
+      # one step with the `--target` case above, did exactly that. It went
+      # unnoticed for two commits because a warm rust-cache kept serving the
+      # freetype-sys artifacts from before the change, and the break only
+      # surfaced once an unrelated edit to setup-freetype.sh rotated the cache
+      # key. `dist build` runs under PowerShell, so the release was never
+      # affected — but do not merge these two steps back together.
+      - name: Build (host target)
+        if: ${{ !matrix.full && matrix.triple == '' }}
+        run: cargo build -p sicompass --release --features bundled-sdl3
 
       - name: Clippy
         run: cargo clippy --workspace --all-targets --features bundled-sdl3 ${{ matrix.flags }}

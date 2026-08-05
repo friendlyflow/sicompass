@@ -114,6 +114,16 @@ Shaders and fonts are now embedded (`src/sicompass/src/shaders.rs`,
     `Command` does not apply PATHEXT when resolving a bare name, so the build
     script cannot find it even though every shell can. That mismatch cost
     several CI rounds to spot.
+  - Also on Windows: **never put `shell: bash` on a step that runs cargo.**
+    Git Bash's MSYS runtime rewrites `PKG_CONFIG_PATH` into POSIX form
+    (`/c/vcpkg/...`) on the way in, Strawberry Perl's native pkg-config cannot
+    read that, and freetype-sys falls back to its PNG-less vendored build
+    exactly as if the setup step had never run. The Build step is split in two
+    for this reason alone — one `shell: bash` leg for the macOS `--target`
+    case, one default-shell leg for everyone else. Do not merge them back.
+    When this last happened the break hid behind a warm rust-cache for two
+    commits, because the cache key only rotates when the setup scripts change.
+    `dist build` runs under PowerShell, so releases were never affected.
   - The Windows leg does **not** run `cargo test`, because
     `.cargo/config.toml` sets a `runner` for `x86_64-pc-windows-msvc` pointing
     at `C:\sicompass\.cargo\run.bat`, which exists on one developer machine.
