@@ -5,6 +5,22 @@ GitHub Release body, so entries here are what users read on the download page.
 
 ## Unreleased
 
+### VoiceOver now works on macOS
+
+sicompass was silent under VoiceOver. Orca and NVDA were unaffected.
+
+The accessibility tree was built once for all three platforms, using the two
+mechanisms Orca and NVDA listen to: mutating one node's label, and a label-only
+live region. NSAccessibility honours neither. It announces on a live region's
+*value*, which was never set, and it re-reads the focused element only when the
+focused node id changes, which it never did.
+
+macOS now gets its own tree. Everything spoken goes through a single live
+region, so the list, mode and error announcements, the typed-character echo,
+and the `w` position report are all read out.
+
+Set `SICOMPASS_A11Y_DEBUG=1` to trace the adapter if speech ever goes missing.
+
 ### The `curl | sh` and `irm | iex` installers are gone
 
 `sicompass-installer.sh` and `sicompass-installer.ps1` are no longer built. Both

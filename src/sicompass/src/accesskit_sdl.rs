@@ -7,6 +7,10 @@
 //! * Windows — [`accesskit_windows::SubclassingAdapter`] (UI Automation)
 //! * macOS   — [`accesskit_macos::SubclassingAdapter`] (NSAccessibility)
 //!
+//! Linux and Windows share one tree ([`build_tree`]); macOS needs a different
+//! one ([`build_tree_macos`]) because NSAccessibility ignores the mechanisms
+//! the shared tree speaks through.  See the comment above `build_tree_macos`.
+//!
 //! Exposes two public operations:
 //!
 //! * [`AccessKitAdapter::new`] — create the adapter from the SDL3 window.
@@ -47,6 +51,118 @@ pub struct AccessKitAdapter {
     adapter: accesskit_windows::SubclassingAdapter,
     #[cfg(target_os = "macos")]
     adapter: accesskit_macos::SubclassingAdapter,
+    /// Tracks what has already been spoken, so the single macOS live region
+    /// announces each item or message exactly once.  See [`SpeechChannel`].
+    #[cfg(target_os = "macos")]
+    channel: SpeechChannel,
+}
+
+/// The parity sentinel the `speak_*` producers append so that two identical
+/// consecutive announcements still differ (see `AppRenderer::speak_mode_change`).
+/// Screen readers ignore it; the comparisons here have to.
+#[cfg(target_os = "macos")]
+const PARITY_SENTINEL: char = '\u{200B}';
+
+/// What was last published to the macOS live region.
+#[cfg(target_os = "macos")]
+#[derive(Clone, Default, PartialEq, Eq, Debug)]
+struct Spoken {
+    /// Exactly the value put on the node, parity sentinel included.  Republished
+    /// verbatim when there is nothing new, so no event fires.
+    value: String,
+    /// BCP-47 tag for `value`.  Empty means "use the UI locale".
+    lang: String,
+}
+
+#[cfg(target_os = "macos")]
+impl Spoken {
+    /// `value` without the parity sentinel — what was actually *said*.
+    fn text(&self) -> &str {
+        self.value.trim_end_matches(PARITY_SENTINEL)
+    }
+}
+
+/// Picks what the single macOS live region should carry each frame.
+///
+/// Two sources compete.  `speak_current_element` and friends push through
+/// `pending_announcement`, but only in the filter modes (search / command /
+/// extended search); in normal mode a selection change is visible *only* as a
+/// new element label.  Publishing both through separate live regions would
+/// speak the item twice in filter modes, so one channel picks between them:
+///
+/// 1. a `pending_announcement` we have not published yet wins;
+/// 2. otherwise a changed element label is published;
+/// 3. otherwise the previous value is republished verbatim, so nothing fires.
+///
+/// `pending_announcement` is never cleared by its producers, which is why it is
+/// compared against the last one published rather than merely tested for
+/// presence.
+#[cfg(target_os = "macos")]
+#[derive(Clone, Default, Debug)]
+struct SpeechChannel {
+    last_announcement: Option<String>,
+    /// The element label as of the last frame.  Tracked separately from
+    /// `published` because the two sources interleave: after an announcement is
+    /// published, comparing the element label against `published` would make an
+    /// *unchanged* label look new and re-read the whole list item.  In Insert
+    /// mode that fires on every keystroke, burying the typed-character echo.
+    last_element: String,
+    published: Spoken,
+}
+
+#[cfg(target_os = "macos")]
+impl SpeechChannel {
+    /// The state that *would* follow from `renderer`.  Pure: the caller commits
+    /// it only once the adapter has accepted the tree, so nothing is consumed
+    /// while the adapter is still inactive.
+    fn next(&self, renderer: &AppRenderer) -> Self {
+        let announcement = renderer.pending_announcement.clone();
+        let (element_label, element_content) = current_element(renderer);
+        let ui_locale = sicompass_sdk::localize::current_locale();
+
+        // 1. A new announcement. App-generated, so tagged with the UI locale.
+        if let Some(text) = &announcement
+            && !text.is_empty()
+            && announcement != self.last_announcement
+        {
+            return Self {
+                last_announcement: announcement.clone(),
+                last_element: element_label,
+                published: Spoken {
+                    value: text.clone(),
+                    lang: ui_locale,
+                },
+            };
+        }
+
+        // 2. A genuinely changed element label. Compared against the previous
+        //    label rather than against what was last published: an announcement
+        //    published in between must not make an unchanged label look new.
+        if !element_label.is_empty() && element_label != self.last_element {
+            return Self {
+                last_announcement: announcement,
+                published: Spoken {
+                    lang: detect_language(&element_content).unwrap_or(ui_locale),
+                    value: element_label.clone(),
+                },
+                last_element: element_label,
+            };
+        }
+
+        // 3. Nothing new to say.
+        Self {
+            last_announcement: announcement,
+            last_element: element_label,
+            published: self.published.clone(),
+        }
+    }
+}
+
+/// Whether `SICOMPASS_A11Y_DEBUG` is set, for tracing the macOS adapter.
+#[cfg(target_os = "macos")]
+fn a11y_debug() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("SICOMPASS_A11Y_DEBUG").is_some())
 }
 
 impl AccessKitAdapter {
@@ -123,9 +239,14 @@ impl AccessKitAdapter {
                 )
             };
             if ns_window.is_null() {
+                if a11y_debug() {
+                    eprintln!("[a11y] macos: no NSWindow pointer; accessibility disabled");
+                }
                 return None;
             }
-            let initial_tree = build_tree(renderer);
+            // Nothing to say yet, so the live region starts without a value.
+            let channel = SpeechChannel::default();
+            let initial_tree = build_tree_macos(renderer, "", "");
             let adapter = unsafe {
                 accesskit_macos::SubclassingAdapter::for_window(
                     ns_window,
@@ -135,7 +256,10 @@ impl AccessKitAdapter {
                     NoopActionHandler,
                 )
             };
-            return Some(AccessKitAdapter { adapter });
+            if a11y_debug() {
+                eprintln!("[a11y] macos: subclassed content view of NSWindow {ns_window:?}");
+            }
+            return Some(AccessKitAdapter { adapter, channel });
         }
 
         // ---- Unsupported platform -------------------------------------------
@@ -155,9 +279,40 @@ impl AccessKitAdapter {
             events.raise();
         }
 
+        // macOS: choose the live-region text *before* borrowing `self.adapter`
+        // mutably (the update closure could not borrow `self` at the same
+        // time), and commit the channel state only if the adapter took the
+        // update — while it is still inactive the closure is never called, and
+        // consuming an announcement there would lose it.
         #[cfg(target_os = "macos")]
-        if let Some(events) = self.adapter.update_if_active(|| build_tree(renderer)) {
-            events.raise();
+        {
+            let next = self.channel.next(renderer);
+            let spoken = next.published.clone();
+            let result = self
+                .adapter
+                .update_if_active(|| build_tree_macos(renderer, &spoken.value, &spoken.lang));
+            if let Some(events) = result {
+                let changed = next.published != self.channel.published;
+                self.channel = next;
+                if a11y_debug() && changed {
+                    eprintln!(
+                        "[a11y] macos: announce {:?} (lang {})",
+                        self.channel.published.text(),
+                        self.channel.published.lang
+                    );
+                }
+                events.raise();
+            } else if a11y_debug() {
+                // Sampled: this is the steady state until VoiceOver first
+                // queries the view, and would otherwise print every frame.
+                static WARNED: std::sync::atomic::AtomicBool =
+                    std::sync::atomic::AtomicBool::new(false);
+                if !WARNED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                    eprintln!(
+                        "[a11y] macos: adapter still inactive (VoiceOver has not queried the view)"
+                    );
+                }
+            }
         }
     }
 
@@ -314,6 +469,34 @@ fn detect_language(content: &str) -> Option<String> {
 // Build the accessibility tree
 // ---------------------------------------------------------------------------
 
+/// The currently selected list item as `(spoken label, raw content)`.
+///
+/// The spoken label has the FFON list prefix expanded to words
+/// ([`label_to_speech`]); the raw content has it stripped entirely
+/// ([`speech_content`]) and is what language detection runs on.
+///
+/// Both are empty when the list is empty.
+fn current_element(renderer: &AppRenderer) -> (String, String) {
+    if renderer.total_list.is_empty() {
+        return (String::new(), String::new());
+    }
+    let raw_idx = if renderer.filtered_list_indices.is_empty() {
+        renderer.list_index.min(renderer.total_list.len() - 1)
+    } else {
+        renderer
+            .filtered_list_indices
+            .get(renderer.list_index)
+            .copied()
+            .unwrap_or(0)
+            .min(renderer.total_list.len() - 1)
+    };
+    let raw_label = &renderer.total_list[raw_idx].label;
+    (
+        label_to_speech(raw_label),
+        speech_content(raw_label).to_owned(),
+    )
+}
+
 /// Convert the current AppRenderer visible list into a flat AccessKit tree.
 ///
 /// Build the accessibility tree from current renderer state.
@@ -331,6 +514,12 @@ fn detect_language(content: &str) -> Option<String> {
 ///   reliable `NodeAdded` event.
 ///
 /// Focus is `ELEMENT_ID` when `total_list` is non-empty, `ROOT_ID` otherwise.
+///
+/// macOS builds its own tree ([`build_tree_macos`]) because NSAccessibility
+/// honours neither the label-mutation nor the label-only live region above;
+/// this stays compiled under `cfg(test)` there so the tests keep pinning the
+/// AT-SPI / UIA shape.
+#[cfg(any(not(target_os = "macos"), test))]
 fn build_tree(renderer: &AppRenderer) -> TreeUpdate {
     let mut nodes: Vec<(NodeId, accesskit::Node)> = Vec::with_capacity(3);
 
@@ -340,25 +529,7 @@ fn build_tree(renderer: &AppRenderer) -> TreeUpdate {
     let ui_locale = sicompass_sdk::localize::current_locale();
 
     // ---- Single focused element node (mirrors C's ELEMENT_ID) --------------
-    let (element_label, element_content) = if renderer.total_list.is_empty() {
-        (String::new(), String::new())
-    } else {
-        let raw_idx = if renderer.filtered_list_indices.is_empty() {
-            renderer.list_index.min(renderer.total_list.len() - 1)
-        } else {
-            renderer
-                .filtered_list_indices
-                .get(renderer.list_index)
-                .copied()
-                .unwrap_or(0)
-                .min(renderer.total_list.len() - 1)
-        };
-        let raw_label = &renderer.total_list[raw_idx].label;
-        (
-            label_to_speech(raw_label),
-            speech_content(raw_label).to_owned(),
-        )
-    };
+    let (element_label, element_content) = current_element(renderer);
     let mut elem = Node::new(Role::ListItem);
     elem.set_label(Box::<str>::from(element_label.as_str()));
     // Speak each item in its own language: auto-detect from the content, fall
@@ -398,6 +569,82 @@ fn build_tree(renderer: &AppRenderer) -> TreeUpdate {
         tree: Some(Tree::new(ROOT_ID)),
         tree_id: TreeId::ROOT,
         focus,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// macOS (NSAccessibility) tree
+// ---------------------------------------------------------------------------
+//
+// sicompass exposes no accessibility tree: it tells the screen reader what to
+// say rather than publishing a navigable structure.  On AT-SPI and UIA that
+// works by mutating one pinned node's *label*, which Orca and NVDA speak.
+// NSAccessibility honours neither half of that:
+//
+// * A label-only change posts `NSAccessibilityTitleChanged`, which VoiceOver
+//   does not re-speak, and `focus_moved` only fires when the focused node *id*
+//   changes — which it never does here.
+// * Live-region announcements are gated on the node's `value`, never its label
+//   (`accesskit_macos::event::EventGenerator`), so a label-only live region is
+//   silent.
+//
+// So macOS gets its own tree: everything spoken goes through a single
+// live-region `value`, which becomes `NSAccessibilityAnnouncementRequested`.
+// `ELEMENT_ID` remains as a focusable anchor — `accesskit_macos` stays in
+// `State::Inactive`, generating no events at all, until VoiceOver first queries
+// the subclassed view, so there has to be something focusable for it to find.
+// The anchor deliberately carries no `value`: that would post an extra
+// `NSAccessibilityValueChanged` for the focused node on top of the
+// announcement, and VoiceOver may speak both.
+
+/// Build the macOS accessibility tree.
+///
+/// `spoken` is the text the live region should carry this frame, chosen by
+/// [`AccessKitAdapter::next_spoken`].  An empty `spoken` leaves the node's
+/// value unset, so `Node::value()` stays `None` and no announcement is posted.
+#[cfg(target_os = "macos")]
+fn build_tree_macos(renderer: &AppRenderer, spoken: &str, spoken_lang: &str) -> TreeUpdate {
+    let ui_locale = sicompass_sdk::localize::current_locale();
+    let mut nodes: Vec<(NodeId, accesskit::Node)> = Vec::with_capacity(3);
+
+    // ---- Root window node --------------------------------------------------
+    let mut root = Node::new(Role::Window);
+    root.set_label(Box::<str>::from("sicompass"));
+    root.set_language(ui_locale.clone());
+    root.set_children(vec![ELEMENT_ID, ANNOUNCEMENT_ID]);
+    nodes.push((ROOT_ID, root));
+
+    // ---- Focusable anchor --------------------------------------------------
+    // Label only, so exploring the app with the VoiceOver cursor still reads
+    // the current item. Speech itself comes from the live region below.
+    let (element_label, element_content) = current_element(renderer);
+    let mut elem = Node::new(Role::ListItem);
+    elem.set_label(Box::<str>::from(element_label.as_str()));
+    elem.set_language(detect_language(&element_content).unwrap_or_else(|| ui_locale.clone()));
+    nodes.push((ELEMENT_ID, elem));
+
+    // ---- The one announcement channel --------------------------------------
+    let mut ann = Node::new(Role::ListItem);
+    ann.set_live(Live::Polite);
+    ann.set_language(if spoken_lang.is_empty() {
+        ui_locale
+    } else {
+        spoken_lang.to_owned()
+    });
+    if !spoken.is_empty() {
+        ann.set_value(Box::<str>::from(spoken));
+    }
+    nodes.push((ANNOUNCEMENT_ID, ann));
+
+    // Focus the anchor unconditionally: `Role::Window` is excluded by
+    // `accesskit_macos::node::can_be_focused`, so focusing the root instead
+    // would leave `accessibilityFocusedUIElement` nil and give VoiceOver
+    // nothing to engage with when the list is empty.
+    TreeUpdate {
+        nodes,
+        tree: Some(Tree::new(ROOT_ID)),
+        tree_id: TreeId::ROOT,
+        focus: ELEMENT_ID,
     }
 }
 
@@ -879,5 +1126,210 @@ mod tests {
         r.coordinate = crate::app_state::Coordinate::InputSearch;
         r.speak_mode_change(None);
         assert_eq!(announced_text(&r).as_deref(), Some("input search mode"));
+    }
+
+    // -----------------------------------------------------------------------
+    // macOS: the single announcement channel
+    // -----------------------------------------------------------------------
+
+    #[cfg(target_os = "macos")]
+    mod macos {
+        use super::*;
+
+        /// Advance the channel the way `update_if_active` does, and return what
+        /// the live region would carry.
+        fn publish(channel: &mut SpeechChannel, r: &AppRenderer) -> String {
+            *channel = channel.next(r);
+            channel.published.value.clone()
+        }
+
+        fn announcement_value(tree: &TreeUpdate) -> Option<String> {
+            let (id, node) = tree.nodes.last().expect("announcement node");
+            assert_eq!(*id, ANNOUNCEMENT_ID);
+            node.value().map(|v| v.to_string())
+        }
+
+        #[test]
+        fn tree_shape_is_root_anchor_announcement() {
+            let r = make_renderer_with_list(&["a"]);
+            let tree = build_tree_macos(&r, "hello", "en");
+            assert_eq!(tree.nodes.len(), 3);
+            assert_eq!(tree.nodes[0].0, ROOT_ID);
+            assert_eq!(tree.nodes[1].0, ELEMENT_ID);
+            assert_eq!(tree.nodes[2].0, ANNOUNCEMENT_ID);
+        }
+
+        #[test]
+        fn announcement_node_carries_value_and_anchor_does_not() {
+            let r = make_renderer_with_list(&["a"]);
+            let tree = build_tree_macos(&r, "hello", "en");
+            // The value is what accesskit_macos turns into
+            // NSAccessibilityAnnouncementRequested; a label alone is silent.
+            assert_eq!(announcement_value(&tree).as_deref(), Some("hello"));
+            assert_eq!(tree.nodes[2].1.live(), Some(Live::Polite));
+            // The anchor stays label-only: a value there would post an extra
+            // NSAccessibilityValueChanged for the focused node.
+            assert_eq!(tree.nodes[1].1.label(), Some("a"));
+            assert!(tree.nodes[1].1.value().is_none());
+        }
+
+        #[test]
+        fn empty_spoken_leaves_value_unset() {
+            let r = make_renderer_with_list(&["a"]);
+            let tree = build_tree_macos(&r, "", "");
+            // None, not Some(""), so no announcement is posted at startup.
+            assert!(announcement_value(&tree).is_none());
+        }
+
+        #[test]
+        fn focus_is_the_anchor_even_when_list_is_empty() {
+            // Role::Window is excluded by can_be_focused, so focusing the root
+            // would leave accessibilityFocusedUIElement nil.
+            let tree = build_tree_macos(&AppRenderer::new(), "", "");
+            assert_eq!(tree.focus, ELEMENT_ID);
+            let tree = build_tree_macos(&make_renderer_with_list(&["a"]), "", "");
+            assert_eq!(tree.focus, ELEMENT_ID);
+        }
+
+        #[test]
+        fn announcement_wins_over_element_label() {
+            let mut r = make_renderer_with_list(&["item"]);
+            r.speak_mode_change(None);
+            let expected = r.pending_announcement.clone().unwrap();
+            let mut channel = SpeechChannel::default();
+            assert_eq!(publish(&mut channel, &r), expected);
+        }
+
+        #[test]
+        fn changed_element_label_is_published_without_an_announcement() {
+            let mut r = make_renderer_with_list(&["first", "second"]);
+            let mut channel = SpeechChannel::default();
+            assert_eq!(publish(&mut channel, &r), "first");
+            r.list_index = 1;
+            assert_eq!(publish(&mut channel, &r), "second");
+        }
+
+        #[test]
+        fn unchanged_state_republishes_verbatim() {
+            let r = make_renderer_with_list(&["only"]);
+            let mut channel = SpeechChannel::default();
+            let first = publish(&mut channel, &r);
+            // Identical value => no tree diff => no repeated announcement.
+            assert_eq!(publish(&mut channel, &r), first);
+            assert_eq!(publish(&mut channel, &r), first);
+        }
+
+        #[test]
+        fn repeated_identical_announcement_still_changes_the_value() {
+            let mut r = AppRenderer::new();
+            r.speak_mode_change(None);
+            let mut channel = SpeechChannel::default();
+            let first = publish(&mut channel, &r);
+            // Same text, opposite parity sentinel: the value must differ or
+            // accesskit_macos suppresses the second announcement.
+            r.speak_mode_change(None);
+            let second = publish(&mut channel, &r);
+            assert_ne!(first, second);
+            assert_eq!(
+                first.trim_end_matches(PARITY_SENTINEL),
+                second.trim_end_matches(PARITY_SENTINEL)
+            );
+        }
+
+        #[test]
+        fn filter_mode_item_is_not_spoken_twice() {
+            // speak_current_element pushes the selected item through
+            // pending_announcement *with* a parity sentinel. The next frame
+            // must not re-publish the same item as a bare element label.
+            let mut r = make_renderer_with_list(&["alpha", "beta"]);
+            r.list_index = 1;
+            r.speak_current_element();
+            let mut channel = SpeechChannel::default();
+            let announced = publish(&mut channel, &r);
+            assert_eq!(announced.trim_end_matches(PARITY_SENTINEL), "beta");
+            assert_eq!(publish(&mut channel, &r), announced, "spoken twice");
+        }
+
+        /// An announcement must not be followed by a re-read of the unchanged
+        /// element label.  VoiceOver replaces a queued medium-priority
+        /// announcement with the next one, so a spurious follow-up one frame
+        /// later (~16 ms) swallows whatever was just said.
+        #[test]
+        fn announcement_is_not_followed_by_an_element_re_read() {
+            // Single token: `label_to_speech` treats a leading word as a list
+            // prefix and drops it, which would obscure what this test checks.
+            let mut r = make_renderer_with_list(&["alpha"]);
+            let mut channel = SpeechChannel::default();
+            // Settle on the element label first, as normal-mode navigation does.
+            assert_eq!(publish(&mut channel, &r), "alpha");
+
+            r.speak_mode_change(None);
+            let spoken = publish(&mut channel, &r);
+            assert_ne!(spoken, "alpha");
+            // The next frames must republish it verbatim, not the list item.
+            assert_eq!(publish(&mut channel, &r), spoken);
+            assert_eq!(publish(&mut channel, &r), spoken);
+        }
+
+        /// `w` (whereami) in General mode: the position must survive, not be
+        /// replaced by the list item one frame later.
+        #[test]
+        fn whereami_survives_the_next_frame() {
+            let mut r = make_renderer_with_list(&["alpha", "beta"]);
+            let mut channel = SpeechChannel::default();
+            publish(&mut channel, &r);
+            r.speak_focus_position();
+            let position = publish(&mut channel, &r);
+            assert_eq!(publish(&mut channel, &r), position, "clobbered by re-read");
+        }
+
+        /// Typing in Insert mode echoes one character per keystroke; each echo
+        /// must be the last thing published until the next keystroke.
+        #[test]
+        fn typed_characters_are_echoed_one_per_keystroke() {
+            let mut r = make_renderer_with_list(&["alpha"]);
+            let mut channel = SpeechChannel::default();
+            publish(&mut channel, &r);
+
+            for ch in ['a', 'b', 'c'] {
+                crate::handlers::announce_char(&mut r, ch);
+                let echoed = publish(&mut channel, &r);
+                assert_eq!(
+                    echoed.trim_end_matches(PARITY_SENTINEL),
+                    ch.to_string(),
+                    "keystroke not echoed"
+                );
+                // Idle frame between keystrokes: nothing new may be published.
+                assert_eq!(publish(&mut channel, &r), echoed);
+            }
+        }
+
+        /// Entering Insert mode speaks the mode plus the existing text, and that
+        /// must not be clobbered either.
+        #[test]
+        fn insert_mode_entry_announces_the_existing_text() {
+            let mut r = make_renderer_with_list(&["alpha"]);
+            r.coordinate = crate::app_state::Coordinate::Insert;
+            let mut channel = SpeechChannel::default();
+            publish(&mut channel, &r);
+
+            r.speak_mode_change(Some("existing".to_string()));
+            let spoken = publish(&mut channel, &r);
+            assert!(spoken.contains("existing"), "existing text not spoken");
+            assert_eq!(publish(&mut channel, &r), spoken);
+        }
+
+        #[test]
+        fn stale_announcement_does_not_resurface_after_navigation() {
+            // pending_announcement is never cleared, so it must not win again
+            // once a later element change has been published.
+            let mut r = make_renderer_with_list(&["alpha", "beta"]);
+            r.speak_mode_change(None);
+            let mut channel = SpeechChannel::default();
+            let mode = publish(&mut channel, &r);
+            r.list_index = 1;
+            assert_eq!(publish(&mut channel, &r), "beta");
+            assert_ne!(publish(&mut channel, &r), mode);
+        }
     }
 }
