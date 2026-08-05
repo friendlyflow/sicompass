@@ -4129,6 +4129,7 @@ fn harness_with_mixed_files() -> (AppRenderer, TempDir, std::path::PathBuf) {
 /// directories, so a symlinked component used to stop the walk and leave the
 /// dialog sitting on the filesystem root. macOS puts `/tmp` and `/var` in that
 /// category, and usr-merge Linux does the same for `/bin` and `/lib`.
+#[cfg(unix)]
 #[test]
 fn open_flow_walks_through_a_symlinked_save_folder() {
     let (mut r, tmp) = harness_with_config_provider();

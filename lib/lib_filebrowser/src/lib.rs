@@ -1210,6 +1210,7 @@ mod tests {
         assert!(results.iter().any(|r| r.label.contains("config")));
     }
 
+    #[cfg(unix)]
     #[test]
     fn test_symlinked_directory_is_navigable() {
         let (mut p, dir) = make_provider();
@@ -1234,6 +1235,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn test_broken_symlink_is_not_a_directory() {
         let (mut p, dir) = make_provider();
@@ -1247,6 +1249,7 @@ mod tests {
         assert!(link.as_str().is_some(), "a broken link resolves to nothing");
     }
 
+    #[cfg(unix)]
     #[test]
     fn test_symlink_properties_still_show_link_mode() {
         let (mut p, dir) = make_provider();
