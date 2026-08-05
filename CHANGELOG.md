@@ -3,7 +3,7 @@
 cargo-dist parses this file and uses the matching version's section as the
 GitHub Release body, so entries here are what users read on the download page.
 
-## Unreleased
+## 0.1.10
 
 ### Ctrl+O: arrow keys work again, and Enter opens the file you selected
 
@@ -47,6 +47,31 @@ longer walks the whole of `.git`.
 
 Run `show/hide hidden files` from the `:` command list to show them again, and
 run it a second time to hide them.
+
+### A page that fails to load no longer sticks on "Loading…"
+
+When the browser could not start, the error was recorded but the page content
+never was, so the view had nothing to redraw and sat on "Loading…" forever with
+the reason never shown. Both failure paths now publish the error along with the
+content, so the page reports what went wrong.
+
+If Chrome is found on a mounted disk image rather than installed, the "not
+found" message now names that copy, which is the usual reason a freshly
+downloaded Chrome is not picked up.
+
+### Navigating while a page is still loading no longer drops the load
+
+Committing a URL while another page was loading updated the address bar and
+then discarded the request, so the browser kept showing the old page. Requests
+are now queued while a load is running, the newest one wins, and the running
+load picks up the queue when it finishes. No navigation is silently lost.
+
+### macOS no longer shows Chrome windows on screen
+
+The web browser provider launched Chrome headed on macOS, the only platform
+that did, so its windows appeared on the desktop and in the window switcher.
+It now runs headless there like everywhere else. Linux uses Xvfb and falls back
+to headless, and Windows parks the window off-screen.
 
 ### VoiceOver now works on macOS
 
