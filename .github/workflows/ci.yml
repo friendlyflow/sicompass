@@ -205,6 +205,16 @@ jobs:
             exit 1
           fi
 
+      # The binary launching on the machine that built it proves nothing about
+      # the machine that downloads it. 0.1.10 linked Homebrew's
+      # libfreetype.6.dylib by absolute path and died in dyld, before `main`,
+      # on every Mac without that keg, while every step above stayed green.
+      # Unlike the Vulkan check this is unambiguous, so it is fatal.
+      - name: Verify the binary is standalone (macOS)
+        if: ${{ runner.os == 'macOS' && !matrix.full }}
+        shell: bash
+        run: ./scripts/check-macos-standalone.sh "$SICOMPASS_BIN"
+
       # "Does MoltenVK actually enumerate a device" decides whether the .dmg
       # works at all, and nobody here has a Mac to check by hand. Not fatal:
       # GitHub's macOS runners virtualize Metal, so a failure is inconclusive.

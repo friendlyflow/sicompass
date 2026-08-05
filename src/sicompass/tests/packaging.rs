@@ -1,10 +1,11 @@
-//! Drift guards for the Linux desktop integration.
+//! Drift guards for the packaging that no compiler checks.
 //!
 //! The packaging metadata in `Cargo.toml` names files by relative path and the
 //! CI workflow names scripts by relative path, and none of it is compiled, so
 //! a rename or a typo shows up only as a broken package weeks later. That is
 //! how the app shipped for several releases with correct icons on disk that no
-//! desktop ever displayed.
+//! desktop ever displayed, and how 0.1.10 shipped a macOS .dmg that could not
+//! launch at all.
 //!
 //! These tests are deliberately string-level. Pulling in a TOML parser as a
 //! dev-dependency to check that a path exists would cost more than it buys.
@@ -153,6 +154,40 @@ fn deb_maintainer_scripts_are_present_and_wired_up() {
         workflow.contains("scripts/deb-add-maintainer-scripts.sh"),
         "the release workflow no longer injects the .deb maintainer scripts, \
          so the shipped .deb would have none"
+    );
+}
+
+/// 0.1.10's macOS build linked Homebrew's `libfreetype.6.dylib` by absolute
+/// path, so it aborted in dyld, before `main`, on every Mac without that keg.
+/// Nothing in the pipeline noticed, because on the runner the path existed.
+///
+/// Two things stop that recurring, and both are lines in files no compiler
+/// reads: the static link forced in `setup-freetype.sh`, and the load-path
+/// audit wired into the two workflows that produce a macOS binary. Deleting
+/// either brings the bug back silently, which is what this test is for.
+#[test]
+fn macos_builds_are_checked_for_machine_specific_load_paths() {
+    for workflow in [
+        ".github/workflows/native-packages.yml",
+        ".github/workflows/ci.yml",
+    ] {
+        assert!(
+            read(workflow).contains("scripts/check-macos-standalone.sh"),
+            "{workflow} no longer audits the macOS binary's load paths, so a build \
+             against a Homebrew dylib would ship and only fail on a user's machine"
+        );
+    }
+
+    let setup = read("scripts/setup-freetype.sh");
+    assert!(
+        setup.contains("FREETYPE2_STATIC=1"),
+        "setup-freetype.sh no longer forces a static FreeType link on macOS, so the \
+         binary would record an absolute Homebrew path for libfreetype.6.dylib"
+    );
+    assert!(
+        setup.contains("libfreetype.a"),
+        "setup-freetype.sh no longer checks that the Homebrew keg has a static \
+         archive, without which FREETYPE2_STATIC=1 silently changes nothing"
     );
 }
 

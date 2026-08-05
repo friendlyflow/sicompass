@@ -197,6 +197,22 @@ jobs:
       - name: Build
         run: cargo build --release --features bundled-sdl3 -p sicompass
 
+      - name: Sanity check the binary before packaging it
+        # The macOS half of the Linux step above, plus the one check that only
+        # matters here. 0.1.10 shipped a .dmg that aborted at launch on every
+        # Mac without `brew install freetype`, because the binary carried an
+        # absolute /opt/homebrew path for libfreetype.6.dylib. Nothing failed
+        # on the runner, where that path exists. See the script header.
+        env:
+          SICOMPASS_CHECK_FILE: check.txt
+        run: |
+          set -euo pipefail
+          ./scripts/check-macos-standalone.sh target/release/sicompass
+          ./target/release/sicompass --check || true
+          cat check.txt || true
+          grep -q 'OK .*colour emoji' check.txt \
+            || { echo "::error::built without PNG-capable FreeType"; exit 1; }
+
       - name: Build .app and .dmg
         run: cargo packager --release --formats app,dmg -p sicompass --verbose
 
@@ -213,6 +229,15 @@ jobs:
           test -n "$APP" || { echo "::error::no .app bundle was produced"; exit 1; }
           codesign --force --deep --sign - "$APP"
           codesign --verify --deep --strict "$APP"
+
+      - name: Check the assembled .app is standalone
+        # Re-run over the bundle, not just the binary: this covers the dylibs
+        # cargo-packager copies in and the install names it rewrites while
+        # doing so, which is work that happens after the check above.
+        run: |
+          set -euo pipefail
+          APP="$(find target/packages -maxdepth 1 -name '*.app' | head -1)"
+          ./scripts/check-macos-standalone.sh "$APP"
 
       - name: Stage artifacts
         # Rename to the target triple: both legs otherwise emit the same
