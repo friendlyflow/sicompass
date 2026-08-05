@@ -25,12 +25,27 @@ targets = [
 ]
 
 # End-user installers.
-#   shell      -> sicompass-installer.sh, the `curl ... | sh` one. macOS and
-#                 Linux only, which is why it was dropped while those targets
-#                 were parked.
-#   powershell -> sicompass-installer.ps1, the `irm ... | iex` one (Windows).
-#   msi        -> a real Windows installer, with a Start Menu entry.
-installers = ["shell", "powershell", "msi"]
+#   msi -> a real Windows installer, with a Start Menu entry.
+#
+# The `shell` (`curl ... | sh`) and `powershell` (`irm ... | iex`) installers
+# were dropped in 0.1.10. Both are generated from cargo-dist templates aimed at
+# command-line tools: they download an archive, copy the binary and edit PATH.
+# There is no dependency step, no elevation and no package-manager call, and the
+# scripts are not checked in, so none of that can be patched here. The
+# `[dist.dependencies.*]` blocks below are *build-time* deps for the CI runners
+# and never reach a user's machine.
+#
+# For a windowed app that is not enough. On Linux the binary needs a Vulkan
+# loader, at-spi2-core, libpng, zlib and OpenSSL present, and wants xvfb so the
+# web browser provider can run Chrome headed. The .deb, .rpm and AppImage
+# declare all of that; the shell installer silently delivered a binary that
+# might not start. On macOS the .dmg bundles MoltenVK and the shell installer
+# did not. On Windows the MSI is strictly better than the .ps1: it ships the
+# Start Menu entry and the `assets/` tree, and it does not need the
+# execution-policy wrapper the .ps1 one-liner did.
+#
+# The portable archives remain for anyone who wants to unpack a binary by hand.
+installers = ["msi"]
 
 # `src/sicompass/wix/main.wxs` is hand-edited: it installs the `assets/` tree,
 # adds a Start Menu shortcut, and sets the product icon, none of which dist's
@@ -52,9 +67,9 @@ features = ["bundled-sdl3"]
 #
 # Shaders and fonts are NOT here: they are compiled into the binary. That is
 # deliberate and load-bearing, because `include` populates the archives only.
-# The shell installer, the PowerShell installer and the MSI copy binaries and
-# nothing else, so anything the app needs at startup has to be embedded, or
-# added explicitly to wix/main.wxs and to the cargo-packager `resources` list.
+# The MSI copies binaries and the files listed in `wix/main.wxs` and nothing
+# else, so anything the app needs at startup has to be embedded, or added
+# explicitly to `wix/main.wxs` and to the cargo-packager `resources` list.
 #
 # `assets/` is the exception: it is read from disk at runtime, and
 # `resources::resource_root()` probes for it beside the executable, which is

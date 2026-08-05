@@ -31,8 +31,8 @@ eula = false
 # Native packages (cargo-packager)
 # ---------------------------------------------------------------------------
 #
-# cargo-dist builds the archives, the curl|sh and PowerShell installers, and
-# the .msi. It cannot produce .deb, .rpm, AppImage, .app or .dmg, so
+# cargo-dist builds the archives and the .msi. It cannot produce .deb, .rpm,
+# AppImage, .app or .dmg, so
 # cargo-packager builds those, driven by .github/workflows/native-packages.yml.
 #
 # `product-name` deliberately has no spaces and no apostrophes: the artifact

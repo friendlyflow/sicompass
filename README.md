@@ -2,46 +2,49 @@
 
 *A keyboard-first, accessibility-first way to use your entire computer.*
 
-Sicompass is a free, open-source way to use your computer entirely from the keyboard, with no mouse needed. Under the hood, every screen is just a tree of lists. Sicompass shows you that structure directly, so you move through it with the arrow keys.
-
-You navigate everything the same way, your files, settings, email, and any other data. It is fast, precise, and predictable, it feels the same everywhere, and it works smoothly with screen readers on Linux, macOS, and Windows. It does not try to look pretty, and that is exactly the point.
+Sicompass is a free, open-source way to use your computer entirely from the
+keyboard, with no mouse needed. Under the hood, every screen is just a tree of
+lists. Sicompass shows you that structure directly, so you move through it with
+the arrow keys, the same way for your files, settings, email, and any other
+data. It is fast, precise, and predictable, it feels the same everywhere, and it
+works with screen readers on Linux, macOS, and Windows.
 
 ## Download
-
-Prebuilt packages for Windows, macOS and Linux are on the
-[Releases page](../../releases/latest). Pick the one for your system below.
 
 Every download is self-contained. Fonts and shaders are compiled into the
 binary, so there is nothing to install alongside it.
 
+| Platform | Download |
+| --- | --- |
+| Windows | [sicompass-x86_64-pc-windows-msvc.msi](https://github.com/friendlyflow/sicompass/releases/latest/download/sicompass-x86_64-pc-windows-msvc.msi) |
+| macOS, Apple Silicon | [sicompass-aarch64-apple-darwin.dmg](https://github.com/friendlyflow/sicompass/releases/latest/download/sicompass-aarch64-apple-darwin.dmg) |
+| macOS, Intel | [sicompass-x86_64-apple-darwin.dmg](https://github.com/friendlyflow/sicompass/releases/latest/download/sicompass-x86_64-apple-darwin.dmg) |
+| Debian, Ubuntu, Mint | [sicompass_0.1.9_amd64.deb](https://github.com/friendlyflow/sicompass/releases/latest/download/sicompass_0.1.9_amd64.deb) |
+| Fedora, RHEL, openSUSE | [sicompass-0.1.9-1.x86_64.rpm](https://github.com/friendlyflow/sicompass/releases/latest/download/sicompass-0.1.9-1.x86_64.rpm) |
+| Any Linux, no root | [sicompass_0.1.9_x86_64.AppImage](https://github.com/friendlyflow/sicompass/releases/latest/download/sicompass_0.1.9_x86_64.AppImage) |
+| Nix, NixOS | `nix run github:friendlyflow/sicompass` |
+
+Portable archives, if you would rather unpack a binary yourself:
+[Windows .zip](https://github.com/friendlyflow/sicompass/releases/latest/download/sicompass-x86_64-pc-windows-msvc.zip),
+[Linux .tar.xz](https://github.com/friendlyflow/sicompass/releases/latest/download/sicompass-x86_64-unknown-linux-gnu.tar.xz),
+[macOS Apple Silicon .tar.xz](https://github.com/friendlyflow/sicompass/releases/latest/download/sicompass-aarch64-apple-darwin.tar.xz),
+[macOS Intel .tar.xz](https://github.com/friendlyflow/sicompass/releases/latest/download/sicompass-x86_64-apple-darwin.tar.xz).
+Older versions and the `SHA256SUMS` files are on the
+[Releases page](https://github.com/friendlyflow/sicompass/releases).
+
 ### Windows
 
-Download `sicompass-x86_64-pc-windows-msvc.msi` from the Releases page and
-double-click it. Or install from PowerShell:
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://github.com/friendlyflow/sicompass/releases/latest/download/sicompass-installer.ps1 | iex"
-```
-
-Keep the `powershell ...` wrapper. Without it the installer aborts on Windows'
-default execution policy and closes your terminal before you can read why.
-
-Either way, press the Windows key and type `sicompass` to launch it.
+Double-click the `.msi`, then press the Windows key and type `sicompass` to
+launch it.
 
 ### macOS
 
-Download the disk image for your Mac, `aarch64` for Apple Silicon and `x86_64`
-for Intel, then drag sicompass to your Applications folder.
-
-```bash
-curl -LO https://github.com/friendlyflow/sicompass/releases/latest/download/sicompass-aarch64-apple-darwin.dmg
-```
-
-The disk image bundles MoltenVK, so there is nothing else to install.
+Open the `.dmg` and drag sicompass to your Applications folder. It bundles
+MoltenVK, so there is nothing else to install.
 
 The app is not yet notarized by Apple, so macOS refuses to open it the first
-time and reports that it is damaged. Clear the download quarantine flag once
-and it starts normally after that.
+time and reports that it is damaged. Clear the download quarantine flag once and
+it starts normally after that.
 
 ```bash
 xattr -dr com.apple.quarantine /Applications/sicompass.app
@@ -49,60 +52,39 @@ xattr -dr com.apple.quarantine /Applications/sicompass.app
 
 ### Linux
 
-Debian, Ubuntu and Mint:
+Install the downloaded package with your package manager, so it pulls in what it
+needs:
 
 ```bash
-curl -LO https://github.com/friendlyflow/sicompass/releases/latest/download/sicompass_0.1.9_amd64.deb
-sudo apt install ./sicompass_0.1.9_amd64.deb
+sudo apt install ./sicompass_0.1.9_amd64.deb      # Debian, Ubuntu, Mint
+sudo dnf install ./sicompass-0.1.9-1.x86_64.rpm   # Fedora, RHEL, openSUSE
 ```
 
-Fedora, RHEL and openSUSE:
+The AppImage needs no root. Make it executable and run it:
 
 ```bash
-curl -LO https://github.com/friendlyflow/sicompass/releases/latest/download/sicompass-0.1.9-1.x86_64.rpm
-sudo dnf install ./sicompass-0.1.9-1.x86_64.rpm
-```
-
-Any distribution, no root needed:
-
-```bash
-curl -LO https://github.com/friendlyflow/sicompass/releases/latest/download/sicompass_0.1.9_x86_64.AppImage
 chmod +x sicompass_0.1.9_x86_64.AppImage
 ./sicompass_0.1.9_x86_64.AppImage
 ```
 
-Nix and NixOS:
+You need a working Vulkan driver, which most desktop distributions already have.
+If yours does not, install your vendor's package, for example
+`mesa-vulkan-drivers` on Debian and Ubuntu.
 
-```bash
-nix run github:friendlyflow/sicompass
-```
+The `.deb` and `.rpm` pull in everything else, including `at-spi2-core` for
+screen readers and `xvfb` for the web browser. The AppImage bundles its own
+shared libraries but cannot install `xvfb`, and the plain archive handles
+nothing, so with those two you may also need `libpng16`, `zlib`, OpenSSL 3 and
+`xvfb`, which is the normal state of any desktop Linux.
 
-Or install just the binary into `~/.local/bin`, which also works on macOS:
+### The web browser
 
-```bash
-curl --proto '=https' --tlsv1.2 -LsSf https://github.com/friendlyflow/sicompass/releases/latest/download/sicompass-installer.sh | sh
-```
-
-You need a working Vulkan driver, which most desktop distributions already
-have. If yours does not, install your vendor's Vulkan package, for example
-`mesa-vulkan-drivers` on Debian and Ubuntu. A screen reader also needs
-`at-spi2-core` running, which the `.deb` and `.rpm` pull in for you.
-
-The `.deb`, `.rpm` and AppImage handle their own dependencies. The plain
-archive and the `curl ... | sh` installer cannot, so they additionally need
-`libpng16`, `zlib` and OpenSSL 3 present, which is the normal state of any
-desktop Linux. If sicompass exits with a message about a missing shared
-library, install those and try again.
-
-The web browser reads pages with a real Chrome or Chromium, which is not
-bundled, so install one if you want to use it. Chrome never appears on your
-screen. When `xvfb` is installed it runs as a normal browser on an invisible
-display, which is what a website expects to see, and the `.deb` and `.rpm`
-pull `xvfb` in for you. Without it Chrome runs headless instead, which a few
-sites detect and block. That is the case for the AppImage, the plain archive
-and the `curl ... | sh` installer, so if a page refuses to load there, install
-it yourself with `sudo apt install xvfb` or
-`sudo dnf install xorg-x11-server-Xvfb`.
+Pages are read with a real Chrome or Chromium, which is not bundled, so install
+one if you want to use that provider. Chrome never appears on your screen. With
+`xvfb` present it runs as a normal browser on an invisible display, which is
+what a website expects to see. Without it Chrome runs headless instead, which a
+few sites detect and block. If a page refuses to load, install `xvfb` with
+`sudo apt install xvfb` or `sudo dnf install xorg-x11-server-Xvfb`.
 
 ### Checking that it worked
 
@@ -111,56 +93,47 @@ sicompass --check
 ```
 
 That reports where sicompass found its resources, whether colour emoji can
-render, and which graphics devices it can see. It is the first thing to run,
-and to paste into a bug report, if the app does not start.
-
-On Windows the app has no console, so send the report to a file instead:
+render, and which graphics devices it can see. It is the first thing to run, and
+to paste into a bug report, if the app does not start. On Windows the app has no
+console, so send the report to a file instead:
 
 ```powershell
 $env:SICOMPASS_CHECK_FILE="check.txt"; sicompass --check; type check.txt
 ```
 
-Every release also ships `SHA256SUMS` files next to the packages, so you can
-verify a download before installing it.
-
-## Getting Started
-
-Build from source:
+## Building from source
 
 ```bash
-# Optional: use Nix for dependency management
-nix develop
-
-# Build
+nix develop          # optional, brings the whole toolchain
 cargo build --release
-
-# Run
 cargo run --release
 ```
 
-Nix users can also build the packaged version with `nix build`.
+Nix users can also build the packaged version with `nix build`. Shaders are
+compiled by `scripts/gen-shaders.sh` and committed, so building needs no shader
+toolchain. Rerun that script if you change anything under `shaders/`, and
+`scripts/gen-icons.sh` if you change the icon.
 
-Shaders are compiled by `scripts/gen-shaders.sh` and committed, so building
-needs no shader toolchain. Rerun that script if you change anything under
-`shaders/`, and `scripts/gen-icons.sh` if you change the icon.
+## Key features
 
-## Key Features
+- **Unambiguous focus**: you always know where the focus is, no guessing
+- **Flat interface**: no popups, dialogs, or overlays, everything is navigated inline within the tree
+- **Keyboard-first**: your hands never leave the keyboard, with tabbed workspaces and letter-driven command palettes
+- **Native accessibility**: built-in screen reader support on Linux, macOS, and Windows
+- **Cross-platform**: packaged for Windows, macOS, and Linux, with paths, shells, and PTYs routed through platform helpers
+- **High-performance rendering**: Vulkan graphics with a FreeType2 glyph atlas
+- **Extensible**: provider-based plugin system with a built-in store for hot enable/disable
 
-- **Unambiguous Focus**: You always know where the focus is, no guessing
-- **Flat Interface**: No popups, dialogs, or overlays, everything is navigated inline within the tree
-- **Keyboard-First**: Your hands never leave the keyboard, with tabbed workspaces and letter-driven command palettes
-- **Native Accessibility**: Built-in screen reader support on Linux, macOS, and Windows
-- **Cross-Platform**: Packaged for Windows, macOS, and Linux, with paths, shells, and PTYs routed through platform helpers
-- **High-Performance Rendering**: Vulkan graphics with a FreeType2 glyph atlas
-- **Extensible**: Provider-based plugin system with a built-in store for hot enable/disable
+## Built-in providers
 
-## Built-in Providers
-
-Each provider turns a different data source into the same keyboard-navigable tree: File Browser, Text Editor, Email, Chat, Web Browser, Terminal, Plugin Store, and Settings.
+Each provider turns a different data source into the same keyboard-navigable
+tree: File Browser, Text Editor, Email, Chat, Web Browser, Terminal, Plugin
+Store, and Settings.
 
 ## Community
 
-Join the conversation on [Discord](https://discord.com/channels/1464152138753249313/1464152139231137894).
+Join the conversation on
+[Discord](https://discord.com/channels/1464152138753249313/1464152139231137894).
 
 ## License
 
@@ -176,4 +149,5 @@ the GNU GPL license v3, you may use this project under the terms of the GPLv3.
 
 ## Contributing
 
-Contributions are welcome! Whether it's code, documentation, or feedback, your input helps make computing more accessible for everyone
+Contributions are welcome. Whether it is code, documentation, or feedback, your
+input helps make computing more accessible for everyone.
