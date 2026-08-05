@@ -59,8 +59,14 @@ allow-dirty = ["msi"]
 # Build with the bundled-sdl3 feature so SDL3 is compiled from source and
 # statically linked — the release binaries are self-contained, with no system
 # SDL3 / SDL3.dll / libSDL3.dylib and nothing for the user to install.
-# (FreeType is bundled from source automatically by freetype-sys 0.20.1, the
-# version freetype 0.7 pins — no feature flag needed.)
+#
+# FreeType is not covered by that feature. It is resolved per platform by
+# scripts/setup-freetype.sh / .ps1, which run before cargo on every runner:
+# built from source and statically linked on Linux, taken from vcpkg's static
+# triplet on Windows, and taken from Homebrew's keg on macOS but forced to link
+# against the .a there rather than the .dylib. That last part is not a detail:
+# without it the binary hard-codes /opt/homebrew/opt/freetype/lib and cannot
+# start on a user's Mac, which is what happened to 0.1.10.
 features = ["bundled-sdl3"]
 
 # What travels next to the binary in the archives.

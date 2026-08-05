@@ -177,7 +177,17 @@ before, so check the real thing:
   covering installs that ship no `.desktop` file at all: the archives,
   `nix run`, and an un-integrated AppImage.
 - **macOS**: mount the `.dmg`, drag to Applications, clear the quarantine flag,
-  and confirm it renders and that VoiceOver reads the tree.
+  and confirm it renders and that VoiceOver reads the tree. Do this on a Mac
+  with **no Homebrew**, or at least without `freetype` and `molten-vk`
+  installed. A developer Mac has the libraries the build machine had, so it is
+  the one machine that cannot tell you whether the `.dmg` works. 0.1.10 shipped
+  a binary that pointed at `/opt/homebrew/opt/freetype/lib/libfreetype.6.dylib`
+  and quit in dyld on every other Mac. `scripts/check-macos-standalone.sh`
+  now runs in CI and in the release, and answers the same question offline:
+
+  ```sh
+  scripts/check-macos-standalone.sh /Applications/sicompass.app
+  ```
 - **Windows**: run the `.msi`, confirm the Start Menu entry and the icon, and
   confirm the tutorial finds its images (that is `assets/` being installed by
   the components in `main.wxs`). Check the Start Menu entry by pressing the

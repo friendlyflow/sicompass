@@ -97,6 +97,18 @@ Shaders and fonts are now embedded (`src/sicompass/src/shaders.rs`,
     catches it on Linux, and the `--check` assertion catches it on macOS and
     Windows. Both scripts verify their own work, so a FreeType that will be
     ignored fails in the step that installed it.
+  - On macOS the same script additionally exports `FREETYPE2_STATIC=1`, and
+    writes `zlib.pc` / `bzip2.pc` shims so that the `--static` probe can
+    resolve freetype2's `Requires.private`. Homebrew's keg holds a `.dylib`
+    next to the `.a`, and a plain probe takes the dylib, which stamps
+    `/opt/homebrew/opt/freetype/lib/...` into the binary as an absolute load
+    path. 0.1.10 shipped exactly that and aborted in dyld on every Mac without
+    the keg. `scripts/check-macos-standalone.sh` is the backstop: it rejects
+    any load path outside `/usr/lib`, `/System/Library` and the bundle, and it
+    runs in `ci.yml` on both macOS legs and in `native-packages.yml` both
+    before packaging and on the assembled `.app`. Do not settle for "it
+    launched on the runner": the runner is the one machine where these paths
+    exist.
   - On Windows, `PKG_CONFIG` must be exported with an explicit path. The only
     pkg-config on the runner is Strawberry Perl's `pkg-config.bat`, and Rust's
     `Command` does not apply PATHEXT when resolving a bare name, so the build

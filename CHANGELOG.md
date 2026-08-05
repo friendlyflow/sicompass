@@ -3,6 +3,28 @@
 cargo-dist parses this file and uses the matching version's section as the
 GitHub Release body, so entries here are what users read on the download page.
 
+## Unreleased
+
+### macOS: the app starts on a Mac that does not have Homebrew
+
+0.1.10 could not launch on most Macs. It quit immediately, and Console showed
+a crash report ending in "Library not loaded:
+/opt/homebrew/opt/freetype/lib/libfreetype.6.dylib".
+
+The build machine has Homebrew and its FreeType package installed, and the
+released binary ended up pointing at that copy by its full path on the build
+machine. On any Mac without that exact package the path does not exist, so
+macOS stopped the app before it ran a single line. Installing FreeType by hand
+was the only workaround.
+
+FreeType is now built into the binary on macOS, as it already was on Linux and
+Windows, so there is nothing left to install. The release now also refuses to
+publish a macOS build that points at anything outside the app bundle and macOS
+itself, which is the check that was missing.
+
+If you worked around this with `brew install freetype`, you no longer need it
+for sicompass.
+
 ## 0.1.10
 
 ### Ctrl+O: arrow keys work again, and Enter opens the file you selected
