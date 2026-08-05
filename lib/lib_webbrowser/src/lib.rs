@@ -80,6 +80,9 @@ struct CachedPage {
     elements: Vec<FfonElement>,
 }
 
+/// Hand-off slot: a background load or submit task fills it, `tick` drains it.
+type ReadySlot = Arc<Mutex<Option<(Vec<FfonElement>, FormMap)>>>;
+
 // ---------------------------------------------------------------------------
 // Live page session — kept alive for form interaction
 //
@@ -115,8 +118,14 @@ pub struct WebbrowserProvider {
     // Guards against a second load being spawned for the same navigation.
     #[cfg(not(target_os = "windows"))]
     load_inflight: Arc<AtomicBool>,
+    // Where a URL committed *during* a load waits its turn. The running task
+    // picks it up when it finishes, so a second navigation is neither dropped
+    // nor run concurrently with the first. Only the newest is kept: a URL the
+    // user has already typed past is not worth a page load.
+    #[cfg(not(target_os = "windows"))]
+    pending_url: Arc<Mutex<Option<String>>>,
     // Background thread delivers refreshed content here after form submission.
-    ready_content: Arc<Mutex<Option<(Vec<FfonElement>, FormMap)>>>,
+    ready_content: ReadySlot,
     // Typed form values, replayed into a fresh Chrome at submit time.  Source
     // of truth for what the user has filled in between page-load and submit.
     // Cleared on URL navigation and after a successful submit-response render.
@@ -148,6 +157,8 @@ impl WebbrowserProvider {
             live: Arc::new(tokio::sync::Mutex::new(None)),
             #[cfg(not(target_os = "windows"))]
             load_inflight: Arc::new(AtomicBool::new(false)),
+            #[cfg(not(target_os = "windows"))]
+            pending_url: Arc::new(Mutex::new(None)),
             path_segments: Vec::new(),
             path_cache: "/".to_owned(),
             cached_page: None,
@@ -204,10 +215,15 @@ impl WebbrowserProvider {
         // submit response does.
         #[cfg(not(target_os = "windows"))]
         {
+            self.current_url = url.to_owned();
+
             if self.load_inflight.swap(true, Ordering::AcqRel) {
-                // A load is already running; the URL bar has been updated and
-                // the result will arrive through `tick`.
-                self.current_url = url.to_owned();
+                // A load is already running. Hand it the new destination rather
+                // than dropping it: the two share one Chrome tab, so a second
+                // task would interleave with the first and the loser's HTML
+                // would land under the winner's URL. The running task picks
+                // this up as soon as it is done.
+                queue_pending(&self.pending_url, url);
                 return;
             }
 
@@ -215,45 +231,23 @@ impl WebbrowserProvider {
             let ready = Arc::clone(&self.ready_content);
             let errors = Arc::clone(&self.pending_error);
             let inflight = Arc::clone(&self.load_inflight);
-            let url_owned = url.to_owned();
+            let pending = Arc::clone(&self.pending_url);
+            let mut target = url.to_owned();
 
             chromium_runtime().spawn(async move {
-                let mut guard = live.lock().await;
-                if guard.is_none() {
-                    match init_live_session().await {
-                        Ok(session) => *guard = Some(session),
-                        Err(e) => {
-                            *errors.lock().unwrap() = Some(format!("Error launching browser: {e}"));
-                            inflight.store(false, Ordering::Release);
-                            return;
-                        }
+                // One navigation per turn, then drain whatever the user typed
+                // while it was running. `load_inflight` stays set for the whole
+                // chain, so `fetch` keeps showing "Loading…" and no second task
+                // is ever spawned alongside this one.
+                loop {
+                    navigate_once(&live, &ready, &errors, &pending, &target).await;
+                    match next_target(&inflight, &pending) {
+                        Some(next) => target = next,
+                        None => return,
                     }
                 }
-                let page = guard.as_ref().expect("initialised above").page.clone();
-                // Release the session lock across the navigation so a cleanup
-                // or cookie clear is not blocked behind a slow page.
-                drop(guard);
-
-                match navigate_and_get_html(&page, &url_owned).await {
-                    Ok(load) => {
-                        let (elements, form_map) = page_to_ffon_with_forms(&load, &url_owned);
-                        *ready.lock().unwrap() = Some((elements, form_map));
-                    }
-                    Err(e) => {
-                        // Drop the session so the next attempt starts fresh.
-                        *live.lock().await = None;
-                        *ready.lock().unwrap() = Some((
-                            vec![FfonElement::new_str(format!(
-                                "Error loading {url_owned}: {e}"
-                            ))],
-                            FormMap::new(),
-                        ));
-                    }
-                }
-                inflight.store(false, Ordering::Release);
             });
 
-            self.current_url = url.to_owned();
             return;
         }
 
@@ -859,18 +853,135 @@ pub(crate) fn check_form_drift(
 
 /// Store an error string into a shared error slot.  Quiet on poisoned mutex —
 /// the slot is best-effort communication to the UI's `take_error` poller.
-//
-// Currently exercised only by tests — see `check_form_drift` above.
-#[allow(dead_code)]
 pub(crate) fn set_error(slot: &Arc<Mutex<Option<String>>>, msg: String) {
     if let Ok(mut g) = slot.lock() {
         *g = Some(msg);
     }
 }
 
+/// Report a failed page load as *both* page content and a status-line error.
+///
+/// The content half is what unsticks the view.  `fetch` renders "Loading…"
+/// while `load_inflight` is set, and `tick` — which returns true only when
+/// `ready_content` has been filled — is the sole thing that makes the app
+/// re-`fetch` afterwards (`needs_refresh` stays false for this provider).  A
+/// failure that filled only the error slot therefore left the URL bar reading
+/// "Loading…" forever, and never surfaced the error either: the app drains
+/// provider errors on that same tick signal.  Filling both slots means a
+/// browser that will not launch (no Chrome installed, launch timed out) shows
+/// up as a readable page saying so.
+#[cfg(not(target_os = "windows"))]
+fn publish_load_failure(ready: &ReadySlot, errors: &Arc<Mutex<Option<String>>>, msg: String) {
+    set_error(errors, msg.clone());
+    if let Ok(mut g) = ready.lock() {
+        *g = Some((vec![FfonElement::new_str(msg)], FormMap::new()));
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Pending-navigation queue
+//
+// A one-slot, newest-wins queue between the UI thread and the running load
+// task.  Committing a URL while a load is in flight puts it here instead of
+// spawning a second task: both would drive the same Chrome tab, and the loser's
+// HTML would be cached under the winner's URL.
+// ---------------------------------------------------------------------------
+
+/// Replace whatever was queued.  Newest wins: an older queued URL is one the
+/// user has already typed past, and loading it would only show them a page they
+/// no longer asked for.
+#[cfg(not(target_os = "windows"))]
+fn queue_pending(slot: &Arc<Mutex<Option<String>>>, url: &str) {
+    if let Ok(mut g) = slot.lock() {
+        *g = Some(url.to_owned());
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn take_pending(slot: &Arc<Mutex<Option<String>>>) -> Option<String> {
+    slot.lock().ok().and_then(|mut g| g.take())
+}
+
+#[cfg(not(target_os = "windows"))]
+fn has_pending(slot: &Arc<Mutex<Option<String>>>) -> bool {
+    slot.lock().map(|g| g.is_some()).unwrap_or(false)
+}
+
+/// What the load task does after finishing one navigation: the next URL to
+/// navigate, or `None` to end the chain and let the flag go.
+///
+/// The double take is not redundant.  Between the first take and clearing
+/// `load_inflight`, a commit still sees the flag set, so it queues instead of
+/// spawning — and would then wait for a task that is already exiting.  The
+/// second take catches exactly that request and claims the flag back for it.
+/// If the swap finds the flag already taken, a later commit won it and spawned
+/// its own task for a newer URL, so the one we pulled out is stale: dropping it
+/// is the same newest-wins rule `queue_pending` applies.
+#[cfg(not(target_os = "windows"))]
+fn next_target(inflight: &AtomicBool, pending: &Arc<Mutex<Option<String>>>) -> Option<String> {
+    if let Some(next) = take_pending(pending) {
+        return Some(next);
+    }
+    inflight.store(false, Ordering::Release);
+    let next = take_pending(pending)?;
+    (!inflight.swap(true, Ordering::AcqRel)).then_some(next)
+}
+
 // ---------------------------------------------------------------------------
 // Async helpers for the persistent live session
 // ---------------------------------------------------------------------------
+
+/// Run one navigation to completion and publish its result, reusing the live
+/// session or creating it first.
+///
+/// Publishing is skipped when a newer URL is already queued: its content would
+/// flash on screen under the newer URL's bar before being replaced a moment
+/// later.  The chain always ends with a publish, because the loop only stops
+/// once the queue is empty.
+#[cfg(not(target_os = "windows"))]
+async fn navigate_once(
+    live: &Arc<tokio::sync::Mutex<Option<LivePageSession>>>,
+    ready: &ReadySlot,
+    errors: &Arc<Mutex<Option<String>>>,
+    pending: &Arc<Mutex<Option<String>>>,
+    url: &str,
+) {
+    let mut guard = live.lock().await;
+    if guard.is_none() {
+        match init_live_session().await {
+            Ok(session) => *guard = Some(session),
+            Err(e) => {
+                drop(guard);
+                if !has_pending(pending) {
+                    publish_load_failure(ready, errors, format!("Error launching browser: {e}"));
+                }
+                return;
+            }
+        }
+    }
+    let page = guard.as_ref().expect("initialised above").page.clone();
+    // Release the session lock across the navigation so a cleanup or cookie
+    // clear is not blocked behind a slow page.
+    drop(guard);
+
+    let outcome = navigate_and_get_html(&page, url).await;
+    if outcome.is_err() {
+        // Drop the session so the next attempt starts fresh.
+        *live.lock().await = None;
+    }
+    if has_pending(pending) {
+        return;
+    }
+    match outcome {
+        Ok(load) => {
+            let (elements, form_map) = page_to_ffon_with_forms(&load, url);
+            if let Ok(mut g) = ready.lock() {
+                *g = Some((elements, form_map));
+            }
+        }
+        Err(e) => publish_load_failure(ready, errors, format!("Error loading {url}: {e}")),
+    }
+}
 
 /// Initialise a long-lived Chrome session: launch the browser, open a blank
 /// tab, and inject the stealth script so it applies to every page load.
@@ -1065,7 +1176,7 @@ async fn submit_form_windows_async(
     url: String,
     form_n: usize,
     stored_values: HashMap<String, String>,
-    ready: Arc<Mutex<Option<(Vec<FfonElement>, FormMap)>>>,
+    ready: ReadySlot,
     error_slot: Arc<Mutex<Option<String>>>,
 ) {
     let session = match launch_browser().await {
@@ -1518,11 +1629,7 @@ fn xvfb_wrapper_script(chrome: &str, helper: XvfbHelper) -> String {
 /// `xvfb` restores step 1, which is why the .deb and .rpm depend on it.
 #[cfg(target_os = "linux")]
 fn linux_chrome_launch() -> Result<LinuxChrome, String> {
-    let chrome = find_chrome_executable().ok_or_else(|| {
-        "Chrome/Chromium not found. \
-         Install Chrome or set SICOMPASS_CHROME_PATH to the browser executable."
-            .to_owned()
-    })?;
+    let chrome = find_chrome_executable().ok_or_else(chrome_missing_message)?;
     linux_chrome_launch_with(detect_xvfb_helper(), chrome)
 }
 
@@ -1649,6 +1756,53 @@ fn find_chrome_executable() -> Option<std::path::PathBuf> {
     }
 
     None
+}
+
+/// The bundle names `chrome_on_mounted_image` looks for on a mounted volume.
+#[cfg(target_os = "macos")]
+const MAC_BROWSER_BUNDLES: &[&str] = &[
+    "Google Chrome.app",
+    "Google Chrome Canary.app",
+    "Chromium.app",
+    "Microsoft Edge.app",
+];
+
+/// A browser sitting in its mounted `.dmg`, downloaded but never installed.
+///
+/// This is the common macOS half-install: the disk image is still mounted and
+/// the browser gets launched from the installer window, so it *looks* installed
+/// while `/Applications` stays empty. We deliberately do not drive it from
+/// there — the volume is read-only and quarantined, Gatekeeper's App
+/// Translocation gives the bundle a randomised path that changes per launch,
+/// and ejecting the image pulls the browser out from under us mid-session. It
+/// is worth detecting only so the error can say what to do about it.
+#[cfg(target_os = "macos")]
+fn chrome_on_mounted_image() -> Option<std::path::PathBuf> {
+    for vol in std::fs::read_dir("/Volumes").ok()?.flatten() {
+        for bundle in MAC_BROWSER_BUNDLES {
+            let p = vol.path().join(bundle);
+            if p.exists() {
+                return Some(p);
+            }
+        }
+    }
+    None
+}
+
+/// Why no browser could be found, in terms of what the user should do next.
+fn chrome_missing_message() -> String {
+    #[cfg(target_os = "macos")]
+    if let Some(dmg) = chrome_on_mounted_image() {
+        return format!(
+            "{} is on a mounted disk image, not installed. In Finder, drag it \
+             from the disk image window into Applications, eject the image, \
+             then try again.",
+            dmg.display()
+        );
+    }
+    "Chrome/Chromium not found. \
+     Install Chrome or set SICOMPASS_CHROME_PATH to the browser executable."
+        .to_owned()
 }
 
 // ── BrowserSession ───────────────────────────────────────────────────────────
@@ -1809,22 +1963,34 @@ async fn launch_browser() -> Result<BrowserSession, String> {
     })
 }
 
-/// macOS / other: headed Chrome via chromiumoxide's built-in launcher.
-/// Chrome may briefly appear in the Dock; headless would be invisible but
-/// risks bot-detection blocks on some sites.
+/// macOS / other: Chrome in its own headless mode, so no window ever reaches
+/// the user's screen.
+///
+/// Headed Chrome here put a real window on screen and made it frontmost, which
+/// is the one thing this app cannot do: the screen reader follows the focus out
+/// of sicompass and the user's arrow keys go silent. The other two platforms
+/// each dodge that a different way — Linux runs headed Chrome on an Xvfb
+/// display, Windows parks the window at -10000,-10000 and hands focus back —
+/// and neither is available here. macOS has no virtual display, and
+/// `--window-position` does not help because launching still activates the app
+/// and puts it in the Dock, focus and all.
+///
+/// So this takes the same fallback Linux takes when Xvfb is missing, which is
+/// what most desktop Linux users already run. `--headless=new` rather than the
+/// old headless mode: it is the same browser binary as headed Chrome, so the
+/// stealth script still has a real `window.chrome` and a full DOM to patch.
+/// The cost is that a few bot-detecting sites are more likely to challenge us;
+/// that is a page that asks for a click, whereas stealing focus from a
+/// screen-reader user breaks the whole app.
 #[cfg(not(any(target_os = "linux", target_os = "windows")))]
 async fn launch_browser() -> Result<BrowserSession, String> {
-    let exe = find_chrome_executable().ok_or_else(|| {
-        "Chrome/Chromium not found. \
-         Install Chrome or set SICOMPASS_CHROME_PATH to the browser executable."
-            .to_owned()
-    })?;
+    let exe = find_chrome_executable().ok_or_else(chrome_missing_message)?;
     // Persistent profile dir so cookies/logins survive restarts.
     let profile_dir = chrome_profile_dir();
     let _ = std::fs::create_dir_all(&profile_dir);
     let _ = std::fs::remove_file(profile_dir.join("SingletonLock"));
     let config = BrowserConfig::builder()
-        .with_head()
+        .new_headless_mode()
         .arg("--disable-blink-features=AutomationControlled")
         .arg("--no-first-run")
         .arg("--no-default-browser-check")
@@ -2600,6 +2766,22 @@ async fn await_stable_url(page: &chromiumoxide::Page, budget: tokio::time::Durat
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Serialises the tests that depend on `TEST_NO_LAUNCH`.
+    ///
+    /// The flag is process-global and cargo runs tests in parallel, so one test
+    /// clearing it while another is mid-`commit_edit` would send that one off
+    /// to launch a real Chrome. Every test that reads the flag takes this and
+    /// states the value it wants, rather than assuming what it was left at.
+    static LAUNCH_FLAG: Mutex<()> = Mutex::new(());
+
+    fn launch_flag_guard(no_launch: bool) -> std::sync::MutexGuard<'static, ()> {
+        // A test that panicked while holding this poisoned it, which says
+        // nothing about the flag itself — take it regardless.
+        let guard = LAUNCH_FLAG.lock().unwrap_or_else(|e| e.into_inner());
+        _set_test_no_launch(no_launch);
+        guard
+    }
 
     // ---- Linux Chrome launch mode ----
 
@@ -3615,6 +3797,174 @@ mod tests {
         assert_eq!(items[1].as_str(), Some("Loading…"));
     }
 
+    #[cfg(not(target_os = "windows"))]
+    #[test]
+    fn browser_launch_failure_leaves_the_loading_state() {
+        // A load that dies before Chrome is even up (no Chrome installed, launch
+        // timed out) used to fill only the error slot. `tick` then returned
+        // false, so the app never re-fetched and never drained the error: the
+        // URL bar read "Loading…" for the rest of the session.
+        let mut p = WebbrowserProvider::new();
+        p.current_url = "https://example.com".to_owned();
+        p.pending_enter_content = true;
+        p.load_inflight.store(true, Ordering::Release);
+
+        publish_load_failure(
+            &p.ready_content,
+            &p.pending_error,
+            "Error launching browser: Chrome/Chromium not found.".to_owned(),
+        );
+        p.load_inflight.store(false, Ordering::Release);
+
+        assert!(
+            p.tick(),
+            "the failure must signal the app to re-fetch, or the view stays on \
+             \"Loading…\" forever"
+        );
+        let items = p.fetch();
+        assert_eq!(items.len(), 1, "URL bar wrapping the failure: {items:?}");
+        let body = items[0]
+            .as_obj()
+            .expect("URL bar gains the page as children");
+        assert!(
+            body.children.iter().any(|e| e
+                .as_str()
+                .is_some_and(|s| s.contains("Chrome/Chromium not found"))),
+            "the reason has to be readable in the page: {body:?}"
+        );
+        assert!(
+            p.take_error()
+                .is_some_and(|e| e.contains("Error launching browser")),
+            "and on the status line, which the app drains on the same tick"
+        );
+        assert_eq!(
+            p.take_navigation_request(),
+            Some(sicompass_sdk::NavigationRequest::EnterChildren),
+            "the cursor still descends, so the error is where the user is reading"
+        );
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    #[test]
+    fn url_committed_during_a_load_is_queued_not_dropped() {
+        // A load is already running (the flag set here is what `load_url` would
+        // have set), so committing a second URL must not spawn anything — it
+        // hands the destination to the running task instead. Before, it just
+        // updated the URL bar and returned, and the second page never loaded.
+        let _flag = launch_flag_guard(false);
+        let mut p = WebbrowserProvider::new();
+        p.load_inflight.store(true, Ordering::Release);
+
+        p.load_url("https://second.example/");
+
+        assert_eq!(
+            take_pending(&p.pending_url).as_deref(),
+            Some("https://second.example/"),
+            "the URL has to reach the running task, or nothing ever loads it"
+        );
+        assert_eq!(
+            p.current_url, "https://second.example/",
+            "the URL bar still shows where the user is going"
+        );
+        assert!(
+            p.load_inflight.load(Ordering::Acquire),
+            "the first load is still running; the flag stays set so `fetch` \
+             keeps saying \"Loading…\""
+        );
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    #[test]
+    fn queued_navigations_coalesce_to_the_newest() {
+        // Typing past a URL should not cost a page load for each one.
+        let _flag = launch_flag_guard(false);
+        let mut p = WebbrowserProvider::new();
+        p.load_inflight.store(true, Ordering::Release);
+        p.load_url("https://first.example/");
+        p.load_url("https://second.example/");
+        p.load_url("https://third.example/");
+
+        assert_eq!(
+            take_pending(&p.pending_url).as_deref(),
+            Some("https://third.example/")
+        );
+        assert_eq!(
+            take_pending(&p.pending_url),
+            None,
+            "one slot, not a backlog"
+        );
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    #[test]
+    fn next_target_serves_the_queue_then_releases_the_flag() {
+        let inflight = AtomicBool::new(true);
+        let pending = Arc::new(Mutex::new(None));
+
+        queue_pending(&pending, "https://queued.example/");
+        assert_eq!(
+            next_target(&inflight, &pending).as_deref(),
+            Some("https://queued.example/"),
+            "a queued URL is the task's next destination"
+        );
+        assert!(
+            inflight.load(Ordering::Acquire),
+            "the chain continues, so the flag stays set and no second task spawns"
+        );
+
+        assert_eq!(
+            next_target(&inflight, &pending),
+            None,
+            "empty queue ends the chain"
+        );
+        assert!(
+            !inflight.load(Ordering::Acquire),
+            "and releases the flag, so the next commit spawns its own task"
+        );
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    #[test]
+    fn a_load_superseded_mid_flight_does_not_publish() {
+        // `navigate_once` skips publishing when a newer URL is already queued.
+        // Without that, the old page's content would land in `ready_content`
+        // and `tick` would cache it under the newer URL now in the URL bar.
+        let pending = Arc::new(Mutex::new(None));
+        assert!(!has_pending(&pending));
+        queue_pending(&pending, "https://newer.example/");
+        assert!(
+            has_pending(&pending),
+            "the in-flight navigation can see that it has been superseded"
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_browser_still_on_its_disk_image_is_named_in_the_error() {
+        // Chrome downloaded but never dragged to Applications: it launches from
+        // the mounted installer window, so the user has every reason to believe
+        // it is installed. "not found" is true but useless; the message has to
+        // say what to do. Only asserts the wording when this machine is in that
+        // state — the fixed half of the message is checked either way.
+        let msg = chrome_missing_message();
+        match chrome_on_mounted_image() {
+            Some(dmg) => {
+                assert!(
+                    msg.contains(&dmg.display().to_string()),
+                    "name the bundle we found: {msg}"
+                );
+                assert!(
+                    msg.contains("drag it") && msg.contains("Applications"),
+                    "and say how to install it: {msg}"
+                );
+            }
+            None => assert!(
+                msg.contains("SICOMPASS_CHROME_PATH"),
+                "otherwise fall back to the override hint: {msg}"
+            ),
+        }
+    }
+
     #[test]
     fn submit_response_does_not_move_the_cursor() {
         // Content arriving without an armed URL navigation (a form submit
@@ -3630,7 +3980,7 @@ mod tests {
 
     #[test]
     fn url_commit_arms_enter_content_but_refresh_does_not() {
-        _set_test_no_launch(true);
+        let _flag = launch_flag_guard(true);
         let mut p = WebbrowserProvider::new();
         assert!(p.commit_edit("", "https://example.invalid"));
         assert_eq!(
@@ -3644,7 +3994,6 @@ mod tests {
         let mut error = String::new();
         p.handle_command("refresh", "", 0, &mut error);
         assert!(p.take_navigation_request().is_none());
-        _set_test_no_launch(false);
     }
 
     #[test]
