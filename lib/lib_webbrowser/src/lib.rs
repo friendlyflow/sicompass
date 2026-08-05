@@ -1578,6 +1578,35 @@ enum XvfbHelper {
     Bare,
 }
 
+/// An AT-SPI bus address that deliberately points at nothing.
+///
+/// Xvfb keeps Chrome off the user's *screen*, but the accessibility bus is
+/// per-session, not per-display. A Chrome started on an invisible display still
+/// registers itself on it, so with Orca running the user gets a second
+/// application named "Google Chrome" carrying a window titled after the page
+/// they just opened. The screen reader then has somewhere else to go, and the
+/// arrow keys stop driving sicompass. Chrome only does this while an assistive
+/// technology is actually running, which is why the app looks fine until a
+/// screen reader is switched on.
+///
+/// Chrome resolves the a11y bus from `AT_SPI_BUS_ADDRESS` before falling back
+/// to the session bus, so aiming that at a socket that cannot exist makes the
+/// connection fail and keeps Chrome off the bus entirely. It is the only lever
+/// that works here: `NO_AT_BRIDGE` is a GTK variable Chrome does not read, and
+/// `--disable-renderer-accessibility` only trims the renderer's tree while the
+/// browser process still registers.
+#[cfg(target_os = "linux")]
+const NO_AT_SPI_BUS: &str = "unix:path=/nonexistent/sicompass-keeps-chrome-off-the-a11y-bus";
+
+/// Environment overrides for every Chrome sicompass starts on Linux.
+///
+/// Split out from `launch_browser` so the invariant the fix rests on — that the
+/// address cannot resolve — is testable without launching a browser.
+#[cfg(target_os = "linux")]
+fn offscreen_chrome_env() -> [(&'static str, &'static str); 1] {
+    [("AT_SPI_BUS_ADDRESS", NO_AT_SPI_BUS)]
+}
+
 /// The shell script that starts Chrome on an invisible X11 display.
 ///
 /// Split out from `linux_chrome_launch` so the generated script can be tested
@@ -1859,7 +1888,13 @@ async fn launch_browser() -> Result<BrowserSession, String> {
         ),
     };
 
+    // Keep this Chrome off the session's accessibility bus. Both launch modes
+    // need it: headed-on-Xvfb and Chrome's own headless mode each register as
+    // an application when an assistive technology is running — see
+    // `NO_AT_SPI_BUS`. The wrapper script passes its environment through, so
+    // setting it on the spawned process covers the Xvfb path too.
     let config = builder
+        .envs(offscreen_chrome_env())
         .arg("--disable-blink-features=AutomationControlled")
         .arg("--no-first-run")
         .arg("--no-default-browser-check")
@@ -2849,6 +2884,30 @@ mod tests {
             script.contains("trap 'kill $cp $xp 2>/dev/null' EXIT HUP INT TERM"),
             "both processes must be killed on exit"
         );
+    }
+
+    /// Xvfb hides Chrome from the screen, not from the screen reader: the
+    /// accessibility bus is per-session, so an off-screen Chrome would still
+    /// register as a second "Google Chrome" application for Orca to wander
+    /// into, and the user's arrow keys would stop reaching sicompass. The fix
+    /// rests entirely on Chrome being unable to resolve the address below, so
+    /// that is what this pins.
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn offscreen_chrome_cannot_reach_the_accessibility_bus() {
+        let env = offscreen_chrome_env();
+        let (key, addr) = env[0];
+        assert_eq!(key, "AT_SPI_BUS_ADDRESS");
+
+        let path = addr
+            .strip_prefix("unix:path=")
+            .expect("must be a unix socket address so the connection simply fails");
+        assert!(
+            !std::path::Path::new(path).exists(),
+            "{path} exists, so Chrome could reach a real bus through it"
+        );
+        // An absolute path, or Chrome would resolve it against its own cwd.
+        assert!(path.starts_with('/'), "{path} must be absolute");
     }
 
     // ---- html_to_ffon unit tests ----
