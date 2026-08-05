@@ -5,6 +5,49 @@ GitHub Release body, so entries here are what users read on the download page.
 
 ## Unreleased
 
+### Ctrl+O: arrow keys work again, and Enter opens the file you selected
+
+In the open dialog the arrow keys appeared dead for the first few presses
+before suddenly jumping, and pressing Enter on the first file reported
+"Please select a .json file".
+
+The dialog lists only `.json` files and folders, but the cursor still counted
+every entry in the folder, including the ones it was hiding. So the cursor and
+the highlight drifted apart: arrows moved the cursor onto hidden files while
+the highlight stayed put, and Enter acted on whatever hidden file the cursor
+had landed on rather than on the highlighted one.
+
+The highlighted row is now what the cursor and Enter follow. Arrow keys, Home,
+End, Page Up, Page Down, Right into a folder and search inside the dialog all
+move one visible entry at a time.
+
+This was most visible on macOS, where `.DS_Store` sorts to the top of nearly
+every folder and so was always the entry the cursor started on, but any
+non-JSON file ahead of a JSON one triggered it on every platform.
+
+A folder with no `.json` files now says so instead of reporting the file the
+cursor happened to be parked on.
+
+### Symlinked folders can be opened again
+
+A folder reached through a symlink was listed as a file, so the right arrow
+would not enter it and Ctrl+O could not save into it or open from it. On macOS
+that covered `/tmp` and `/var`, and on Linux distributions that merge `/usr` it
+covered `/bin`, `/lib` and `/sbin`.
+
+Symlinks are now followed when deciding whether an entry is a folder, which is
+what deleting and copying already did. The properties view still describes the
+link itself, so it keeps its leading `l`.
+
+### The file browser hides dotfiles
+
+Entries starting with a dot are no longer listed by default, so folders are no
+longer led by `.DS_Store` and friends. Deep search skips them too, so it no
+longer walks the whole of `.git`.
+
+Run `show/hide hidden files` from the `:` command list to show them again, and
+run it a second time to hide them.
+
 ### VoiceOver now works on macOS
 
 sicompass was silent under VoiceOver. Orca and NVDA were unaffected.

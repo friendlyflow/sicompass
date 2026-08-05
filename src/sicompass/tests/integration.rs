@@ -3848,7 +3848,13 @@ impl Provider for ConfigProvider {
 /// The filebrowser is rooted at `tmp` and the save folder is set to `tmp`.
 fn harness_with_config_provider() -> (AppRenderer, TempDir) {
     ensure_builtins();
-    let tmp = TempDir::new().expect("temp dir");
+    // Not `TempDir::new()`: its default `.tmpXXXX` prefix is dot-prefixed, and
+    // the file browser hides dot entries, so `navigate_to_path` could not walk
+    // into the directory and Ctrl+O would open on the filesystem root instead.
+    let tmp = tempfile::Builder::new()
+        .prefix("sicompass-test")
+        .tempdir()
+        .expect("temp dir");
     let mut renderer = AppRenderer::new();
 
     // ConfigProvider at index 0
@@ -3942,11 +3948,18 @@ fn open_flow_loads_json_file_into_source_provider() {
     // filebrowser root obj, set current_id to point at it, set provider path to tmpdir.
     // This simulates the user having navigated to config.json without requiring
     // navigate_to_path to traverse a deep tmpdir path.
+    // `notes.txt` goes in front so raw index 0 is an entry the open flow hides —
+    // the cursor has to be derived from the visible list, not assumed to match.
     r.ffon[1]
         .as_obj_mut()
         .unwrap()
         .children
         .insert(0, FfonElement::Str("<input>config.json</input>".to_owned()));
+    r.ffon[1]
+        .as_obj_mut()
+        .unwrap()
+        .children
+        .insert(0, FfonElement::Str("<input>notes.txt</input>".to_owned()));
     r.providers[1].set_current_path(tmp.path().to_str().unwrap());
     r.pending_file_browser_open = true;
     r.save_as_source_root_idx = 0;
@@ -3965,13 +3978,9 @@ fn open_flow_loads_json_file_into_source_provider() {
     };
     sicompass::list::create_list_current_layer(&mut r);
 
-    let json_idx = r
-        .total_list
-        .iter()
-        .position(|item| item.label.contains("config.json"))
-        .expect("config.json entry should be visible in filebrowser list");
-    r.list_index = json_idx;
-    r.current_id = r.total_list[json_idx].id.clone();
+    // No manual list_index/current_id fixup here: placing the cursor on the
+    // first *visible* entry is the production code's job.
+    assert_selection_consistent(&r, "config.json");
 
     press(&mut r, Keycode::Return);
 
@@ -4052,6 +4061,252 @@ fn open_flow_hides_non_json_files_in_list() {
             .iter()
             .any(|item| item.label.contains("some-dir")),
         "directory should be visible during open flow"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Open flow: the visible list is filtered, so list position != raw ffon index
+// ---------------------------------------------------------------------------
+
+/// The highlighted row and the cursor must describe the same element.
+///
+/// The open dialog hides non-`.json` files while `current_id` keeps addressing
+/// the unfiltered layer, so these two can drift apart. When they do, the
+/// highlight lies about what Enter will act on.
+fn assert_selection_consistent(r: &AppRenderer, expect_label: &str) {
+    let item = r
+        .current_list_item()
+        .expect("a row should be selected")
+        .clone();
+    assert_eq!(
+        item.id, r.current_id,
+        "list_index and current_id desynced (highlight shows {})",
+        item.label
+    );
+    assert!(
+        item.label.contains(expect_label),
+        "expected {expect_label} to be selected, got {}",
+        item.label
+    );
+}
+
+/// Point the open dialog at the canonical form of the temp directory.
+///
+/// `navigate_to_path` rebuilds the provider's path by walking from `/` and
+/// joining the names it passes through, so the path the provider ends up
+/// reporting is the one it was *given*. Canonicalizing up front keeps that in
+/// step with the paths these tests assert on, whatever symlinks the platform
+/// puts in front of the temp directory (`/var` -> `/private/var` on macOS).
+/// See `open_flow_walks_through_a_symlinked_save_folder` for the symlink
+/// traversal itself.
+fn set_save_folder_canonical(r: &mut AppRenderer, tmp: &TempDir) -> std::path::PathBuf {
+    let dir = tmp.path().canonicalize().expect("canonical temp dir");
+    r.save_folder_path = dir.to_str().unwrap().to_owned();
+    dir
+}
+
+/// Real files on disk, so ordering comes from the filebrowser's own `natord`
+/// sort rather than injected FFON.
+///
+/// `00-notes.txt` sorts ahead of `11.json` (`0` < `1`), so raw index 0 is an
+/// entry the open dialog hides — the exact condition that desyncs the cursor
+/// from the highlight. It is deliberately *not* a dotfile: the file browser
+/// hides those by default, which would take the entry out of the layer
+/// entirely and quietly turn these tests into no-ops.
+fn harness_with_mixed_files() -> (AppRenderer, TempDir, std::path::PathBuf) {
+    let (mut r, tmp) = harness_with_config_provider();
+    let dir = set_save_folder_canonical(&mut r, &tmp);
+    std::fs::write(dir.join("00-notes.txt"), "not json").unwrap();
+    std::fs::write(dir.join("11.json"), r#"[{"first":[]}]"#).unwrap();
+    std::fs::write(dir.join("22.json"), r#"[{"second":[]}]"#).unwrap();
+    std::fs::create_dir(dir.join("sub")).unwrap();
+    (r, tmp, dir)
+}
+
+/// A save folder reached through a symlink is still walkable.
+///
+/// `navigate_to_path` descends only into entries the browser reports as
+/// directories, so a symlinked component used to stop the walk and leave the
+/// dialog sitting on the filesystem root. macOS puts `/tmp` and `/var` in that
+/// category, and usr-merge Linux does the same for `/bin` and `/lib`.
+#[test]
+fn open_flow_walks_through_a_symlinked_save_folder() {
+    let (mut r, tmp) = harness_with_config_provider();
+    let real = tmp.path().canonicalize().unwrap();
+    std::fs::create_dir(real.join("actual")).unwrap();
+    std::fs::write(real.join("actual").join("11.json"), r#"[{"x":[]}]"#).unwrap();
+    std::os::unix::fs::symlink(real.join("actual"), real.join("via-link")).unwrap();
+
+    r.save_folder_path = real.join("via-link").to_str().unwrap().to_owned();
+
+    press_ctrl(&mut r, Keycode::O);
+
+    assert_eq!(
+        r.total_list.len(),
+        1,
+        "should have reached the linked folder"
+    );
+    assert_selection_consistent(&r, "11.json");
+}
+
+/// Arrow keys move one *visible* row at a time, even when hidden entries sit
+/// between them. Before the fix the first two Downs appeared to do nothing:
+/// raw index walked onto `00-notes.txt` (hidden) and then onto `11.json`,
+/// which was already the highlighted row.
+#[test]
+fn open_flow_arrows_skip_filtered_leading_files() {
+    let (mut r, _tmp, _dir) = harness_with_mixed_files();
+
+    press_ctrl(&mut r, Keycode::O);
+
+    assert_eq!(r.total_list.len(), 3, "11.json, 22.json, sub/");
+    assert_selection_consistent(&r, "11.json");
+
+    press_down(&mut r);
+    assert_selection_consistent(&r, "22.json");
+    press_down(&mut r);
+    assert_selection_consistent(&r, "sub");
+    press_down(&mut r);
+    assert_selection_consistent(&r, "sub");
+
+    press_up(&mut r);
+    assert_selection_consistent(&r, "22.json");
+    press_up(&mut r);
+    assert_selection_consistent(&r, "11.json");
+    press_up(&mut r);
+    assert_selection_consistent(&r, "11.json");
+}
+
+/// Enter straight after Ctrl+O loads the file the user can see highlighted.
+/// Before the fix the cursor was still on the hidden raw index 0, so this
+/// reported "Please select a .json file".
+#[test]
+fn open_flow_enter_immediately_after_ctrl_o_loads_first_visible_json() {
+    let (mut r, _tmp, dir) = harness_with_mixed_files();
+
+    press_ctrl(&mut r, Keycode::O);
+    press_enter(&mut r);
+
+    assert!(
+        !r.pending_file_browser_open,
+        "open flow should have completed"
+    );
+    assert!(
+        !r.error_message.contains("Please select"),
+        "unexpected error: {}",
+        r.error_message
+    );
+    assert_eq!(r.current_save_path, dir.join("11.json").to_str().unwrap());
+}
+
+/// Home and End land on visible rows, not on whatever raw index happens to sit
+/// at either end of the unfiltered layer.
+#[test]
+fn open_flow_home_and_end_land_on_visible_entries() {
+    let (mut r, _tmp, _dir) = harness_with_mixed_files();
+
+    press_ctrl(&mut r, Keycode::O);
+
+    press(&mut r, Keycode::End);
+    assert_selection_consistent(&r, "sub");
+    press(&mut r, Keycode::Home);
+    assert_selection_consistent(&r, "11.json");
+}
+
+/// Page keys move by list position too, and stay on visible rows.
+#[test]
+fn open_flow_page_keys_land_on_visible_entries() {
+    let (mut r, _tmp, _dir) = harness_with_mixed_files();
+
+    press_ctrl(&mut r, Keycode::O);
+
+    press(&mut r, Keycode::PageDown);
+    assert_selection_consistent(&r, "sub");
+    press(&mut r, Keycode::PageUp);
+    assert_selection_consistent(&r, "11.json");
+}
+
+/// Right into a subdirectory whose first raw entry is hidden still lands on the
+/// first visible file, and Enter loads that file.
+#[test]
+fn open_flow_right_into_subdir_lands_on_first_visible_json() {
+    let (mut r, _tmp, dir) = harness_with_mixed_files();
+    let sub = dir.join("sub");
+    std::fs::write(sub.join("a.txt"), "not json").unwrap();
+    std::fs::write(sub.join("b.json"), r#"[{"nested":[]}]"#).unwrap();
+
+    press_ctrl(&mut r, Keycode::O);
+    press(&mut r, Keycode::End);
+    assert_selection_consistent(&r, "sub");
+
+    press_right(&mut r);
+    assert_selection_consistent(&r, "b.json");
+
+    press_enter(&mut r);
+    assert!(!r.pending_file_browser_open);
+    assert_eq!(r.current_save_path, sub.join("b.json").to_str().unwrap());
+}
+
+/// Left back out of a subdirectory keeps the highlight and the cursor together.
+#[test]
+fn open_flow_left_out_of_subdir_stays_consistent() {
+    let (mut r, _tmp, dir) = harness_with_mixed_files();
+    std::fs::write(dir.join("sub").join("b.json"), "[]").unwrap();
+
+    press_ctrl(&mut r, Keycode::O);
+    press(&mut r, Keycode::End);
+    press_right(&mut r);
+    assert_selection_consistent(&r, "b.json");
+
+    press_left(&mut r);
+    assert_selection_consistent(&r, "sub");
+}
+
+/// Fuzzy search inside the open dialog filters an already-filtered list, so the
+/// two levels of indirection have to compose.
+#[test]
+fn open_flow_search_then_enter_loads_matched_file() {
+    let (mut r, _tmp, dir) = harness_with_mixed_files();
+
+    press_ctrl(&mut r, Keycode::O);
+    press_tab(&mut r); // Tab opens search inside the dialog
+    type_text(&mut r, "22");
+    assert_eq!(r.coordinate, Coordinate::SimpleSearch);
+
+    assert!(
+        !r.total_list
+            .iter()
+            .any(|item| item.label.contains("00-notes.txt")),
+        "the .json filter must still apply inside search"
+    );
+
+    press_enter(&mut r);
+
+    assert!(!r.pending_file_browser_open);
+    assert_eq!(r.current_save_path, dir.join("22.json").to_str().unwrap());
+}
+
+/// A folder with nothing selectable says so, instead of reporting whichever
+/// hidden file the cursor was parked on.
+#[test]
+fn open_flow_empty_folder_reports_no_json_files() {
+    let (mut r, tmp) = harness_with_config_provider();
+    let dir = set_save_folder_canonical(&mut r, &tmp);
+    std::fs::write(dir.join("notes.txt"), "not json").unwrap();
+
+    press_ctrl(&mut r, Keycode::O);
+    assert!(r.total_list.is_empty());
+
+    press_enter(&mut r);
+
+    assert!(
+        r.error_message.contains("No .json files"),
+        "unexpected error: {}",
+        r.error_message
+    );
+    assert!(
+        r.pending_file_browser_open,
+        "the dialog should stay open so the user can navigate elsewhere"
     );
 }
 

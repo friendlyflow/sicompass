@@ -1448,6 +1448,28 @@ impl AppRenderer {
             }
         }
     }
+
+    /// Move `list_index` to the row that displays `current_id` — the inverse of
+    /// [`Self::sync_current_id_from_list`].
+    ///
+    /// Filter-aware, so it stays correct when `total_list` is a subset of the
+    /// layer (the Ctrl+O open dialog hides non-`.json` files). Where the list
+    /// is 1:1 with the raw indices this is identical to assigning
+    /// `current_id.last()` clamped to the list length.
+    pub fn sync_list_index_from_current_id(&mut self) {
+        let raw = self.current_id.last();
+        let pos = if self.filtered_list_indices.is_empty() {
+            self.total_list.iter().position(|it| it.id.last() == raw)
+        } else {
+            self.filtered_list_indices
+                .iter()
+                .position(|&i| self.total_list.get(i).and_then(|it| it.id.last()) == raw)
+        };
+        self.list_index = pos.unwrap_or_else(|| {
+            raw.unwrap_or(0)
+                .min(self.active_list_len().saturating_sub(1))
+        });
+    }
 }
 
 impl Default for AppRenderer {
