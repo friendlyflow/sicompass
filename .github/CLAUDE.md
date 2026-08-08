@@ -70,20 +70,29 @@ Shaders and fonts are now embedded (`src/sicompass/src/shaders.rs`,
     globs with `find`, and although that is now `-print0` into an array, the
     per-arch `.dmg` rename still matters: both macOS legs otherwise emit the
     same filename and collide.
-  - **Never build the `.app` and the `.dmg` in one `cargo packager` call.** The
-    `.dmg` packager does not build a bundle, it seals whatever `.app` is
-    already in the output directory. `--formats app,dmg` therefore produced the
-    `.dmg` *before* the ad-hoc signing step ran, so every release up to and
-    including 0.1.12 shipped a `.dmg` whose bundle carried only the linker's
-    signature and had no `_CodeSignature` at all. The loose `.app` was signed
-    and verified, and CI was green the whole time. Anything that has to be true
-    of the shipped bundle belongs between the two invocations.
-  - The bundle is `chmod -R u+w`'d before signing. Homebrew ships
-    `libMoltenVK.dylib` mode `444` and cargo-packager copies that mode in.
-    `xattr -d` needs write permission on the file it clears, so the quarantine
-    one-liner in the README died with `EACCES` on that dylib for every macOS
-    user — on the one step they cannot skip, since the app will not open until
-    quarantine is cleared.
+  - **The macOS bundle cannot be modified by a workflow step.** `--formats dmg`
+    rebuilds the `.app` whenever one was not produced in the *same*
+    cargo-packager invocation, and `--formats app,dmg` seals the `.dmg` before
+    the invocation returns. So a `codesign` step after `--formats app,dmg` is
+    too late, and splitting into two invocations is worse: the second discards
+    what the first made. There is no ordering of workflow steps that works.
+    Every release up to and including 0.1.12 shipped a `.dmg` whose bundle
+    carried only the linker's signature with no `_CodeSignature`, while the
+    loose `.app` left in `target/packages` was signed, verified, and green.
+    0.1.13's first attempt then failed the same way by splitting the call.
+
+    Signing is therefore configured, not scripted: `signing-identity = "-"` in
+    the `[package.metadata.packager.macos]` block of `src/sicompass/Cargo.toml`
+    makes cargo-packager sign the bundle root between its own app and dmg
+    stages, which is the only point that works. It ad-hoc signs, which makes
+    the app launchable but does not satisfy Gatekeeper.
+  - For the same reason, `libMoltenVK.dylib` is made writable **at the source**,
+    in the step that points the packager at Homebrew's copy, rather than in the
+    finished bundle. Homebrew ships it mode `444` and cargo-packager copies that
+    mode in. `xattr -d` needs write permission on the file it clears, so the
+    quarantine one-liner in the README died with `EACCES` on that dylib for
+    every macOS user, on the one step they cannot skip since the app will not
+    open until quarantine is cleared.
   - Both of the above are now caught by the step that mounts the finished
     `.dmg` and checks the bundle *inside it*. That check exists because every
     other macOS step inspects the loose `.app` in `target/packages`, which is

@@ -193,6 +193,17 @@ jobs:
             || { echo "::error::libMoltenVK.dylib not found under $PREFIX"; exit 1; }
           sed -i '' "s#/opt/homebrew/lib/libMoltenVK.dylib#$PREFIX/lib/libMoltenVK.dylib#" \
             src/sicompass/Cargo.toml
+          # Homebrew ships this dylib mode 444 and cargo-packager copies it into
+          # Contents/Frameworks with that mode intact. `xattr -d` needs write
+          # permission on the file it clears, so the quarantine one-liner in the
+          # README died with EACCES on this one file for every macOS user, on
+          # the one step nobody can skip since the app will not open until the
+          # flag is gone.
+          #
+          # Fixed at the source rather than in the bundle: the .app is built and
+          # sealed into the .dmg inside a single cargo-packager invocation, so
+          # there is no point in between at which the copy could be chmod'd.
+          chmod u+w "$PREFIX/lib/libMoltenVK.dylib"
 
       - name: Build
         run: cargo build --release --features bundled-sdl3 -p sicompass
@@ -213,43 +224,20 @@ jobs:
           grep -q 'OK .*colour emoji' check.txt \
             || { echo "::error::built without PNG-capable FreeType"; exit 1; }
 
-      - name: Build the .app
-        # Deliberately NOT `--formats app,dmg`. The .dmg packager does not build
-        # a bundle, it seals whatever .app is already sitting in the output
-        # directory. Everything that has to be true of the shipped bundle
-        # therefore has to happen between this command and the .dmg one below.
+      - name: Build the .app and the .dmg
+        # One invocation on purpose. The .dmg packager rebuilds the .app
+        # whenever one was not produced in the same run, so splitting this into
+        # `--formats app` and `--formats dmg` means the second command discards
+        # whatever the first produced, and anything done to the bundle in
+        # between is thrown away with it.
         #
-        # Up to 0.1.12 both formats were built in a single invocation, so the
-        # signing step ran after the .dmg had already been sealed around an
-        # unsigned bundle. The loose .app was signed and verified, CI was green,
-        # and every published .dmg contained a bundle carrying only the linker's
-        # signature, with no _CodeSignature at all.
-        run: cargo packager --release --formats app -p sicompass --verbose
-
-      - name: Make the bundle writable by its owner
-        # Homebrew ships libMoltenVK.dylib mode 444 and cargo-packager copies it
-        # in with that mode intact. `xattr -d` needs write permission on the
-        # file it is clearing, so the one-line quarantine fix in the README died
-        # with EACCES on that dylib for every user who installed the .dmg. The
-        # app is unusable until quarantine is cleared, so this is not cosmetic.
-        run: |
-          set -euo pipefail
-          APP="$(find target/packages -maxdepth 1 -name '*.app' | head -1)"
-          test -n "$APP" || { echo "::error::no .app bundle was produced"; exit 1; }
-          chmod -R u+w "$APP"
-
-      - name: Ad-hoc sign
-        # Bundling MoltenVK rewrites install names inside the .app, which
-        # invalidates whatever signature the linker produced. Apple Silicon
-        # refuses to execute an unsigned binary outright, so this is required
-        # just to make the app launchable. It does NOT satisfy Gatekeeper:
-        # users still need to clear the quarantine attribute until there is a
-        # Developer ID to notarize with.
-        run: |
-          set -euo pipefail
-          APP="$(find target/packages -maxdepth 1 -name '*.app' | head -1)"
-          codesign --force --deep --sign - "$APP"
-          codesign --verify --deep --strict "$APP"
+        # That leaves no point in the workflow at which the bundle can be signed
+        # and still reach a user, which is why `signing-identity` is set in
+        # src/sicompass/Cargo.toml and cargo-packager signs it between its own
+        # app and dmg stages instead. See the comment there. Every release up to
+        # 0.1.12 shipped an unsigned bundle because a `codesign` step here ran
+        # after the .dmg had already been sealed.
+        run: cargo packager --release --formats app,dmg -p sicompass --verbose
 
       - name: Check the assembled .app is standalone
         # Re-run over the bundle, not just the binary: this covers the dylibs
@@ -283,11 +271,6 @@ jobs:
             echo "::error::the bundled app asks MoltenVK for an extension only the loader provides"
             exit 1
           fi
-
-      - name: Build the .dmg
-        # Seals the .app prepared above. Nothing may touch the bundle after
-        # this point and still reach a user.
-        run: cargo packager --release --formats dmg -p sicompass --verbose
 
       - name: Verify the .dmg ships that bundle
         # The check that was missing. Every step above inspects the loose .app;
