@@ -82,15 +82,22 @@ jobs:
             row '\.rpm$'                          'Fedora, RHEL, openSUSE'
             row '\.AppImage$'                     'Any Linux, no root'
             echo
-            echo "### macOS: clear the quarantine flag first"
+            echo "### macOS: clear the quarantine flag before opening the .dmg"
             echo
-            echo "The app is not yet notarized by Apple, so macOS refuses to open"
-            echo "it the first time and reports that it is damaged. Drag it to"
-            echo "Applications, run this once, and it starts normally after that."
+            echo "sicompass is not yet notarized by Apple, so macOS blocks the"
+            echo "download and says it \"could not verify\" the file is free of"
+            echo "malware. Clear the flag on the .dmg first, then open it and drag"
+            echo "sicompass to Applications."
             echo
             echo '```bash'
-            echo "xattr -dr com.apple.quarantine /Applications/sicompass.app"
+            echo "xattr -dr com.apple.quarantine ~/Downloads/sicompass-aarch64-apple-darwin.dmg"
             echo '```'
+            echo
+            echo "Use the \`x86_64\` file name on an Intel Mac. The order matters:"
+            echo "macOS copies that flag onto whatever you drag out of the disk"
+            echo "image, so clearing it first leaves nothing else to run. If you"
+            echo "already dragged the app across, clear it there instead, with"
+            echo "\`xattr -dr com.apple.quarantine /Applications/sicompass.app\`."
             echo
             echo "Full install notes for every platform are in the"
             echo "[README](https://github.com/$REPO#download)."
