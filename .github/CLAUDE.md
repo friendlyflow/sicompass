@@ -86,6 +86,27 @@ Shaders and fonts are now embedded (`src/sicompass/src/shaders.rs`,
     makes cargo-packager sign the bundle root between its own app and dmg
     stages, which is the only point that works. It ad-hoc signs, which makes
     the app launchable but does not satisfy Gatekeeper.
+  - **Signing drags in the hardened runtime, so the entitlement is mandatory.**
+    cargo-packager passes `--options runtime` to `codesign` for every Mach-O,
+    unconditionally, with no config to turn it off. The hardened runtime
+    enforces library validation, which lets a process load only libraries
+    sharing its Team ID — and an ad-hoc signature has none, so the binary is
+    refused its own bundled `libMoltenVK.dylib` ("different Team IDs"). That is
+    the whole graphics stack on macOS, and 0.1.14 shipped it: the app started
+    and could draw nothing. `src/sicompass/macos-entitlements.plist` carries
+    `com.apple.security.cs.disable-library-validation` to undo it. Keep that
+    file free of XML comments: `codesign` parses entitlements with AMFI, which
+    is stricter than `plutil`, and a comment ahead of the DOCTYPE lints clean
+    then fails the build with `AMFIUnserializeXML: syntax error`.
+  - **Nothing in the macOS guard may depend on the runner having a GPU.** The
+    runners are VMs with no Metal device, and MoltenVK *aborts the process*
+    rather than returning an error when it finds none, so `--check` dies
+    partway and never prints a Vulkan section. `Sanity check the binary` only
+    survives that because the report is flushed before the probe. A guard that
+    required `OK loader` failed every build on a perfectly good artifact. Assert
+    properties of the bundle instead — the entitlement is checked with
+    `codesign -d --entitlements -`, which is true or false regardless of
+    hardware.
   - For the same reason, `libMoltenVK.dylib` is made writable **at the source**,
     in the step that points the packager at Homebrew's copy, rather than in the
     finished bundle. Homebrew ships it mode `444` and cargo-packager copies that
