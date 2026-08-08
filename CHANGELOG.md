@@ -3,6 +3,42 @@
 cargo-dist parses this file and uses the matching version's section as the
 GitHub Release body, so entries here are what users read on the download page.
 
+## 0.1.13
+
+### The macOS download installs and opens
+
+The `.dmg` shipped a copy of the app that was never signed. The signing step ran
+after the disk image had already been sealed around the unsealed copy, so the
+loose bundle on the build machine was correct and the one people downloaded was
+not. It was checked in the same place it was correct, which is why it survived
+several releases.
+
+Clearing the quarantine flag failed too. The bundled MoltenVK library arrived
+read-only, and `xattr` cannot clear the flag on a file it is not allowed to
+write, so the one command in the README stopped with "Permission denied" on it.
+That was the one step nobody could skip, because the app does not open until the
+flag is gone.
+
+Both are now checked by opening the finished `.dmg` and inspecting the app
+inside it, rather than the copy left behind on the build machine.
+
+### `--check` no longer reports a working Mac as broken
+
+`sicompass --check` asked the graphics driver for a feature that only the Vulkan
+loader provides. The installed app talks to MoltenVK directly and has no loader,
+so the request was refused and the report claimed no graphics device could be
+found, on installations that were rendering perfectly well. Rendering itself was
+never affected.
+
+### Every installer is listed on the download page
+
+The `.dmg`, `.deb`, `.rpm` and AppImage were attached to each release but named
+nowhere in its text, which listed only the portable archives. Since the app's
+update prompt opens that page, anyone following a notification on macOS was
+offered a `.tar.xz` while the `.dmg` sat out of sight further down. The page now
+leads with the right download for each platform, and repeats the macOS
+quarantine command next to it.
+
 ## 0.1.12
 
 ### Every program's files now travel inside the binary
