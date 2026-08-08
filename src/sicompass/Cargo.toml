@@ -212,6 +212,11 @@ signing-identity = "-"
 # against whatever directory codesign happens to run in. native-packages.yml
 # rewrites it to an absolute path for that reason, the same way it rewrites the
 # MoltenVK path above.
+#
+# Keep that plist free of XML comments. codesign parses entitlements with AMFI,
+# which is stricter than plutil: a comment ahead of the DOCTYPE lints clean and
+# then fails the build with "AMFIUnserializeXML: syntax error". 0.1.15 died that
+# way, so the explanation lives here rather than in the file.
 entitlements = "src/sicompass/macos-entitlements.plist"
 
 # ---------------------------------------------------------------------------
