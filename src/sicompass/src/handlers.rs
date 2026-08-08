@@ -1821,7 +1821,7 @@ fn handle_enter_extended_search(r: &mut AppRenderer) {
     // Checkboxes and radios are *not* activated here — see handle_enter_search.
     // Enter in extended search always means "go to this element".
 
-    // Deep search item: teleport via nav_path
+    // Extended search item: teleport via nav_path
     if let Some(ref nav_path) = item.nav_path {
         let root_idx = item.id.get(0).unwrap_or(0);
         let (parent_dir, filename) = split_nav_path(nav_path);

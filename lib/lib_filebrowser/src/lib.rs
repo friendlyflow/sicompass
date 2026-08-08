@@ -13,7 +13,7 @@
 //! - `commit_edit(old, new)` performs a rename.
 //! - `delete_item` / `create_directory` / `create_file` / `copy_item` use
 //!   `std::fs` primitives or recursive helpers.
-//! - `deep_search` is a BFS traversal (up to 50 000 results).
+//! - `extended_search` is a BFS traversal (up to 50 000 results).
 
 use sicompass_sdk::ffon::FfonElement;
 use sicompass_sdk::localize;
@@ -460,13 +460,13 @@ impl Provider for FilebrowserProvider {
         false
     }
 
-    fn collect_deep_search_items(&self) -> Option<Vec<SearchResultItem>> {
-        Some(self.run_deep_search())
+    fn collect_extended_search_items(&self) -> Option<Vec<SearchResultItem>> {
+        Some(self.run_extended_search())
     }
 }
 
 impl FilebrowserProvider {
-    fn run_deep_search(&self) -> Vec<SearchResultItem> {
+    fn run_extended_search(&self) -> Vec<SearchResultItem> {
         const MAX_ITEMS: usize = 50_000;
         let mut results = Vec::new();
         let root = self.current_path.clone();
@@ -491,7 +491,7 @@ impl FilebrowserProvider {
                     break;
                 }
                 let name = entry.file_name().to_string_lossy().into_owned();
-                // Agree with `list_directory`: a deep search that surfaced the
+                // Agree with `list_directory`: an extended search that surfaced the
                 // contents of `.git` while the listing hides it would be both
                 // confusing and, on a large repo, most of the item budget.
                 if !self.show_hidden && name.starts_with('.') {
@@ -1186,17 +1186,17 @@ mod tests {
     }
 
     #[test]
-    fn test_deep_search_skips_hidden_when_disabled() {
+    fn test_extended_search_skips_hidden_when_disabled() {
         let (mut p, dir) = make_provider();
         std::fs::create_dir(dir.path().join(".git")).unwrap();
         std::fs::write(dir.path().join(".git").join("config"), "").unwrap();
         std::fs::write(dir.path().join("visible.txt"), "").unwrap();
 
-        let results = p.collect_deep_search_items().unwrap_or_default();
+        let results = p.collect_extended_search_items().unwrap_or_default();
         assert!(results.iter().any(|r| r.label.contains("visible.txt")));
         assert!(
             !results.iter().any(|r| r.label.contains(".git")),
-            "deep search must agree with the listing"
+            "extended search must agree with the listing"
         );
         assert!(
             !results.iter().any(|r| r.label.contains("config")),
@@ -1205,7 +1205,7 @@ mod tests {
 
         let mut err = String::new();
         p.handle_command("show/hide hidden files", "", 0, &mut err);
-        let results = p.collect_deep_search_items().unwrap_or_default();
+        let results = p.collect_extended_search_items().unwrap_or_default();
         assert!(results.iter().any(|r| r.label.contains(".git")));
         assert!(results.iter().any(|r| r.label.contains("config")));
     }
@@ -1280,32 +1280,32 @@ mod tests {
         assert_eq!(p.sort_mode, SortMode::Alpha);
     }
 
-    // ---- deep_search -------------------------------------------------------
+    // ---- extended_search ---------------------------------------------------
 
     #[test]
-    fn test_deep_search_finds_nested_files() {
+    fn test_extended_search_finds_nested_files() {
         let (mut p, dir) = make_provider();
         let sub = dir.path().join("sub");
         std::fs::create_dir(&sub).unwrap();
         std::fs::write(sub.join("deep.txt"), b"").unwrap();
         p.set_current_path(dir.path().to_str().unwrap());
-        let results = p.collect_deep_search_items().unwrap_or_default();
+        let results = p.collect_extended_search_items().unwrap_or_default();
         assert!(results.iter().any(|r| r.label.contains("deep.txt")));
     }
 
     #[test]
-    fn test_deep_search_dir_prefix() {
+    fn test_extended_search_dir_prefix() {
         let (p, dir) = make_provider();
         std::fs::create_dir(dir.path().join("mydir")).unwrap();
-        let results = p.collect_deep_search_items().unwrap_or_default();
+        let results = p.collect_extended_search_items().unwrap_or_default();
         assert!(results.iter().any(|r| r.label.starts_with("+ ")));
     }
 
     #[test]
-    fn test_deep_search_file_prefix() {
+    fn test_extended_search_file_prefix() {
         let (p, dir) = make_provider();
         std::fs::write(dir.path().join("myfile.txt"), b"").unwrap();
-        let results = p.collect_deep_search_items().unwrap_or_default();
+        let results = p.collect_extended_search_items().unwrap_or_default();
         assert!(results.iter().any(|r| r.label.starts_with("- ")));
     }
 
@@ -1368,20 +1368,20 @@ mod tests {
     }
 
     #[test]
-    fn test_deep_search_empty_dir() {
+    fn test_extended_search_empty_dir() {
         let (mut p, dir) = make_provider();
         p.set_current_path(dir.path().to_str().unwrap());
-        let results = p.collect_deep_search_items().unwrap_or_default();
+        let results = p.collect_extended_search_items().unwrap_or_default();
         assert_eq!(results.len(), 0);
     }
 
     #[test]
-    fn test_deep_search_flat_files() {
+    fn test_extended_search_flat_files() {
         let (p, dir) = make_provider();
         std::fs::write(dir.path().join("alpha.txt"), b"").unwrap();
         std::fs::write(dir.path().join("beta.txt"), b"").unwrap();
         std::fs::write(dir.path().join("gamma.txt"), b"").unwrap();
-        let results = p.collect_deep_search_items().unwrap_or_default();
+        let results = p.collect_extended_search_items().unwrap_or_default();
         assert_eq!(results.len(), 3);
         for item in &results {
             assert!(
@@ -1412,14 +1412,14 @@ mod tests {
 
     #[test]
     #[cfg(unix)]
-    fn test_deep_search_symlink_not_followed() {
+    fn test_extended_search_symlink_not_followed() {
         let (p, dir) = make_provider();
         // Create a symlink pointing back to the root dir (circular)
         let link_path = dir.path().join("loop");
         std::os::unix::fs::symlink(dir.path(), &link_path).unwrap();
         // Also create a regular file
         std::fs::write(dir.path().join("regular.txt"), b"").unwrap();
-        let results = p.collect_deep_search_items().unwrap_or_default();
+        let results = p.collect_extended_search_items().unwrap_or_default();
         // Should find: loop (as non-dir via symlink_metadata) + regular.txt = 2
         assert_eq!(results.len(), 2, "symlink should not be traversed as dir");
         let loop_item = results.iter().find(|r| r.label.contains("loop"));

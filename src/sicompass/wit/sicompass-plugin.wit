@@ -73,7 +73,7 @@ interface types {
     data: string,
   }
 
-  /// A result item from deep search (Ctrl+F).
+  /// A result item from extended search (Ctrl+F).
   record search-result {
     /// Display label with prefix, e.g. `"- report.pdf"`, `"+ docs"`.
     label: string,
@@ -400,10 +400,10 @@ interface provider {
   /// Re-apply a previously emitted entry.
   redo: func(entry: provider-op) -> result<_, string>;
 
-  // ---- Deep search -------------------------------------------------------
+  // ---- Extended search ---------------------------------------------------
 
   /// All searchable items for Ctrl+F. Absent falls back to FFON tree traversal.
-  collect-deep-search-items: func() -> option<list<search-result>>;
+  collect-extended-search-items: func() -> option<list<search-result>>;
 
   // ---- Persistent config -------------------------------------------------
   //

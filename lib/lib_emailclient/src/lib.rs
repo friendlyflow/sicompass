@@ -3353,7 +3353,9 @@ impl Provider for EmailClientProvider {
         }
     }
 
-    fn collect_deep_search_items(&self) -> Option<Vec<sicompass_sdk::provider::SearchResultItem>> {
+    fn collect_extended_search_items(
+        &self,
+    ) -> Option<Vec<sicompass_sdk::provider::SearchResultItem>> {
         use sicompass_sdk::provider::SearchResultItem;
         let mut results = Vec::new();
         for h in &self.message_cache {
@@ -7453,10 +7455,10 @@ mod tests {
         );
     }
 
-    // ---- Tier 2: search (collect_deep_search_items) ----
+    // ---- Tier 2: search (collect_extended_search_items) ----
 
     #[test]
-    fn test_collect_deep_search_items_returns_cached_envelopes() {
+    fn test_collect_extended_search_items_returns_cached_envelopes() {
         let msgs = vec![
             make_header(1, "alice@example.com", "Hello World"),
             make_header(2, "bob@example.com", "Rust Newsletter"),
@@ -7465,7 +7467,7 @@ mod tests {
         let mut p = EmailClientProvider::new().with_imap(Box::new(imap));
         p.push_path("INBOX");
         p.fetch(); // populates message_cache
-        let results = p.collect_deep_search_items().unwrap_or_default();
+        let results = p.collect_extended_search_items().unwrap_or_default();
         assert!(
             results
                 .iter()
@@ -7483,10 +7485,10 @@ mod tests {
     }
 
     #[test]
-    fn test_collect_deep_search_items_empty_before_fetch() {
+    fn test_collect_extended_search_items_empty_before_fetch() {
         let p = EmailClientProvider::new();
         // No fetch yet — message_cache is empty so results should be empty.
-        let results = p.collect_deep_search_items().unwrap_or_default();
+        let results = p.collect_extended_search_items().unwrap_or_default();
         assert!(
             results.is_empty(),
             "search must return nothing before any message is cached"

@@ -31,7 +31,7 @@
 //! ## Why `RefCell`
 //!
 //! Five trait methods (`commands`, `command_label`, `command_list_items`,
-//! `collect_deep_search_items`, `save_config`) take `&self`, but a guest call needs
+//! `collect_extended_search_items`, `save_config`) take `&self`, but a guest call needs
 //! `&mut Store`. Caching their answers would trade a borrow problem for a staleness
 //! bug, so the mutable guts live behind a `RefCell` instead.
 //!
@@ -746,11 +746,11 @@ impl Provider for WasmProvider {
         }
     }
 
-    // ---- Deep search -------------------------------------------------------
+    // ---- Extended search ---------------------------------------------------
 
-    fn collect_deep_search_items(&self) -> Option<Vec<SearchResultItem>> {
-        self.call("collect-deep-search-items", |g, s| {
-            g.call_collect_deep_search_items(s)
+    fn collect_extended_search_items(&self) -> Option<Vec<SearchResultItem>> {
+        self.call("collect-extended-search-items", |g, s| {
+            g.call_collect_extended_search_items(s)
         })
         .ok()
         .flatten()
