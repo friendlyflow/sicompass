@@ -55,6 +55,11 @@ every command with `cd PROJECT_ROOT &&` (the actual absolute project root).**
    usually already points at the target version. If it lags, bump it to match
    in the same edit.
 
+   If the version it needs is not on crates.io yet, stop: run `/release-sdk`
+   first. That skill publishes the crate from the sibling
+   `../sicompass-plugin-sdk` checkout, which is a step this one does not do and
+   cannot do for you.
+
 4. **Bump `Cargo.toml`.** Set `[workspace.package] version`, and the
    `sicompass-sdk` pin if it lagged. `flake.nix` reads the version from there,
    so there is nothing else to bump.
