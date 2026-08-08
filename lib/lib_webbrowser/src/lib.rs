@@ -1614,8 +1614,20 @@ fn offscreen_chrome_env() -> [(&'static str, &'static str); 1] {
 #[cfg(target_os = "linux")]
 fn xvfb_wrapper_script(chrome: &str, helper: XvfbHelper) -> String {
     match helper {
+        // The trailing `1>&2` is what makes this work at all on Debian and its
+        // derivatives. Their xvfb-run runs the command as
+        // `DISPLAY=… "$@" 2>&1`, folding Chrome's stderr into stdout, and
+        // chromiumoxide launches Chrome with stdout on /dev/null and only
+        // stderr on a pipe, which it scans for "DevTools listening on ws://…".
+        // Without the redirect that line lands in /dev/null, chromiumoxide
+        // waits out its full launch timeout and reports
+        // `LaunchTimeout(BrowserStderr(""))` while a perfectly healthy Chrome
+        // sits on the virtual display. Sending our stdout to stderr puts the
+        // line back where chromiumoxide is listening. Nixpkgs' xvfb-run has no
+        // `2>&1`, so there the redirect only moves Chrome's (empty) stdout, and
+        // this is why the bug never showed up in the dev shell.
         XvfbHelper::Run => format!(
-            "#!/bin/sh\nunset WAYLAND_DISPLAY\nexec xvfb-run -a {chrome} --ozone-platform=x11 \"$@\"\n"
+            "#!/bin/sh\nunset WAYLAND_DISPLAY\nexec xvfb-run -a {chrome} --ozone-platform=x11 \"$@\" 1>&2\n"
         ),
         // Emulate xvfb-run: pick a free display number, start Xvfb on it, run
         // Chrome (backgrounded so we keep the shell alive), and kill both Xvfb
@@ -2869,6 +2881,14 @@ mod tests {
         // Chrome must not pick the compositor over the virtual X11 display.
         assert!(script.contains("unset WAYLAND_DISPLAY"));
         assert!(script.contains("--ozone-platform=x11"));
+        // Debian's xvfb-run runs the command as `"$@" 2>&1`, so without this
+        // redirect Chrome's "DevTools listening on ws://…" line goes to the
+        // stdout chromiumoxide sends to /dev/null, and every page load on a
+        // .deb/.rpm machine dies with LaunchTimeout(BrowserStderr("")).
+        assert!(
+            script.trim_end().ends_with("1>&2"),
+            "xvfb-run's stdout must be folded into stderr, where chromiumoxide reads: {script}"
+        );
     }
 
     #[test]
