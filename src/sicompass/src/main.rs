@@ -29,22 +29,10 @@ fn main() {
     // Must happen before load_programs() so create_provider_by_name() resolves them.
     sicompass_builtins::register_all();
 
-    // Point the process at its own resources.
-    //
-    // `assets/` is reached through `sicompass_sdk::platform::resolve_repo_asset`,
-    // whose last candidate is the working directory. The SDK is a published
-    // crate, so it cannot be taught about .app/.deb/AppImage layouts without a
-    // release. Setting the working directory to the resolved resource root
-    // makes that last candidate correct on every platform, which is what lets
-    // every package format ship without a wrapper script that `cd`s first.
-    //
-    // Nothing in the workspace depends on the inherited working directory:
-    // subprocess spawners set `current_dir` explicitly and the file browser
-    // starts from the home directory.
-    //
-    // TODO: drop this once `resolve_repo_asset` honours SICOMPASS_RESOURCE_DIR,
-    // and have callers use `resources::resource_root()` directly.
-    let _ = std::env::set_current_dir(sicompass::resources::resource_root());
+    // No working-directory fixup here, and no resource-root probe: shaders, fonts
+    // and every provider asset are compiled into the binary, so there is no runtime
+    // resource tree to find. `register_all()` above is what publishes the assets,
+    // which is why it comes first.
 
     // Set up dual logging: always write debug to a log file, optionally stderr via RUST_LOG.
     let log_dir =

@@ -53,7 +53,7 @@ use wasmtime::Store;
 use wasmtime::component::Component;
 
 use super::exports::sicompass::plugin::provider::Guest;
-use super::{HostState, Plugin, limits, wit_types};
+use super::{HostState, Plugin, confine_in, limits, wit_types};
 
 /// The parts that a guest call mutates.
 struct Inner {
@@ -80,13 +80,15 @@ pub struct WasmProvider {
     /// trait's documented two-call semantics.
     polled: wit_types::PollResult,
 
-    /// Confined absolute path for a `DashboardKind::Image` plugin, resolved once at
-    /// construction.
+    /// What a `DashboardKind::Image` plugin named for its image, checked once at
+    /// construction: either an `asset:<plugin-name>/<file>` URI the host resolves
+    /// through the SDK registry, or (for plugins built against 0.3.x) a confined
+    /// absolute path.
     ///
-    /// The trait returns a borrow, which a guest call cannot produce. Resolving it
-    /// here also means the confinement check — no absolute paths, no `..`, always
-    /// inside the plugin's own directory — happens once, before the host ever opens
-    /// the file, rather than on every frame.
+    /// The trait returns a borrow, which a guest call cannot produce. Doing it here
+    /// also means the check — this plugin's own namespace only, no absolute paths, no
+    /// `..` — happens once, before the host ever reads anything, rather than on every
+    /// frame.
     dashboard_image: Option<String>,
 }
 
@@ -163,10 +165,17 @@ impl WasmProvider {
         me.call("init", |g, s| g.call_init(s))?;
         let descriptor = me.call("describe", |g, s| g.call_describe(s))?;
 
-        // Resolve the static image path once, and only for a plugin that says it
-        // has one.
+        // Publish this plugin's `assets/` directory under its manifest name, so
+        // `asset:<plugin-name>/<file>` in an `<image>`/`<link>` tag or in
+        // `dashboard-image-path` resolves. Done here rather than at the call site
+        // because every instantiation path (first load and hot reload alike) goes
+        // through this function, and because it has to happen *before* the dashboard
+        // image is resolved below.
+        super::register_plugin_assets(plugin_name, plugin_dir);
+
+        // Resolve the static image once, and only for a plugin that says it has one.
         let dashboard_image = if descriptor.dashboard_kind == wit_types::DashboardKind::Image {
-            me.resolve_dashboard_image(plugin_dir)
+            me.resolve_dashboard_image(plugin_name, plugin_dir)
         } else {
             None
         };
@@ -178,13 +187,17 @@ impl WasmProvider {
         })
     }
 
-    /// Ask the guest for its dashboard image and confine the answer.
+    /// Ask the guest for its dashboard image and check the answer.
     ///
-    /// A sandboxed guest has no business naming a host path, so anything absolute or
-    /// containing `..` is refused rather than normalized — the *host* is the one that
-    /// opens this file, and without the check a plugin could point it at any file the
+    /// A sandboxed guest has no business naming a host path or another plugin's data,
+    /// so an `asset:` URI outside its own namespace, anything absolute, and anything
+    /// containing `..` are all refused rather than normalized — the *host* is the one
+    /// that reads this, and without the check a plugin could point it at any file the
     /// user can read.
-    fn resolve_dashboard_image(&self, plugin_dir: &Path) -> Option<String> {
+    ///
+    /// `plugin_name` is the **manifest** name, not `descriptor.name`: the namespace is
+    /// the boundary, so the guest's self-report does not get a say in it.
+    fn resolve_dashboard_image(&self, plugin_name: &str, plugin_dir: &Path) -> Option<String> {
         let rel = self
             .call("dashboard-image-path", |g, s| {
                 g.call_dashboard_image_path(s)
@@ -192,12 +205,26 @@ impl WasmProvider {
             .ok()
             .flatten()?;
 
-        match HostState::new("", "", plugin_dir, Vec::new()).confine(&rel) {
+        // An `asset:` URI is passed through untouched: the image renderer resolves it
+        // via the resolver `register_plugin_assets` installed, which is confined to
+        // this plugin's own `assets/` directory.
+        match sicompass_sdk::assets::parse_uri(&rel) {
+            Some((provider, _)) if provider == plugin_name => return Some(rel),
+            Some((provider, _)) => {
+                self.note_error(format!(
+                    "plugin `{plugin_name}` asked for `{provider}`'s asset `{rel}`"
+                ));
+                return None;
+            }
+            // Not a URI at all — fall through to the legacy relative-path form.
+            None => {}
+        }
+
+        match confine_in(plugin_dir, &rel) {
             Ok(path) => Some(path.to_string_lossy().into_owned()),
             Err(e) => {
                 self.note_error(format!(
-                    "plugin `{}` asked for dashboard image `{rel}`: {e}",
-                    self.descriptor.name
+                    "plugin `{plugin_name}` asked for dashboard image `{rel}`: {e}"
                 ));
                 None
             }

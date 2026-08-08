@@ -3,10 +3,16 @@
 //! Mirrors `image.c` / `image.h` from the C source.
 //!
 //! Each call to [`ImageRenderer::prepare_image`] looks up (or loads) a texture
-//! by file path and records a draw quad.  Up to [`MAX_CACHED_IMAGES`] textures
+//! by name and records a draw quad.  Up to [`MAX_CACHED_IMAGES`] textures
 //! are kept in an LRU cache; the least-recently-used entry is evicted when the
 //! cache is full.  All quads are batched and drawn in a single `draw_images`
 //! call at the end of each frame.
+//!
+//! A name is either a filesystem path or an `asset:<provider>/<file>` URI naming a
+//! provider-scoped asset — compiled into the binary for a built-in, or a file in a
+//! plugin's own install directory. See [`decode_image_source`] and
+//! `sicompass_sdk::assets`. Either way the cache is keyed by the string, so one
+//! name is one texture.
 
 use crate::app_state::SiError;
 use crate::render;
@@ -551,12 +557,10 @@ impl ImageRenderer {
         find_evict_slot_in(&self.cache)
     }
 
-    /// Decode an image file and upload it to a new `VkImage`.
+    /// Decode an image and upload it to a new `VkImage`.
     unsafe fn load_texture(&self, path: &str) -> Result<CachedTexture, SiError> {
         unsafe {
-            // Decode via the `image` crate (supports PNG, JPEG, WebP, …)
-            let dyn_img =
-                img_crate::open(path).map_err(|e| SiError::Other(format!("image decode: {e}")))?;
+            let dyn_img = decode_image_source(path)?;
             let (width, height) = dyn_img.dimensions();
             let rgba = dyn_img.into_rgba8();
             let pixel_bytes: &[u8] = &rgba;
@@ -667,6 +671,24 @@ impl ImageRenderer {
 // Standalone helpers (pub(crate) for testability)
 // ---------------------------------------------------------------------------
 
+/// Decode an image named either by an `asset:` URI or by a filesystem path.
+///
+/// Split out of `load_texture` so it needs no Vulkan device and can be tested.
+///
+/// `load_from_memory` sniffs the format from the magic bytes, while `open` tries
+/// the extension first and falls back to the same sniffing. For PNG, JPEG and WebP
+/// — everything shipped or plausibly shipped as an asset — the magic is
+/// unambiguous, so the two agree.
+pub(crate) fn decode_image_source(path: &str) -> Result<img_crate::DynamicImage, SiError> {
+    if sicompass_sdk::assets::is_uri(path) {
+        let bytes = sicompass_sdk::assets::resolve(path)
+            .ok_or_else(|| SiError::Other(format!("no such asset: {path}")))?;
+        return img_crate::load_from_memory(&bytes)
+            .map_err(|e| SiError::Other(format!("image decode: {e}")));
+    }
+    img_crate::open(path).map_err(|e| SiError::Other(format!("image decode: {e}")))
+}
+
 /// Choose the cache slot to evict: prefer empty slots, then pick the LRU.
 pub(crate) fn find_evict_slot_in(cache: &[Option<CachedTexture>]) -> usize {
     if let Some(i) = cache.iter().position(|s| s.is_none()) {
@@ -714,6 +736,55 @@ mod tests {
         let cache: Vec<Option<CachedTexture>> = (0..MAX_CACHED_IMAGES).map(|_| None).collect();
         let slot = find_evict_slot_in(&cache);
         assert_eq!(slot, 0);
+    }
+
+    // ---- decode_image_source ------------------------------------------------
+    //
+    // No Vulkan device is needed for these, which is the reason the decode was
+    // split out of `load_texture`.
+
+    /// A 1x1 red PNG, encoded here rather than committed as a fixture.
+    fn tiny_png() -> Vec<u8> {
+        let img = img_crate::DynamicImage::new_rgba8(1, 1);
+        let mut out = std::io::Cursor::new(Vec::new());
+        img.write_to(&mut out, img_crate::ImageFormat::Png).unwrap();
+        out.into_inner()
+    }
+
+    #[test]
+    fn a_registered_asset_decodes_from_memory() {
+        // Through a resolver rather than `register_bytes`, so this covers the
+        // plugin-shaped path too (a closure can own its bytes; `&'static` cannot be
+        // conjured in a test without leaking).
+        sicompass_sdk::assets::register_resolver(
+            "__image_test",
+            Box::new(|name| (name == "tiny.png").then(tiny_png)),
+        );
+        let img = decode_image_source("asset:__image_test/tiny.png").expect("should decode");
+        assert_eq!((img.width(), img.height()), (1, 1));
+    }
+
+    #[test]
+    fn an_unregistered_asset_uri_is_an_error_not_a_panic() {
+        // `find_or_load` turns an `Err` into "no draw", the same outcome a missing
+        // file has always had.
+        let err = decode_image_source("asset:__image_test_missing/nope.png")
+            .expect_err("must not resolve");
+        assert!(format!("{err:?}").contains("no such asset"), "{err:?}");
+    }
+
+    #[test]
+    fn a_plain_path_still_goes_to_the_filesystem() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("x.png");
+        std::fs::write(&path, tiny_png()).unwrap();
+        let img = decode_image_source(path.to_str().unwrap()).expect("should decode");
+        assert_eq!((img.width(), img.height()), (1, 1));
+    }
+
+    #[test]
+    fn a_missing_plain_path_is_still_an_error() {
+        assert!(decode_image_source("/nonexistent/definitely-not-here.png").is_err());
     }
 
     fn dummy_cached(idx: usize, last_used: u64) -> CachedTexture {

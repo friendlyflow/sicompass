@@ -81,18 +81,11 @@ icons = [
 path = "sicompass"
 main = true
 
-# Shaders and fonts are compiled into the binary, so `assets/` is the only
-# runtime tree left. cargo-packager places it at Contents/Resources/assets in
-# the .app and /usr/lib/sicompass/assets in the .deb and AppImage, both of
-# which `resources::resource_root()` already probes for.
-[[package.metadata.packager.resources]]
-src = "../../assets/tutorial"
-target = "assets/tutorial"
-
-[[package.metadata.packager.resources]]
-src = "../../assets/sales-demo"
-target = "assets/sales-demo"
-
+# Shaders, fonts and every provider asset are compiled into the binary, so there
+# is no runtime tree to place here. The tutorial's and sales demo's files live in
+# `lib/lib_tutorial/assets/` and `lib/lib_sales_demo/assets/`, where those crates
+# `include_bytes!` them; nothing reads them from disk at runtime, on any platform.
+#
 # The fonts are embedded in the binary, so their license texts have to travel
 # with it. This is a real obligation, not bookkeeping: cargo-about only sees
 # Rust crates and will never list them.
@@ -236,8 +229,8 @@ update-desktop-database -q /usr/share/applications >/dev/null 2>&1 || :
 
 assets = [
     { source = "target/release/sicompass", dest = "/usr/bin/sicompass", mode = "755" },
-    { source = "assets/tutorial/*", dest = "/usr/lib/sicompass/assets/tutorial/", mode = "644" },
-    { source = "assets/sales-demo/*", dest = "/usr/lib/sicompass/assets/sales-demo/", mode = "644" },
+    # No provider assets here: they are compiled into the binary, so the rpm ships
+    # the executable, the desktop entry, the icons and the license texts only.
     { source = "assets/sicompass.desktop", dest = "/usr/share/applications/sicompass.desktop", mode = "644" },
     { source = "assets/icons/sicompass.svg", dest = "/usr/share/icons/hicolor/scalable/apps/sicompass.svg", mode = "644" },
     { source = "assets/icons/16x16.png", dest = "/usr/share/icons/hicolor/16x16/apps/sicompass.png", mode = "644" },

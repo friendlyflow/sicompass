@@ -65,6 +65,7 @@ anything.
 | `get-setting` | **Only** this plugin's own settings section |
 | `now-millis` | Guests have no `wasi:clocks` |
 | `translate` | Goes through the host's Fluent bundles |
+| `read-asset` | **Only** files under `assets/` in this plugin's own install directory |
 
 **`interface net`** — linked **only** when `plugin.json` declares a non-empty
 `allowedHosts`:
@@ -82,6 +83,14 @@ not have been expressed at all.
 `get-setting` is scoped to the plugin's own section on purpose. Other providers'
 sections hold API keys, IMAP passwords and licence certificates; a sandbox that
 hands those over on request is not a sandbox.
+
+`read-asset` is in `host` rather than behind a gate like `net`, even though it is the
+one function here that reads a disk. The only reachable bytes are files under
+`assets/` in the plugin's own install directory: files that plugin shipped and the
+user installed. There is no user-visible authority in that for `plugin.json` to
+declare, and gating it would have meant making `host` itself conditional, which is
+exactly what makes `net`'s gate legible. The import still appears in a built
+component's import list, so the audit below still sees that a plugin uses it.
 
 ## Guests target `wasm32-unknown-unknown`
 
@@ -221,10 +230,52 @@ Plugins are discovered **at startup**, so a newly installed one needs a restart.
 
 ## Runtime assets
 
-Loaded by path, not compiled in, and they must live under the top-level `assets/`
-tree — that is the only directory the release archives ship. cargo-dist copies
-`include` paths to the archive root by basename, so per-crate `assets/` directories
-would collide.
+Every provider owns an `assets/` directory, and names what is in it the same way:
+
+    asset:<provider>/<file>
+
+**A plugin** ships its files in `assets/` beside its `plugin.json`. Two ways to reach
+them, both confined to that directory:
+
+- `host::read_asset("equipment.json")` — the guest gets the bytes.
+- `asset:<plugin-name>/<file>` in an `<image>` or `<link>` tag, or returned from
+  `dashboard-image-path` — the *host* resolves and reads it. Preferred for anything
+  the host renders: no copy through guest memory, no decoding in the guest.
+
+`<plugin-name>` is the **manifest** `name`, not the guest's self-reported
+`describe().name`: the namespace is the boundary, so the untrusted side does not
+choose it. `register_plugin_assets` installs the resolver at instantiation time, and
+`read_confined_asset` enforces the boundary for both routes — refusing absolute
+paths, `..`, anything that resolves outside `assets/` after symlinks (including via a
+symlinked intermediate directory), anything that is not a regular file, and anything
+over 16 MiB. A refusal and a missing file are indistinguishable to the guest, so this
+cannot be turned into a probe for what exists on the host.
+
+This also closed a gap. A guest's `<image>` value used to go straight to the image
+decoder with no confinement and no rebasing, so a plugin could have the host open any
+file the user could read and learn its dimensions through `texture_size`.
+
+**A built-in provider** keeps its files in its own crate — `lib/lib_tutorial/assets/`,
+`lib/lib_sales_demo/assets/` — `include_bytes!`s them, and publishes them in
+`register()`:
+
+```rust
+const TEXTURE: &[u8] = include_bytes!("../assets/texture.jpg");
+sicompass_sdk::assets::register_bytes("tutorial", "texture.jpg", TEXTURE);
+```
+
+They are compiled into the binary, like the shaders and fonts, so no packaging list
+has to know about them. `sicompass --check` resolves every registered URI and reports
+the byte count, which is how a provider naming an asset nobody registered gets
+noticed. Plugin assets come from a resolver closure and so cannot be enumerated
+there.
+
+Known limitation: a guest could put another *installed* plugin's URI in its own
+`<image>` tag, because the tag is a bare string with no provider context at the point
+the host renders it. What that reaches is a file the user installed and can open in a
+file manager, not a secret. `read-asset` has no such hole — it is scoped to the
+calling plugin — and `dashboard-image-path` is checked against the manifest name,
+because there the host knows who is asking.
 
 ## Testing
 
@@ -238,10 +289,15 @@ cargo test -p sicompass --no-default-features --features no-jit-wasm
 `tests/fixtures/wasm/hello.wasm` and `net.wasm` are built from the SDK's
 `examples/`. They are committed rather than built here so `cargo test` does not need
 the wasm toolchain; the regeneration commands are in `tests/wasm_plugin.rs`.
+`tests/fixtures/wasm/` doubles as a plugin directory, so
+`tests/fixtures/wasm/assets/hello-asset.txt` is the hello fixture's own asset — the
+guest reads it through `read-asset` and reports the byte count, which is what the
+end-to-end asset tests check.
 
 The security tests are the point: fuel exhaustion, memory caps, guest panics,
-instance isolation, allowlist enforcement, robots.txt, redirect re-checking, and a
-component refused for reaching past its manifest.
+instance isolation, allowlist enforcement, robots.txt, redirect re-checking, asset
+confinement against a real directory, and a component refused for reaching past its
+manifest.
 
 ## Known limits
 

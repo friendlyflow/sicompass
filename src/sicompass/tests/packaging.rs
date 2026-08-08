@@ -218,3 +218,95 @@ fn rpm_scriptlets_refresh_the_icon_cache() {
         }
     }
 }
+
+/// Nothing may still claim to ship the two asset trees that moved into the crates
+/// that own them.
+///
+/// A stale glob in `generate-rpm`, a stale `src` in the cargo-packager resources or
+/// a stale `<File Source=…>` in the MSI all fail at *package build* time — that is,
+/// during a release, on a runner, after the tag is pushed. This catches it in
+/// `cargo test` instead.
+#[test]
+fn no_packaging_list_still_references_the_moved_asset_trees() {
+    for file in [
+        "dist-workspace.toml",
+        "src/sicompass/Cargo.toml",
+        "src/sicompass/wix/main.wxs",
+        "flake.nix",
+    ] {
+        let contents = read(file);
+        for (n, line) in contents.lines().enumerate() {
+            // Prose is allowed to explain where they went; a directive is not. Both
+            // path separators, since main.wxs uses backslashes.
+            let names_a_tree = line.contains("assets/tutorial")
+                || line.contains("assets/sales-demo")
+                || line.contains(r"assets\tutorial")
+                || line.contains(r"assets\sales-demo");
+            let is_comment = {
+                let t = line.trim_start();
+                t.starts_with('#') || t.starts_with("<!--") || t.starts_with("//")
+            };
+            assert!(
+                !names_a_tree || is_comment,
+                "{file}:{} still ships a moved asset tree: {line:?}",
+                n + 1
+            );
+        }
+    }
+}
+
+/// The counterpart: removing the asset entries must not have taken the icons or the
+/// desktop entry with them, since those really are installed from the checkout.
+#[test]
+fn the_desktop_entry_and_icons_are_still_shipped() {
+    let manifest = read("src/sicompass/Cargo.toml");
+    for source in ["assets/sicompass.desktop", "assets/icons/sicompass.svg"] {
+        assert!(
+            manifest.contains(&format!("source = \"{source}\"")),
+            "the .rpm no longer installs {source}"
+        );
+    }
+    assert!(
+        read("flake.nix").contains("assets/icons/sicompass.svg"),
+        "the Nix build no longer installs the hicolor icon"
+    );
+}
+
+/// Everything left under the top-level `assets/` must be a *build-time* input.
+///
+/// This is the invariant the move established: a file the app reads at runtime
+/// belongs in its own crate's `assets/` directory, embedded with `include_bytes!`
+/// and published with `sicompass_sdk::assets::register_bytes` — not here, where
+/// shipping it means editing four hand-maintained lists that nothing verifies.
+#[test]
+fn the_top_level_asset_tree_holds_only_packaging_inputs() {
+    fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
+        for entry in std::fs::read_dir(dir)
+            .expect("assets/ should exist")
+            .flatten()
+        {
+            let path = entry.path();
+            if path.is_dir() {
+                walk(&path, out);
+            } else {
+                out.push(path);
+            }
+        }
+    }
+
+    let root = workspace_root().join("assets");
+    let mut files = Vec::new();
+    walk(&root, &mut files);
+    assert!(!files.is_empty(), "assets/ is empty — did the icons move?");
+
+    for path in files {
+        let rel = path.strip_prefix(&root).unwrap();
+        let ok = rel.starts_with("icons") || rel == Path::new("sicompass.desktop");
+        assert!(
+            ok,
+            "assets/{} is neither an icon nor the desktop entry. If the app reads it \
+             at runtime, embed it in the crate that owns it instead.",
+            rel.display()
+        );
+    }
+}

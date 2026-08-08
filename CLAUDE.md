@@ -85,15 +85,28 @@ derivation, and on every contributor's machine.
 
 ## Architecture: standalone binary
 
-Shaders and fonts are compiled into the executable
-(`src/sicompass/src/shaders.rs`, `fonts.rs`), and `assets/` is found relative
-to the executable by `src/sicompass/src/resources.rs`. That is what makes one
-binary work from an archive, a `.deb`, an `.rpm`, an AppImage, a macOS `.app`,
-the Windows MSI and Nix without a wrapper script.
+Shaders, fonts and every provider asset are compiled into the executable
+(`src/sicompass/src/shaders.rs`, `fonts.rs`, and `include_bytes!` in each
+provider crate). There is no runtime resource tree and nothing is located
+relative to the executable, which is what makes one binary work from an archive,
+a `.deb`, an `.rpm`, an AppImage, a macOS `.app`, the Windows MSI and Nix
+without a wrapper script. The top-level `assets/` holds packaging inputs only
+(icons, the `.desktop` entry), and `src/sicompass/tests/packaging.rs` enforces
+that.
 
-If you add a file the app reads at runtime, adding it to `include` in
-`dist-workspace.toml` is **not** enough: that reaches the archives only, not
-the MSI or the native packages. See [docs/releasing.md](docs/releasing.md).
+**A file the app reads at runtime belongs in the crate that owns it**, not in
+`assets/`: put it in `lib/lib_<x>/assets/`, `include_bytes!` it, and publish it
+in `register()` with `sicompass_sdk::assets::register_bytes("<provider>", "<file>", BYTES)`.
+Refer to it as `asset:<provider>/<file>` wherever a path used to go — an
+`<image>`/`<link>` tag, `dashboard_image_path()` — and the host resolves it. A
+WASM plugin does the same, with its files in `<plugin_dir>/assets/`; see
+[docs/wasm-plugins.md](docs/wasm-plugins.md).
+
+Shipping a loose file instead means editing **four** hand-maintained lists that
+nothing verifies (`include` in `dist-workspace.toml` reaches the archives only,
+plus the cargo-packager `resources`, the `generate-rpm` assets and
+`wix/main.wxs`). That is what made every release up to 0.1.8 unable to start.
+See [docs/releasing.md](docs/releasing.md).
 
 ## Releasing
 

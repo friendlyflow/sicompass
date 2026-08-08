@@ -41,16 +41,16 @@ targets = [
 # declare all of that; the shell installer silently delivered a binary that
 # might not start. On macOS the .dmg bundles MoltenVK and the shell installer
 # did not. On Windows the MSI is strictly better than the .ps1: it ships the
-# Start Menu entry and the `assets/` tree, and it does not need the
-# execution-policy wrapper the .ps1 one-liner did.
+# Start Menu entry, and it does not need the execution-policy wrapper the .ps1
+# one-liner did.
 #
 # The portable archives remain for anyone who wants to unpack a binary by hand.
 installers = ["msi"]
 
-# `src/sicompass/wix/main.wxs` is hand-edited: it installs the `assets/` tree,
-# adds a Start Menu shortcut, and sets the product icon, none of which dist's
-# template does. Without this, `dist plan` reports the file as out of date and
-# `dist init` would silently revert all three.
+# `src/sicompass/wix/main.wxs` is hand-edited: it adds a Start Menu shortcut and
+# sets the product icon, neither of which dist's template does. Without this,
+# `dist plan` reports the file as out of date and `dist init` would silently
+# revert both.
 #
 # The cost is that dist will never refresh that file, so when upgrading
 # cargo-dist, diff its new template against ours by hand.
@@ -71,21 +71,25 @@ features = ["bundled-sdl3"]
 
 # What travels next to the binary in the archives.
 #
-# Shaders and fonts are NOT here: they are compiled into the binary. That is
-# deliberate and load-bearing, because `include` populates the archives only.
-# The MSI copies binaries and the files listed in `wix/main.wxs` and nothing
-# else, so anything the app needs at startup has to be embedded, or added
-# explicitly to `wix/main.wxs` and to the cargo-packager `resources` list.
+# Only license texts. Shaders, fonts and every provider asset are compiled into
+# the binary, which is deliberate and load-bearing, because `include` populates
+# the archives *only*. The MSI copies binaries and the files listed in
+# `wix/main.wxs` and nothing else, so anything the app reads at startup has to be
+# embedded, or added explicitly to `wix/main.wxs`, to the cargo-packager
+# `resources` list, and to the `generate-rpm` asset list. Those three are hand
+# maintained and nothing checks them, which is how the archives once shipped with
+# no assets at all for months.
 #
-# `assets/` is the exception: it is read from disk at runtime, and
-# `resources::resource_root()` probes for it beside the executable, which is
-# where `include` puts it.
+# So there is no longer a runtime tree here. `assets/tutorial` and
+# `assets/sales-demo` moved into `lib/lib_tutorial/assets/` and
+# `lib/lib_sales_demo/assets/`, where the owning crate `include_bytes!`s them.
+# What is left in the top-level `assets/` (icons, the .desktop file) is consumed
+# at package-build time from the checkout, never from the archive.
 #
 # The font license texts ship because the fonts themselves are inside the
 # binary. cargo-about cannot know about them, since they are not Rust crates.
 include = [
     "THIRD-PARTY-LICENSES.html",
-    "assets",
     "fonts/LICENSE-DejaVu.txt",
     "fonts/LICENSE-NotoColorEmoji.txt",
 ]

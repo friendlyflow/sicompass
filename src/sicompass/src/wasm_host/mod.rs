@@ -106,31 +106,138 @@ impl HostState {
     /// containing `..` is rejected rather than normalized. Used for
     /// `dashboard-image-path`, where the *host* opens the file the guest names.
     pub fn confine(&self, rel: &str) -> Result<PathBuf, String> {
-        let candidate = Path::new(rel);
-        // `is_absolute()` alone is not enough, because it is platform-dependent:
-        // on Windows `/etc/passwd` is *not* absolute (it carries no drive prefix)
-        // and would otherwise fall through. A prefix or root component means the
-        // guest named a host location whichever platform we are on, so check the
-        // components too and report both the same way.
-        let rooted = candidate.components().any(|c| {
-            matches!(
-                c,
-                std::path::Component::Prefix(_) | std::path::Component::RootDir
-            )
-        });
-        if candidate.is_absolute() || rooted {
-            return Err(format!(
-                "`{rel}` is absolute; plugin paths must be relative"
-            ));
-        }
-        if candidate
-            .components()
-            .any(|c| matches!(c, std::path::Component::ParentDir))
-        {
-            return Err(format!("`{rel}` escapes the plugin directory"));
-        }
-        Ok(self.plugin_dir.join(candidate))
+        confine_in(&self.plugin_dir, rel)
     }
+
+    /// This plugin's asset directory: `<plugin_dir>/assets/`. The root the
+    /// `read-asset` import and the plugin's asset resolver both work from.
+    pub fn asset_root(&self) -> PathBuf {
+        self.plugin_dir.join(ASSET_SUBDIR)
+    }
+}
+
+/// Where a plugin's own files live, relative to its install directory.
+pub const ASSET_SUBDIR: &str = "assets";
+
+/// The lexical half of confinement: join `rel` onto `root`, refusing anything that
+/// names a host location or climbs out.
+///
+/// A free function rather than a `HostState` method because the asset resolver
+/// registered for each plugin has a root but no `Store`, and because
+/// `WasmProvider::resolve_dashboard_image` cannot borrow the live `HostState` while
+/// a guest call holds it.
+pub fn confine_in(root: &Path, rel: &str) -> Result<PathBuf, String> {
+    let candidate = Path::new(rel);
+    // `is_absolute()` alone is not enough, because it is platform-dependent:
+    // on Windows `/etc/passwd` is *not* absolute (it carries no drive prefix)
+    // and would otherwise fall through. A prefix or root component means the
+    // guest named a host location whichever platform we are on, so check the
+    // components too and report both the same way.
+    let rooted = candidate.components().any(|c| {
+        matches!(
+            c,
+            std::path::Component::Prefix(_) | std::path::Component::RootDir
+        )
+    });
+    if candidate.is_absolute() || rooted {
+        return Err(format!(
+            "`{rel}` is absolute; plugin paths must be relative"
+        ));
+    }
+    if candidate
+        .components()
+        .any(|c| matches!(c, std::path::Component::ParentDir))
+    {
+        return Err(format!("`{rel}` escapes the plugin directory"));
+    }
+    Ok(root.join(candidate))
+}
+
+/// Largest asset `read-asset` will hand back.
+///
+/// A guest's memory is capped (see [`limits`]), so a bigger file could not be
+/// received anyway; refusing here turns an out-of-memory trap into a `none`.
+pub const MAX_ASSET_BYTES: u64 = 16 * 1024 * 1024;
+
+/// Read `name` from `root`, refusing anything that does not stay inside it.
+///
+/// Two layers, because [`HostState::confine`] is purely lexical and cannot see a
+/// symlink: the lexical check refuses the obvious attempts with a message worth
+/// logging, then canonicalizing both sides and requiring containment closes the
+/// symlink hole — including a symlinked *intermediate* directory, which inspecting
+/// the leaf alone would miss. This is the only host import that reads bytes off a
+/// disk, so `assets/` has to be a real boundary rather than a spelling convention.
+///
+/// Shared by the `read-asset` import and by the asset resolver registered for each
+/// plugin, so both enforce exactly the same rule. `root` is the plugin's `assets/`
+/// directory; taking it as an argument rather than a `HostState` is what lets both
+/// callers reach it, and lets the tests run without a wasmtime `Store`.
+pub fn read_confined_asset(root: &Path, name: &str) -> Option<Vec<u8>> {
+    // Check the guest's string as given. Joining first would be wrong: `assets/`
+    // prefixed onto `/etc/passwd` yields `assets//etc/passwd`, whose components
+    // silently drop the root, turning a refusal into a quiet acceptance.
+    let candidate = match confine_in(root, name) {
+        Ok(p) => p,
+        Err(e) => {
+            tracing::warn!(target: "wasm_plugin", root = %root.display(), "asset `{name}`: {e}");
+            return None;
+        }
+    };
+
+    // `canonicalize` needs the path to exist, so a missing file lands here and is
+    // reported the same way a refused one is. That is deliberate: the guest sees
+    // `none` either way and cannot use this to probe the host filesystem.
+    let (real_root, real) = match (root.canonicalize(), candidate.canonicalize()) {
+        (Ok(r), Ok(c)) => (r, c),
+        _ => {
+            tracing::warn!(target: "wasm_plugin", root = %root.display(),
+                           "asset `{name}` is missing or unreadable");
+            return None;
+        }
+    };
+    if !real.starts_with(&real_root) {
+        tracing::warn!(target: "wasm_plugin", root = %real_root.display(),
+                       "asset `{name}` resolves to {} — outside the asset directory",
+                       real.display());
+        return None;
+    }
+
+    match std::fs::metadata(&real) {
+        Ok(m) if !m.is_file() => {
+            tracing::warn!(target: "wasm_plugin", "asset `{name}` is not a regular file");
+            None
+        }
+        Ok(m) if m.len() > MAX_ASSET_BYTES => {
+            tracing::warn!(target: "wasm_plugin", "asset `{name}` is {} bytes, over the {MAX_ASSET_BYTES} cap",
+                           m.len());
+            None
+        }
+        Ok(_) => std::fs::read(&real).ok(),
+        Err(_) => None,
+    }
+}
+
+/// Make `<plugin_dir>/assets/` reachable as `asset:<plugin-name>/<file>`.
+///
+/// Called once per plugin at load time, before the provider is constructed. This is
+/// what gives a WASM plugin the same asset story a built-in has: same URI shape in
+/// an `<image>` or `<link>` tag, same call site in the host, different byte source.
+///
+/// It also closes a gap. A guest's `<image>` value used to go through no confinement
+/// and no rebasing at all — whatever string it emitted was handed straight to the
+/// image decoder, so a plugin could have the host open any file the user can read
+/// and, via `texture_size`, learn its dimensions. A bare relative path now resolves
+/// against nothing the guest controls, and the URI form cannot leave this directory.
+///
+/// `plugin_name` must be the **manifest** name, never the guest's self-reported
+/// `describe().name`: the namespace is a capability boundary, so the untrusted side
+/// does not get to choose it.
+pub fn register_plugin_assets(plugin_name: &str, plugin_dir: &Path) {
+    let root = plugin_dir.join(ASSET_SUBDIR);
+    sicompass_sdk::assets::register_resolver(
+        plugin_name,
+        Box::new(move |name| read_confined_asset(&root, name)),
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -151,6 +258,15 @@ impl wit::host::Host for HostState {
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_millis() as u64)
             .unwrap_or(0)
+    }
+
+    /// Read a file the plugin shipped in its own `assets/` directory.
+    ///
+    /// Confinement, symlink containment, the regular-file check and the size cap all
+    /// live in [`read_confined_asset`]; a refusal and a missing file both come back
+    /// as `None`, so a guest cannot use this to learn what exists on the host.
+    fn read_asset(&mut self, rel: String) -> Option<Vec<u8>> {
+        read_confined_asset(&self.asset_root(), &rel)
     }
 
     fn translate(&mut self, key: String) -> String {
@@ -280,6 +396,13 @@ pub const fn uses_jit() -> bool {
 /// `allowedHosts`. That is why network lives in its own WIT interface: wasmtime links
 /// host functions an interface at a time, so with `fetch` in `host` this decision
 /// would not have been expressible.
+///
+/// `read-asset` is in `host` and therefore unconditional, which is deliberate: the
+/// only bytes it can reach are files under `assets/` in the plugin's own install
+/// directory — files that plugin shipped and the user installed. There is no
+/// user-visible authority there for `plugin.json` to declare, and gating it would
+/// have meant making `host` itself conditional, which is exactly the property that
+/// makes `net`'s gate legible.
 pub fn linker_for(state: &HostState) -> Result<Linker<HostState>, String> {
     let mut linker = Linker::new(engine());
 
@@ -479,6 +602,7 @@ pub const HOST_IMPORTS: &[(&str, &str)] = &[
     ("sicompass:plugin/host", "get-setting"),
     ("sicompass:plugin/host", "now-millis"),
     ("sicompass:plugin/host", "translate"),
+    ("sicompass:plugin/host", "read-asset"),
 ];
 
 /// Import names that require `allowedHosts` in the manifest.
@@ -559,6 +683,128 @@ mod tests {
     #[test]
     fn confine_rejects_a_bare_root() {
         assert!(state().confine("/").is_err());
+    }
+
+    // --- read-asset ---
+
+    /// A plugin directory with `assets/greeting.txt` in it.
+    fn plugin_with_asset(body: &[u8]) -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        let assets = dir.path().join(ASSET_SUBDIR);
+        std::fs::create_dir_all(&assets).unwrap();
+        std::fs::write(assets.join("greeting.txt"), body).unwrap();
+        dir
+    }
+
+    #[test]
+    fn the_asset_root_is_the_assets_subdirectory() {
+        assert_eq!(
+            state().asset_root(),
+            Path::new("/tmp/sicompass-test-plugin/assets")
+        );
+    }
+
+    #[test]
+    fn read_confined_asset_returns_the_bytes() {
+        let dir = plugin_with_asset(b"hello");
+        let root = dir.path().join(ASSET_SUBDIR);
+        assert_eq!(
+            read_confined_asset(&root, "greeting.txt").as_deref(),
+            Some(&b"hello"[..])
+        );
+    }
+
+    #[test]
+    fn read_confined_asset_refuses_an_absolute_path() {
+        // The regression test for checking the guest's string *before* joining: with
+        // the naive `assets/{rel}` prefix, `/etc/passwd` becomes `assets//etc/passwd`,
+        // whose components drop the root, and the refusal turns into an acceptance.
+        let dir = plugin_with_asset(b"hello");
+        let root = dir.path().join(ASSET_SUBDIR);
+        for attempt in ["/etc/passwd", "/"] {
+            assert!(
+                read_confined_asset(&root, attempt).is_none(),
+                "`{attempt}` should have been refused"
+            );
+        }
+    }
+
+    #[test]
+    fn read_confined_asset_refuses_parent_traversal() {
+        let dir = plugin_with_asset(b"hello");
+        std::fs::write(dir.path().join("plugin.json"), b"{}").unwrap();
+        let root = dir.path().join(ASSET_SUBDIR);
+        for attempt in ["../plugin.json", "a/../../plugin.json", "../../etc/passwd"] {
+            assert!(
+                read_confined_asset(&root, attempt).is_none(),
+                "`{attempt}` should have been refused"
+            );
+        }
+    }
+
+    #[test]
+    fn read_confined_asset_refuses_a_missing_file() {
+        let dir = plugin_with_asset(b"hello");
+        let root = dir.path().join(ASSET_SUBDIR);
+        assert!(read_confined_asset(&root, "nope.txt").is_none());
+    }
+
+    #[test]
+    fn read_confined_asset_refuses_a_directory() {
+        let dir = plugin_with_asset(b"hello");
+        let root = dir.path().join(ASSET_SUBDIR);
+        std::fs::create_dir(root.join("sub")).unwrap();
+        assert!(read_confined_asset(&root, "sub").is_none());
+    }
+
+    #[test]
+    fn read_confined_asset_refuses_a_file_over_the_cap() {
+        let dir = plugin_with_asset(b"hello");
+        let root = dir.path().join(ASSET_SUBDIR);
+        let big = root.join("big.bin");
+        let f = std::fs::File::create(&big).unwrap();
+        // Sparse: sets the length without writing 16 MiB.
+        f.set_len(MAX_ASSET_BYTES + 1).unwrap();
+        drop(f);
+        assert!(read_confined_asset(&root, "big.bin").is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn read_confined_asset_refuses_a_symlink_out_of_the_asset_dir() {
+        // `confine_in` is lexical and cannot see this, which is why the read also
+        // canonicalizes and requires containment.
+        let dir = plugin_with_asset(b"hello");
+        let root = dir.path().join(ASSET_SUBDIR);
+        std::fs::write(dir.path().join("secret.txt"), b"secret").unwrap();
+        std::os::unix::fs::symlink(dir.path().join("secret.txt"), root.join("link.txt")).unwrap();
+        assert!(read_confined_asset(&root, "link.txt").is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn read_confined_asset_refuses_a_symlinked_parent_directory() {
+        // The case inspecting only the leaf would miss: the file itself is a regular
+        // file inside the named directory, but the directory leaves `assets/`.
+        let dir = plugin_with_asset(b"hello");
+        let root = dir.path().join(ASSET_SUBDIR);
+        let outside = dir.path().join("outside");
+        std::fs::create_dir(&outside).unwrap();
+        std::fs::write(outside.join("secret.txt"), b"secret").unwrap();
+        std::os::unix::fs::symlink(&outside, root.join("sub")).unwrap();
+        assert!(read_confined_asset(&root, "sub/secret.txt").is_none());
+    }
+
+    #[test]
+    fn register_plugin_assets_serves_the_plugin_directory_as_asset_uris() {
+        let dir = plugin_with_asset(b"hello");
+        register_plugin_assets("__wasm_asset_test", dir.path());
+        assert_eq!(
+            sicompass_sdk::assets::resolve("asset:__wasm_asset_test/greeting.txt").as_deref(),
+            Some(&b"hello"[..])
+        );
+        // And the resolver is confined, not merely a path join.
+        assert!(sicompass_sdk::assets::resolve("asset:__wasm_asset_test/../plugin.json").is_none());
     }
 
     // --- engine ---
@@ -728,7 +974,7 @@ mod tests {
                 .iter()
                 .all(|(i, _)| *i == "sicompass:plugin/net")
         );
-        assert_eq!(HOST_IMPORTS.len(), 4);
+        assert_eq!(HOST_IMPORTS.len(), 5);
         assert_eq!(NET_IMPORTS.len(), 2);
     }
 }
