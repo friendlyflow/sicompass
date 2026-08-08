@@ -3,6 +3,38 @@
 cargo-dist parses this file and uses the matching version's section as the
 GitHub Release body, so entries here are what users read on the download page.
 
+## 0.1.12
+
+### Every program's files now travel inside the binary
+
+The tutorial's image and its example document, and the sales demo's diagram,
+used to be loose files shipped alongside the executable. Whether they arrived
+depended on four separate packaging lists agreeing with each other, and nothing
+checked that they did. When they disagreed nothing failed at build time, it just
+meant a tutorial with a missing picture, and that is exactly what happened for
+several releases in a row.
+
+They are now compiled into the executable, like the fonts and the shaders
+already were. There is nothing left to install beside the binary and nothing
+left to go missing, on any platform.
+
+`sicompass --check` reports this directly: it lists each program's files with
+the number of bytes it actually found, rather than reporting which directory it
+guessed at.
+
+### Plugins can ship their own files
+
+A plugin can now put files in an `assets` folder next to itself and either read
+them itself or hand them to sicompass to display. It reaches nothing else: a
+plugin cannot read a file outside its own folder, cannot follow a shortcut that
+leads out of it, and cannot see whether some other file on your computer exists.
+
+This also closes a hole. A plugin used to be able to name any picture on your
+computer and have sicompass open it. It can only name its own now.
+
+Plugin authors need `sicompass-pdk` 0.2.0 for the new call. Existing plugins keep
+working unchanged.
+
 ## 0.1.11
 
 ### Linux: the arrow keys keep working after a web page loads
