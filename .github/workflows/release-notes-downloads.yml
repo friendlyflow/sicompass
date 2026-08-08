@@ -1,0 +1,114 @@
+name: Release notes downloads
+
+# Puts the real installers at the top of the GitHub release body.
+#
+# ## Why this exists
+#
+# cargo-dist writes the "Download" table in the release body from the artifacts
+# *it* built: the four portable archives and the .msi. The .dmg, .deb, .rpm and
+# AppImage are built by native-packages.yml and attached to the same release,
+# but cargo-dist has no idea they exist, so they never appeared in the body at
+# all — they were only findable by scrolling to the raw asset list.
+#
+# That matters more than it sounds. The app's own update prompt opens the
+# release page (`apply_app_update` -> `release_url`), so a macOS user following
+# an update notification was shown a .tar.xz as the first macOS download while
+# the .dmg they actually wanted sat out of sight further down.
+#
+# ## How
+#
+# Runs after cargo-dist has created and announced the release, then rewrites the
+# body with `gh release edit`. The table is built from the assets actually
+# attached to the release rather than from reconstructed filenames, so a package
+# that failed to build is simply absent instead of becoming a 404 link.
+
+on:
+  workflow_call:
+    inputs:
+      plan:
+        description: The dist plan for this release, passed by cargo-dist.
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  downloads:
+    name: Add the installers to the release body
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Rewrite the release body
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PLAN: ${{ inputs.plan }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          TAG="$(printf '%s' "$PLAN" | jq -r '.announcement_tag')"
+          test -n "$TAG" && test "$TAG" != "null" \
+            || { echo "::error::no announcement_tag in the dist plan"; exit 1; }
+
+          # Whatever is actually on the release, so a missing package cannot
+          # become a dead link.
+          gh release view "$TAG" --repo "$REPO" --json assets \
+            --jq '.assets[].name' > assets.txt
+          gh release view "$TAG" --repo "$REPO" --json body --jq .body > body.md
+
+          base="https://github.com/$REPO/releases/download/$TAG"
+
+          # $1 = a grep -E pattern matching exactly one asset, $2 = the label.
+          # Emits nothing when that package is not on the release.
+          row() {
+            local name
+            name="$(grep -E "$1" assets.txt | head -1 || true)"
+            test -n "$name" || return 0
+            printf '| %s | [%s](%s/%s) |\n' "$2" "$name" "$base" "$name"
+          }
+
+          {
+            echo "## Install"
+            echo
+            echo "The recommended download for each platform. Portable archives"
+            echo "are in the table further down."
+            echo
+            echo "| Platform | Download |"
+            echo "| --- | --- |"
+            row '\.msi$'                          'Windows'
+            row '^sicompass-aarch64-apple-darwin\.dmg$' 'macOS, Apple Silicon'
+            row '^sicompass-x86_64-apple-darwin\.dmg$'  'macOS, Intel'
+            row '\.deb$'                          'Debian, Ubuntu, Mint'
+            row '\.rpm$'                          'Fedora, RHEL, openSUSE'
+            row '\.AppImage$'                     'Any Linux, no root'
+            echo
+            echo "### macOS: clear the quarantine flag first"
+            echo
+            echo "The app is not yet notarized by Apple, so macOS refuses to open"
+            echo "it the first time and reports that it is damaged. Drag it to"
+            echo "Applications, run this once, and it starts normally after that."
+            echo
+            echo '```bash'
+            echo "xattr -dr com.apple.quarantine /Applications/sicompass.app"
+            echo '```'
+            echo
+            echo "Full install notes for every platform are in the"
+            echo "[README](https://github.com/$REPO#download)."
+            echo
+          } > install.md
+
+          # Insert ahead of cargo-dist's own table rather than appending, so the
+          # installers are what a reader lands on. If that heading ever stops
+          # being generated, fall back to prepending.
+          if grep -q '^## Download ' body.md; then
+            awk '
+              /^## Download / && !done { while ((getline line < "install.md") > 0) print line; done = 1 }
+              { print }
+            ' body.md > new-body.md
+          else
+            cat install.md body.md > new-body.md
+          fi
+
+          gh release edit "$TAG" --repo "$REPO" --notes-file new-body.md
+          echo "Updated the release body for $TAG:"
+          cat new-body.md
