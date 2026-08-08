@@ -3,6 +3,26 @@
 cargo-dist parses this file and uses the matching version's section as the
 GitHub Release body, so entries here are what users read on the download page.
 
+## 0.1.15
+
+### macOS: 0.1.14 could not draw anything, and this fixes it
+
+0.1.14 started and then failed to find any graphics device, so nothing rendered.
+Signing the app for the first time also switched on a stricter macOS mode that
+only lets a program load libraries carrying the same signature as itself. The
+graphics library bundled inside the app is signed separately, so the app was
+refused its own copy of it, and on macOS that library is the entire graphics
+stack.
+
+The app now carries the permission that says it is allowed to load a library it
+ships itself, which is the normal arrangement for an app that bundles one.
+
+**If you are on 0.1.14, update.** Nothing else in it worked around this.
+
+The release now refuses to publish a macOS build whose graphics library does not
+load, rather than only checking a narrower failure as it did before. That check
+is what should have caught this.
+
 ## 0.1.14
 
 ### The macOS download installs and opens

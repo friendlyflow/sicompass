@@ -201,6 +201,18 @@ frameworks = ["/opt/homebrew/lib/libMoltenVK.dylib"]
 # notarize with. cargo-packager passes `--timestamp`, which codesign ignores
 # for an ad-hoc signature rather than rejecting.
 signing-identity = "-"
+# Required *because* of the line above. cargo-packager signs every Mach-O with
+# `--options runtime` and offers no way to switch that off, and the hardened
+# runtime refuses to let an ad-hoc signed binary load an ad-hoc signed dylib
+# ("different Team IDs"). That is libMoltenVK.dylib, so 0.1.14 shipped a macOS
+# app that could not render at all. See the file itself for the full story.
+#
+# Unlike every other path in this file, this one is NOT resolved relative to the
+# manifest: cargo-packager passes it to codesign verbatim, so it is interpreted
+# against whatever directory codesign happens to run in. native-packages.yml
+# rewrites it to an absolute path for that reason, the same way it rewrites the
+# MoltenVK path above.
+entitlements = "src/sicompass/macos-entitlements.plist"
 
 # ---------------------------------------------------------------------------
 # RPM (cargo-generate-rpm)
