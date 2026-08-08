@@ -3,7 +3,7 @@
 cargo-dist parses this file and uses the matching version's section as the
 GitHub Release body, so entries here are what users read on the download page.
 
-## 0.1.15
+## 0.1.16
 
 ### macOS: 0.1.14 could not draw anything, and this fixes it
 

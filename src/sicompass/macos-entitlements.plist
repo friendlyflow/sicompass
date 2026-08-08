@@ -1,29 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!--
-  Entitlements for the macOS .app.
-
-  Exists for exactly one reason: cargo-packager signs every Mach-O in the bundle
-  with `--options runtime`, unconditionally, with no configuration to turn that
-  off. The hardened runtime enforces library validation, which allows a process
-  to load only libraries signed by the same Team ID or by Apple. An ad-hoc
-  signature carries no Team ID, so the ad-hoc signed binary was refused its own
-  ad-hoc signed libMoltenVK.dylib:
-
-      code signature ... not valid for use in process:
-      mapping process and mapped file (non-platform) have different Team IDs
-
-  MoltenVK is the whole graphics stack on macOS, so 0.1.14 shipped an app that
-  could not render at all. Disabling library validation restores the behaviour
-  the bundle had before it was signed this way, and is the correct entitlement
-  for an app that dlopens a library it ships itself.
-
-  This is not a workaround for a missing Developer ID: a notarized build loading
-  a third-party dylib it bundles needs the same entitlement.
--->
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>com.apple.security.cs.disable-library-validation</key>
-  <true/>
+	<key>com.apple.security.cs.disable-library-validation</key>
+	<true/>
 </dict>
 </plist>
