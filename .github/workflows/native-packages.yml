@@ -213,8 +213,30 @@ jobs:
           grep -q 'OK .*colour emoji' check.txt \
             || { echo "::error::built without PNG-capable FreeType"; exit 1; }
 
-      - name: Build .app and .dmg
-        run: cargo packager --release --formats app,dmg -p sicompass --verbose
+      - name: Build the .app
+        # Deliberately NOT `--formats app,dmg`. The .dmg packager does not build
+        # a bundle, it seals whatever .app is already sitting in the output
+        # directory. Everything that has to be true of the shipped bundle
+        # therefore has to happen between this command and the .dmg one below.
+        #
+        # Up to 0.1.12 both formats were built in a single invocation, so the
+        # signing step ran after the .dmg had already been sealed around an
+        # unsigned bundle. The loose .app was signed and verified, CI was green,
+        # and every published .dmg contained a bundle carrying only the linker's
+        # signature, with no _CodeSignature at all.
+        run: cargo packager --release --formats app -p sicompass --verbose
+
+      - name: Make the bundle writable by its owner
+        # Homebrew ships libMoltenVK.dylib mode 444 and cargo-packager copies it
+        # in with that mode intact. `xattr -d` needs write permission on the
+        # file it is clearing, so the one-line quarantine fix in the README died
+        # with EACCES on that dylib for every user who installed the .dmg. The
+        # app is unusable until quarantine is cleared, so this is not cosmetic.
+        run: |
+          set -euo pipefail
+          APP="$(find target/packages -maxdepth 1 -name '*.app' | head -1)"
+          test -n "$APP" || { echo "::error::no .app bundle was produced"; exit 1; }
+          chmod -R u+w "$APP"
 
       - name: Ad-hoc sign
         # Bundling MoltenVK rewrites install names inside the .app, which
@@ -226,7 +248,6 @@ jobs:
         run: |
           set -euo pipefail
           APP="$(find target/packages -maxdepth 1 -name '*.app' | head -1)"
-          test -n "$APP" || { echo "::error::no .app bundle was produced"; exit 1; }
           codesign --force --deep --sign - "$APP"
           codesign --verify --deep --strict "$APP"
 
@@ -238,6 +259,71 @@ jobs:
           set -euo pipefail
           APP="$(find target/packages -maxdepth 1 -name '*.app' | head -1)"
           ./scripts/check-macos-standalone.sh "$APP"
+
+      - name: The bundled binary must reach MoltenVK
+        # Regression guard. The `--check` probe used to ask unconditionally for
+        # VK_KHR_portability_enumeration, which is implemented by the Vulkan
+        # *loader*. The .app loads its bundled MoltenVK directly as the driver,
+        # so the extension is absent there, `create_instance` was refused
+        # outright, and `--check` reported "no Vulkan" on a bundle that renders
+        # perfectly well.
+        #
+        # Deliberately not asserting that a GPU is found: a CI runner may
+        # legitimately have none, and that must not fail the release. Asserting
+        # only that instance creation is not refused for a missing extension,
+        # which is a configuration error rather than a property of the machine.
+        env:
+          SICOMPASS_CHECK_FILE: app-check.txt
+        run: |
+          set -euo pipefail
+          APP="$(find target/packages -maxdepth 1 -name '*.app' | head -1)"
+          "$APP/Contents/MacOS/sicompass" --check || true
+          cat app-check.txt || true
+          if grep -q 'Extension specified does not exist' app-check.txt; then
+            echo "::error::the bundled app asks MoltenVK for an extension only the loader provides"
+            exit 1
+          fi
+
+      - name: Build the .dmg
+        # Seals the .app prepared above. Nothing may touch the bundle after
+        # this point and still reach a user.
+        run: cargo packager --release --formats dmg -p sicompass --verbose
+
+      - name: Verify the .dmg ships that bundle
+        # The check that was missing. Every step above inspects the loose .app;
+        # this is the only one that opens what a user actually downloads, which
+        # is exactly where the two bugs above hid. Mounted read-only, so the
+        # stored permission bits are what a user would get.
+        run: |
+          set -euo pipefail
+          DMG="$(find target/packages -maxdepth 1 -name '*.dmg' | head -1)"
+          test -n "$DMG" || { echo "::error::no .dmg was produced"; exit 1; }
+          MNT="$(mktemp -d)"
+          # `yes |` is not optional: the .dmg carries the license agreement, and
+          # hdiutil blocks waiting for it to be accepted, then reports "attach
+          # canceled" when it hits EOF on a CI runner's stdin.
+          #
+          # pipefail is off for that one line because `yes` is killed by SIGPIPE
+          # as soon as hdiutil stops reading, so the pipeline reports 141 and
+          # `set -e` would abort the step on a *successful* mount. The `test -n`
+          # below is what catches a genuinely failed attach.
+          set +o pipefail
+          yes | hdiutil attach "$DMG" -nobrowse -readonly -noverify -mountpoint "$MNT" >/dev/null
+          set -o pipefail
+          trap 'hdiutil detach "$MNT" -quiet || true' EXIT
+          APP="$(find "$MNT" -maxdepth 1 -name '*.app' | head -1)"
+          test -n "$APP" || { echo "::error::the .dmg contains no .app"; exit 1; }
+          codesign --verify --deep --strict "$APP"
+          # An unsigned bundle prints "Sealed Resources=none" here, so match the
+          # version field rather than the label.
+          codesign -dv "$APP" 2>&1 | grep -q 'Sealed Resources version=' \
+            || { echo "::error::the bundle in the .dmg has no sealed resources"; exit 1; }
+          UNWRITABLE="$(find "$APP" ! -perm -u+w)"
+          test -z "$UNWRITABLE" || {
+            echo "::error::these are not owner-writable, so xattr -dr cannot clear quarantine:"
+            echo "$UNWRITABLE"
+            exit 1
+          }
 
       - name: Stage artifacts
         # Rename to the target triple: both legs otherwise emit the same

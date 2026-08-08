@@ -105,6 +105,17 @@ github-build-setup = "parts/build-setup.yml"
 # top-level workflow.
 local-artifacts-jobs = ["./native-packages"]
 
+# Rewrite the release body once the release exists, to put the .dmg, .deb, .rpm
+# and AppImage in it. dist builds its own download table from the artifacts it
+# produced, so everything native-packages.yml makes is attached to the release
+# but named nowhere in its text. The app's update prompt opens exactly that
+# page, which is how a macOS user chasing an update was shown a .tar.xz while
+# the .dmg sat further down in the raw asset list.
+#
+# Has to run *after* the announce job: it edits a release that must already
+# exist, and it reads back the asset list to build the table from.
+post-announce-jobs = ["./release-notes-downloads"]
+
 # System packages installed on each runner before the build. Only the block
 # matching the runner's OS applies, so no per-target gymnastics are needed.
 [dist.dependencies.apt]

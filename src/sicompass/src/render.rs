@@ -524,15 +524,38 @@ unsafe fn enumerate_devices_for_diagnostic(entry: &ash::Entry) -> Result<Vec<Str
         // macOS reaches its GPU through MoltenVK, which only appears as a
         // portability driver. Without these an instance is created happily and
         // then enumerates nothing at all.
+        //
+        // Probed rather than pushed blindly, for the same reason the renderer's
+        // own instance creation probes: VK_KHR_portability_enumeration is
+        // implemented *by the loader*, so it is absent whenever MoltenVK is
+        // loaded directly as the driver, which is exactly what the .app does
+        // with its bundled copy. Requesting an extension the driver does not
+        // advertise fails `create_instance` outright, so asking blindly made
+        // `--check` report "no Vulkan" on precisely the builds that render
+        // fine. Nothing is lost by dropping it: with no loader in between there
+        // is no portability filtering to opt out of.
         #[allow(unused_mut)]
         let mut ext_names: Vec<*const std::ffi::c_char> = Vec::new();
         #[allow(unused_mut)]
         let mut flags = vk::InstanceCreateFlags::empty();
         #[cfg(target_os = "macos")]
         {
-            ext_names.push(ash::khr::portability_enumeration::NAME.as_ptr());
-            ext_names.push(ash::khr::get_physical_device_properties2::NAME.as_ptr());
-            flags |= vk::InstanceCreateFlags::ENUMERATE_PORTABILITY_KHR;
+            let available = entry
+                .enumerate_instance_extension_properties(None)
+                .unwrap_or_default();
+            let has_ext = |wanted: &CStr| {
+                available.iter().any(|ext| {
+                    ext.extension_name_as_c_str()
+                        .is_ok_and(|name| name == wanted)
+                })
+            };
+            if has_ext(ash::khr::portability_enumeration::NAME) {
+                ext_names.push(ash::khr::portability_enumeration::NAME.as_ptr());
+                if has_ext(ash::khr::get_physical_device_properties2::NAME) {
+                    ext_names.push(ash::khr::get_physical_device_properties2::NAME.as_ptr());
+                }
+                flags |= vk::InstanceCreateFlags::ENUMERATE_PORTABILITY_KHR;
+            }
         }
 
         let info = vk::InstanceCreateInfo::default()

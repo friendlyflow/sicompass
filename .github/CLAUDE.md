@@ -70,6 +70,36 @@ Shaders and fonts are now embedded (`src/sicompass/src/shaders.rs`,
     globs with `find`, and although that is now `-print0` into an array, the
     per-arch `.dmg` rename still matters: both macOS legs otherwise emit the
     same filename and collide.
+  - **Never build the `.app` and the `.dmg` in one `cargo packager` call.** The
+    `.dmg` packager does not build a bundle, it seals whatever `.app` is
+    already in the output directory. `--formats app,dmg` therefore produced the
+    `.dmg` *before* the ad-hoc signing step ran, so every release up to and
+    including 0.1.12 shipped a `.dmg` whose bundle carried only the linker's
+    signature and had no `_CodeSignature` at all. The loose `.app` was signed
+    and verified, and CI was green the whole time. Anything that has to be true
+    of the shipped bundle belongs between the two invocations.
+  - The bundle is `chmod -R u+w`'d before signing. Homebrew ships
+    `libMoltenVK.dylib` mode `444` and cargo-packager copies that mode in.
+    `xattr -d` needs write permission on the file it clears, so the quarantine
+    one-liner in the README died with `EACCES` on that dylib for every macOS
+    user — on the one step they cannot skip, since the app will not open until
+    quarantine is cleared.
+  - Both of the above are now caught by the step that mounts the finished
+    `.dmg` and checks the bundle *inside it*. That check exists because every
+    other macOS step inspects the loose `.app` in `target/packages`, which is
+    exactly how two shipped bugs stayed invisible. Note the `yes |` on the
+    `hdiutil attach`: the `.dmg` carries a license agreement and otherwise
+    blocks, and `pipefail` has to be off for that line because `yes` dies of
+    SIGPIPE and would abort the step on a *successful* mount.
+- `release-notes-downloads.yml` rewrites the GitHub release body after the
+  release is announced, wired in through `post-announce-jobs`. cargo-dist
+  builds its "Download" table only from artifacts it produced itself, so the
+  `.dmg`, `.deb`, `.rpm` and AppImage were attached to the release but appeared
+  nowhere in its text. That is user-visible: the app's update prompt opens the
+  release page, so a macOS user following an update was offered a `.tar.xz`
+  while the `.dmg` sat out of sight in the raw asset list. The table is built
+  from the assets actually on the release, never from reconstructed filenames,
+  so a package that failed to build goes missing instead of becoming a 404.
 - `licenses.yml` verifies third-party licensing (see the `cargo about` config
   in `about.toml`). `about.toml` now covers all four target triples, so a
   dependency change on any single platform can move
