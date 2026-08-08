@@ -262,27 +262,37 @@ jobs:
         # outright, and `--check` reported "no Vulkan" on a bundle that renders
         # perfectly well.
         #
-        # It also has to assert that MoltenVK loads at all. 0.1.14 shipped an
-        # app that could not open its own bundled dylib, because signing it
-        # applied the hardened runtime and library validation then rejected it.
-        # An earlier version of this step only grepped for the missing-extension
-        # string and sailed straight past that, which is how it reached users.
+        # It also has to catch a bundle that cannot open its own dylib. 0.1.14
+        # shipped exactly that: signing applied the hardened runtime, and
+        # library validation then refused the ad-hoc signed binary its ad-hoc
+        # signed libMoltenVK.dylib, so the app could not render at all.
         #
-        # `OK loader` is the right assertion: it means the driver was dlopened,
-        # and it does not depend on the runner having a GPU. Device enumeration
-        # deliberately is NOT asserted, since a CI runner may legitimately have
-        # no GPU and that must not fail the release.
+        # Nothing here may depend on the runner having a GPU. It does not: these
+        # are VMs, and MoltenVK *aborts the process* rather than returning an
+        # error when it finds no Metal device, so `--check` dies partway through
+        # and never prints a Vulkan section at all. An earlier version of this
+        # step required `OK loader` and failed every build for that reason, on
+        # an artifact that was perfectly good.
+        #
+        # So the load-bearing assertion is the entitlement, which is a property
+        # of the bundle rather than of the machine. The greps below are extra:
+        # they only fire when `--check` did get far enough to report.
         env:
           SICOMPASS_CHECK_FILE: app-check.txt
         run: |
           set -euo pipefail
           APP="$(find target/packages -maxdepth 1 -name '*.app' | head -1)"
+
+          codesign -d --entitlements - "$APP" 2>/dev/null \
+            | grep -q 'disable-library-validation' \
+            || { echo "::error::bundle lacks the entitlement that lets it load its own MoltenVK"; exit 1; }
+
           "$APP/Contents/MacOS/sicompass" --check || true
           cat app-check.txt || true
-          grep -qE '^[[:space:]]*OK[[:space:]]+loader' app-check.txt || {
-            echo "::error::the bundled app cannot load MoltenVK, so it cannot render"
+          if grep -q 'not valid for use in process' app-check.txt; then
+            echo "::error::the hardened runtime refused the bundled MoltenVK"
             exit 1
-          }
+          fi
           if grep -q 'Extension specified does not exist' app-check.txt; then
             echo "::error::the bundled app asks MoltenVK for an extension only the loader provides"
             exit 1
