@@ -39,16 +39,31 @@ launch it.
 
 ### macOS
 
-Open the `.dmg` and drag sicompass to your Applications folder. It bundles
-MoltenVK, so there is nothing else to install.
+sicompass is not yet notarized by Apple, so macOS blocks the download and says
+it "could not verify" the file is free of malware. Clear the quarantine flag on
+the `.dmg` **before** opening it, in Terminal:
 
-The app is not yet notarized by Apple, so macOS refuses to open it the first
-time and reports that it is damaged. Clear the download quarantine flag once and
-it starts normally after that.
+```bash
+xattr -dr com.apple.quarantine ~/Downloads/sicompass-aarch64-apple-darwin.dmg
+```
+
+Use the `x86_64` file name instead if you are on an Intel Mac. Then open the
+`.dmg` and drag sicompass to your Applications folder. It bundles MoltenVK, so
+there is nothing else to install, and it starts normally from then on.
+
+Doing it in this order matters. The flag is what macOS copies from the disk
+image onto everything you drag out of it, so clearing it first leaves you with
+an app that was never quarantined and nothing further to run. If you have
+already dragged the app across, clear it there instead:
 
 ```bash
 xattr -dr com.apple.quarantine /Applications/sicompass.app
 ```
+
+There is no way to do this from Finder on recent macOS. The right-click and
+Open trick no longer works for this warning, and the "Open Anyway" button in
+System Settings under Privacy and Security only appears after macOS has
+refused the app once.
 
 ### Linux
 
