@@ -3,7 +3,7 @@
 cargo-dist parses this file and uses the matching version's section as the
 GitHub Release body, so entries here are what users read on the download page.
 
-## 0.1.13
+## 0.1.14
 
 ### The macOS download installs and opens
 
