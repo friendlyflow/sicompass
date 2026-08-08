@@ -204,6 +204,12 @@ jobs:
           # sealed into the .dmg inside a single cargo-packager invocation, so
           # there is no point in between at which the copy could be chmod'd.
           chmod u+w "$PREFIX/lib/libMoltenVK.dylib"
+          # cargo-packager hands the entitlements path to codesign verbatim
+          # rather than resolving it against the manifest, so make it absolute.
+          sed -i '' "s#entitlements = \"src/sicompass/macos-entitlements.plist\"#entitlements = \"$PWD/src/sicompass/macos-entitlements.plist\"#" \
+            src/sicompass/Cargo.toml
+          grep -q "entitlements = \"$PWD/" src/sicompass/Cargo.toml \
+            || { echo "::error::entitlements path was not made absolute"; exit 1; }
 
       - name: Build
         run: cargo build --release --features bundled-sdl3 -p sicompass
@@ -256,10 +262,16 @@ jobs:
         # outright, and `--check` reported "no Vulkan" on a bundle that renders
         # perfectly well.
         #
-        # Deliberately not asserting that a GPU is found: a CI runner may
-        # legitimately have none, and that must not fail the release. Asserting
-        # only that instance creation is not refused for a missing extension,
-        # which is a configuration error rather than a property of the machine.
+        # It also has to assert that MoltenVK loads at all. 0.1.14 shipped an
+        # app that could not open its own bundled dylib, because signing it
+        # applied the hardened runtime and library validation then rejected it.
+        # An earlier version of this step only grepped for the missing-extension
+        # string and sailed straight past that, which is how it reached users.
+        #
+        # `OK loader` is the right assertion: it means the driver was dlopened,
+        # and it does not depend on the runner having a GPU. Device enumeration
+        # deliberately is NOT asserted, since a CI runner may legitimately have
+        # no GPU and that must not fail the release.
         env:
           SICOMPASS_CHECK_FILE: app-check.txt
         run: |
@@ -267,6 +279,10 @@ jobs:
           APP="$(find target/packages -maxdepth 1 -name '*.app' | head -1)"
           "$APP/Contents/MacOS/sicompass" --check || true
           cat app-check.txt || true
+          grep -qE '^[[:space:]]*OK[[:space:]]+loader' app-check.txt || {
+            echo "::error::the bundled app cannot load MoltenVK, so it cannot render"
+            exit 1
+          }
           if grep -q 'Extension specified does not exist' app-check.txt; then
             echo "::error::the bundled app asks MoltenVK for an extension only the loader provides"
             exit 1
