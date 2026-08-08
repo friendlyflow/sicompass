@@ -181,6 +181,26 @@ minimum-system-version = "11.0"
 # The path is rewritten per runner by native-packages.yml, because Homebrew's
 # prefix differs between Apple Silicon (/opt/homebrew) and Intel (/usr/local).
 frameworks = ["/opt/homebrew/lib/libMoltenVK.dylib"]
+# Ad-hoc sign, and let cargo-packager do it rather than a step in the workflow.
+#
+# Bundling MoltenVK rewrites install names inside the .app, which invalidates
+# the signature the linker produced, and Apple Silicon refuses to execute an
+# unsigned binary. So the bundle has to be signed, and it has to be signed
+# *before* the .dmg is built.
+#
+# That last part is why this cannot be a `codesign` step in native-packages.yml.
+# The .dmg packager rebuilds the .app whenever one was not produced in the same
+# cargo-packager invocation, so signing between two invocations is undone by the
+# second, and signing after a combined `--formats app,dmg` run is too late
+# because the .dmg has already been sealed. Every release up to 0.1.12 shipped
+# an unsigned bundle for exactly that reason. cargo-packager signs the bundle
+# root between its own app and dmg stages, which is the only point that works.
+#
+# "-" is ad-hoc: it makes the app launchable but does NOT satisfy Gatekeeper,
+# so users still clear the quarantine flag until there is a Developer ID to
+# notarize with. cargo-packager passes `--timestamp`, which codesign ignores
+# for an ad-hoc signature rather than rejecting.
+signing-identity = "-"
 
 # ---------------------------------------------------------------------------
 # RPM (cargo-generate-rpm)
