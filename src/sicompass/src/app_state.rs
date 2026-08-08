@@ -360,7 +360,7 @@ pub struct RenderListItem {
     pub label: String,
     /// Breadcrumb text for extended search results.
     pub data: Option<String>,
-    /// Non-None for deep-search results: the provider-level navigation path.
+    /// Non-None for extended-search results: the provider-level navigation path.
     pub nav_path: Option<String>,
     /// Extended prefix (`layer: X list: Y/Z`) for scroll mode; `None` elsewhere.
     pub ext_prefix: Option<String>,

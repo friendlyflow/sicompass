@@ -83,7 +83,7 @@ link itself, so it keeps its leading `l`.
 ### The file browser hides dotfiles
 
 Entries starting with a dot are no longer listed by default, so folders are no
-longer led by `.DS_Store` and friends. Deep search skips them too, so it no
+longer led by `.DS_Store` and friends. Extended search skips them too, so it no
 longer walks the whole of `.git`.
 
 Run `show/hide hidden files` from the `:` command list to show them again, and
