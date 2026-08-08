@@ -1,8 +1,27 @@
 use sicompass_sdk::ffon::FfonElement;
 use sicompass_sdk::localize;
 use sicompass_sdk::provider::Provider;
-use std::path::Path;
 use std::sync::OnceLock;
+
+// ---------------------------------------------------------------------------
+// Assets
+// ---------------------------------------------------------------------------
+
+/// The two files the tutorial shows off, compiled in from this crate's own
+/// `assets/` directory.
+///
+/// They used to be loose files under the repository's top-level `assets/` tree,
+/// found at runtime. That meant five hand-maintained packaging lists had to agree
+/// about shipping them, and when they did not, nothing failed at build time: the
+/// release archives shipped no assets at all for a long while and nobody noticed.
+/// Compiled in, they travel wherever the binary does, like the shaders and fonts.
+const TEXTURE_JPG: &[u8] = include_bytes!("../assets/texture.jpg");
+const FFON_JSON: &[u8] = include_bytes!("../assets/ffon.json");
+
+/// What the FFON tree actually carries. The host resolves these through the SDK's
+/// asset registry, which [`register`] populates.
+const TEXTURE_URI: &str = "asset:tutorial/texture.jpg";
+const FFON_URI: &str = "asset:tutorial/ffon.json";
 
 /// Register this crate's translation bundles with the SDK localizer.
 /// Idempotent.
@@ -281,30 +300,24 @@ fn get_children_at_path<'a>(nodes: &'a [Node], path_parts: &[&str]) -> Option<&'
 }
 
 // ---------------------------------------------------------------------------
-// Convert static tree to FfonElement vec, substituting asset paths
+// Convert static tree to FfonElement vec, substituting asset URIs
 // ---------------------------------------------------------------------------
 
-fn node_to_ffon(node: &Node, texture_jpg: &str, ffon_json: &str) -> FfonElement {
+fn node_to_ffon(node: &Node) -> FfonElement {
     match node {
         Node::Leaf(s) => {
             // Resolve the translation key first, then run asset-placeholder
             // substitution on the resolved value (sentinels like __TEXTURE_JPG__
             // live in the FTL value).
             let translated = translate_node_string(s);
-            FfonElement::Str(apply_asset_placeholders(
-                &translated,
-                texture_jpg,
-                ffon_json,
-            ))
+            FfonElement::Str(apply_asset_placeholders(&translated))
         }
         Node::Branch { key, children } => {
             let translated = translate_node_string(key);
-            let resolved_key = apply_asset_placeholders(&translated, texture_jpg, ffon_json);
+            let resolved_key = apply_asset_placeholders(&translated);
             let mut obj = FfonElement::new_obj(resolved_key);
             for child in *children {
-                obj.as_obj_mut()
-                    .unwrap()
-                    .push(node_to_ffon(child, texture_jpg, ffon_json));
+                obj.as_obj_mut().unwrap().push(node_to_ffon(child));
             }
             obj
         }
@@ -332,21 +345,18 @@ fn translate_node_string(s: &str) -> String {
     }
 }
 
-fn apply_asset_placeholders(s: &str, texture_jpg: &str, ffon_json: &str) -> String {
+fn apply_asset_placeholders(s: &str) -> String {
     // Substring substitution (not whole-value), so a localized leaf can wrap an
     // asset in prefix/suffix text, e.g. "caption: __TEXTURE_JPG__ end". The
     // screen reader then reads the prefix, the image, and the suffix in order,
     // which is why the image example carries surrounding text.
-    s.replace("__TEXTURE_JPG__", &format!("<image>{texture_jpg}</image>"))
-        .replace("__FFON_JSON__", &format!("<link>{ffon_json}</link>"))
+    s.replace("__TEXTURE_JPG__", &format!("<image>{TEXTURE_URI}</image>"))
+        .replace("__FFON_JSON__", &format!("<link>{FFON_URI}</link>"))
         .replace("__LOREM_IPSUM__", lorem_ipsum())
 }
 
-fn nodes_to_ffon(nodes: &[Node], texture_jpg: &str, ffon_json: &str) -> Vec<FfonElement> {
-    nodes
-        .iter()
-        .map(|n| node_to_ffon(n, texture_jpg, ffon_json))
-        .collect()
+fn nodes_to_ffon(nodes: &[Node]) -> Vec<FfonElement> {
+    nodes.iter().map(node_to_ffon).collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -355,42 +365,27 @@ fn nodes_to_ffon(nodes: &[Node], texture_jpg: &str, ffon_json: &str) -> Vec<Ffon
 
 /// The tutorial provider: a short, guided, read-only introduction to Sicompass.
 ///
-/// `assets_dir` should point to the directory containing `texture.jpg` and `ffon.json`.
+/// Carries no asset paths: the two files it shows are compiled in and named by the
+/// constant `asset:` URIs above, so there is nothing per-instance to configure and
+/// no headless variant to need.
 pub struct TutorialProvider {
     current_path: String,
-    texture_jpg: String,
-    ffon_json: String,
     /// A one-shot screen-reader announcement, drained by `take_error`. The demo
     /// button in the playground sets this so activating it confirms with a short
     /// spoken line instead of silently re-fetching the list.
     pending_announce: Option<String>,
 }
 
-impl TutorialProvider {
-    /// Create with explicit asset directory.
-    pub fn new(assets_dir: &Path) -> Self {
-        let texture_jpg = assets_dir
-            .join("texture.jpg")
-            .to_string_lossy()
-            .replace('\\', "/");
-        let ffon_json = assets_dir
-            .join("ffon.json")
-            .to_string_lossy()
-            .replace('\\', "/");
-        TutorialProvider {
-            current_path: "/".to_owned(),
-            texture_jpg,
-            ffon_json,
-            pending_announce: None,
-        }
+impl Default for TutorialProvider {
+    fn default() -> Self {
+        Self::new()
     }
+}
 
-    /// Convenience: create with an empty asset path (for tests that don't need images/links).
-    pub fn new_headless() -> Self {
+impl TutorialProvider {
+    pub fn new() -> Self {
         TutorialProvider {
             current_path: "/".to_owned(),
-            texture_jpg: "/missing/texture.jpg".to_owned(),
-            ffon_json: "/missing/ffon.json".to_owned(),
             pending_announce: None,
         }
     }
@@ -420,7 +415,7 @@ impl Provider for TutorialProvider {
     fn fetch(&mut self) -> Vec<FfonElement> {
         let parts = self.path_parts();
         match get_children_at_path(SECTIONS, &parts) {
-            Some(nodes) => nodes_to_ffon(nodes, &self.texture_jpg, &self.ffon_json),
+            Some(nodes) => nodes_to_ffon(nodes),
             None => vec![],
         }
     }
@@ -475,28 +470,105 @@ mod tests {
     use super::*;
 
     fn provider() -> TutorialProvider {
-        TutorialProvider::new_headless()
+        TutorialProvider::new()
     }
 
     #[test]
-    fn the_runtime_assets_exist_where_register_looks_for_them() {
-        // These are loaded by path at runtime, not compiled in, so a rename or a
-        // packaging change can break the tutorial's images with nothing failing at
-        // build time — which is exactly what happened: the release archives shipped
-        // no assets at all for a long while, and nothing noticed.
-        //
-        // Anchored on this crate's manifest dir rather than `resolve_repo_asset`,
-        // whose `CARGO_MANIFEST_DIR` branch resolves against the *SDK* crate and
-        // whose remaining branches depend on the working directory.
-        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        for rel in ["assets/tutorial/texture.jpg", "assets/tutorial/ffon.json"] {
-            let path = root.join(rel);
+    fn the_embedded_assets_resolve_through_the_registry() {
+        register();
+        for uri in [TEXTURE_URI, FFON_URI] {
+            let bytes = sicompass_sdk::assets::resolve(uri)
+                .unwrap_or_else(|| panic!("{uri} does not resolve"));
+            assert!(!bytes.is_empty(), "{uri} resolved to nothing");
+        }
+    }
+
+    #[test]
+    fn the_uri_constants_match_the_keys_register_publishes_under() {
+        // The URIs are literals so they can be `const`, which means a typo here
+        // would not fail to compile — it would show up at runtime as an image that
+        // silently does not draw.
+        assert_eq!(
+            TEXTURE_URI,
+            sicompass_sdk::assets::uri("tutorial", "texture.jpg")
+        );
+        assert_eq!(
+            FFON_URI,
+            sicompass_sdk::assets::uri("tutorial", "ffon.json")
+        );
+    }
+
+    #[test]
+    fn every_asset_the_tutorial_emits_is_registered() {
+        // The real guard: walk the whole tree, collect every `<image>`/`<link>`
+        // value the provider actually produces, and require each `asset:` one to
+        // resolve. A URI that no `register_bytes` call matches renders as nothing
+        // at all, with no error anywhere.
+        use sicompass_sdk::tags;
+        register();
+
+        fn walk(elems: &[FfonElement], out: &mut Vec<String>) {
+            for e in elems {
+                match e {
+                    FfonElement::Str(s) => {
+                        if let Some(v) = tags::extract_image(s) {
+                            out.push(v);
+                        }
+                        if let Some(v) = tags::extract_link(s) {
+                            out.push(v);
+                        }
+                    }
+                    FfonElement::Obj(o) => {
+                        if let Some(v) = tags::extract_image(&o.key) {
+                            out.push(v);
+                        }
+                        if let Some(v) = tags::extract_link(&o.key) {
+                            out.push(v);
+                        }
+                        walk(&o.children, out);
+                    }
+                }
+            }
+        }
+
+        let mut found = Vec::new();
+        walk(&nodes_to_ffon(SECTIONS), &mut found);
+
+        let assets: Vec<&String> = found
+            .iter()
+            .filter(|v| sicompass_sdk::assets::is_uri(v))
+            .collect();
+        assert!(
+            assets.len() >= 2,
+            "expected the tutorial to name at least an image and a link asset, found {found:?}"
+        );
+        for uri in assets {
             assert!(
-                path.exists(),
-                "{rel} is missing. It must stay under the top-level assets/ tree: \
-                 that is the only directory the release archives ship."
+                sicompass_sdk::assets::resolve(uri).is_some_and(|b| !b.is_empty()),
+                "the tutorial emits {uri}, which nothing registered"
             );
         }
+    }
+
+    #[test]
+    fn the_embedded_ffon_asset_is_still_parseable_ffon() {
+        // `include_bytes!` proves the file exists; this proves it is still the thing
+        // the `<link>` target expects to be able to open.
+        let text = std::str::from_utf8(FFON_JSON).expect("ffon.json must be UTF-8");
+        assert!(
+            !sicompass_sdk::ffon::parse_json(text)
+                .expect("ffon.json must parse as FFON JSON")
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn the_embedded_texture_is_still_a_jpeg() {
+        assert_eq!(
+            &TEXTURE_JPG[..3],
+            &[0xFF, 0xD8, 0xFF],
+            "not a JPEG any more"
+        );
     }
 
     fn joined(elems: &[FfonElement]) -> String {
@@ -849,10 +921,13 @@ mod tests {
 
 /// Register the tutorial with the SDK factory and manifest registries.
 pub fn register() {
-    sicompass_sdk::register_provider_factory("tutorial", || {
-        let assets = sicompass_sdk::platform::resolve_repo_asset("assets/tutorial");
-        Box::new(TutorialProvider::new(&assets))
-    });
+    // Publish the assets before the factory, so a provider built by the very next
+    // line already resolves. `register_bytes` overwrites, so calling this twice
+    // (which the tests do) is harmless.
+    sicompass_sdk::assets::register_bytes("tutorial", "texture.jpg", TEXTURE_JPG);
+    sicompass_sdk::assets::register_bytes("tutorial", "ffon.json", FFON_JSON);
+
+    sicompass_sdk::register_provider_factory("tutorial", || Box::new(TutorialProvider::new()));
     sicompass_sdk::register_builtin_manifest(
         sicompass_sdk::BuiltinManifest::new("tutorial", "tutorial").enable_by_default(),
     );

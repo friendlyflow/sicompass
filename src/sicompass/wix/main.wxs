@@ -130,46 +130,19 @@
                         </Component>
 
                         <!--
-                          Runtime assets.
+                          No runtime assets here, on purpose.
 
-                          Shaders and fonts are compiled into the .exe, but the
-                          `assets/` tree is read from disk at runtime. `include`
-                          in dist-workspace.toml only populates the .zip, so
-                          without these components the MSI would install an .exe
-                          that cannot find its tutorial or demo content.
-
-                          The files land beside sicompass.exe, which is the
-                          first candidate `resources::resource_root()` probes.
-
-                          The `..\..\..` in each Source walks up from
-                          CargoTargetBinDir to the workspace root. cargo-dist
-                          always builds with an explicit target triple, so that
-                          directory is `target\TRIPLE\PROFILE`, three levels
-                          down. If the MSI job is ever changed to build for the
-                          host without naming a triple, these become `..\..`.
+                          Shaders, fonts and every provider asset are compiled
+                          into the .exe, so the MSI installs the executable and
+                          nothing else it needs to start. There used to be an
+                          `assets\` tree of individually named <Component>s here,
+                          one per file — a list nobody remembered to extend, next
+                          to three others just like it (dist-workspace.toml's
+                          `include`, the cargo-packager resources, and the
+                          generate-rpm assets). If a future asset really cannot be
+                          embedded, it needs a <Component> here AND an entry in
+                          each of those three.
                         -->
-                        <Directory Id='AssetsDir' Name='assets'>
-                            <Directory Id='AssetsTutorialDir' Name='tutorial'>
-                                <Component Id='assetTutorialFfon' Guid='*'>
-                                    <File Id='assetTutorialFfonFile' Name='ffon.json' DiskId='1'
-                                          Source='$(var.CargoTargetBinDir)\..\..\..\assets\tutorial\ffon.json'
-                                          KeyPath='yes'/>
-                                </Component>
-                                <Component Id='assetTutorialTexture' Guid='*'>
-                                    <File Id='assetTutorialTextureFile' Name='texture.jpg' DiskId='1'
-                                          Source='$(var.CargoTargetBinDir)\..\..\..\assets\tutorial\texture.jpg'
-                                          KeyPath='yes'/>
-                                </Component>
-                            </Directory>
-                            <Directory Id='AssetsSalesDemoDir' Name='sales-demo'>
-                                <Component Id='assetSalesDemoDiagram' Guid='*'>
-                                    <File Id='assetSalesDemoDiagramFile'
-                                          Name='115-Draw-through-Air-Handling-Unit-Diagram-1.webp' DiskId='1'
-                                          Source='$(var.CargoTargetBinDir)\..\..\..\assets\sales-demo\115-Draw-through-Air-Handling-Unit-Diagram-1.webp'
-                                          KeyPath='yes'/>
-                                </Component>
-                            </Directory>
-                        </Directory>
                     </Directory>
                 </Directory>
             </Directory>

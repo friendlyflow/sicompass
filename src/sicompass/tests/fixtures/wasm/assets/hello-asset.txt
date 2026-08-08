@@ -1,0 +1,1 @@
+hello, from a file the plugin shipped itself

@@ -380,13 +380,13 @@ pub unsafe fn load_vulkan_entry() -> Result<ash::Entry, String> {
 /// buffered output with it.
 pub const CHECK_FILE_ENV: &str = "SICOMPASS_CHECK_FILE";
 
-/// Report what the binary found on this machine: where its resources resolved
-/// to, and whether Vulkan is usable.
+/// Report what the binary found on this machine: which provider assets resolve,
+/// and whether Vulkan is usable.
 ///
-/// This used to check for `shaders/*.spv` and `fonts/*.ttf` on disk. Both are
-/// compiled into the binary now, so the only things that can still go wrong at
-/// startup are a missing `assets/` tree and a Vulkan loader or driver that
-/// cannot be reached, which is exactly what this reports.
+/// This used to check for `shaders/*.spv`, `fonts/*.ttf` and an `assets/` tree on
+/// disk. All three are compiled into the binary now, so nothing is looked up on the
+/// filesystem: what remains is a provider that names an asset nobody registered, and
+/// a Vulkan loader or driver that cannot be reached.
 ///
 /// The report goes to stdout, the rolling log, and, when
 /// [`CHECK_FILE_ENV`] is set, that file. The file is not a convenience:
@@ -423,22 +423,32 @@ pub fn check_runtime_files() -> i32 {
         std::env::consts::ARCH
     ));
 
-    // ---- Resources ----
-    let root = crate::resources::resource_root();
-    report.push_str(&format!("\nResource root: {}\n", root.display()));
-    if let Some(dir) = std::env::var_os(crate::resources::RESOURCE_DIR_ENV) {
-        report.push_str(&format!(
-            "  ({} is set to {})\n",
-            crate::resources::RESOURCE_DIR_ENV,
-            std::path::Path::new(&dir).display()
-        ));
+    // ---- Provider assets ----
+    //
+    // There is no resource root to report and nothing to find on disk: every
+    // provider asset is compiled into the binary. What can still go wrong is a
+    // provider naming an asset it never registered — a silently missing image with
+    // no other symptom — so resolve every registered URI and say how many bytes
+    // came back. `register_all()` in `main` runs before this, which is what makes
+    // the list non-empty.
+    //
+    // WASM plugins serve their assets through a resolver closure, which cannot be
+    // enumerated, so they do not appear here.
+    let uris = sicompass_sdk::assets::registered_uris();
+    report.push_str(&format!("\nProvider assets: {}\n", uris.len()));
+    if uris.is_empty() {
+        report.push_str("  MISSING  no provider registered any assets\n");
+        problems += 1;
     }
-    for sub in ["assets", "assets/tutorial", "assets/sales-demo"] {
-        if root.join(sub).is_dir() {
-            report.push_str(&format!("  OK       {sub}\n"));
-        } else {
-            report.push_str(&format!("  MISSING  {sub}\n"));
-            problems += 1;
+    for uri in &uris {
+        match sicompass_sdk::assets::resolve(uri) {
+            Some(bytes) if !bytes.is_empty() => {
+                report.push_str(&format!("  OK       {uri} ({} bytes)\n", bytes.len()));
+            }
+            _ => {
+                report.push_str(&format!("  MISSING  {uri}\n"));
+                problems += 1;
+            }
         }
     }
 

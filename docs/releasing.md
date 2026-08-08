@@ -153,9 +153,8 @@ dist generate
 `dist` is deliberately not in the flake: it must match `cargo-dist-version`
 exactly, and nixpkgs tracks its own cadence, so a flake-pinned copy would drift.
 
-`src/sicompass/wix/main.wxs` **is** hand-edited (it installs `assets/`, adds a
-Start Menu shortcut and sets the product icon), which is why
-`allow-dirty = ["msi"]` is set. dist will never refresh that file, so when
+`src/sicompass/wix/main.wxs` **is** hand-edited (it adds a Start Menu shortcut
+and sets the product icon), which is why `allow-dirty = ["msi"]` is set. dist will never refresh that file, so when
 upgrading cargo-dist, diff its new template against ours by hand.
 
 Shaders and icons are also committed rather than built:
@@ -173,9 +172,11 @@ shaders drift.
 The pipeline can publish artifacts that do not run, and has done exactly that
 before, so check the real thing:
 
-- **Any platform**: `sicompass --check`. It reports the resolved resource root
-  and the Vulkan devices it can see, which is the whole class of failure that
-  used to only appear on a user's machine.
+- **Any platform**: `sicompass --check`. It lists every provider asset with the
+  number of bytes that actually resolved, and the Vulkan devices it can see,
+  which is the whole class of failure that used to only appear on a user's
+  machine. Expect three `OK` asset lines (two tutorial, one sales demo) and
+  exit 0.
 - **Linux**: install the `.deb` on a clean Ubuntu container and run it. Then
   run the AppImage on a *different* distribution: linuxdeploy bundling a
   `libvulkan.so.1` that shadows the host's ICDs is the classic failure, which
@@ -202,8 +203,9 @@ before, so check the real thing:
   scripts/check-macos-standalone.sh /Applications/sicompass.app
   ```
 - **Windows**: run the `.msi`, confirm the Start Menu entry and the icon, and
-  confirm the tutorial finds its images (that is `assets/` being installed by
-  the components in `main.wxs`). Check the Start Menu entry by pressing the
+  confirm the tutorial still shows its image (its assets are inside the .exe, so
+  what this really checks is that `sicompass --check` reports every provider
+  asset OK). Check the Start Menu entry by pressing the
   Windows key and typing `sicompass`, not by scrolling the app list. Search
   matches word prefixes in the shortcut name, so a name that reads fine in the
   list can still be unreachable by the one word every user knows.
@@ -214,14 +216,21 @@ before, so check the real thing:
 
 ## What the packages assume
 
-Shaders and fonts are compiled into the binary, so the only runtime tree is
-`assets/`. `resources::resource_root()` finds it by probing, in order:
-`$SICOMPASS_RESOURCE_DIR`, the executable directory, its parent,
-`../Resources` (macOS `.app`), `../lib/sicompass` (deb, rpm, AppImage),
-`../share/sicompass` (Nix), the repository root, then the working directory.
+Shaders, fonts and every provider asset are compiled into the binary, so there
+is **no runtime tree at all**: no resource-root probe, no working-directory
+fixup, and nothing a package has to place next to the executable. What ships
+beside the binary is license texts, the desktop entry and the icons, none of
+which the app itself reads.
 
-**`include` in `dist-workspace.toml` populates the archives only.** The MSI
-copies the binary and whatever `wix/main.wxs` lists, and nothing else. Anything
-the app needs at runtime must either be embedded in the binary, or added
-explicitly to `wix/main.wxs` and to the cargo-packager `resources` list.
-Forgetting this is what made every release up to 0.1.8 unable to start.
+That is deliberate, and it is the lesson of every release up to 0.1.8, which
+could not start. **`include` in `dist-workspace.toml` populates the archives
+only.** The MSI copies the binary and whatever `wix/main.wxs` lists, and nothing
+else; the `.rpm` ships what `generate-rpm`'s asset list names; the `.deb`,
+AppImage and `.app` ship what cargo-packager's `resources` list names. Four
+hand-maintained lists, none compiler-checked, all of which have to agree.
+
+So a file the app reads at runtime belongs **in the crate that owns it**:
+`lib/lib_<x>/assets/`, embedded with `include_bytes!` and published with
+`sicompass_sdk::assets::register_bytes`. Then none of the four lists needs to
+know. `src/sicompass/tests/packaging.rs` guards this: the top-level `assets/`
+may hold icons and the desktop entry only.

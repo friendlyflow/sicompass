@@ -464,12 +464,11 @@
               moltenvk
             ];
 
-            # No glslang and no fonts here: shaders and fonts are compiled
-            # into the binary. `assets/` is the only runtime tree left.
+            # No glslang, no fonts and no assets here: shaders, fonts and every
+            # provider asset are compiled into the binary, so there is no runtime
+            # tree to install. Only the icons and the .desktop item below, which
+            # the desktop environment reads rather than the app.
             postInstall = ''
-              mkdir -p $out/share/sicompass
-              cp -r assets $out/share/sicompass/assets
-
               # The font licenses have to travel with the binary, since the
               # fonts themselves are inside it.
               install -Dm644 fonts/LICENSE-DejaVu.txt \
@@ -491,10 +490,6 @@
                   "$out/share/icons/hicolor/''${s}x''${s}/apps/sicompass.png"
               done
 
-              # SICOMPASS_RESOURCE_DIR is the first thing
-              # `resources::resource_root()` checks, so the derivation states
-              # where its assets are rather than relying on a layout guess.
-              #
               # vulkan-loader on LD_LIBRARY_PATH is what lets
               # `ash::Entry::load()` dlopen libvulkan.so.1. Deliberately no
               # VK_ICD_FILENAMES: on NixOS the drivers live in
@@ -506,7 +501,6 @@
               # sites block. Same reason the dev shell carries it, and the same
               # reason the .deb and .rpm depend on xvfb.
               wrapProgram $out/bin/sicompass \
-                --set SICOMPASS_RESOURCE_DIR $out/share/sicompass \
                 --prefix PATH : "${pkgs.lib.makeBinPath (with pkgs; [ xvfb-run ])}" \
                 --prefix LD_LIBRARY_PATH : "${pkgs.lib.makeLibraryPath (with pkgs; [
                   vulkan-loader
@@ -531,7 +525,6 @@
               # the web browser provider's headed-Chrome path does not go
               # through a virtual X server there.
               wrapProgram $out/bin/sicompass \
-                --set SICOMPASS_RESOURCE_DIR $out/share/sicompass \
                 --set VK_ICD_FILENAMES "${pkgs.moltenvk}/share/vulkan/icd.d/MoltenVK_icd.json" \
                 --prefix DYLD_FALLBACK_LIBRARY_PATH : "${pkgs.lib.makeLibraryPath (with pkgs; [
                   vulkan-loader

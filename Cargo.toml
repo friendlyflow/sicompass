@@ -29,10 +29,10 @@ license = "GPL-3.0-only"
 # override in [patch.crates-io] below so edits in ../sicompass-plugin-sdk are
 # picked up without a publish round-trip.
 #
-# 0.3.0 is a hard floor, not a preference: it is the release that removed the
-# native/script plugin ABIs and added the `sicompass:plugin` WIT world. The app
-# needs `WIT_SOURCE` and would not compile against 0.2.x.
-sicompass-sdk = "0.3.0"
+# 0.4.0 is a hard floor, not a preference: it is the release that added the
+# provider-scoped asset registry (`assets::register_bytes` / `resolve`) and the
+# `read-asset` host import, both of which the app uses unconditionally.
+sicompass-sdk = "0.4.0"
 sicompass-tutorial = { path = "lib/lib_tutorial" }
 sicompass-settings = { path = "lib/lib_settings" }
 sicompass-filebrowser = { path = "lib/lib_filebrowser" }

@@ -234,6 +234,14 @@ interface types {
 
 /// Always linked. Nothing here grants ambient authority: no ambient filesystem, no
 /// ambient network, no way to observe or affect anything outside this plugin.
+///
+/// `read-asset` is the one function here that touches a disk, and it is not an
+/// exception to that sentence. The only reachable bytes are files under `assets/`
+/// in the plugin's own install directory: files the plugin itself shipped and the
+/// user installed. There is no authority in that for `plugin.json` to declare, which
+/// is why it sits here rather than behind a gate like `net`. The import still
+/// *appears* in a built component's import list, so an audit can still see that a
+/// plugin reads its own data.
 interface host {
   /// Write a diagnostic line to the host log, prefixed with the plugin name.
   log: func(msg: string);
@@ -248,6 +256,23 @@ interface host {
   /// Look up a key in the host's Fluent bundles, so a plugin's user-visible text
   /// localizes through the same path a built-in's does.
   translate: func(key: string) -> string;
+
+  /// Read one of this plugin's own data files.
+  ///
+  /// `rel` is resolved inside `assets/` in the plugin's install directory, so
+  /// `read-asset("equipment.json")` reads `<plugin-dir>/assets/equipment.json`.
+  ///
+  /// `none` means refused *or* absent, deliberately indistinguishable: a guest
+  /// cannot turn this into a probe for what exists on the host filesystem.
+  /// Refused are absolute paths, anything containing `..`, anything that resolves
+  /// (after symlinks) outside `assets/`, anything that is not a regular file, and
+  /// anything larger than 16 MiB — a guest's memory is capped, so a bigger file
+  /// could not be received anyway.
+  ///
+  /// For an image the *host* should render, do not read it here. Put
+  /// `asset:<plugin-name>/<file>` in an `<image>` tag and let the host resolve it:
+  /// no copy through guest memory, no decoding in the guest.
+  read-asset: func(rel: string) -> option<list<u8>>;
 }
 
 /// Network egress. **A separate interface from `host` on purpose.**
@@ -414,11 +439,19 @@ interface provider {
 
   // ---- Dashboard ---------------------------------------------------------
 
-  /// Path to a static fullscreen image, used when `dashboard-kind` is `image`.
+  /// Where to find a static fullscreen image, used when `dashboard-kind` is `image`.
   ///
-  /// Resolved by the host RELATIVE TO THIS PLUGIN'S OWN INSTALL DIRECTORY.
-  /// Absolute paths and any `..` segment are rejected: a sandboxed guest has no
-  /// legitimate business naming a host path.
+  /// Two accepted forms:
+  ///   - `asset:<plugin-name>/<file>` — a file under `assets/` in this plugin's own
+  ///     install directory. Preferred: the host resolves it through the same
+  ///     registry that serves a built-in provider's compiled-in assets, and the
+  ///     same URI works inside an `<image>` tag.
+  ///   - a plain relative path, resolved RELATIVE TO THIS PLUGIN'S OWN INSTALL
+  ///     DIRECTORY. Kept working for plugins built against 0.3.x.
+  ///
+  /// Rejected: absolute paths, any `..` segment, and an `asset:` URI naming a
+  /// *different* plugin. A sandboxed guest has no legitimate business naming a host
+  /// path or another plugin's data.
   dashboard-image-path: func() -> option<string>;
 
   /// Render one frame of the interactive dashboard. Called every frame while this

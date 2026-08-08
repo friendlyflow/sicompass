@@ -23,7 +23,6 @@ pub mod plugin_manifest;
 pub mod programs;
 pub mod provider;
 pub mod rectangle;
-pub mod resources;
 pub mod shaders;
 pub mod shortcuts;
 pub mod start_menu;

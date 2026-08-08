@@ -496,15 +496,44 @@ fn fetch_url_to_elements(url: &str) -> Vec<FfonElement> {
     sicompass_sdk::fetch_url_to_ffon(url)
 }
 
-/// Resolve a link URL (local file or HTTP) into FFON elements.
+/// Resolve a link URL (provider asset, local file, or HTTP) into FFON elements.
 /// Mirrors C's `resolveLinkToElements`.
 fn resolve_link_to_elements(url: &str) -> Vec<FfonElement> {
-    if url.starts_with("http://") || url.starts_with("https://") {
+    if sicompass_sdk::assets::is_uri(url) {
+        resolve_asset_link(url)
+    } else if url.starts_with("http://") || url.starts_with("https://") {
         resolve_http_link(url)
     } else if url.ends_with(".ffon") {
         sicompass_sdk::ffon::load_ffon_file(std::path::Path::new(url)).unwrap_or_default()
     } else {
         sicompass_sdk::ffon::load_json_file(std::path::Path::new(url)).unwrap_or_default()
+    }
+}
+
+/// Resolve a `<link>` naming a provider asset — compiled into the binary for a
+/// built-in, or a file in a plugin's own install directory.
+///
+/// Same format dispatch as the on-disk branch above: the binary FFON codec for
+/// `.ffon`, JSON otherwise. Every failure returns an empty vec, exactly as
+/// `load_json_file(...).unwrap_or_default()` does for a missing file — the caller
+/// then leaves the cursor where it was rather than entering an empty node.
+fn resolve_asset_link(uri: &str) -> Vec<FfonElement> {
+    let Some(bytes) = sicompass_sdk::assets::resolve(uri) else {
+        eprintln!("sicompass: no such asset '{uri}'");
+        return Vec::new();
+    };
+    if uri.ends_with(".ffon") {
+        return sicompass_sdk::ffon::deserialize_binary(&bytes);
+    }
+    match std::str::from_utf8(&bytes) {
+        Ok(text) => sicompass_sdk::ffon::parse_json(text).unwrap_or_else(|e| {
+            eprintln!("sicompass: asset '{uri}' is not FFON JSON: {e}");
+            Vec::new()
+        }),
+        Err(e) => {
+            eprintln!("sicompass: asset '{uri}' is not UTF-8: {e}");
+            Vec::new()
+        }
     }
 }
 
@@ -4878,10 +4907,14 @@ fn build_image_html(prefix: &str, png: &[u8], suffix: &str) -> String {
     )
 }
 
-/// Resolve an `<image>` value (local path or http(s) URL) to a decoded image.
-/// Fetches/reads the source and decodes it (PNG, JPEG, WebP, …).
+/// Resolve an `<image>` value (`asset:` URI, local path, or http(s) URL) to a
+/// decoded image. Fetches/reads the source and decodes it (PNG, JPEG, WebP, …).
 fn load_clipboard_image(value: &str) -> Result<::image::DynamicImage, String> {
-    let raw: Vec<u8> = if value.starts_with("http://") || value.starts_with("https://") {
+    let raw: Vec<u8> = if sicompass_sdk::assets::is_uri(value) {
+        sicompass_sdk::assets::resolve(value)
+            .ok_or_else(|| format!("no such asset: {value}"))?
+            .into_owned()
+    } else if value.starts_with("http://") || value.starts_with("https://") {
         let client = reqwest::blocking::Client::builder()
             .timeout(std::time::Duration::from_secs(15))
             .build()
@@ -6773,6 +6806,59 @@ mod tests {
     use super::*;
     use crate::app_state::AppRenderer;
     use sicompass_sdk::ffon::{FfonElement, IdArray};
+
+    // ---- asset links and asset images ---------------------------------------
+    //
+    // The registry is process-global, so each test registers under its own
+    // provider id.
+
+    #[test]
+    fn an_asset_link_resolves_json_to_elements() {
+        sicompass_sdk::assets::register_bytes(
+            "__link_json",
+            "doc.json",
+            br#"[{"section": ["leaf"]}]"#,
+        );
+        let elems = resolve_link_to_elements("asset:__link_json/doc.json");
+        assert_eq!(elems.len(), 1);
+        assert_eq!(elems[0].as_obj().map(|o| o.key.as_str()), Some("section"));
+    }
+
+    #[test]
+    fn an_asset_link_resolves_a_binary_ffon_blob() {
+        // A `.ffon` name selects the binary codec, matching the on-disk branch.
+        let blob = sicompass_sdk::ffon::serialize_binary(&[FfonElement::new_str("from blob")]);
+        let leaked: &'static [u8] = Box::leak(blob.into_boxed_slice());
+        sicompass_sdk::assets::register_bytes("__link_blob", "doc.ffon", leaked);
+        let elems = resolve_link_to_elements("asset:__link_blob/doc.ffon");
+        assert_eq!(elems, vec![FfonElement::new_str("from blob")]);
+    }
+
+    #[test]
+    fn an_unresolvable_asset_link_is_empty_not_a_panic() {
+        // Same outcome as a missing file: `handle_right` sees no children and stays
+        // where it is.
+        assert!(resolve_link_to_elements("asset:__link_missing/nope.json").is_empty());
+    }
+
+    #[test]
+    fn an_asset_link_that_is_not_utf8_is_empty() {
+        sicompass_sdk::assets::register_bytes("__link_binary", "doc.json", &[0xff, 0xfe]);
+        assert!(resolve_link_to_elements("asset:__link_binary/doc.json").is_empty());
+    }
+
+    #[test]
+    fn load_clipboard_image_reads_a_registered_asset() {
+        let img = ::image::DynamicImage::new_rgba8(1, 1);
+        let mut png = std::io::Cursor::new(Vec::new());
+        img.write_to(&mut png, ::image::ImageFormat::Png).unwrap();
+        let leaked: &'static [u8] = Box::leak(png.into_inner().into_boxed_slice());
+        sicompass_sdk::assets::register_bytes("__clip_image", "tiny.png", leaked);
+
+        let decoded = load_clipboard_image("asset:__clip_image/tiny.png").expect("should decode");
+        assert_eq!((decoded.width(), decoded.height()), (1, 1));
+        assert!(load_clipboard_image("asset:__clip_image/missing.png").is_err());
+    }
 
     fn make_renderer() -> AppRenderer {
         let mut root = FfonElement::new_obj("provider");

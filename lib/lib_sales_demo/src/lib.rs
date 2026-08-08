@@ -26,15 +26,23 @@ use sicompass_sdk::{FfonElement, FfonObject, Provider};
 /// and a runtime failure mode. It is fixed data, so it belongs in the binary.
 const EQUIPMENT_JSON: &str = include_str!("../assets/equipment1.json");
 
-/// Path to the diagram shown by the `d` key, relative to the app root.
+/// The diagram shown by the `d` key, compiled in next to `equipment1.json`.
 ///
-/// Still a real file: the host loads and scales images itself, so it needs a path
-/// rather than bytes. Lives under the top-level `assets/` tree because that is the
-/// one directory the release archives ship — a per-crate `assets/` dir cannot be
-/// packaged without colliding, since cargo-dist copies `include` paths to the
-/// archive root by basename.
-const DASHBOARD_IMAGE_ASSET: &str =
-    "assets/sales-demo/115-Draw-through-Air-Handling-Unit-Diagram-1.webp";
+/// It used to be a loose file under the repository's top-level `assets/` tree,
+/// because the host loads and scales images itself and so needed a *path*. It still
+/// gets a name rather than bytes — but now an `asset:` URI, which the host resolves
+/// through the SDK registry. Nothing to ship, nothing to list in five packaging
+/// manifests, nothing to go missing.
+const DASHBOARD_IMAGE: &[u8] =
+    include_bytes!("../assets/115-Draw-through-Air-Handling-Unit-Diagram-1.webp");
+
+/// What `dashboard_image_path` hands the host. Hyphenated, not the `"sales demo"`
+/// the provider itself is registered as: this string ends up inside a URI, where a
+/// space is bad hygiene for no gain. A built-in picks its own asset namespace, so
+/// the two need not match. (A WASM plugin does not get that freedom — the host keys
+/// its namespace on the manifest name.)
+const DASHBOARD_IMAGE_URI: &str =
+    "asset:sales-demo/115-Draw-through-Air-Handling-Unit-Diagram-1.webp";
 
 /// The cardinality vocabulary. An entry's first element is one of these; anything
 /// else means the entry is not a configuration node and is skipped.
@@ -322,14 +330,6 @@ fn build_item(key: &str, raw: &[Node]) -> FfonElement {
 pub struct SalesDemoProvider {
     root: Node,
     path: String,
-    /// Absolute path to the diagram, resolved once.
-    ///
-    /// `dashboard_image_path` returns a borrow, and the host opens the file itself,
-    /// so this has to be a path that resolves from wherever the binary is running —
-    /// a dev checkout or an installed tree. The script produced an absolute path by
-    /// joining against its own location; `resolve_repo_asset` is the equivalent, and
-    /// is how `lib_tutorial` finds its assets.
-    dashboard_image: String,
 }
 
 impl Default for SalesDemoProvider {
@@ -347,13 +347,9 @@ impl SalesDemoProvider {
             eprintln!("sales demo: equipment1.json is malformed: {e}");
             Node::Object(Vec::new())
         });
-        let dashboard_image = sicompass_sdk::platform::resolve_repo_asset(DASHBOARD_IMAGE_ASSET)
-            .to_string_lossy()
-            .into_owned();
         SalesDemoProvider {
             root,
             path: "/".to_owned(),
-            dashboard_image,
         }
     }
 
@@ -424,7 +420,7 @@ impl Provider for SalesDemoProvider {
         // root payload only, and `ScriptProvider` cleared the field on every
         // subsequent fetch.
         if self.at_root() {
-            Some(&self.dashboard_image)
+            Some(DASHBOARD_IMAGE_URI)
         } else {
             None
         }
@@ -484,6 +480,14 @@ impl Provider for SalesDemoProvider {
 
 /// Register the sales demo with the SDK factory and manifest registries.
 pub fn register() {
+    // The diagram, published before the factory so a provider built by the next line
+    // already resolves it. Overwrites, so calling this twice is harmless.
+    sicompass_sdk::assets::register_bytes(
+        "sales-demo",
+        "115-Draw-through-Air-Handling-Unit-Diagram-1.webp",
+        DASHBOARD_IMAGE,
+    );
+
     sicompass_sdk::register_provider_factory("sales demo", || Box::new(SalesDemoProvider::new()));
     sicompass_sdk::register_builtin_manifest(
         sicompass_sdk::BuiltinManifest::new("sales demo", "sales demo").with_settings(vec![
@@ -578,35 +582,33 @@ mod tests {
     }
 
     #[test]
-    fn the_diagram_asset_is_present_in_the_repo() {
-        // The host opens this file itself, so it has to exist. Located from *this*
-        // crate's manifest dir rather than through `resolve_repo_asset`: that helper
-        // lives in the SDK, so its `CARGO_MANIFEST_DIR` is the SDK's, and it really
-        // resolves through its current-directory fallback — which points at the
-        // crate directory under `cargo test -p`, not the repo root.
-        let asset = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../..")
-            .join(DASHBOARD_IMAGE_ASSET);
-        assert!(
-            asset.exists(),
-            "the diagram is missing at {}",
-            asset.display()
+    fn the_diagram_resolves_and_is_still_a_webp() {
+        // The host decodes these bytes itself, so being registered is not enough:
+        // they also have to still be an image the `image` crate can sniff.
+        register();
+        let bytes = sicompass_sdk::assets::resolve(DASHBOARD_IMAGE_URI)
+            .expect("the diagram must resolve through the registry");
+        assert_eq!(&bytes[..4], b"RIFF", "not a RIFF container any more");
+        assert_eq!(&bytes[8..12], b"WEBP", "not a WebP any more");
+    }
+
+    #[test]
+    fn the_uri_constant_matches_the_key_register_publishes_under() {
+        // A literal typo here would compile fine and show up only as a dashboard
+        // that draws nothing.
+        assert_eq!(
+            DASHBOARD_IMAGE_URI,
+            sicompass_sdk::assets::uri(
+                "sales-demo",
+                "115-Draw-through-Air-Handling-Unit-Diagram-1.webp"
+            )
         );
     }
 
     #[test]
     fn the_dashboard_image_path_names_the_diagram() {
-        // What the provider hands the host must at least end at the right file; the
-        // directory part comes from `resolve_repo_asset` and depends on where the
-        // binary runs from, exactly as it does for `lib_tutorial`'s assets.
         let p = provider();
-        let path = p
-            .dashboard_image_path()
-            .expect("root should offer an image");
-        assert!(
-            path.ends_with("115-Draw-through-Air-Handling-Unit-Diagram-1.webp"),
-            "got {path}"
-        );
+        assert_eq!(p.dashboard_image_path(), Some(DASHBOARD_IMAGE_URI));
     }
 
     #[test]

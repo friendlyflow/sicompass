@@ -429,6 +429,93 @@ fn row_text(frame: &sicompass_sdk::DashboardFrame, row: u16) -> String {
         .to_owned()
 }
 
+// ---------------------------------------------------------------------------
+// Assets
+// ---------------------------------------------------------------------------
+//
+// A plugin ships its own files in `<plugin_dir>/assets/`. Two ways in, both
+// confined to that directory: the guest reads bytes with the `read-asset` import,
+// and the *host* resolves `asset:<plugin-name>/<file>` when it has to render or
+// open something itself.
+
+/// The fixture directory doubles as a plugin directory, so
+/// `tests/fixtures/wasm/assets/hello-asset.txt` is the hello plugin's own asset.
+fn hello_asset_bytes() -> Vec<u8> {
+    std::fs::read(fixture_dir().join("assets/hello-asset.txt"))
+        .expect("the fixture asset should be committed")
+}
+
+#[test]
+fn a_plugin_directory_asset_is_reachable_as_an_asset_uri() {
+    // Registered under a test-only name so this does not collide with the resolver
+    // `WasmProvider::from_component` installs for `hello` elsewhere in this binary.
+    wasm_host::register_plugin_assets("__uri_test", &fixture_dir());
+    let bytes = sicompass_sdk::assets::resolve("asset:__uri_test/hello-asset.txt")
+        .expect("the plugin's own asset should resolve");
+    assert_eq!(bytes.as_ref(), hello_asset_bytes().as_slice());
+}
+
+#[test]
+fn an_asset_uri_cannot_escape_the_plugin_directory() {
+    // The end-to-end counterpart to the unit tests in `wasm_host`: a real directory
+    // on disk, with real files just outside it.
+    wasm_host::register_plugin_assets("__escape_test", &fixture_dir());
+    for attempt in [
+        "../../../Cargo.toml",
+        "/etc/passwd",
+        "a/../../hello.wasm",
+        "../hello.wasm",
+    ] {
+        assert!(
+            sicompass_sdk::assets::resolve(&format!("asset:__escape_test/{attempt}")).is_none(),
+            "`{attempt}` should not have resolved"
+        );
+    }
+}
+
+#[test]
+fn a_guest_reads_its_own_asset_through_the_host() {
+    // The guest calls `read_asset("hello-asset.txt")` in `fetch` and reports the byte
+    // count, so this exercises the import all the way into guest memory.
+    let mut p = open_hello();
+    let elems = p.fetch();
+    let obj = elems[0].as_obj().unwrap();
+    let line = obj
+        .children
+        .iter()
+        .find_map(|c| c.as_str().filter(|s| s.starts_with("asset bytes: ")))
+        .expect("no asset line — is the fixture rebuilt?");
+    assert_eq!(
+        line,
+        format!("asset bytes: {}", hello_asset_bytes().len()),
+        "the guest should have received the whole file"
+    );
+}
+
+#[test]
+fn a_guest_cannot_read_outside_its_own_asset_directory() {
+    // The guest also asks for `../../Cargo.toml` and a file that does not exist. Both
+    // must come back as `none`, and indistinguishably so: a guest that could tell
+    // "refused" from "absent" would have a filesystem probe.
+    let mut p = open_hello();
+    let elems = p.fetch();
+    let obj = elems[0].as_obj().unwrap();
+    let rows: Vec<&str> = obj.children.iter().filter_map(|c| c.as_str()).collect();
+
+    assert!(
+        rows.contains(&"escape: refused"),
+        "the guest read outside its asset dir: {rows:?}"
+    );
+    assert!(
+        rows.contains(&"missing: refused"),
+        "a missing asset did not come back as none: {rows:?}"
+    );
+    assert!(
+        !rows.iter().any(|r| r.contains("LEAKED")),
+        "confinement failed: {rows:?}"
+    );
+}
+
 #[test]
 fn the_fixture_opts_into_an_interactive_dashboard() {
     let p = open_hello();
