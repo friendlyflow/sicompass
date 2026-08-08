@@ -204,11 +204,15 @@
             -->
             <!--<ComponentRef Id='License'/>-->
 
+            <!--
+              Every Component defined above needs exactly one ComponentRef here,
+              and every ComponentRef needs a Component: `light` fails with
+              LGHT0094 (exit 94) on a reference to a symbol that no longer
+              exists. That is only discoverable by building the MSI, so
+              `packaging.rs` pins the two lists against each other instead.
+            -->
             <ComponentRef Id='binary0'/>
             <ComponentRef Id='StartMenuShortcut'/>
-            <ComponentRef Id='assetTutorialFfon'/>
-            <ComponentRef Id='assetTutorialTexture'/>
-            <ComponentRef Id='assetSalesDemoDiagram'/>
 
             <Feature
                 Id='Environment'

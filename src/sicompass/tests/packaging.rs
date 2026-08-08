@@ -310,3 +310,55 @@ fn the_top_level_asset_tree_holds_only_packaging_inputs() {
         );
     }
 }
+
+/// Every `<Component>` in the MSI needs exactly one `<ComponentRef>`, and every
+/// `<ComponentRef>` needs a `<Component>`.
+///
+/// WiX's `light` fails with LGHT0094 (exit code 94) on a reference to a symbol that
+/// does not exist, and that only happens when the MSI is actually built — which is
+/// during a release, on a Windows runner, after the tag is pushed. Removing the
+/// asset components without their refs failed exactly this way in v0.1.12, so the
+/// two lists are pinned against each other here instead.
+#[test]
+fn every_msi_component_is_referenced_exactly_once() {
+    let wxs = read("src/sicompass/wix/main.wxs");
+
+    // Ids inside XML comments do not count: the template ships a commented-out
+    // `License` component *and* a commented-out ref for it, and neither reaches WiX.
+    let mut live = String::new();
+    let mut rest = wxs.as_str();
+    while let Some(open) = rest.find("<!--") {
+        live.push_str(&rest[..open]);
+        rest = match rest[open..].find("-->") {
+            Some(close) => &rest[open + close + 3..],
+            None => "",
+        };
+    }
+    live.push_str(rest);
+
+    let ids = |tag: &str| -> Vec<String> {
+        live.split(tag)
+            .skip(1)
+            .filter_map(|s| {
+                let start = s.find("Id='")? + 4;
+                let end = s[start..].find('\'')?;
+                Some(s[start..start + end].to_owned())
+            })
+            .collect()
+    };
+
+    let mut defined = ids("<Component ");
+    let mut referenced = ids("<ComponentRef ");
+    assert!(
+        !defined.is_empty() && !referenced.is_empty(),
+        "parsed nothing out of main.wxs — did the quoting style change?"
+    );
+
+    defined.sort();
+    referenced.sort();
+    assert_eq!(
+        defined, referenced,
+        "main.wxs components and refs disagree. A ref without a component fails \
+         `light` with LGHT0094; a component without a ref silently ships nothing."
+    );
+}
