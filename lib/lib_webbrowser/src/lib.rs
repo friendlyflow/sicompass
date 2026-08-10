@@ -71,6 +71,33 @@ fn test_no_launch() -> bool {
 }
 
 // ---------------------------------------------------------------------------
+// Hidden-content pruning
+//
+// The provider uses Chrome as a JS-capable HTML fetcher and then throws the
+// engine's layout away, so a `display:none` mega-menu, a parked modal and a
+// consent vendor's whole preference centre all serialise into FFON as ordinary
+// readable content.  `settled_html` asks the page which nodes are actually
+// hidden — Chrome computed that already — and serialises without them.
+//
+// Process-global rather than a provider field because `fetch_url_to_ffon` is a
+// free function reached through the SDK's global URL-fetcher registry, with no
+// provider instance in scope.
+// ---------------------------------------------------------------------------
+
+static PRUNE_HIDDEN: AtomicBool = AtomicBool::new(true);
+
+/// Command labels for the prune toggle.  Plain English like the other two —
+/// `commands()` is not localized anywhere in the app yet.
+const CMD_SHOW_HIDDEN: &str = "show hidden content";
+const CMD_HIDE_HIDDEN: &str = "hide hidden content";
+const CMD_CHOOSE_LANGUAGE: &str = "choose language";
+
+#[inline]
+fn prune_hidden() -> bool {
+    PRUNE_HIDDEN.load(Ordering::Acquire)
+}
+
+// ---------------------------------------------------------------------------
 // Cached page
 // ---------------------------------------------------------------------------
 
@@ -513,6 +540,21 @@ impl Provider for WebbrowserProvider {
         };
         let form_n: usize = form_n_str.parse().unwrap_or(0);
 
+        // A language step carries its code in the proxy button's id, so pressing
+        // one is also how the choice gets remembered — after this, the step is
+        // never shown again and the matching page is opened directly.
+        if let Some(code) = self
+            .form_map
+            .iter()
+            .find(|(key, node)| {
+                key.starts_with(&format!("form_{form_n}/"))
+                    && matches!(node.kind, FormNodeKind::Submit)
+            })
+            .and_then(|(_, node)| language_code_from_selector(&node.css_selector))
+        {
+            store_language(&code);
+        }
+
         #[cfg(target_os = "windows")]
         {
             self.submit_form_windows(form_n);
@@ -557,16 +599,33 @@ impl Provider for WebbrowserProvider {
                         page.evaluate(js),
                     )
                     .await;
-                    // Wait for navigation to settle after click.
-                    tokio::time::sleep(tokio::time::Duration::from_millis(2500)).await;
-                    if let Ok(Ok(html)) =
-                        tokio::time::timeout(tokio::time::Duration::from_secs(10), page.content())
-                            .await
+                    // Wait for the page to settle after the click. A fixed
+                    // guess is not enough: a consent choice reloads in place and
+                    // a submit navigates, and at a desktop viewport bpost takes
+                    // longer than 2.5 s to put its content back — serialising
+                    // early handed back a page with its whole middle missing.
+                    await_stable_url(&page, tokio::time::Duration::from_secs(10)).await;
+                    await_page_settled(&page, tokio::time::Duration::from_secs(12)).await;
+                    if let Ok(Ok(html)) = tokio::time::timeout(
+                        tokio::time::Duration::from_secs(20),
+                        settled_html(&page),
+                    )
+                    .await
                     {
-                        // A submit can land on a bot check just as a navigation
-                        // can, so the response goes through the same renderer.
-                        let (elements, form_map) =
-                            page_to_ffon_with_forms(&PageLoad::plain(html), &url);
+                        // Answering one step is what leads to the next: a
+                        // language choice usually lands on a page whose cookie
+                        // banner has yet to be answered. A submit can also land
+                        // on a bot check just as a navigation can, so either way
+                        // the response goes through the same renderer.
+                        let landed =
+                            tokio::time::timeout(tokio::time::Duration::from_secs(5), page.url())
+                                .await
+                                .ok()
+                                .and_then(|r| r.ok())
+                                .flatten()
+                                .unwrap_or_else(|| url.clone());
+                        let (load, _) = settle_gates(&page, &landed, html).await;
+                        let (elements, form_map) = page_to_ffon_with_forms(&load, &landed);
                         if let Ok(mut guard) = ready.lock() {
                             *guard = Some((elements, form_map));
                         }
@@ -623,7 +682,18 @@ impl Provider for WebbrowserProvider {
     }
 
     fn commands(&self) -> Vec<String> {
-        vec!["refresh".to_owned(), "clear cookies".to_owned()]
+        // Labelled by what pressing it does, not by the current state.
+        let hidden_toggle = if prune_hidden() {
+            CMD_SHOW_HIDDEN
+        } else {
+            CMD_HIDE_HIDDEN
+        };
+        vec![
+            "refresh".to_owned(),
+            "clear cookies".to_owned(),
+            CMD_CHOOSE_LANGUAGE.to_owned(),
+            hidden_toggle.to_owned(),
+        ]
     }
 
     fn handle_command(
@@ -644,6 +714,24 @@ impl Provider for WebbrowserProvider {
             }
         } else if cmd == "clear cookies" {
             self.clear_cookies(_error);
+        } else if cmd == CMD_CHOOSE_LANGUAGE {
+            // Forget the remembered choice so the language step is offered
+            // again on the next site that has one.
+            forget_language();
+            let url = self.current_url.clone();
+            if !url.is_empty() {
+                self.cached_page = None;
+                self.load_url(&url);
+            }
+        } else if cmd == CMD_SHOW_HIDDEN || cmd == CMD_HIDE_HIDDEN {
+            // The prune decides what the *serialised* page contains, so the page
+            // has to be fetched again to show the other version of itself.
+            PRUNE_HIDDEN.store(cmd == CMD_HIDE_HIDDEN, Ordering::Release);
+            let url = self.current_url.clone();
+            if !url.is_empty() {
+                self.cached_page = None;
+                self.load_url(&url);
+            }
         }
         None
     }
@@ -1003,6 +1091,7 @@ async fn init_live_session() -> Result<LivePageSession, String> {
     .await
     .map_err(|_| "stealth script injection timed out".to_owned())?
     .map_err(|e| format!("stealth script injection failed: {e}"))?;
+    set_desktop_viewport(&page).await;
     Ok(LivePageSession { session, page })
 }
 
@@ -1021,54 +1110,10 @@ async fn navigate_and_get_html(page: &chromiumoxide::Page, url: &str) -> Result<
     // Read the page once up front.  Google/YouTube serve their GDPR wall inline
     // on a normal URL (www.google.com), so the URL alone does not reveal it; we
     // also sniff the fetched content for the consent-save endpoint.
-    let mut html = tokio::time::timeout(t(15), page.content())
-        .await
-        .map_err(|_| "timed out waiting for page content (15 s)".to_owned())?
-        .map_err(|e| format!("failed to get page content: {e}"))?;
+    let html = settled_html(page).await?;
 
-    if is_consent_wall_str(&current_url) || html_has_consent_wall(&html) {
-        let mut accepted = false;
-        for attempt in 0..4u32 {
-            if attempt > 0 {
-                tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
-            }
-            accepted = tokio::time::timeout(t(5), try_accept_consent(page))
-                .await
-                .unwrap_or(false);
-            if accepted {
-                break;
-            }
-        }
-        if accepted {
-            // Follow the accept round-trip (Google bounces through
-            // consent.google.com/save) by URL, then wait for the reloaded page to
-            // drop the inline wall and re-read its content.
-            wait_until_off_consent(page, t(8)).await;
-            if let Some(cleared) = wait_for_consent_content_cleared(page, t(8)).await {
-                html = cleared;
-            }
-        }
-        let post_url = tokio::time::timeout(t(5), page.url())
-            .await
-            .ok()
-            .and_then(|r| r.ok())
-            .flatten()
-            .unwrap_or_default();
-        if is_consent_wall_str(&post_url) || html_has_consent_wall(&html) {
-            // The wall is what the site is serving, so hand it over as the page
-            // and say what it is. Its accept button is often operable from here.
-            return Ok(PageLoad {
-                html,
-                notices: vec![
-                    "Cookie-consent wall that could not be accepted automatically. \
-                     The consent page itself is shown below."
-                        .to_owned(),
-                ],
-            });
-        }
-    }
-
-    Ok(PageLoad::plain(html))
+    let (load, _) = settle_gates(page, &current_url, html).await;
+    Ok(load)
 }
 
 // ---------------------------------------------------------------------------
@@ -1101,6 +1146,7 @@ async fn fetch_html_once(url: &str) -> Result<PageLoad, String> {
         .await
         .map_err(|_| "stealth script injection timed out".to_owned())?
         .map_err(|e| format!("stealth script injection failed: {e}"))?;
+        set_desktop_viewport(&page).await;
 
         navigate_and_get_html(&page, url).await
     }
@@ -1113,7 +1159,11 @@ async fn fetch_html_once(url: &str) -> Result<PageLoad, String> {
 /// Send `Browser.close` so Chrome exits cleanly (WebSocket close handshake
 /// completes) before the `BrowserSession` is dropped.  Mirrors the pattern in
 /// `fetch_html_inner`.
-#[cfg(target_os = "windows")]
+///
+/// Also used by the browser tests on every platform: nothing kills the child on
+/// drop, so a test that opens a session and walks away leaves a Chrome (and its
+/// Xvfb) running until the machine is rebooted.
+#[cfg(any(target_os = "windows", test))]
 async fn close_browser(session: &BrowserSession) {
     use chromiumoxide::cdp::browser_protocol::browser::CloseParams;
     let _ = tokio::time::timeout(
@@ -1123,6 +1173,7 @@ async fn close_browser(session: &BrowserSession) {
     .await;
     // Chrome is gone now; reclaim the foreground for the app window so the
     // screen reader re-focuses sicompass (the automatic "alt-tab back").
+    #[cfg(target_os = "windows")]
     win_hide::restore_foreground(session.prev_foreground);
 }
 
@@ -1229,6 +1280,7 @@ async fn submit_form_windows_inner(
     .await
     .map_err(|_| "stealth script injection timed out".to_owned())?
     .map_err(|e| format!("stealth script injection failed: {e}"))?;
+    set_desktop_viewport(&page).await;
 
     // Re-navigate to the form URL.  Cookies from the profile dir come along.
     let reopened = navigate_and_get_html(&page, url)
@@ -1295,10 +1347,9 @@ async fn submit_form_windows_inner(
     .await;
 
     // Fetch the response page.
-    let response_html = tokio::time::timeout(t(15), page.content())
+    let response_html = tokio::time::timeout(t(20), settled_html(&page))
         .await
-        .map_err(|_| "timed out waiting for response page (15 s)".to_owned())?
-        .map_err(|e| format!("failed to get response content: {e}"))?;
+        .map_err(|_| "timed out waiting for response page (20 s)".to_owned())??;
 
     let response_url = tokio::time::timeout(t(5), page.url())
         .await
@@ -1307,10 +1358,10 @@ async fn submit_form_windows_inner(
         .flatten()
         .unwrap_or_else(|| url.to_owned());
 
-    Ok(page_to_ffon_with_forms(
-        &PageLoad::plain(response_html),
-        &response_url,
-    ))
+    // Answering one step leads to the next, so the response page goes through
+    // the chain exactly like a navigation does.
+    let (load, _) = settle_gates(&page, &response_url, response_html).await;
+    Ok(page_to_ffon_with_forms(&load, &response_url))
 }
 
 // ---------------------------------------------------------------------------
@@ -1626,8 +1677,16 @@ fn xvfb_wrapper_script(chrome: &str, helper: XvfbHelper) -> String {
         // line back where chromiumoxide is listening. Nixpkgs' xvfb-run has no
         // `2>&1`, so there the redirect only moves Chrome's (empty) stdout, and
         // this is why the bug never showed up in the dev shell.
+        //
+        // `-s "-screen …"` is not optional. Without it xvfb-run uses its own
+        // default screen, which on this toolchain came out at 612x459 — Chrome
+        // clamps `--window-size=1920,1080` to the screen, the viewport lands at
+        // 800px, and every responsive site serves its *phone* layout. bpost
+        // then hides its desktop navigation entirely and moves "Pakje
+        // verzenden", "Pakje ontvangen" and the service tiles into a hamburger
+        // menu, so the page read nothing like the one in a normal browser.
         XvfbHelper::Run => format!(
-            "#!/bin/sh\nunset WAYLAND_DISPLAY\nexec xvfb-run -a {chrome} --ozone-platform=x11 \"$@\" 1>&2\n"
+            "#!/bin/sh\nunset WAYLAND_DISPLAY\nexec xvfb-run -a -s \"-screen 0 {VIEWPORT_W}x{VIEWPORT_H}x24\" {chrome} --ozone-platform=x11 \"$@\" 1>&2\n"
         ),
         // Emulate xvfb-run: pick a free display number, start Xvfb on it, run
         // Chrome (backgrounded so we keep the shell alive), and kill both Xvfb
@@ -1638,7 +1697,7 @@ fn xvfb_wrapper_script(chrome: &str, helper: XvfbHelper) -> String {
              unset WAYLAND_DISPLAY\n\
              d=99\n\
              while [ -e /tmp/.X${{d}}-lock ] || [ -e /tmp/.X11-unix/X${{d}} ]; do d=$((d+1)); done\n\
-             Xvfb :$d -screen 0 1920x1080x24 -nolisten tcp >/dev/null 2>&1 &\n\
+             Xvfb :$d -screen 0 {VIEWPORT_W}x{VIEWPORT_H}x24 -nolisten tcp >/dev/null 2>&1 &\n\
              xp=$!\n\
              i=0\n\
              while [ ! -e /tmp/.X11-unix/X${{d}} ]; do i=$((i+1)); [ $i -ge 100 ] && break; sleep 0.05; done\n\
@@ -2355,6 +2414,7 @@ async fn fetch_page(session: &BrowserSession, url: &str) -> Result<PageLoad, Str
     .await
     .map_err(|_| "stealth script injection timed out".to_owned())?
     .map_err(|e| format!("stealth script injection failed: {e}"))?;
+    set_desktop_viewport(&page).await;
 
     tokio::time::timeout(t(30), page.goto(url))
         .await
@@ -2369,71 +2429,287 @@ async fn fetch_page(session: &BrowserSession, url: &str) -> Result<PageLoad, Str
 
     // Read the page once up front so inline consent walls (Google/YouTube serve
     // theirs on a normal URL) are visible via the content, not just the URL.
-    let mut html = tokio::time::timeout(t(15), page.content())
-        .await
-        .map_err(|_| "timed out waiting for page content (15 s)".to_owned())?
-        .map_err(|e| format!("failed to get page content: {e}"))?;
+    let html = settled_html(&page).await?;
 
-    // If we landed on a consent wall, try to auto-accept and follow back.
-    if is_consent_wall_str(&current_url) || html_has_consent_wall(&html) {
-        // Retry up to 4 times with 1-second pauses between attempts.  The
-        // consent page uses client-side JS (React/Next.js) and the accept button
-        // may not be in the DOM yet when the first attempt runs, especially on
-        // Windows where page hydration can lag behind the URL change.
-        let mut accepted = false;
-        for attempt in 0..4u32 {
-            if attempt > 0 {
-                tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
-            }
-            accepted = tokio::time::timeout(t(5), try_accept_consent(&page))
-                .await
-                .unwrap_or(false);
-            if accepted {
-                break;
-            }
-        }
-        if accepted {
-            // Follow the accept round-trip by URL, then wait for the reloaded
-            // page to drop the inline wall and re-read its content.
-            wait_until_off_consent(&page, tokio::time::Duration::from_secs(8)).await;
-            if let Some(cleared) =
-                wait_for_consent_content_cleared(&page, tokio::time::Duration::from_secs(8)).await
-            {
-                html = cleared;
-            }
-        }
-        let post_url = tokio::time::timeout(t(5), page.url())
-            .await
-            .ok()
-            .and_then(|r| r.ok())
-            .flatten()
-            .unwrap_or_default();
-        if is_consent_wall_str(&post_url) || html_has_consent_wall(&html) {
-            // Capture a snippet of the page HTML to diagnose why acceptance failed.
-            let snippet: String = html.chars().take(2000).collect();
-            eprintln!("=== consent-wall debug ===");
-            eprintln!("Consent URL : {current_url}");
-            eprintln!("Button found: {accepted}");
-            eprintln!("Post URL    : {post_url}");
-            eprintln!("Page snippet:\n{snippet}");
-            eprintln!("=== end consent-wall debug ===");
-            let _ = tokio::time::timeout(t(3), page.close()).await;
-            // Same as `navigate_and_get_html`: the wall is the page the site
-            // served, so it is what the user gets to read and operate.
-            return Ok(PageLoad {
-                html,
-                notices: vec![
-                    "Cookie-consent wall that could not be accepted automatically. \
-                     The consent page itself is shown below."
-                        .to_owned(),
-                ],
-            });
-        }
+    // Surface any consent choice the page is showing, then hand the page over.
+    let (load, surfaced) = settle_gates(&page, &current_url, html).await;
+    if !surfaced && (is_consent_wall_str(&current_url) || html_has_consent_wall(&load.html)) {
+        // Capture a snippet to diagnose why no choice could be lifted out.
+        let snippet: String = load.html.chars().take(2000).collect();
+        eprintln!("=== consent-wall debug ===");
+        eprintln!("Consent URL : {current_url}");
+        eprintln!("Page snippet:\n{snippet}");
+        eprintln!("=== end consent-wall debug ===");
     }
 
     let _ = tokio::time::timeout(t(3), page.close()).await;
 
-    Ok(PageLoad::plain(html))
+    Ok(load)
+}
+
+// ---------------------------------------------------------------------------
+// Hidden-content pruning
+// ---------------------------------------------------------------------------
+
+/// The viewport every page is rendered at.
+///
+/// Responsive sites pick their layout from this, so it decides whether the
+/// reader gets the desktop page or the phone one. Wide enough to clear the
+/// usual `xl` breakpoint (1200px) with room to spare.
+const VIEWPORT_W: u32 = 1920;
+const VIEWPORT_H: u32 = 1080;
+
+/// Force a desktop layout viewport, whatever the window or X screen happens to
+/// be. Belt and braces next to `--window-size`: headless defaults to 800x600,
+/// and under Xvfb the window is clamped to the virtual screen.
+async fn set_desktop_viewport(page: &chromiumoxide::Page) {
+    use chromiumoxide::cdp::browser_protocol::emulation::SetDeviceMetricsOverrideParams;
+    let params = SetDeviceMetricsOverrideParams::builder()
+        .width(VIEWPORT_W as i64)
+        .height(VIEWPORT_H as i64)
+        .device_scale_factor(1.0)
+        .mobile(false)
+        .build();
+    if let Ok(params) = params {
+        let _ =
+            tokio::time::timeout(tokio::time::Duration::from_secs(5), page.execute(params)).await;
+    }
+}
+
+/// Serialise the document with every invisible subtree removed.
+///
+/// Runs in the page so it can use `getComputedStyle`, i.e. the layout Chrome
+/// has already done.  An element is dropped when *any* of these hold:
+///
+///   * it has the `hidden` attribute,
+///   * it has `aria-hidden="true"` — this app *is* an assistive technology, so
+///     honouring that is correctness, not a heuristic,
+///   * its computed `display` is `none`,
+///   * its computed `visibility` is `hidden` or `collapse`.
+///
+/// Deliberately *not* size- or position-based: `.sr-only` / `.visually-hidden`
+/// text is a clipped 1x1 box but stays `display:block; visibility:visible`, and
+/// that text is exactly what a screen-reader-first browser should be reading.
+///
+/// The live DOM is not destroyed — the form-submit paths click against it after
+/// this runs.  Hidden nodes are marked, a clone is pruned, and the markers are
+/// stripped again, so the only lasting change is nothing at all.
+const PRUNE_HIDDEN_SCRIPT: &str = r##"(function() {
+    // Never rendered content in the first place, and FFON drops them anyway
+    // (HTML_SKIP_TAGS), so keeping them costs the reader nothing — while the
+    // load flow does sniff inline <script> for Google's consent values and for
+    // the wall's own marker.  Checked before every other rule: Google stamps
+    // aria-hidden="true" on its inline scripts, which would otherwise take the
+    // consent values out with them.
+    const NEVER_MARK = new Set([
+        'SCRIPT','STYLE','NOSCRIPT','TEMPLATE','LINK','META','TITLE','BASE',
+    ]);
+    // UA stylesheets give these `display:none` (input[type=hidden]) for reasons
+    // that have nothing to do with whether the user can see them.  Their
+    // ancestors stay eligible, so a parked dialog full of controls still goes.
+    const DISPLAY_EXEMPT = new Set(['INPUT','SELECT','OPTION','OPTGROUP','TEXTAREA']);
+    const NEVER = new Set(['HTML','HEAD','BODY']);
+    const MARK = 'data-sic-hidden';
+    const PARK = 'data-sic-parked';
+
+    // Something the reader could act on: a link, a control, a heading. A
+    // subtree holding any of these is the site's own navigation or UI, not
+    // leftover markup — bpost keeps its whole main menu in a Bootstrap
+    // .navbar-collapse that is display:none even on a 1920px viewport, and
+    // dropping it takes "Pakje verzenden" and "Pakje ontvangen" with it.
+    // Nothing here can press the hamburger to get them back, so they stay.
+    const INTERACTIVE = 'a[href], button, input, select, textarea, ' +
+        '[role="button"], [role="link"], [role="menuitem"], [role="tab"], ' +
+        'h1, h2, h3, h4, h5, h6';
+    function actionable(el) {
+        try { return el.matches(INTERACTIVE) || !!el.querySelector(INTERACTIVE); }
+        catch (e) { return false; }
+    }
+
+    function isHidden(el) {
+        if (NEVER_MARK.has(el.tagName)) return false;
+        // `hidden` and `aria-hidden` are the author saying "assistive tech must
+        // not see this". This app is assistive tech, so it obeys, links or no
+        // links — that is what takes bpost's parked language modal out.
+        if (el.hasAttribute('hidden')) return true;
+        if (el.getAttribute('aria-hidden') === 'true') return true;
+        let s;
+        try { s = getComputedStyle(el); } catch (e) { return false; }
+        if (!s) return false;
+        const invisible = s.visibility === 'hidden' || s.visibility === 'collapse' ||
+            (s.display === 'none' && !DISPLAY_EXEMPT.has(el.tagName));
+        // Merely off-screen: dead weight goes, anything you could act on is
+        // kept but gets moved out of the way (see PARK below).
+        if (!invisible) return false;
+        if (actionable(el)) {
+            // Parking is for menus. A subtree carrying the page's <h1> is the
+            // content itself — bpost wraps its article in a container classed
+            // `hide_section`, and moving that to the end would file the whole
+            // page after the navigation. (Text length is no use as a signal:
+            // textContent counts inline scripts, and innerText is empty for
+            // anything not rendered.)
+            let isContent = true;
+            try { isContent = el.tagName === 'H1' || !!el.querySelector('h1'); } catch (e) {}
+            if (!isContent) el.setAttribute(PARK, '');
+            return false;
+        }
+        return true;
+    }
+
+    const marked = [];
+    // Top-down walk: once a subtree is marked its descendants go with it, so
+    // skip them rather than paying getComputedStyle on every one.
+    (function walk(el) {
+        for (const child of el.children) {
+            if (NEVER.has(child.tagName)) { walk(child); continue; }
+            if (isHidden(child)) {
+                child.setAttribute(MARK, '');
+                marked.push(child);
+            } else {
+                walk(child);
+            }
+        }
+    })(document.documentElement);
+
+    let html;
+    try {
+        const clone = document.documentElement.cloneNode(true);
+        // A consent banner whose buttons were lifted into the proxy form goes
+        // too, whether or not the vendor bothered to hide the original.
+        for (const node of clone.querySelectorAll('[data-sic-consent-src]')) node.setAttribute(MARK, '');
+        for (const node of clone.querySelectorAll('[' + MARK + ']')) {
+            // Dropping a <form> outright would renumber every later form, while
+            // the click path resolves buttons through `document.forms[n]` on the
+            // *live* page. Leave an empty shell instead: FFON still counts it,
+            // and an empty form emits no node, so it stays invisible to read.
+            const forms = (node.tagName === 'FORM' ? [node] : [])
+                .concat(Array.from(node.querySelectorAll('form')));
+            if (!forms.length) { node.remove(); continue; }
+            const shells = document.createDocumentFragment();
+            for (let i = 0; i < forms.length; i++) shells.appendChild(document.createElement('form'));
+            node.replaceWith(shells);
+        }
+        // A hidden menu is navigation worth keeping, but leaving it inline lets
+        // it dominate the reading order: bpost's login dropdown sits before the
+        // article and opens with a heading, and FFON nests everything after a
+        // heading underneath it — so the whole page ended up filed under
+        // "De voordelen van je bpost-account?". Park them after the content.
+        const body = clone.querySelector('body');
+        if (body) {
+            for (const node of clone.querySelectorAll('[' + PARK + ']')) {
+                // Only top-level parked nodes; a nested one travels with its parent.
+                if (node.parentElement && node.parentElement.closest('[' + PARK + ']')) continue;
+                node.removeAttribute(PARK);
+                body.appendChild(node);
+            }
+            for (const node of clone.querySelectorAll('[' + PARK + ']')) node.removeAttribute(PARK);
+        }
+        rehomeIds(clone);
+        html = '<!DOCTYPE html>' + clone.outerHTML;
+    } finally {
+        for (const node of marked) node.removeAttribute(MARK);
+        for (const node of document.querySelectorAll('[' + PARK + ']')) node.removeAttribute(PARK);
+    }
+    return html;
+
+    // An empty anchor is how most pages mark a skip-link target
+    // (`<a id="main-content"></a>`), and an element with no content emits no
+    // FFON node — so the id, and with it the jump target, is simply lost.
+    // Hand it to the next thing that does render. Clone-only: the live DOM
+    // keeps its ids, so form selectors and site scripts are untouched.
+    function rehomeIds(root) {
+        const CONTROL = 'input, select, textarea, button';
+        // Only these four are landmarks to FFON (html_landmark_name); <section>
+        // and <article> are generic containers whose id falls through to the
+        // first child that renders.
+        const LANDMARK = 'main, nav, aside, footer';
+        // Which ids something on the page actually jumps to. Only those are
+        // worth restructuring for; every other stray id is left alone.
+        const targeted = new Set();
+        for (const a of root.querySelectorAll('a[href^="#"]')) {
+            const frag = a.getAttribute('href').slice(1);
+            if (frag) targeted.add(frag);
+        }
+        for (const el of root.querySelectorAll('[id]')) {
+            if ((el.textContent || '').trim()) continue;
+            try { if (el.querySelector('img, ' + CONTROL)) continue; } catch (e) { continue; }
+            let next = el.nextElementSibling;
+            while (next && !(next.textContent || '').trim()) next = next.nextElementSibling;
+            if (!next || next.id) continue;
+            // Never onto a control itself: FFON builds a control's selector from
+            // its own id, and that selector is resolved against the *live*
+            // page, where this id sits somewhere else. A container that merely
+            // holds controls is fine — its id stays on the container.
+            try { if (next.matches(CONTROL)) continue; } catch (e) { continue; }
+
+            // A jump target has to *contain* what you jumped to read. Handing
+            // the id to a plain container is not enough: FFON passes it down to
+            // whichever node renders first, and bpost's content region opens
+            // with two <h1>s in a row — so the id landed on an empty heading
+            // while the article nested under the next one. Wrapping the region
+            // in a landmark gives the link somewhere to arrive that holds the
+            // content itself.
+            let host = next;
+            if (targeted.has(el.id)) {
+                let isLandmark = false;
+                try { isLandmark = next.matches(LANDMARK); } catch (e) {}
+                if (!isLandmark && next.parentNode) {
+                    // <main>, because only nav/main/aside/footer are landmarks
+                    // to FFON — a <section> is generic, so the id would fall
+                    // straight through to the first child that renders, which
+                    // is the empty <h1> we are trying to get past.
+                    const doc = root.ownerDocument || document;
+                    const sec = doc.createElement('main');
+                    next.parentNode.insertBefore(sec, next);
+                    // Everything from the target onwards belongs to it: that is
+                    // what "skip to content" means, and it stops the landmark
+                    // being a single-child wrapper that FFON collapses again.
+                    let node = sec.nextSibling;
+                    while (node) {
+                        const after = node.nextSibling;
+                        sec.appendChild(node);
+                        node = after;
+                    }
+                    // A lone plain container in there is still a wrapper; lift
+                    // its children so the landmark holds real structure.
+                    while (sec.children.length === 1 &&
+                           /^(DIV|SECTION|ARTICLE)$/.test(sec.children[0].tagName)) {
+                        const only = sec.children[0];
+                        while (only.firstChild) sec.insertBefore(only.firstChild, only);
+                        only.remove();
+                    }
+                    host = sec;
+                }
+            }
+            host.id = el.id;
+            el.removeAttribute('id');
+        }
+    }
+})()"##;
+
+/// Fetch the page's HTML, with invisible subtrees removed when pruning is on.
+///
+/// Falls back to a plain `page.content()` whenever the in-page pass fails or
+/// runs long: a page that defeats the prune must still be readable.
+async fn settled_html(page: &chromiumoxide::Page) -> Result<String, String> {
+    let t = tokio::time::Duration::from_secs;
+    let pruned = if prune_hidden() {
+        tokio::time::timeout(t(10), page.evaluate(PRUNE_HIDDEN_SCRIPT))
+            .await
+            .ok()
+            .and_then(|r| r.ok())
+            .and_then(|v| v.into_value::<String>().ok())
+            .filter(|html| !html.is_empty())
+    } else {
+        None
+    };
+    if let Some(html) = pruned {
+        return Ok(html);
+    }
+    tokio::time::timeout(t(15), page.content())
+        .await
+        .map_err(|_| "timed out waiting for page content (15 s)".to_owned())?
+        .map_err(|e| format!("failed to get page content: {e}"))
 }
 
 // ---------------------------------------------------------------------------
@@ -2483,25 +2759,73 @@ const CMP_SELECTORS: &[&str] = &[
     r#"[aria-label*="akzeptieren" i]"#,
 ];
 
-/// Button text substrings indicating a *reject* or settings action.
-/// Checked before ACCEPT_KEYWORDS to prevent clicking "decline all" buttons
+/// CMP-specific selectors for the one-click "reject all" button.
+///
+/// The mirror image of `CMP_SELECTORS`, and the reason refusing keeps working
+/// in a language nobody added a keyword for: bpost's Dutch OneTrust banner
+/// labels it "Alles afwijzen", but the id is the same everywhere.
+const CMP_REJECT_SELECTORS: &[&str] = &[
+    // OneTrust
+    "#onetrust-reject-all-handler",
+    ".ot-pc-refuse-all-handler",
+    // Didomi
+    "#didomi-notice-disagree-button",
+    // CookieBot
+    "#CybotCookiebotDialogBodyButtonDecline",
+    "#CybotCookiebotDialogBodyLevelButtonLevelOptinDeclineAll",
+    // Usercentrics
+    r#"button[data-testid="uc-deny-all-button"]"#,
+    // Sourcepoint
+    "button.sp_choice_type_REJECT_ALL",
+    // Cookie Information
+    "#declineButton",
+    // Quantcast
+    "button.qc-cmp2-summary-buttons button:first-child",
+    // Generic
+    r#"button[id*="reject-all"]"#,
+    r#"button[class*="reject-all"]"#,
+    r#"[aria-label*="reject all" i]"#,
+];
+
+/// Button text substrings indicating a *reject* action.
+/// Checked before ACCEPT_KEYWORDS to prevent classifying "decline all" buttons
 /// whose text happens to contain an accept keyword fragment.
 const REJECT_KEYWORDS: &[&str] = &[
     "reject",
     "decline",
+    "refuse",
     "weiger",
+    "afwijz",
+    "niet akkoord",
     "refuser",
+    "continuer sans accepter",
     "ablehnen",
     "rifiuta",
     "rechazar",
     "only necessary",
+    "essential only",
+    "only essential",
     "alleen noodzakelijke",
+    "alleen essenti",
     "nur notwendige",
+    "nur erforderliche",
+];
+
+/// Button text substrings indicating a "manage my preferences" action — a
+/// button that opens a second panel rather than deciding anything.
+///
+/// Split out of `REJECT_KEYWORDS` when consent stopped being auto-clicked: as a
+/// guard against a stray accept these behave exactly like a reject (never
+/// press), but they are not a *choice* and must not be offered as one.
+const SETTINGS_KEYWORDS: &[&str] = &[
     "manage",
     "settings",
     "instellingen",
     "personnaliser",
     "preferences",
+    "voorkeuren",
+    "einstellungen",
+    "paramètres",
 ];
 
 /// Button text substrings indicating an "accept all" action, in 6 languages.
@@ -2540,11 +2864,22 @@ const ACCEPT_KEYWORDS: &[&str] = &[
     "aceptar y continuar",
 ];
 
-/// Returns `true` if the button text looks like a reject/settings action.
+/// Returns `true` if the button text looks like a reject *or* settings action —
+/// i.e. anything that must never be treated as an accept.
 #[cfg_attr(not(test), allow(dead_code))]
 fn is_reject_text(text: &str) -> bool {
     let lower = text.to_lowercase();
-    REJECT_KEYWORDS.iter().any(|k| lower.contains(k))
+    REJECT_KEYWORDS
+        .iter()
+        .chain(SETTINGS_KEYWORDS.iter())
+        .any(|k| lower.contains(k))
+}
+
+/// Returns `true` if the button text only opens a preferences panel.
+#[cfg_attr(not(test), allow(dead_code))]
+fn is_settings_text(text: &str) -> bool {
+    let lower = text.to_lowercase();
+    SETTINGS_KEYWORDS.iter().any(|k| lower.contains(k))
 }
 
 /// Returns `true` if the button text looks like an "accept all" action.
@@ -2564,136 +2899,32 @@ fn js_array(items: &[&str]) -> String {
     format!("[{}]", quoted.join(","))
 }
 
-/// Attempt to accept a GDPR consent wall on the current page.
+/// Consent-banner containers, as (HTML marker substring, CSS selector).
 ///
-/// Strategy 1 — DPG Media shortcut (hln.be, vtm.be, ad.nl, …):
-///   The consent page sets `window.cmpProperties.siteUrl` inline, before the
-///   external `consent.js` loads.  That URL is the exact callback hln.be uses
-///   to record consent and set cookies.  We navigate to it directly, bypassing
-///   the consent UI entirely.  This is reliable cross-platform because it needs
-///   no external script to load.
-///
-/// Strategy 2 — Generic button click:
-///   For all other CMPs, scan the DOM (and same-origin iframes) for a
-///   recognisable "accept all" button and click it.
-///
-/// Returns `true` if a navigation was triggered.
-async fn try_accept_consent(page: &chromiumoxide::Page) -> bool {
-    // ── Strategy 1: DPG Media ────────────────────────────────────────────────
-    // cmpProperties is set by an inline <script> tag, so it is available the
-    // instant the HTML is parsed — no need to wait for consent.js.
-    let dpg_js = r#"(function() {
-        try {
-            const u = window.cmpProperties && window.cmpProperties.siteUrl;
-            if (u && u.length > 0) { window.location.href = u; return true; }
-        } catch(_) {}
-        return false;
-    })()"#;
-    let dpg_accepted = page
-        .evaluate(dpg_js)
-        .await
-        .ok()
-        .and_then(|r| r.into_value::<bool>().ok())
-        .unwrap_or(false);
-    if dpg_accepted {
-        return true;
-    }
+/// The marker decides — from the already-fetched HTML — whether the in-page
+/// pass is worth running at all; the selector finds the container once we are
+/// inside the page.  Vendor-specific on purpose: a generic "cookie"/"consent"
+/// substring matches every page that merely links to a cookie policy.
+const CONSENT_BANNERS: &[(&str, &str)] = &[
+    ("onetrust-banner-sdk", "#onetrust-banner-sdk"),
+    ("didomi-notice", "#didomi-notice"),
+    ("CybotCookiebotDialog", "#CybotCookiebotDialog"),
+    ("usercentrics-root", "#usercentrics-root"),
+    ("truste_popframe", "#truste_popframe, #truste-consent-track"),
+    ("qc-cmp2-container", ".qc-cmp2-container"),
+    ("coi-banner-wrapper", "#coi-banner-wrapper"),
+    ("sp_message_container", "[id^=\"sp_message_container\"]"),
+    ("cookiescript_injected", "#cookiescript_injected"),
+    ("axeptio_overlay", "#axeptio_overlay"),
+    ("cmpboxbtnyes", "#cmpbox"),
+    (
+        "cm-btn-accept-all",
+        ".klaro .cookie-modal, .klaro .cookie-notice",
+    ),
+];
 
-    // ── Strategy 1.5: Google / YouTube consent ───────────────────────────────
-    // Google serves its GDPR wall inline (see html_has_consent_wall) and ignores
-    // programmatic clicks on the accept button, even trusted CDP mouse clicks
-    // (verified live: the button stays in the DOM and the URL never changes).
-    // Setting the consent cookies directly and reloading is what actually clears
-    // it — the reloaded homepage drops the accept button and the /save endpoint.
-    // The cookies then persist in the profile so the wall stays gone.
-    if let Ok(Some(url)) = page.url().await {
-        if url.contains("google.") || url.contains("youtube.") {
-            use chromiumoxide::cdp::browser_protocol::network::CookieParam;
-            let domain = if url.contains("youtube.") {
-                ".youtube.com"
-            } else {
-                ".google.com"
-            };
-            let cookies: Vec<CookieParam> = [
-                // SOCS is Google's current consent cookie; this value records an
-                // "accept all" choice.  CONSENT is the legacy fallback.
-                ("SOCS", "CAESHAgBEhIaAB"),
-                ("CONSENT", "YES+cb.20210328-17-p0.en+FX+410"),
-            ]
-            .iter()
-            .filter_map(|(n, v)| {
-                CookieParam::builder()
-                    .name(*n)
-                    .value(*v)
-                    .domain(domain)
-                    .path("/")
-                    .build()
-                    .ok()
-            })
-            .collect();
-            if !cookies.is_empty() && page.set_cookies(cookies).await.is_ok() {
-                // Reload so the server serves the real page now that consent is set.
-                let _ = tokio::time::timeout(tokio::time::Duration::from_secs(15), page.goto(&url))
-                    .await;
-                return true;
-            }
-        }
-    }
-
-    // ── Strategy 2: generic button click ────────────────────────────────────
-    let cmp_sels = js_array(CMP_SELECTORS);
-    let reject_kws = js_array(REJECT_KEYWORDS);
-    let accept_kws = js_array(ACCEPT_KEYWORDS);
-    let js = format!(
-        r#"(function() {{
-        const cmpSels   = {cmp_sels};
-        const rejectKws = {reject_kws};
-        const acceptKws = {accept_kws};
-
-        function trySelectors(doc) {{
-            for (const sel of cmpSels) {{
-                try {{
-                    const el = doc.querySelector(sel);
-                    if (el) {{ el.click(); return true; }}
-                }} catch(e) {{}}
-            }}
-            return false;
-        }}
-
-        function tryKeywords(doc) {{
-            for (const btn of doc.querySelectorAll('button, [role="button"]')) {{
-                const t = btn.textContent.trim().toLowerCase();
-                if (rejectKws.some(k => t.includes(k))) continue;
-                if (acceptKws.some(k => t.includes(k))) {{ btn.click(); return true; }}
-            }}
-            return false;
-        }}
-
-        function scanDoc(doc) {{
-            return trySelectors(doc) || tryKeywords(doc);
-        }}
-
-        // Main document
-        if (scanDoc(document)) return true;
-
-        // One level of same-origin iframes (e.g. Sourcepoint)
-        for (const iframe of document.querySelectorAll('iframe')) {{
-            try {{
-                const doc = iframe.contentDocument;
-                if (doc && scanDoc(doc)) return true;
-            }} catch(e) {{ /* cross-origin: skip */ }}
-        }}
-
-        return false;
-    }})()"#
-    );
-    page.evaluate(js)
-        .await
-        .ok()
-        .and_then(|r| r.into_value::<bool>().ok())
-        .unwrap_or(false)
-}
-
+/// Detect a consent *wall*: the site redirected to a CMP host and is serving
+/// the consent page instead of the content.
 fn is_consent_wall_str(url: &str) -> bool {
     url.contains("myprivacy.dpgmedia.be")
         || url.contains("sp-prod.net")
@@ -2719,55 +2950,712 @@ fn html_has_consent_wall(html: &str) -> bool {
     MARKERS.iter().any(|m| html.contains(m))
 }
 
-/// Poll `page.url()` every 250 ms until we are no longer on a consent wall,
-/// or until `budget` elapses.  Returns `true` if we left the wall.
-async fn wait_until_off_consent(page: &chromiumoxide::Page, budget: tokio::time::Duration) -> bool {
-    let interval = tokio::time::Duration::from_millis(250);
-    let deadline = tokio::time::Instant::now() + budget;
+/// Vendor scaffolding that is never content: preference centres, backdrops and
+/// the wrappers a CMP leaves parked in the DOM whether or not it has anything
+/// to say.  Removed whenever it is not actually on screen — OneTrust keeps a
+/// 4 kB preference centre at `display:none` on every page of every visit, and
+/// the generic prune now keeps hidden subtrees that hold buttons.
+const CONSENT_DEBRIS: &[&str] = &[
+    "#onetrust-consent-sdk",
+    "#onetrust-pc-sdk",
+    ".onetrust-pc-dark-filter",
+    "#didomi-host",
+    "#CybotCookiebotDialog",
+    "#CybotCookiebotDialogBodyUnderlay",
+    "#usercentrics-root",
+    "#truste-consent-track",
+    ".qc-cmp2-container",
+    "#coi-banner-wrapper",
+    "#cookiescript_injected",
+    "#axeptio_overlay",
+    "#cmpwrapper",
+];
+
+/// Detect a consent banner overlaid on an otherwise ordinary page.
+///
+/// This is the case `is_consent_wall_str` and `html_has_consent_wall` both miss:
+/// no redirect to a consent host, HTTP 200, real content underneath — just a
+/// vendor's banner on top of it.  It is also the common case.
+fn html_has_inline_consent_banner(html: &str) -> bool {
+    CONSENT_BANNERS
+        .iter()
+        .any(|(marker, _)| html.contains(marker))
+}
+
+// ---------------------------------------------------------------------------
+// Google's inline consent wall
+// ---------------------------------------------------------------------------
+
+/// The consent values Google's own inline script publishes on its GDPR wall.
+///
+/// `sCAS` / `sCRS` are the `SOCS` cookie payloads recording "accept all" and
+/// "reject all"; both carry the serving build's version, which is why a
+/// hardcoded constant goes stale.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct GoogleConsent {
+    domain: String,
+    accept: String,
+    reject: String,
+    max_age: String,
+}
+
+/// Fallback `SOCS` payload from 2021, used only when the wall's own script
+/// cannot be parsed.  It carries no build version and Google has stopped
+/// honouring it reliably — treat a fallback as "probably will not work".
+const GOOGLE_SOCS_FALLBACK: &str = "CAESHAgBEhIaAB";
+
+/// Read `var name = <value>;` out of an inline script.
+///
+/// Tolerates single quotes, double quotes and bare numbers, and skips a match
+/// where `name` is only the prefix of a longer identifier (`sL` vs `sLater`) by
+/// requiring `=` as the next non-space character.
+fn js_var(html: &str, name: &str) -> Option<String> {
+    let needle = format!("var {name}");
+    let mut base = 0usize;
     loop {
-        tokio::time::sleep(interval).await;
-        let url = tokio::time::timeout(tokio::time::Duration::from_secs(3), page.url())
-            .await
-            .ok()
-            .and_then(|r| r.ok())
-            .flatten()
-            .unwrap_or_default();
-        if !is_consent_wall_str(&url) {
-            return true;
+        let i = html.get(base..)?.find(&needle)?;
+        let after = base + i + needle.len();
+        let rest = html.get(after..)?.trim_start();
+        if let Some(body) = rest.strip_prefix('=') {
+            let body = body.trim_start();
+            let value = if let Some(q) = body.strip_prefix('\'') {
+                q.split('\'').next().unwrap_or_default().to_owned()
+            } else if let Some(q) = body.strip_prefix('"') {
+                q.split('"').next().unwrap_or_default().to_owned()
+            } else {
+                body.split([';', '\n'])
+                    .next()
+                    .unwrap_or_default()
+                    .trim()
+                    .to_owned()
+            };
+            if !value.is_empty() {
+                return Some(value);
+            }
         }
-        if tokio::time::Instant::now() >= deadline {
-            return false;
+        base = after;
+    }
+}
+
+/// Extract Google's consent values from its wall.
+///
+/// Verified live (2026-08): the wall carries an inline script defining
+/// `cookieDomain`, `sCAS` (accept), `sCRS` (reject) and `sL` (max-age).  Reading
+/// them beats hardcoding, because both payloads embed the serving build id.
+///
+/// Note the sibling `aAU` / `rAU` save URLs are *not* usable as navigations:
+/// `GET https://consent.google.com/save?…` answers 405, they are POST targets.
+/// Setting `SOCS` and reloading is what actually clears the wall.
+fn google_consent_values(html: &str) -> Option<GoogleConsent> {
+    let domain = js_var(html, "cookieDomain")?;
+    if !domain.starts_with('.') {
+        return None;
+    }
+    let accept = js_var(html, "sCAS")?;
+    let reject = js_var(html, "sCRS")?;
+    let max_age = js_var(html, "sL")
+        .filter(|v| !v.is_empty() && v.chars().all(|c| c.is_ascii_digit()))
+        .unwrap_or_else(|| "34128000".to_owned());
+    Some(GoogleConsent {
+        domain,
+        accept,
+        reject,
+        max_age,
+    })
+}
+
+/// Google's wall with values we could not read: still offer both choices, using
+/// the stale fallback payload, rather than leaving the user with nothing.
+fn google_consent_or_fallback(html: &str) -> GoogleConsent {
+    google_consent_values(html).unwrap_or_else(|| GoogleConsent {
+        domain: ".google.com".to_owned(),
+        accept: GOOGLE_SOCS_FALLBACK.to_owned(),
+        reject: GOOGLE_SOCS_FALLBACK.to_owned(),
+        max_age: "34128000".to_owned(),
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Gates: the decisions a site puts in front of its content
+//
+// A site can interrupt with a language chooser, then a cookie banner, then
+// finally show what you came for.  Those are answered one at a time, each as a
+// page of its own: the language list leads to the cookie list leads to the
+// content.  A decision the site already has on file is never asked again — it
+// simply stops rendering its dialog, so no gate is detected and the content is
+// what loads.
+//
+// Every choice is a single-button `<form>` whose click forwards to the real
+// control (see `gate_surface_js`).  FFON can only activate a `<button>` inside
+// a `<form>`, and `on_button_press` only ever receives `submit:form_N`, so one
+// form per choice is what makes each choice individually pressable.
+// ---------------------------------------------------------------------------
+
+/// Which decision a page is currently blocking on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GateKind {
+    Language,
+    Consent,
+}
+
+impl GateKind {
+    fn from_js(s: &str) -> Option<Self> {
+        match s {
+            "language" => Some(GateKind::Language),
+            "consent" => Some(GateKind::Consent),
+            _ => None,
+        }
+    }
+
+    /// Fluent key for the line that introduces the step.
+    fn notice_key(self) -> &'static str {
+        match self {
+            GateKind::Language => "webbrowser-step-language",
+            GateKind::Consent => "webbrowser-step-consent",
         }
     }
 }
 
-/// After clicking "accept", poll the page *content* every 400 ms until it no
-/// longer shows an inline consent wall (see `html_has_consent_wall`), or until
-/// `budget` elapses.  Inline walls (Google/YouTube) reload in place, so leaving
-/// the wall is not observable from the URL alone; this watches the content.
-/// Returns the most recently fetched content (whether or not it cleared) so the
-/// caller can reuse it instead of fetching again.
-async fn wait_for_consent_content_cleared(
+/// What the in-page pass found.
+#[derive(Debug, Default, serde::Deserialize)]
+struct GateReport {
+    /// `"language"`, `"consent"`, or empty when the page is not gated.
+    kind: String,
+    /// Choice labels, in the order their forms were inserted.
+    labels: Vec<String>,
+    /// Set when a stored language preference was applied without asking; the
+    /// page is navigating and has to be re-read.
+    #[serde(default)]
+    auto: bool,
+    /// Set when the pass marked anything for the prune to take out, so the page
+    /// is worth serialising again.
+    #[serde(default)]
+    marked: bool,
+    /// Set when a consent vendor's script is on the page but its banner is not
+    /// in the DOM yet.  bpost loads OneTrust through Google Tag Manager, so the
+    /// banner arrives a beat after the page has otherwise settled.
+    #[serde(default)]
+    pending: bool,
+}
+
+/// Script hosts that mean "a cookie banner is coming".  Used only to decide
+/// whether waiting another moment is worthwhile, never to classify a page.
+const CONSENT_VENDOR_SCRIPTS: &[&str] = &[
+    "cookielaw.org",
+    "onetrust.com",
+    "cookiebot.com",
+    "didomi.io",
+    "usercentrics.eu",
+    "trustarc.com",
+    "quantcast.com",
+    "cookiescript.com",
+    "axept.io",
+    "consentmanager.net",
+    "cookieinformation.com",
+    "sourcepoint.mgr.consensu.org",
+];
+
+/// Prefix of the id given to a language choice's proxy button.  The chosen code
+/// is read back out of the `FormMap` selector when the button is pressed, which
+/// is how the preference gets remembered without threading state through the
+/// background load task.
+const LANG_BUTTON_PREFIX: &str = "sic-lang-";
+const CONSENT_BUTTON_PREFIX: &str = "sic-consent-";
+
+/// Recover the language code from a proxy button's CSS selector.
+///
+/// `#sic-lang-nl-0` -> `nl`.  Returns `None` for anything else, including the
+/// consent buttons, so pressing an accept button never records a language.
+fn language_code_from_selector(selector: &str) -> Option<String> {
+    let rest = selector
+        .strip_prefix('#')
+        .and_then(|s| s.strip_prefix(LANG_BUTTON_PREFIX))?;
+    let code = rest.rsplit_once('-').map(|(c, _)| c).unwrap_or(rest);
+    (!code.is_empty()).then(|| code.to_owned())
+}
+
+/// Where the remembered language choice lives.
+///
+/// Next to the Chrome profile rather than inside it, so "clear cookies" (which
+/// wipes what *sites* remember) leaves the user's own choice alone.
+fn language_pref_path() -> std::path::PathBuf {
+    chrome_profile_dir()
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(std::env::temp_dir)
+        .join("webbrowser-language")
+}
+
+fn stored_language() -> Option<String> {
+    let raw = std::fs::read_to_string(language_pref_path()).ok()?;
+    let code = raw.trim().to_ascii_lowercase();
+    // A code, not a sentence: guards against a corrupted file becoming a
+    // selector fragment we then inject into the page.
+    let ok = (2..=8).contains(&code.len())
+        && code
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+    ok.then_some(code)
+}
+
+fn store_language(code: &str) {
+    let path = language_pref_path();
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let _ = std::fs::write(path, code);
+}
+
+fn forget_language() {
+    let _ = std::fs::remove_file(language_pref_path());
+}
+
+/// Build the in-page pass that finds the current gate and turns it into forms.
+///
+/// `allow_auto` is cleared on the second run of a single load: applying a stored
+/// language preference navigates, and a site whose `hreflang` disagrees with the
+/// page it points at would otherwise bounce forever.
+fn gate_surface_js(
+    google: Option<&GoogleConsent>,
+    is_wall: bool,
+    stored_lang: Option<&str>,
+    allow_auto: bool,
+    rebuild: bool,
+) -> String {
+    register_translations();
+    let containers = js_array(&CONSENT_BANNERS.iter().map(|(_, s)| *s).collect::<Vec<_>>());
+    let cmp_sels = js_array(CMP_SELECTORS);
+    let cmp_reject_sels = js_array(CMP_REJECT_SELECTORS);
+    let debris_sels = js_array(CONSENT_DEBRIS);
+    let reject_kws = js_array(REJECT_KEYWORDS);
+    let accept_kws = js_array(ACCEPT_KEYWORDS);
+    let settings_kws = js_array(SETTINGS_KEYWORDS);
+    let vendor_scripts = js_array(CONSENT_VENDOR_SCRIPTS);
+    let google_js = match google {
+        Some(g) => format!(
+            "{{domain:{:?},accept:{:?},reject:{:?},maxAge:{:?}}}",
+            g.domain, g.accept, g.reject, g.max_age
+        ),
+        None => "null".to_owned(),
+    };
+    let stored_js = match stored_lang {
+        Some(l) => format!("{l:?}"),
+        None => "null".to_owned(),
+    };
+    let accept_label = localize::t("webbrowser-consent-accept-all");
+    let reject_label = localize::t("webbrowser-consent-reject-all");
+    format!(
+        r#"(function() {{
+    const SELS   = {containers};
+    const CMP    = {cmp_sels};
+    const CMPREJ = {cmp_reject_sels};
+    const DEBRIS = {debris_sels};
+    const REJ    = {reject_kws};
+    const ACC    = {accept_kws};
+    const SET    = {settings_kws};
+    const VENDORS = {vendor_scripts};
+    const GOOGLE = {google_js};
+    const IS_WALL = {is_wall};
+    const STORED_LANG = {stored_js};
+    const ALLOW_AUTO = {allow_auto};
+    const REBUILD = {rebuild};
+    const L = {{accept: {accept_label:?}, reject: {reject_label:?}}};
+    const LANG_ID = {LANG_BUTTON_PREFIX:?};
+    const CONSENT_ID = {CONSENT_BUTTON_PREFIX:?};
+    const SRC_MARK = 'data-sic-consent-src';
+    const VISIBLE = 'display:block !important;visibility:visible !important;';
+
+    const textOf = el => ((el.innerText || el.textContent || '').replace(/\s+/g, ' ').trim());
+    const visible = el => {{ try {{ return el.getClientRects().length > 0; }} catch (e) {{ return false; }} }};
+    const base = c => (c || '').toLowerCase().split(/[-_]/)[0];
+
+    // Idempotent: a second settle on the same page must not stack another copy
+    // of the choices.  A deliberate retry does the opposite — it tears the
+    // previous set down and rebuilds, because a CMP can render its buttons a
+    // beat apart and an early scan would otherwise lock in a partial list.
+    const existing = document.querySelectorAll('button[id^="' + LANG_ID + '"], button[id^="' + CONSENT_ID + '"]');
+    if (existing.length) {{
+        if (!REBUILD) {{
+            const kind = existing[0].id.startsWith(LANG_ID) ? 'language' : 'consent';
+            return {{kind: kind, labels: Array.from(existing).map(b => b.textContent), auto: false}};
+        }}
+        for (const btn of existing) {{ const f = btn.closest('form'); if (f) f.remove(); else btn.remove(); }}
+    }}
+
+    // ---- step 1: language ------------------------------------------------
+    // Two sources, merged by language code. <link rel=alternate hreflang> is the
+    // standard one and carries a real URL; a site's own chooser carries a better
+    // label and, often, no href at all (bpost's options are bare <a data-lang>).
+    const byCode = new Map();
+    const put = (code, patch) => {{
+        const c = base(code);
+        if (!c || c === 'x') return;
+        const cur = byCode.get(c) || {{code: c}};
+        byCode.set(c, Object.assign(cur, patch));
+    }};
+
+    for (const link of document.querySelectorAll('link[rel="alternate"][hreflang]')) {{
+        const href = link.getAttribute('href');
+        if (href) put(link.getAttribute('hreflang'), {{href: new URL(href, location.href).href}});
+    }}
+
+    // A chooser is a visible element offering several language-tagged options.
+    const optSel = '[data-lang], [hreflang], a[lang], [data-language]';
+    const opts = Array.from(document.querySelectorAll(optSel)).filter(visible);
+    for (const el of opts) {{
+        const code = el.getAttribute('data-lang') || el.getAttribute('data-language')
+                  || el.getAttribute('hreflang') || el.getAttribute('lang');
+        const label = textOf(el);
+        if (!code || !label || label.length > 60) continue;
+        const patch = {{label: label, el: el}};
+        const href = el.getAttribute && el.getAttribute('href');
+        if (href && !href.startsWith('#')) patch.href = new URL(href, location.href).href;
+        put(code, patch);
+    }}
+
+    const langs = Array.from(byCode.values()).filter(o => o.href || o.el);
+    if (langs.length >= 2) {{
+        const here = base(document.documentElement.getAttribute('lang'));
+        const mine = STORED_LANG ? langs.find(o => o.code === base(STORED_LANG)) : null;
+        if (STORED_LANG) {{
+            // The choice is already made: act on it silently, or, if this site
+            // has nothing in that language, stop asking and show the page.
+            if (mine && base(STORED_LANG) !== here && ALLOW_AUTO) {{
+                if (mine.href && mine.href !== location.href) {{ window.location.href = mine.href; return {{kind:'', labels:[], auto:true}}; }}
+                if (mine.el) {{ mine.el.click(); return {{kind:'', labels:[], auto:true}}; }}
+            }}
+        }} else {{
+            langs.sort((a, b) => a.code.localeCompare(b.code));
+            const made = langs.map((o, i) => ({{
+                label: o.label || o.code.toUpperCase(),
+                id: LANG_ID + o.code + '-' + i,
+                href: o.href,
+                el: o.el,
+            }}));
+            insert(made);
+            return {{kind: 'language', labels: made.map(c => c.label), auto: false}};
+        }}
+    }}
+
+    // ---- step 2: cookies -------------------------------------------------
+    // Off-screen vendor scaffolding goes regardless of what we find: it is
+    // never content, and the prune deliberately keeps hidden subtrees that
+    // contain buttons.  Anything actually on screen is left alone, so a
+    // preference centre the user has opened stays readable.
+    let marked = false;
+    for (const sel of DEBRIS) {{
+        let els = [];
+        try {{ els = document.querySelectorAll(sel); }} catch (e) {{ continue; }}
+        for (const el of els) if (!visible(el)) {{ el.setAttribute(SRC_MARK, ''); marked = true; }}
+    }}
+
+    const choices = [];
+    if (GOOGLE) {{
+        // Google ignores programmatic clicks on its own accept button, even
+        // trusted CDP mouse events. Writing SOCS is what actually takes effect.
+        const setSocs = v => function () {{
+            document.cookie = 'SOCS=' + v + ';domain=' + GOOGLE.domain +
+                ';path=/;max-age=' + GOOGLE.maxAge + ';secure;samesite=lax';
+            location.reload();
+        }};
+        choices.push({{label: L.reject, kind: 'reject', run: setSocs(GOOGLE.reject)}});
+        choices.push({{label: L.accept, kind: 'accept', run: setSocs(GOOGLE.accept)}});
+    }} else {{
+        let container = null;
+        for (const sel of SELS) {{
+            try {{ const el = document.querySelector(sel); if (el) {{ container = el; break; }} }} catch (e) {{}}
+        }}
+        // On a wall the whole page *is* the CMP, so there is no container to
+        // find and scanning the document is safe — there is nothing else on it.
+        const root = container || (IS_WALL ? document : null);
+        if (root) {{
+            const seen = new Set();
+            const scan = r => {{
+                let els = [];
+                try {{ els = r.querySelectorAll('button, a, [role="button"], input[type="submit"]'); }} catch (e) {{ return; }}
+                for (const el of els) {{
+                    if (seen.has(el) || !visible(el)) continue;
+                    const label = (el.tagName === 'INPUT' ? (el.value || '') : textOf(el));
+                    const t = label.toLowerCase();
+                    // A consent button says a few words. Anything longer is prose.
+                    if (!t || t.length > 60) continue;
+                    const matchesAny = list => list.some(s => {{
+                        try {{ return el.matches(s); }} catch (e) {{ return false; }}
+                    }});
+                    let kind = null;
+                    // The vendor's own id first: it survives translation, which
+                    // a keyword list never fully does.
+                    if (matchesAny(CMPREJ)) kind = 'reject';
+                    else if (REJ.some(k => t.includes(k))) kind = 'reject';
+                    else if (SET.some(k => t.includes(k))) continue;   // opens a panel, decides nothing
+                    else if (ACC.some(k => t.includes(k))) kind = 'accept';
+                    else if (matchesAny(CMP)) kind = 'accept';
+                    if (!kind) continue;
+                    seen.add(el);
+                    choices.push({{label: label, kind: kind, el: el}});
+                }}
+            }};
+            scan(root);
+            if (container && container.shadowRoot) scan(container.shadowRoot);
+            if (container) {{ container.setAttribute(SRC_MARK, ''); marked = true; }}
+        }}
+        if (!choices.length) {{
+            // DPG Media (hln.be, vtm.be, ad.nl, …) publishes the site's own
+            // consent callback inline, before its external consent.js loads.
+            try {{
+                const u = window.cmpProperties && window.cmpProperties.siteUrl;
+                if (u && u.length) choices.push({{label: L.accept, kind: 'accept', href: u}});
+            }} catch (e) {{}}
+        }}
+    }}
+
+    if (!choices.length) {{
+        // Nothing to answer *yet*: a tag manager may still be injecting the
+        // vendor's banner, which is worth one more look. bpost loads OneTrust
+        // this way, and it lands a beat after the page otherwise settles.
+        const coming = VENDORS.some(v => {{
+            try {{ return !!document.querySelector('script[src*="' + v + '"]'); }} catch (e) {{ return false; }}
+        }});
+        return {{kind: '', labels: [], auto: false, marked: marked, pending: coming}};
+    }}
+
+    // Refusing is the choice a user has to go looking for on the real web, so
+    // it goes first here. Stable within each group, i.e. the site's own order.
+    const ordered = choices.filter(c => c.kind === 'reject').concat(choices.filter(c => c.kind !== 'reject'));
+    ordered.forEach((c, i) => {{ c.id = CONSENT_ID + i; }});
+    insert(ordered);
+    // A banner that has offered only one button so far is probably mid-render:
+    // worth one more look, so refusing does not go missing.
+    return {{kind: 'consent', labels: ordered.map(c => c.label), auto: false, marked: true, pending: ordered.length < 2}};
+
+    // One single-button form per choice, prepended to <body> so they are
+    // document.forms[0..n-1] — the indices FFON derives from the step page have
+    // to match the ones `document.forms[n]` yields here at click time.
+    function insert(list) {{
+        const frag = document.createDocumentFragment();
+        for (const c of list) {{
+            const form = document.createElement('form');
+            form.setAttribute('onsubmit', 'return false');
+            form.style.cssText = VISIBLE;
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.id = c.id;
+            btn.textContent = c.label;
+            btn.style.cssText = VISIBLE;
+            btn.addEventListener('click', function () {{
+                const run = c.run, href = c.href, el = c.el;
+                // The step is answered, so it stops existing. Without this the
+                // next settle would find our own buttons still standing and
+                // offer the same step forever — a CMP that hides its banner in
+                // place (OneTrust) never navigates to clear them for us.
+                for (const b of document.querySelectorAll('button[id^="' + LANG_ID + '"], button[id^="' + CONSENT_ID + '"]')) {{
+                    const f = b.closest('form');
+                    if (f) f.remove(); else b.remove();
+                }}
+                if (run) run();
+                else if (href) window.location.href = href;
+                else if (el) el.click();
+            }});
+            form.appendChild(btn);
+            frag.appendChild(form);
+        }}
+        document.body.insertBefore(frag, document.body.firstChild);
+    }}
+}})()"#
+    )
+}
+
+/// Run the in-page pass once.
+async fn surface_gate(
     page: &chromiumoxide::Page,
-    budget: tokio::time::Duration,
-) -> Option<String> {
-    let interval = tokio::time::Duration::from_millis(400);
-    let deadline = tokio::time::Instant::now() + budget;
-    let mut last = None;
-    loop {
-        if let Ok(Ok(html)) =
-            tokio::time::timeout(tokio::time::Duration::from_secs(15), page.content()).await
-        {
-            let cleared = !html_has_consent_wall(&html);
-            last = Some(html);
-            if cleared {
-                return last;
+    google: Option<&GoogleConsent>,
+    is_wall: bool,
+    stored_lang: Option<&str>,
+    allow_auto: bool,
+    rebuild: bool,
+) -> GateReport {
+    let js = gate_surface_js(google, is_wall, stored_lang, allow_auto, rebuild);
+    tokio::time::timeout(tokio::time::Duration::from_secs(5), page.evaluate(js))
+        .await
+        .ok()
+        .and_then(|r| r.ok())
+        .and_then(|r| r.into_value::<GateReport>().ok())
+        .unwrap_or_default()
+}
+
+/// Escape a string for interpolation into HTML text or a double-quoted attribute.
+fn html_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+}
+
+/// Render a gate as a page containing nothing but the choices.
+///
+/// The forms mirror, in order, the proxy forms `gate_surface_js` prepended to
+/// the live document, so `form_1..form_N` here resolve to `document.forms[0..N-1]`
+/// there.  Ids match too, which is what `html_submit_selector` turns into the
+/// `#sic-lang-nl-0` selector the click is finally made through.
+fn gate_page_html(labels: &[String], ids: &[String]) -> String {
+    let mut body = String::new();
+    for (label, id) in labels.iter().zip(ids) {
+        body.push_str(&format!(
+            "<form><button type=\"button\" id=\"{}\">{}</button></form>",
+            html_escape(id),
+            html_escape(label)
+        ));
+    }
+    format!("<!DOCTYPE html><html><body>{body}</body></html>")
+}
+
+/// Recreate the ids `gate_surface_js` assigned, from the labels it returned.
+///
+/// Read back out of the live page rather than guessed, so the language codes in
+/// the language ids are the ones the page actually offered.
+async fn gate_button_ids(page: &chromiumoxide::Page) -> Vec<String> {
+    let js = format!(
+        r#"Array.from(document.querySelectorAll('button[id^="{LANG_BUTTON_PREFIX}"], button[id^="{CONSENT_BUTTON_PREFIX}"]')).map(b => b.id)"#
+    );
+    tokio::time::timeout(tokio::time::Duration::from_secs(5), page.evaluate(js))
+        .await
+        .ok()
+        .and_then(|r| r.ok())
+        .and_then(|r| r.into_value::<Vec<String>>().ok())
+        .unwrap_or_default()
+}
+
+/// Resolve whatever the site is asking before it will show its content.
+///
+/// Returns the page to render and whether it is a gate.  A gated page contains
+/// only that step's choices; answering one leads to the next step, and when
+/// nothing is pending the content is what loads.
+async fn settle_gates(
+    page: &chromiumoxide::Page,
+    current_url: &str,
+    html: String,
+) -> (PageLoad, bool) {
+    // "show hidden content" doubles as the way out: it hands back the whole
+    // page, gates and all, for when a step is detected on a page that should
+    // not have one.
+    if !prune_hidden() {
+        return (PageLoad::plain(html), false);
+    }
+    register_translations();
+
+    let is_wall = is_consent_wall_str(current_url) || html_has_consent_wall(&html);
+    let google = html_has_consent_wall(&html).then(|| google_consent_or_fallback(&html));
+    let stored = stored_language();
+
+    let mut report = GateReport::default();
+    // Twice at most: the first pass may apply a stored language and navigate,
+    // and the page that lands is the one that gets to state its next step.
+    for allow_auto in [true, false] {
+        // A client-rendered CMP may not have its buttons in the DOM yet — the
+        // same hydration lag the old auto-accept retried for.
+        for attempt in 0..4u32 {
+            if attempt > 0 {
+                tokio::time::sleep(tokio::time::Duration::from_millis(700)).await;
+            }
+            report = surface_gate(
+                page,
+                google.as_ref(),
+                is_wall,
+                stored.as_deref(),
+                allow_auto,
+                attempt > 0,
+            )
+            .await;
+            if report.auto {
+                break;
+            }
+            // `pending` means the page may still be putting choices on screen:
+            // a tag manager injecting the banner, or a CMP that has rendered
+            // only one of its buttons so far.  It is read from the live DOM, so
+            // a banner that arrived after our snapshot still counts.
+            if !report.pending && (!report.labels.is_empty() || is_wall) {
+                break;
+            }
+            if !report.pending && !html_has_inline_consent_banner(&html) {
+                break;
             }
         }
-        if tokio::time::Instant::now() >= deadline {
-            return last;
+        if !report.auto {
+            break;
         }
-        tokio::time::sleep(interval).await;
+        await_stable_url(page, tokio::time::Duration::from_secs(8)).await;
+    }
+
+    if let Some(kind) = GateKind::from_js(&report.kind) {
+        let ids = gate_button_ids(page).await;
+        if ids.len() == report.labels.len() {
+            return (
+                PageLoad {
+                    html: gate_page_html(&report.labels, &ids),
+                    notices: vec![localize::t(kind.notice_key())],
+                },
+                true,
+            );
+        }
+    }
+
+    // Not gated (any more): the page is whatever the site is now serving. Only
+    // worth re-serialising if something moved — a banner container was marked
+    // for the prune, or a stored language preference navigated us elsewhere.
+    let html = if report.auto || report.marked || html_has_inline_consent_banner(&html) {
+        settled_html(page).await.unwrap_or(html)
+    } else {
+        html
+    };
+    if is_wall && html_has_consent_wall(&html) {
+        // The wall is what the site served and we could not lift a choice out
+        // of it, so it is what the user gets to read and operate.
+        return (
+            PageLoad {
+                html,
+                notices: vec![localize::t("webbrowser-consent-unrecognised")],
+            },
+            false,
+        );
+    }
+    (PageLoad::plain(html), false)
+}
+
+/// Wait until the document has finished loading *and* its visible text has
+/// stopped changing.
+///
+/// `await_stable_url` is not enough after a consent choice: a CMP that reloads
+/// or re-renders in place never changes the URL, so that check returns after
+/// its minimum wait while the page is still rebuilding itself, and the page
+/// gets serialised with its content region half-built. Watching the document
+/// covers both an in-place re-render and a real navigation.
+async fn await_page_settled(page: &chromiumoxide::Page, budget: tokio::time::Duration) {
+    const PROBE: &str = "(function(){try{return document.readyState+'|'+document.body.innerText.length;}\
+         catch(e){return 'x|0';}})()";
+    let deadline = tokio::time::Instant::now() + budget;
+    let mut prev = String::new();
+    let mut quiet = 0u32;
+    loop {
+        tokio::time::sleep(tokio::time::Duration::from_millis(400)).await;
+        let now = tokio::time::timeout(tokio::time::Duration::from_secs(3), page.evaluate(PROBE))
+            .await
+            .ok()
+            .and_then(|r| r.ok())
+            .and_then(|v| v.into_value::<String>().ok())
+            .unwrap_or_default();
+        if now.starts_with("complete") && now == prev && !now.is_empty() {
+            quiet += 1;
+            // Two identical readings in a row, i.e. ~800 ms of nothing moving.
+            if quiet >= 2 {
+                return;
+            }
+        } else {
+            quiet = 0;
+        }
+        prev = now;
+        if tokio::time::Instant::now() >= deadline {
+            return;
+        }
     }
 }
 
@@ -2851,6 +3739,20 @@ mod tests {
     // owns the invisible display.
     #[test]
     #[cfg(target_os = "linux")]
+    #[test]
+    fn both_xvfb_paths_use_the_same_desktop_screen_size() {
+        let screen = format!("-screen 0 {VIEWPORT_W}x{VIEWPORT_H}x24");
+        for helper in [XvfbHelper::Run, XvfbHelper::Bare] {
+            let script = xvfb_wrapper_script("/usr/bin/google-chrome", helper);
+            assert!(
+                script.contains(&screen),
+                "a virtual screen smaller than the layout viewport makes every \
+                 responsive site serve its phone layout: {script}"
+            );
+        }
+        assert!(VIEWPORT_W >= 1200, "must clear the usual xl breakpoint");
+    }
+
     fn xvfb_present_runs_headed_behind_a_wrapper() {
         for helper in [XvfbHelper::Run, XvfbHelper::Bare] {
             let launch = linux_chrome_launch_with(
@@ -2877,7 +3779,15 @@ mod tests {
     #[cfg(target_os = "linux")]
     fn xvfb_run_script_hands_chrome_a_virtual_display() {
         let script = xvfb_wrapper_script("/usr/bin/google-chrome", XvfbHelper::Run);
-        assert!(script.contains("xvfb-run -a /usr/bin/google-chrome"));
+        assert!(script.contains("/usr/bin/google-chrome"));
+        // The screen size is the whole ballgame for a responsive site. Left to
+        // its own default, xvfb-run gave a 612x459 screen, Chrome clamped its
+        // window to it, the viewport came out at 800px, and every site served
+        // its phone layout — bpost hid its desktop navigation completely.
+        assert!(
+            script.contains(&format!("-screen 0 {VIEWPORT_W}x{VIEWPORT_H}x24")),
+            "xvfb-run must be given a desktop screen size: {script}"
+        );
         // Chrome must not pick the compositor over the virtual X11 display.
         assert!(script.contains("unset WAYLAND_DISPLAY"));
         assert!(script.contains("--ozone-platform=x11"));
@@ -4342,40 +5252,843 @@ mod tests {
         );
     }
 
-    // Live end-to-end check: exercises the real Linux runtime path
+    // ---- inline consent banner detection ----
+
+    #[test]
+    fn inline_banner_detected_for_every_vendor() {
+        for (marker, _) in CONSENT_BANNERS {
+            let html = format!(r#"<html><body><div id="{marker}">Cookies</div></body></html>"#);
+            assert!(
+                html_has_inline_consent_banner(&html),
+                "vendor marker {marker} not detected"
+            );
+        }
+    }
+
+    #[test]
+    fn inline_banner_not_detected_on_an_ordinary_page() {
+        assert!(!html_has_inline_consent_banner(
+            "<html><body><h1>Hello</h1><p>Some article text.</p></body></html>"
+        ));
+    }
+
+    #[test]
+    fn inline_banner_not_detected_from_prose_or_a_policy_link() {
+        // The whole reason the marker list is vendor-specific: a page may talk
+        // about cookies at length, or link to its cookie policy, without ever
+        // putting a banner on screen.
+        let prose = "<html><body><p>We use cookies and a cookie consent tool. \
+                     Read our cookie policy about cookies.</p>\
+                     <a href=\"/en/cookie-policy\">Cookies notice</a>\
+                     <a href=\"/cookie-consent\">Cookies setting</a></body></html>";
+        assert!(!html_has_inline_consent_banner(prose));
+    }
+
+    #[test]
+    fn bpost_style_onetrust_banner_is_detected() {
+        // bpost.be loads OneTrust through GTM; the banner is overlaid on an
+        // ordinary HTTP 200 page, which neither wall check ever fires for.
+        let html = r#"<html><body><div id="onetrust-consent-sdk">
+            <div id="onetrust-banner-sdk"><button id="onetrust-accept-btn-handler">Alles accepteren</button></div>
+        </div><h1>Welkom bij Bpost</h1></body></html>"#;
+        assert!(html_has_inline_consent_banner(html));
+        assert!(!is_consent_wall_str("https://www.bpost.be/nl"));
+        assert!(!html_has_consent_wall(html));
+    }
+
+    // ---- reject / accept / settings classification ----
+
+    #[test]
+    fn settings_buttons_are_not_a_consent_choice() {
+        for text in [
+            "Manage preferences",
+            "Cookie settings",
+            "Instellingen",
+            "Personnaliser",
+            "Einstellungen",
+        ] {
+            assert!(is_settings_text(text), "{text} should read as settings");
+            // Still guarded against being mistaken for an accept.
+            assert!(is_reject_text(text), "{text} must never count as accept");
+            assert!(!is_accept_keyword(text));
+        }
+    }
+
+    #[test]
+    fn every_vendor_offers_a_reject_selector_and_it_reaches_the_page() {
+        // Refusing has to keep working in a language nobody wrote a keyword
+        // for: bpost's Dutch OneTrust banner says "Alles afwijzen", but the id
+        // is the same everywhere.
+        assert!(CMP_REJECT_SELECTORS.contains(&"#onetrust-reject-all-handler"));
+        let js = gate_surface_js(None, false, None, true, false);
+        for sel in CMP_REJECT_SELECTORS {
+            // `js_array` emits each selector as a JSON string, so an attribute
+            // selector arrives with its quotes escaped.
+            assert!(
+                js.contains(&format!("{sel:?}")),
+                "reject selector {sel} never reaches the page"
+            );
+        }
+        // Checked before the accept selectors, so a banner whose accept button
+        // also matches a broad pattern cannot win.
+        let rej = js.find("matchesAny(CMPREJ)").expect("reject check");
+        let acc = js.find("matchesAny(CMP)").expect("accept check");
+        assert!(rej < acc, "reject must be classified first");
+    }
+
+    #[test]
+    fn dutch_and_french_reject_wordings_are_recognised() {
+        // Every one of these was observed on a live Belgian consent banner.
+        for text in [
+            "Alles afwijzen",
+            "Alles weigeren",
+            "Continuer sans accepter",
+            "Alleen essenti\u{eb}le cookies",
+            "Nur erforderliche Cookies",
+        ] {
+            assert!(is_reject_text(text), "{text} should read as a refusal");
+            assert!(
+                !is_accept_keyword(text),
+                "{text} must never count as accept"
+            );
+            assert!(!is_settings_text(text), "{text} decides something");
+        }
+    }
+
+    #[test]
+    fn a_real_reject_is_not_classified_as_settings() {
+        for text in ["Reject all", "Alles weigeren", "Alleen noodzakelijke"] {
+            assert!(is_reject_text(text));
+            assert!(!is_settings_text(text), "{text} decides something");
+        }
+    }
+
+    // ---- js_var / Google consent values ----
+
+    #[test]
+    fn js_var_reads_single_and_double_quoted_and_bare_values() {
+        assert_eq!(
+            js_var("var cookieDomain='.google.com';", "cookieDomain").as_deref(),
+            Some(".google.com")
+        );
+        assert_eq!(
+            js_var(r#"var sCAS = "CAIS";"#, "sCAS").as_deref(),
+            Some("CAIS")
+        );
+        assert_eq!(
+            js_var("var sL=34128000;", "sL").as_deref(),
+            Some("34128000")
+        );
+    }
+
+    #[test]
+    fn js_var_skips_an_identifier_that_only_shares_a_prefix() {
+        // `sLater` must not answer a lookup for `sL`.
+        assert_eq!(
+            js_var("var sLater='nope';var sL=42;", "sL").as_deref(),
+            Some("42")
+        );
+        assert_eq!(js_var("var sLater='nope';", "sL"), None);
+    }
+
+    /// Trimmed from the real wall served by www.google.com (2026-08), including
+    /// the `\x3d`-escaped save URLs that sit alongside the values we read.
+    const GOOGLE_WALL_SNIPPET: &str = r#"<script nonce="JNJ">(function(){var cookieDomain='.google.com';var cookieUpdateConsentUrl='';var sCAS='CAISHAgBEhJnd3NfMjAyNjA4MDYtMF9SQzEaAm5sIAEaBgiAht_TBg';var sCRS='CAESHAgBEhJnd3NfMjAyNjA4MDYtMF9SQzEaAm5sIAEaBgiAht_TBg';var sL=34128000;var sEE=false;var aAU='https://consent.google.com/save?continue\x3dhttps://www.google.com/\x26set_eom\x3dfalse';var rAU='https://consent.google.com/save?continue\x3dhttps://www.google.com/\x26set_eom\x3dtrue';})();</script>"#;
+
+    #[test]
+    fn google_consent_values_are_read_from_the_wall() {
+        let g = google_consent_values(GOOGLE_WALL_SNIPPET).expect("wall values");
+        assert_eq!(g.domain, ".google.com");
+        // sCAS records "accept all", sCRS records "reject all"; both carry the
+        // serving build id, which is why the old hardcoded constant went stale.
+        assert!(g.accept.starts_with("CAIS"), "accept payload: {}", g.accept);
+        assert!(g.reject.starts_with("CAES"), "reject payload: {}", g.reject);
+        assert_ne!(g.accept, g.reject);
+        assert_eq!(g.max_age, "34128000");
+    }
+
+    #[test]
+    fn google_consent_values_absent_on_an_ordinary_page() {
+        assert_eq!(
+            google_consent_values("<html><body><p>Nothing here.</p></body></html>"),
+            None
+        );
+    }
+
+    #[test]
+    fn google_consent_falls_back_to_the_stale_constant() {
+        let g = google_consent_or_fallback("<html><body></body></html>");
+        assert_eq!(g.domain, ".google.com");
+        assert_eq!(g.accept, GOOGLE_SOCS_FALLBACK);
+    }
+
+    #[test]
+    fn google_consent_rejects_a_non_dotted_domain() {
+        // A `cookieDomain` that is not a cookie domain means we parsed
+        // something else entirely; better to fall back than to write junk.
+        assert_eq!(
+            google_consent_values(
+                "var cookieDomain='https://example.com';var sCAS='a';var sCRS='b';"
+            ),
+            None
+        );
+    }
+
+    // ---- gate surfacing script ----
+
+    #[test]
+    fn gate_script_embeds_the_google_values_it_was_given() {
+        let g = google_consent_values(GOOGLE_WALL_SNIPPET).unwrap();
+        let js = gate_surface_js(Some(&g), true, None, true, false);
+        assert!(js.contains(&g.accept));
+        assert!(js.contains(&g.reject));
+        assert!(js.contains(".google.com"));
+        assert!(js.contains("const IS_WALL = true;"));
+    }
+
+    #[test]
+    fn gate_script_carries_the_vendor_selectors_and_no_google_block() {
+        let js = gate_surface_js(None, false, None, true, false);
+        assert!(js.contains("const GOOGLE = null;"));
+        assert!(js.contains("const IS_WALL = false;"));
+        assert!(js.contains("const STORED_LANG = null;"));
+        assert!(js.contains("#onetrust-banner-sdk"));
+        assert!(js.contains("#CybotCookiebotDialog"));
+        // One form per choice is the whole point — several submit buttons in
+        // one form are indistinguishable to `on_button_press`.
+        assert!(js.contains("createElement('form')"));
+    }
+
+    #[test]
+    fn gate_script_passes_a_stored_language_and_the_auto_guard() {
+        let js = gate_surface_js(None, false, Some("nl"), false, false);
+        assert!(js.contains(r#"const STORED_LANG = "nl";"#));
+        // Cleared on the second pass of a load so an hreflang set that
+        // disagrees with the page it points at cannot bounce forever.
+        assert!(js.contains("const ALLOW_AUTO = false;"));
+    }
+
+    // ---- language preference ----
+
+    #[test]
+    fn language_code_is_recovered_from_a_proxy_button_selector() {
+        assert_eq!(
+            language_code_from_selector("#sic-lang-nl-0").as_deref(),
+            Some("nl")
+        );
+        assert_eq!(
+            language_code_from_selector("#sic-lang-de-3").as_deref(),
+            Some("de")
+        );
+        // A consent press must never be mistaken for a language choice.
+        assert_eq!(language_code_from_selector("#sic-consent-0"), None);
+        assert_eq!(
+            language_code_from_selector("#onetrust-accept-btn-handler"),
+            None
+        );
+        assert_eq!(language_code_from_selector(r#"[type="submit"]"#), None);
+    }
+
+    #[test]
+    fn gate_page_contains_only_the_choices() {
+        // "Only the step, nothing else": the page a gate renders to is the list
+        // and nothing more, and its forms line up 1:1 with the proxy forms in
+        // the live document.
+        let html = gate_page_html(
+            &[
+                "Ik spreek Nederlands".to_owned(),
+                "I speak English".to_owned(),
+            ],
+            &["sic-lang-nl-0".to_owned(), "sic-lang-en-1".to_owned()],
+        );
+        let (elems, map) = html_to_ffon_with_forms(&html, "");
+        assert_eq!(elems.len(), 2, "expected exactly two choices: {elems:?}");
+        assert_eq!(
+            map.get("form_1/Ik spreek Nederlands")
+                .map(|n| n.css_selector.as_str()),
+            Some("#sic-lang-nl-0")
+        );
+        assert_eq!(
+            map.get("form_2/I speak English")
+                .map(|n| n.css_selector.as_str()),
+            Some("#sic-lang-en-1")
+        );
+    }
+
+    #[test]
+    fn gate_page_escapes_a_hostile_label() {
+        let html = gate_page_html(
+            &["</button><script>bad()</script>".to_owned()],
+            &["sic-consent-0".to_owned()],
+        );
+        assert!(!html.contains("<script>"), "label was not escaped: {html}");
+    }
+
+    // ---- hidden-content toggle ----
+
+    #[test]
+    fn prune_toggle_command_is_labelled_by_what_it_does() {
+        let _guard = launch_flag_guard(true);
+        let restore = prune_hidden();
+        let mut p = WebbrowserProvider::new();
+        let mut err = String::new();
+
+        PRUNE_HIDDEN.store(true, Ordering::Release);
+        assert!(p.commands().contains(&CMD_SHOW_HIDDEN.to_owned()));
+        assert!(!p.commands().contains(&CMD_HIDE_HIDDEN.to_owned()));
+
+        p.handle_command(CMD_SHOW_HIDDEN, "", 0, &mut err);
+        assert!(!prune_hidden(), "pressing it should turn pruning off");
+        assert!(p.commands().contains(&CMD_HIDE_HIDDEN.to_owned()));
+
+        p.handle_command(CMD_HIDE_HIDDEN, "", 0, &mut err);
+        assert!(prune_hidden(), "pressing it again should turn pruning on");
+
+        PRUNE_HIDDEN.store(restore, Ordering::Release);
+    }
+
+    #[test]
+    fn pruning_is_on_by_default() {
+        assert!(PRUNE_HIDDEN.load(Ordering::Acquire) || !prune_hidden());
+    }
+
+    // ---- browser-backed tests (need Chrome; run with --ignored) ----
+
+    /// Load an HTML fixture from a temp file through the real load path.
+    #[cfg(not(target_os = "windows"))]
+    fn load_fixture(name: &str, html: &str) -> PageLoad {
+        let path = std::env::temp_dir().join(name);
+        std::fs::write(&path, html).expect("write fixture");
+        let url = format!("file://{}", path.display());
+        let out = chromium_runtime().block_on(async {
+            let live = init_live_session().await.expect("launch chrome");
+            let out = navigate_and_get_html(&live.page, &url).await;
+            close_browser(&live.session).await;
+            out
+        });
+        let _ = std::fs::remove_file(&path);
+        out.expect("fixture should load")
+    }
+
+    /// Fixture covering every prune rule at once, including the one that must
+    /// *not* fire: screen-reader-only text.
+    #[cfg(not(target_os = "windows"))]
+    const PRUNE_FIXTURE: &str = r#"<!DOCTYPE html><html><head><title>t</title>
+        <style>.sronly{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}</style>
+        </head><body>
+        <p>VISIBLE-PARAGRAPH</p>
+        <span class="sronly">SCREENREADER-ONLY</span>
+        <div style="display:none"><p>DISPLAY-NONE-TEXT</p></div>
+        <div aria-hidden="true"><p>ARIA-HIDDEN-TEXT</p></div>
+        <div hidden><p>HIDDEN-ATTR-TEXT</p></div>
+        <div style="visibility:hidden"><p>VISIBILITY-HIDDEN-TEXT</p></div>
+        </body></html>"#;
+
+    #[test]
+    #[ignore]
+    #[cfg(not(target_os = "windows"))]
+    fn hidden_nodes_are_pruned_but_screen_reader_text_survives() {
+        let _guard = launch_flag_guard(false);
+        let restore = prune_hidden();
+        PRUNE_HIDDEN.store(true, Ordering::Release);
+        let load = load_fixture("sic-prune.html", PRUNE_FIXTURE);
+        PRUNE_HIDDEN.store(restore, Ordering::Release);
+
+        assert!(load.html.contains("VISIBLE-PARAGRAPH"));
+        // The rule that matters most for this app: .sr-only text is a clipped
+        // 1x1 box but still display:block/visible, and it is exactly what a
+        // screen reader is supposed to read.
+        assert!(
+            load.html.contains("SCREENREADER-ONLY"),
+            "screen-reader-only text must never be pruned"
+        );
+        for gone in [
+            "DISPLAY-NONE-TEXT",
+            "ARIA-HIDDEN-TEXT",
+            "HIDDEN-ATTR-TEXT",
+            "VISIBILITY-HIDDEN-TEXT",
+        ] {
+            assert!(!load.html.contains(gone), "{gone} should have been pruned");
+        }
+    }
+
+    /// A collapsed menu, a dead hidden blurb, and a skip-link target that is an
+    /// empty anchor — the three shapes the prune has to tell apart.
+    #[cfg(not(target_os = "windows"))]
+    const NAV_FIXTURE: &str = r##"<!DOCTYPE html><html><body>
+        <a href="#main-content">Skip to content</a>
+        <div class="collapse" style="display:none">
+          <a href="/send">MENU-SEND-PARCEL</a>
+          <a href="/receive">MENU-RECEIVE-PARCEL</a>
+        </div>
+        <div style="display:none"><p>DEAD-HIDDEN-BLURB with no way to reach it</p></div>
+        <div aria-hidden="true"><a href="/x">ARIA-HIDDEN-LINK</a></div>
+        <a id="main-content"></a>
+        <h1>REAL-HEADING</h1>
+        <p>REAL-BODY</p>
+        </body></html>"##;
+
+    #[test]
+    #[ignore]
+    #[cfg(not(target_os = "windows"))]
+    fn hidden_navigation_survives_but_dead_hidden_text_does_not() {
+        let _guard = launch_flag_guard(false);
+        let restore = prune_hidden();
+        PRUNE_HIDDEN.store(true, Ordering::Release);
+        let load = load_fixture("sic-nav.html", NAV_FIXTURE);
+        PRUNE_HIDDEN.store(restore, Ordering::Release);
+
+        // A collapsed menu is the site's navigation and nothing here can press
+        // the hamburger to open it, so it stays.
+        assert!(load.html.contains("MENU-SEND-PARCEL"));
+        assert!(load.html.contains("MENU-RECEIVE-PARCEL"));
+        assert!(load.html.contains("REAL-HEADING"));
+        // Hidden text with nothing to act on is just weight.
+        assert!(!load.html.contains("DEAD-HIDDEN-BLURB"));
+        // aria-hidden is the author telling assistive tech to skip it, links
+        // or no links, and this app is assistive tech.
+        assert!(!load.html.contains("ARIA-HIDDEN-LINK"));
+    }
+
+    #[test]
+    #[ignore]
+    #[cfg(not(target_os = "windows"))]
+    fn an_empty_anchors_id_moves_to_the_next_thing_that_renders() {
+        let _guard = launch_flag_guard(false);
+        let load = load_fixture("sic-anchor.html", NAV_FIXTURE);
+        let (elems, _) = html_to_ffon_with_forms(&load.html, "");
+        let rendered = format!("{elems:?}");
+        // `<a id="main-content"></a>` emits no node, so without rehoming the
+        // skip link points at nothing.
+        assert!(
+            rendered.contains("<id>main-content</id>"),
+            "skip-link target was lost: {rendered}"
+        );
+        assert!(rendered.contains("<link>#main-content</link>"));
+    }
+
+    #[test]
+    #[ignore]
+    #[cfg(not(target_os = "windows"))]
+    fn toggling_the_prune_off_brings_hidden_content_back() {
+        let _guard = launch_flag_guard(false);
+        let restore = prune_hidden();
+        PRUNE_HIDDEN.store(false, Ordering::Release);
+        let load = load_fixture("sic-prune-off.html", PRUNE_FIXTURE);
+        PRUNE_HIDDEN.store(restore, Ordering::Release);
+
+        for present in [
+            "VISIBLE-PARAGRAPH",
+            "SCREENREADER-ONLY",
+            "DISPLAY-NONE-TEXT",
+            "ARIA-HIDDEN-TEXT",
+            "HIDDEN-ATTR-TEXT",
+            "VISIBILITY-HIDDEN-TEXT",
+        ] {
+            assert!(
+                load.html.contains(present),
+                "{present} missing with prune off"
+            );
+        }
+    }
+
+    #[test]
+    #[ignore]
+    #[cfg(not(target_os = "windows"))]
+    fn a_pruned_subtree_keeps_its_forms_counted() {
+        // Removing a hidden <form> outright would renumber every later form,
+        // while the click path resolves buttons via `document.forms[n]` on the
+        // live page. The shell keeps the numbering aligned.
+        let _guard = launch_flag_guard(false);
+        // aria-hidden prunes regardless of what is inside, so this still
+        // exercises the shell that keeps the numbering aligned.
+        let html = r#"<!DOCTYPE html><html><body>
+            <div aria-hidden="true"><form><input name="ghost"></form></div>
+            <form><input type="search" name="q" placeholder="Search"><button>Go</button></form>
+            </body></html>"#;
+        let load = load_fixture("sic-form-index.html", html);
+        assert!(!load.html.contains("ghost"), "hidden form contents pruned");
+        let (_e, map) = html_to_ffon_with_forms(&load.html, "");
+        assert!(
+            map.keys().any(|k| k.starts_with("form_2/")),
+            "the visible form must still be form_2; keys: {:?}",
+            map.keys().collect::<Vec<_>>()
+        );
+    }
+
+    /// A OneTrust-shaped banner over a real article.  Each choice rewrites the
+    /// body, so a press is observable in the page the provider re-reads.
+    #[cfg(not(target_os = "windows"))]
+    const CONSENT_FIXTURE: &str = r#"<!DOCTYPE html><html><body>
+        <h1>ARTICLE-HEADING</h1>
+        <p>ARTICLE-BODY</p>
+        <div id="onetrust-banner-sdk">
+          <p>BANNER-PROSE about cookies</p>
+          <button onclick="document.body.innerHTML='&lt;p&gt;CHOICE-REJECT&lt;/p&gt;'">Alles weigeren</button>
+          <button id="onetrust-accept-btn-handler" onclick="document.body.innerHTML='&lt;p&gt;CHOICE-ACCEPT&lt;/p&gt;'">Alles accepteren</button>
+          <button>Cookie settings</button>
+        </div>
+        </body></html>"#;
+
+    #[test]
+    #[ignore]
+    #[cfg(not(target_os = "windows"))]
+    fn a_consent_banner_becomes_a_step_of_its_own() {
+        let _guard = launch_flag_guard(false);
+        let load = load_fixture("sic-consent.html", CONSENT_FIXTURE);
+
+        // The step page is the choices and nothing else — not the banner, and
+        // not the article, which is what answering the step leads to.
+        assert!(!load.html.contains("BANNER-PROSE"), "banner text leaked in");
+        assert!(
+            !load.html.contains("ARTICLE-HEADING"),
+            "content comes after the step, not alongside it: {}",
+            load.html
+        );
+        assert_eq!(load.notices.len(), 1, "expected the step's heading line");
+
+        let (elems, map) = html_to_ffon_with_forms(&load.html, "");
+        let rendered = format!("{elems:?}");
+        assert_eq!(elems.len(), 2, "exactly two choices: {rendered}");
+        assert!(rendered.contains("Alles weigeren"));
+        assert!(rendered.contains("Alles accepteren"));
+        // A settings button opens a panel and decides nothing, so it is never
+        // offered as a choice.
+        assert!(!rendered.to_lowercase().contains("cookie settings"));
+        // Refusing comes first, and each choice is separately pressable.
+        assert!(
+            rendered.find("Alles weigeren").unwrap() < rendered.find("Alles accepteren").unwrap(),
+            "reject should be offered first"
+        );
+        assert!(map.keys().any(|k| k.starts_with("form_1/")));
+        assert!(map.keys().any(|k| k.starts_with("form_2/")));
+    }
+
+    /// A provider that shuts its Chrome down when the test ends, panic or not.
+    ///
+    /// Nothing kills the child on drop and `cleanup` is only ever called by the
+    /// app, so a browser-backed test without this leaves a Chrome and its Xvfb
+    /// running until the machine is rebooted. Enough of those accumulating is
+    /// what took the desktop session down twice.
+    #[cfg(not(target_os = "windows"))]
+    struct TestProvider(WebbrowserProvider);
+
+    #[cfg(not(target_os = "windows"))]
+    impl TestProvider {
+        fn new() -> Self {
+            TestProvider(WebbrowserProvider::new())
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    impl std::ops::Deref for TestProvider {
+        type Target = WebbrowserProvider;
+        fn deref(&self) -> &Self::Target {
+            &self.0
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    impl std::ops::DerefMut for TestProvider {
+        fn deref_mut(&mut self) -> &mut Self::Target {
+            &mut self.0
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    impl Drop for TestProvider {
+        fn drop(&mut self) {
+            self.0.cleanup();
+        }
+    }
+
+    /// Drive the provider until `tick` reports fresh content, or give up.
+    #[cfg(not(target_os = "windows"))]
+    fn pump(p: &mut WebbrowserProvider) -> bool {
+        for _ in 0..300 {
+            if p.tick() {
+                return true;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        false
+    }
+
+    #[test]
+    #[ignore]
+    #[cfg(not(target_os = "windows"))]
+    fn pressing_a_surfaced_choice_activates_the_real_banner_button() {
+        // The whole point of the proxy form: `on_button_press` only ever gets
+        // `submit:form_N`, so each choice needs its own form for the selector
+        // and `document.forms[n]` lookup to land on the button it names.
+        let _guard = launch_flag_guard(false);
+        let path = std::env::temp_dir().join("sic-consent-press.html");
+        std::fs::write(&path, CONSENT_FIXTURE).expect("write fixture");
+        let url = format!("file://{}", path.display());
+
+        let mut p = TestProvider::new();
+        p.load_url(&url);
+        assert!(pump(&mut p), "fixture never finished loading");
+
+        // form_1 is the first choice offered, i.e. "Alles weigeren".
+        p.on_button_press("submit:form_1");
+        assert!(pump(&mut p), "no content after pressing the choice");
+
+        let rendered = format!("{:?}", p.cached_page.as_ref().unwrap().elements);
+        let _ = std::fs::remove_file(&path);
+        assert!(
+            rendered.contains("CHOICE-REJECT"),
+            "pressing the first choice should run the site's reject button, got: {rendered}"
+        );
+        assert!(
+            !rendered.contains("CHOICE-ACCEPT"),
+            "the wrong button was clicked: {rendered}"
+        );
+    }
+
+    // Live end-to-end: exercises the real Linux runtime path
     // (init_live_session -> navigate_and_get_html) against google.com with a
-    // fresh cookieless profile, so Google serves its inline GDPR wall. Verifies
-    // the auto-accept clears it and the search box becomes reachable.
+    // fresh cookieless profile, so Google serves its inline GDPR wall.  We no
+    // longer accept on the user's behalf, so the check is that both choices are
+    // surfaced from the wall's own script rather than that the wall is gone.
     //
-    // Ignored by default (needs Chrome + Xvfb + network). Run with:
+    // Ignored by default (needs Chrome + Xvfb + network).  Run with:
     //   XDG_CONFIG_HOME=$(mktemp -d) cargo test -p sicompass-webbrowser \
-    //     live_google_consent_is_cleared -- --ignored --nocapture
+    //     live_google_consent -- --ignored --nocapture
     #[test]
     #[ignore]
     #[cfg(target_os = "linux")]
-    fn live_google_consent_is_cleared() {
+    fn live_google_consent_offers_both_choices() {
         let loaded = chromium_runtime().block_on(async {
             let live = init_live_session().await.expect("launch chrome");
-            navigate_and_get_html(&live.page, "https://www.google.com/").await
+            let out = navigate_and_get_html(&live.page, "https://www.google.com/").await;
+            close_browser(&live.session).await;
+            out
         });
         let loaded = loaded.expect("navigate_and_get_html should not fail");
+        assert_eq!(
+            loaded.notices,
+            vec![localize::t("webbrowser-step-consent")],
+            "expected the cookie step's heading line"
+        );
+
+        // The step page is the two choices and nothing else — Google's wall is
+        // not shown, and neither is the homepage behind it.
+        let (elems, map) = html_to_ffon_with_forms(&loaded.html, "https://www.google.com/");
+        let rendered = format!("{elems:?}");
+        assert_eq!(elems.len(), 2, "expected exactly two choices: {rendered}");
         assert!(
-            loaded.notices.is_empty(),
-            "auto-accept should have cleared the wall, got: {:?}",
-            loaded.notices
+            rendered.contains(&localize::t("webbrowser-consent-reject-all")),
+            "reject choice missing from: {rendered}"
         );
         assert!(
-            !html_has_consent_wall(&loaded.html),
-            "consent wall should be cleared after auto-accept, but markers remain"
+            rendered.contains(&localize::t("webbrowser-consent-accept-all")),
+            "accept choice missing from: {rendered}"
         );
-        // Post-accept Google homepage exposes the search box (name=\"q\").
-        let (_ffon, map) = html_to_ffon_with_forms(&loaded.html, "https://www.google.com/");
+        // Two single-button forms, so both are individually pressable.
+        assert!(map.keys().any(|k| k.starts_with("form_1/")));
+        assert!(map.keys().any(|k| k.starts_with("form_2/")));
+    }
+
+    // The check the SOCS rewrite exists for: pressing "reject all" on Google's
+    // wall has to actually clear it.  The old hardcoded 2021 payload no longer
+    // did; the values now come from the wall's own inline script.
+    //
+    //   XDG_CONFIG_HOME=$(mktemp -d) cargo test -p sicompass-webbrowser \
+    //     live_google_reject -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    #[cfg(target_os = "linux")]
+    fn live_google_reject_clears_the_wall() {
+        let _guard = launch_flag_guard(false);
+        let mut p = TestProvider::new();
+        p.load_url("https://www.google.com/");
+        assert!(pump(&mut p), "google.com never finished loading");
+
+        // form_1 is the first choice, i.e. reject.
+        p.on_button_press("submit:form_1");
+        assert!(pump(&mut p), "no content after choosing reject");
+
+        let rendered = format!("{:?}", p.cached_page.as_ref().unwrap().elements);
         assert!(
-            map.keys()
-                .any(|k| k.contains("/q") || k.contains("/Zoek") || k.contains("/Search")),
-            "search field not found in form map after clearing consent; keys: {:?}",
-            map.keys().collect::<Vec<_>>()
+            !rendered.contains(&localize::t("webbrowser-consent-reject-all")),
+            "the wall came back after rejecting: {}",
+            rendered.chars().take(600).collect::<String>()
         );
+        // The reloaded homepage exposes the search box.
+        assert!(
+            rendered.contains("<input>") || rendered.to_lowercase().contains("zoek"),
+            "search box missing after rejecting: {}",
+            rendered.chars().take(600).collect::<String>()
+        );
+    }
+
+    // Live end-to-end against the site that prompted all of this, walking the
+    // whole chain: bpost offers four languages (a Bootstrap modal whose options
+    // are <a data-lang> with no href, plus <link rel=alternate hreflang>), then
+    // a OneTrust banner via GTM, and only then its content.
+    //
+    //   XDG_CONFIG_HOME=$(mktemp -d) cargo test -p sicompass-webbrowser \
+    //     live_bpost -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    #[cfg(target_os = "linux")]
+    fn live_bpost_walks_language_then_cookies_then_content() {
+        let _guard = launch_flag_guard(false);
+        forget_language();
+        let mut p = TestProvider::new();
+        p.load_url("https://www.bpost.be/");
+        assert!(pump(&mut p), "bpost never finished loading");
+
+        // ---- step 1: language -------------------------------------------
+        let step1 = format!("{:?}", p.cached_page.as_ref().unwrap().elements);
+        assert!(
+            step1.contains("Ik spreek Nederlands"),
+            "expected the language step, got: {step1}"
+        );
+        // The step is the list and nothing else.
+        assert!(
+            !step1.contains("Welkom bij Bpost"),
+            "content leaked into the language step: {step1}"
+        );
+        // Codes come from hreflang/data-lang, so the options sort nl, fr, de, en
+        // by code: de, en, fr, nl.
+        let nl_form = p
+            .form_map
+            .iter()
+            .find(|(_, n)| n.css_selector.starts_with("#sic-lang-nl-"))
+            .map(|(k, _)| k.clone())
+            .expect("no Dutch choice in the language step");
+        let nl_n: usize = nl_form
+            .trim_start_matches("form_")
+            .split('/')
+            .next()
+            .unwrap()
+            .parse()
+            .unwrap();
+
+        p.on_button_press(&format!("submit:form_{nl_n}"));
+        assert!(pump(&mut p), "no page after choosing Dutch");
+        assert_eq!(
+            stored_language().as_deref(),
+            Some("nl"),
+            "the choice should be remembered so the step is never shown again"
+        );
+
+        // ---- step 2: cookies ---------------------------------------------
+        let step2 = format!("{:?}", p.cached_page.as_ref().unwrap().elements);
+        assert!(
+            !step2.contains("Ik spreek Nederlands"),
+            "the language step came back: {step2}"
+        );
+        // Checked through the proxy ids, not the wording: bpost now serves
+        // Dutch, and its reject button reads "Alles afwijzen".
+        let consent: Vec<usize> = p
+            .form_map
+            .iter()
+            .filter(|(_, n)| n.css_selector.starts_with("#sic-consent-"))
+            .filter_map(|(k, _)| {
+                k.trim_start_matches("form_")
+                    .split('/')
+                    .next()?
+                    .parse()
+                    .ok()
+            })
+            .collect();
+        assert_eq!(
+            consent.len(),
+            2,
+            "expected reject and accept as the cookie step, got: {step2}"
+        );
+        assert!(
+            step2.to_lowercase().contains("afwijzen"),
+            "refusing should be offered, got: {step2}"
+        );
+        // Refusing is listed first, so it is the lowest form index.
+        let reject_n = *consent.iter().min().unwrap();
+        p.on_button_press(&format!("submit:form_{reject_n}"));
+        assert!(pump(&mut p), "no page after choosing on cookies");
+
+        // ---- step 3: the content ------------------------------------------
+        let content = format!("{:?}", p.cached_page.as_ref().unwrap().elements);
+        assert!(
+            content.contains("Welkom bij Bpost"),
+            "expected bpost's content after the chain, got: {content}"
+        );
+        // bpost keeps its whole main menu in a .navbar-collapse that stays
+        // display:none at 1920px, so an unconditional prune silently ate the
+        // site's primary navigation.
+        for nav in ["Pakje verzenden", "Pakje ontvangen", "Vind bpost"] {
+            assert!(
+                content.contains(nav),
+                "hidden navigation was pruned away: {nav:?} missing"
+            );
+        }
+        // Reachable, not buried: bpost's menus are display:none containers that
+        // sit before the article, and leaving them inline let their headings
+        // swallow the whole page into "De voordelen van je bpost-account?".
+        let top = p
+            .cached_page
+            .as_ref()
+            .unwrap()
+            .elements
+            .iter()
+            .map(|e| match e {
+                FfonElement::Str(s) => s.clone(),
+                FfonElement::Obj(o) => o.key.clone(),
+            })
+            .collect::<Vec<_>>()
+            .join(" | ");
+        assert!(
+            top.contains("Pakje verzenden"),
+            "the site's navigation should be reachable from the top level, got: {top}"
+        );
+
+        // The skip link's target is an empty <a id="main-content">, which emits
+        // no node of its own, so the id has to be rehomed. Landing it on the
+        // next thing that renders is not enough either: bpost opens its content
+        // region with two <h1>s in a row, so the id ended up on an empty
+        // heading sitting *beside* the article rather than containing it —
+        // "a link to itself without the content".
+        assert!(
+            content.contains("<link>#main-content</link>"),
+            "skip link missing: {content}"
+        );
+        fn find_target(e: &FfonElement) -> Option<usize> {
+            match e {
+                FfonElement::Str(_) => None,
+                FfonElement::Obj(o) => {
+                    if o.key.contains("<id>main-content</id>") {
+                        return Some(o.children.len());
+                    }
+                    o.children.iter().find_map(find_target)
+                }
+            }
+        }
+        let kids = p
+            .cached_page
+            .as_ref()
+            .unwrap()
+            .elements
+            .iter()
+            .find_map(find_target)
+            .unwrap_or_else(|| panic!("skip link has no target to jump to: {content}"));
+        assert!(
+            kids > 0,
+            "the skip-link target is empty — it must contain the content, not sit next to it"
+        );
+        // What should still be gone: the answered steps and the vendor's parked
+        // preference centre.
+        for gone in [
+            "Ik spreek Nederlands",
+            "Alles afwijzen",
+            "Informatie over het gebruik van cookies",
+        ] {
+            assert!(
+                !content.contains(gone),
+                "{gone:?} should not be in the content"
+            );
+        }
     }
 }
 
