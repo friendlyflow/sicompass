@@ -9845,6 +9845,99 @@ fn load_active_tab_pops_stale_levels_for_webbrowser() {
     );
 }
 
+/// Regression: after a restart the webbrowser's page is gone, so the saved
+/// cursor collapses back to the URL bar — but `deep_rebuild_provider_tree`
+/// leaves `current_path()` at the saved page path, and the pop loop that
+/// resyncs it only runs for filesystem providers. `at_root()` then stayed
+/// false, and the depth-2 parent line renders the basename of the dead page
+/// ("form_1") where the provider name "web browser" belongs.
+#[test]
+fn load_active_tab_resets_webbrowser_path_to_root_after_restore() {
+    let mut h = Harness::new_with_webbrowser();
+    let wb_idx = h.provider_idx("webbrowser").expect("webbrowser registered");
+
+    // Cursor saved inside the page tree, path saved at the page it was in.
+    let mut id = sicompass_sdk::ffon::IdArray::new();
+    id.push(wb_idx);
+    id.push(0);
+    id.push(1);
+    h.renderer.tabs[0] =
+        sicompass::app_state::TabSnapshot::nav_only(id, "/https://example.com/form_1".to_owned());
+    h.renderer.active_tab = 0;
+    h.renderer.load_active_tab();
+
+    assert_eq!(
+        h.renderer.current_id.depth(),
+        2,
+        "cursor collapses back to the URL bar"
+    );
+    assert_eq!(
+        h.renderer.providers[wb_idx].current_path(),
+        "/",
+        "the provider path must follow the collapsed cursor back to the root"
+    );
+    assert!(
+        h.renderer.providers[wb_idx].at_root(),
+        "at_root() drives the depth-2 parent label; false here renders \"form_1\" \
+         instead of \"web browser\""
+    );
+}
+
+/// The same desync with no collapse to fix it: the app was closed with the
+/// cursor on the URL bar while a page was open, so the snapshot is already at
+/// depth 2 and only the path is stale. Pins that the resync keys off the final
+/// cursor depth, not off "the clamp popped something".
+#[test]
+fn load_active_tab_resets_webbrowser_path_when_cursor_is_already_at_the_url_bar() {
+    let mut h = Harness::new_with_webbrowser();
+    let wb_idx = h.provider_idx("webbrowser").expect("webbrowser registered");
+
+    let mut id = sicompass_sdk::ffon::IdArray::new();
+    id.push(wb_idx);
+    id.push(0);
+    h.renderer.tabs[0] = sicompass::app_state::TabSnapshot::nav_only(id, "/form_1".to_owned());
+    h.renderer.active_tab = 0;
+    h.renderer.load_active_tab();
+
+    assert_eq!(h.renderer.providers[wb_idx].current_path(), "/");
+    assert!(
+        h.renderer.providers[wb_idx].at_root(),
+        "a depth-2 cursor means the URL bar, whatever the saved path said"
+    );
+}
+
+/// Counterpart guard: the depth-2 path reset is for non-filesystem providers
+/// only. A filesystem provider legitimately sits at depth 2 with a deep
+/// absolute path — `navigate_to_path` parks the file browser exactly there on
+/// Windows — and resetting it to "/" would rebase it on the drive-list
+/// sentinel.
+#[test]
+fn load_active_tab_keeps_filesystem_provider_path_at_depth_2() {
+    let mut h = Harness::new();
+    let fb_idx = h
+        .provider_idx("filebrowser")
+        .expect("filebrowser registered");
+    let subdir = h
+        .tmp_path()
+        .join("subdir")
+        .to_str()
+        .expect("utf-8 temp path")
+        .to_owned();
+
+    let mut id = sicompass_sdk::ffon::IdArray::new();
+    id.push(fb_idx);
+    id.push(0);
+    h.renderer.tabs[0] = sicompass::app_state::TabSnapshot::nav_only(id, subdir.clone());
+    h.renderer.active_tab = 0;
+    h.renderer.load_active_tab();
+
+    assert_eq!(
+        h.renderer.providers[fb_idx].current_path(),
+        subdir,
+        "a filesystem provider keeps its absolute path at depth 2"
+    );
+}
+
 /// Counterpart to the webbrowser pop test: when the saved `current_id`
 /// fully resolves through the rebuilt FFON tree, the loader must leave it
 /// unchanged. Guards against an overly aggressive pop loop that would

@@ -1138,12 +1138,15 @@ fn update_view(app: &mut AppState) {
     // indented one level below the parent line.
     //
     // At depth 2 (just inside a provider) the parent is always the provider's
-    // root Obj. For providers that pin their root key (`stable_root_key=true`,
-    // e.g. editor) that key never changes as the user navigates within the
-    // provider, so deriving the label from the active provider's
-    // `current_path()` basename gives a label that follows the list. For other
-    // providers the basename and the FFON root key happen to coincide, so the
-    // result is unchanged.
+    // root Obj, whose key is unconditionally `display_name()`. For providers
+    // that pin their root key (`stable_root_key=true`, e.g. editor) that key
+    // never changes as the user navigates within the provider, so deriving the
+    // label from the active provider's `current_path()` basename gives a label
+    // that follows the list. Every provider that can be at depth 2 with a
+    // non-root path is a filesystem one; a non-filesystem provider at depth 2
+    // is by invariant at `"/"` (see `rebuild_and_clamp` and
+    // `sync_inmemory_provider_path_to_cursor`), so `at_root()` short-circuits
+    // the override and the label stays the provider's name.
     let parent_info: ParentInfo = if app.renderer.current_id.depth() > 1 {
         let mut parent_id = app.renderer.current_id.clone();
         parent_id.pop();
