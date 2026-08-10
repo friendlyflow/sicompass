@@ -779,14 +779,15 @@ fn update_view(app: &mut AppState) {
             );
         }
         let header_baseline = (ascender * scale + crate::text::TEXT_PADDING) as f32 + top_offset;
-        app.font_renderer
-            .as_mut()
-            .unwrap()
-            .prepare_text_for_rendering(&header, text_x, header_baseline, scale, p.text);
+        let chrome_w = (win_w - text_x - 10.0).min(max_content_w).max(1.0);
+        let fr = app.font_renderer.as_mut().unwrap();
+        let header_shown = fr.truncate_to_width(&header, scale, chrome_w).into_owned();
+        fr.prepare_text_for_rendering(&header_shown, text_x, header_baseline, scale, p.text);
         if !error_msg.is_empty() {
-            let fr = app.font_renderer.as_mut().unwrap();
-            let err_x = text_x + (header.len() as f32 * fr.get_width_em(scale)) + 10.0;
-            fr.prepare_text_for_rendering(&error_msg, err_x, header_baseline, scale, p.error);
+            let err_x = text_x + fr.measure_text_width(&header_shown, scale) + 10.0;
+            let err_w = (win_w - err_x - 10.0).max(1.0);
+            let err_shown = fr.truncate_to_width(&error_msg, scale, err_w).into_owned();
+            fr.prepare_text_for_rendering(&err_shown, err_x, header_baseline, scale, p.error);
         }
 
         // Render scroll content — full list with pixel-smooth scrolling
@@ -1116,6 +1117,20 @@ fn update_view(app: &mut AppState) {
     } else {
         None
     };
+    // The `search: ` / `ext search: ` label is pinned: it stays visible while
+    // an overlong query elides from the front. Byte length of that label.
+    let search_pin_len = match app.renderer.coordinate {
+        Coordinate::Command | Coordinate::SimpleSearch | Coordinate::InputSearch => {
+            "search: ".len()
+        }
+        Coordinate::ExtendedSearch => "ext search: ".len(),
+        Coordinate::TabSwitcher => "switch tab: ".len(),
+        // No editable query (e.g. the ConfirmCloseTab prompt): pin nothing.
+        _ => 0,
+    };
+    // Where the search caret ends up once the line has been windowed. Filled
+    // in by the search-line draw below, read by the caret block after it.
+    let mut search_caret_x: Option<f32> = None;
     let error_msg = app.renderer.error_message.clone();
 
     // ---- Parent element snapshot -------------------------------------------
@@ -1229,21 +1244,28 @@ fn update_view(app: &mut AppState) {
             .iter()
             .enumerate()
             .map(|(idx, (label, img_data, _, _, ext_prefix))| {
-                if in_insert_mode && idx == list_index {
-                    return insert_buf.split('\n').count().max(1);
+                if renders_insert_buffer && idx == list_index {
+                    let pfx_w = fr.measure_text_width(&insert_prefix, scale);
+                    return insert_buf_segments(fr, &insert_buf, scale, pfx_w, item_max_w)
+                        .len()
+                        .max(1);
                 }
                 if !is_extended_search {
                     if let Some(path) = img_data {
                         let (prefix, suffix, has_prefix) = split_image_label(label, path);
+                        // Captions wrap at the content column, exactly like an
+                        // ordinary list item: the "-p " tag sits on line 1 and
+                        // only the text after it is measured.
                         let prefix_lines = if has_prefix {
-                            count_text_lines(prefix)
+                            let (_, prefix_content) = split_label(prefix);
+                            fr.count_wrapped_lines(prefix_content, scale, item_max_w)
                         } else {
                             0
                         };
                         let suffix_lines = if suffix.is_empty() {
                             0
                         } else {
-                            count_text_lines(suffix)
+                            fr.count_wrapped_lines(suffix, scale, item_max_w)
                         };
                         let header_lines = (1 + extra_lines) as f32;
                         let lh = line_height as f32;
@@ -1283,9 +1305,11 @@ fn update_view(app: &mut AppState) {
                 } else {
                     0.0
                 };
-                // Image result: one breadcrumb/prefix line, then the image below.
+                let rest_w = (max_content_w - 4.0 * em_width - indicator_w).max(1.0);
+                let breadcrumb = img_data.as_deref().unwrap_or("");
+                // Image result: the breadcrumb/prefix flow, then the image below.
                 if let Some(path) = ext_prefix {
-                    let img_w = (max_content_w - 4.0 * em_width - indicator_w).max(1.0);
+                    let img_w = rest_w;
                     let img_h = app
                         .image_renderer
                         .as_mut()
@@ -1299,29 +1323,19 @@ fn update_view(app: &mut AppState) {
                         })
                         .unwrap_or(img_w);
                     let image_lines = ((img_h / line_height as f32).ceil() as usize).max(1);
-                    let (_, suffix, _) = split_image_label(label, path);
+                    let (prefix_text, suffix, _) = split_image_label(label, path);
+                    let prefix_lines =
+                        ext_flow(fr, breadcrumb, "", prefix_text, scale, img_w, em_width)
+                            .total_lines;
                     let suffix_lines = if suffix.is_empty() {
                         0
                     } else {
                         fr.count_wrapped_lines(suffix, scale, img_w)
                     };
-                    // 1 breadcrumb/prefix line + image + trailing text below it.
-                    return 1 + image_lines + suffix_lines;
+                    return prefix_lines + image_lines + suffix_lines;
                 }
-                let bc_w = img_data
-                    .as_deref()
-                    .filter(|s| !s.is_empty())
-                    .map(|bc| fr.measure_text_width(bc, scale))
-                    .unwrap_or(0.0);
                 let (prefix_str, content) = split_label(label);
-                let prefix_w = fr.measure_text_width(prefix_str, scale);
-                // First line trails the breadcrumb + prefix; continuation lines
-                // wrap full-width (left margin → column edge) below them.
-                let rest_w = (max_content_w - 4.0 * em_width - indicator_w).max(1.0);
-                let first_w = (rest_w - bc_w - prefix_w).max(1.0);
-                fr.wrap_lines_with_offsets_hanging(content, scale, first_w, rest_w)
-                    .len()
-                    .max(1)
+                ext_flow(fr, breadcrumb, prefix_str, content, scale, rest_w, em_width).total_lines
             })
             .collect()
     };
@@ -1391,20 +1405,27 @@ fn update_view(app: &mut AppState) {
             if y > win_h {
                 break;
             }
-            let (lines, img_layout) = if in_insert_mode && global_idx == list_index {
-                (insert_buf.split('\n').count().max(1), None)
+            let (lines, img_layout) = if renders_insert_buffer && global_idx == list_index {
+                let pfx_w = fr.measure_text_width(&insert_prefix, scale);
+                (
+                    insert_buf_segments(fr, &insert_buf, scale, pfx_w, item_max_w)
+                        .len()
+                        .max(1),
+                    None,
+                )
             } else if !is_extended_search {
                 if let Some(path) = img_data {
                     let (prefix, suffix, has_prefix) = split_image_label(label, path);
                     let prefix_lines = if has_prefix {
-                        count_text_lines(prefix)
+                        let (_, prefix_content) = split_label(prefix);
+                        fr.count_wrapped_lines(prefix_content, scale, item_max_w)
                     } else {
                         0
                     };
                     let suffix_lines = if suffix.is_empty() {
                         0
                     } else {
-                        count_text_lines(suffix)
+                        fr.count_wrapped_lines(suffix, scale, item_max_w)
                     };
                     let header_lines = (1 + extra_lines) as f32;
                     let lh = line_height as f32;
@@ -1455,9 +1476,11 @@ fn update_view(app: &mut AppState) {
                 } else {
                     0.0
                 };
+                let rest_w = (max_content_w - 4.0 * em_width - indicator_w).max(1.0);
+                let breadcrumb = img_data.as_deref().unwrap_or("");
                 if let Some(path) = ext_prefix {
-                    // Image result: one breadcrumb/prefix line, then the image.
-                    let img_w = (max_content_w - 4.0 * em_width - indicator_w).max(1.0);
+                    // Image result: the breadcrumb/prefix flow, then the image.
+                    let img_w = rest_w;
                     let img_h = app
                         .image_renderer
                         .as_mut()
@@ -1471,16 +1494,19 @@ fn update_view(app: &mut AppState) {
                         })
                         .unwrap_or(img_w);
                     let image_lines = ((img_h / line_height as f32).ceil() as usize).max(1);
-                    let (_, suffix, _) = split_image_label(label, path);
+                    let (prefix_text, suffix, _) = split_image_label(label, path);
+                    let prefix_lines =
+                        ext_flow(fr, breadcrumb, "", prefix_text, scale, img_w, em_width)
+                            .total_lines;
                     let suffix_lines = if suffix.is_empty() {
                         0
                     } else {
                         fr.count_wrapped_lines(suffix, scale, img_w)
                     };
                     (
-                        1 + image_lines + suffix_lines,
+                        prefix_lines + image_lines + suffix_lines,
                         Some(ImageLayout {
-                            prefix_lines: 1,
+                            prefix_lines,
                             suffix_lines,
                             image_lines,
                             img_w,
@@ -1488,19 +1514,10 @@ fn update_view(app: &mut AppState) {
                         }),
                     )
                 } else {
-                    let bc_w = img_data
-                        .as_deref()
-                        .filter(|s| !s.is_empty())
-                        .map(|bc| fr.measure_text_width(bc, scale))
-                        .unwrap_or(0.0);
                     let (prefix_str, content) = split_label(label);
-                    let prefix_w = fr.measure_text_width(prefix_str, scale);
-                    let rest_w = (max_content_w - 4.0 * em_width - indicator_w).max(1.0);
-                    let first_w = (rest_w - bc_w - prefix_w).max(1.0);
                     (
-                        fr.wrap_lines_with_offsets_hanging(content, scale, first_w, rest_w)
-                            .len()
-                            .max(1),
+                        ext_flow(fr, breadcrumb, prefix_str, content, scale, rest_w, em_width)
+                            .total_lines,
                         None,
                     )
                 }
@@ -1547,13 +1564,20 @@ fn update_view(app: &mut AppState) {
     }
 
     // ---- Header text -----------------------------------------------------
+    // Chrome lines cannot wrap without shifting every row below them, so they
+    // elide instead. `chrome_w` is the content column, or the window edge when
+    // that is nearer.
+    let chrome_w = (win_w - text_x - 10.0).min(max_content_w).max(1.0);
     let header_baseline = (ascender * scale + crate::text::TEXT_PADDING) as f32 + top_offset;
-    fr.prepare_text_for_rendering(&header, text_x, header_baseline, scale, p.text);
+    let header_shown = fr.truncate_to_width(&header, scale, chrome_w).into_owned();
+    fr.prepare_text_for_rendering(&header_shown, text_x, header_baseline, scale, p.text);
 
     // ---- Error message (right of header) ---------------------------------
     if !error_msg.is_empty() {
-        let err_x = text_x + (header.len() as f32 * fr.get_width_em(scale)) + 10.0;
-        fr.prepare_text_for_rendering(&error_msg, err_x, header_baseline, scale, p.error);
+        let err_x = text_x + fr.measure_text_width(&header_shown, scale) + 10.0;
+        let err_w = (win_w - err_x - 10.0).max(1.0);
+        let err_shown = fr.truncate_to_width(&error_msg, scale, err_w).into_owned();
+        fr.prepare_text_for_rendering(&err_shown, err_x, header_baseline, scale, p.error);
     }
 
     // ---- Parent element (when navigated into a child level) ---------------
@@ -1566,7 +1590,8 @@ fn update_view(app: &mut AppState) {
         } else {
             parent_info.display_text.clone()
         };
-        fr.prepare_text_for_rendering(&parent_display, text_x, parent_y, scale, p.text);
+        let parent_shown = fr.truncate_to_width(&parent_display, scale, chrome_w);
+        fr.prepare_text_for_rendering(&parent_shown, text_x, parent_y, scale, p.text);
         if let Some(ref summary) = parent_info.radio_summary {
             let indent = fr.measure_text_width("    ", scale);
             let summary_x = text_x + indent;
@@ -1601,7 +1626,20 @@ fn update_view(app: &mut AppState) {
     if let Some(ref s) = search_str {
         let search_y =
             line_height as f32 + ascender * scale + crate::text::TEXT_PADDING + top_offset;
-        fr.prepare_text_for_rendering(s, text_x, search_y, scale, p.text);
+        // Keep the `search: ` label pinned and window the query around the
+        // caret, so a long query elides from the front instead of running off
+        // the right edge with the caret behind it.
+        let pin_len = search_pin_len.min(s.len());
+        let pin_w = fr.measure_text_width(&s[..pin_len], scale);
+        let pin_shown = fr
+            .truncate_to_width(&s[..pin_len], scale, chrome_w)
+            .into_owned();
+        fr.prepare_text_for_rendering(&pin_shown, text_x, search_y, scale, p.text);
+        let field_x = text_x + pin_w;
+        let field_w = (chrome_w - pin_w).max(1.0);
+        let window = fr.caret_window(&s[pin_len..], insert_cursor, scale, field_w);
+        fr.prepare_text_for_rendering(&window.text, field_x, search_y, scale, p.text);
+        search_caret_x = Some(field_x + window.caret_dx);
     }
 
     // ---- List items — selection highlight rectangles ----------------------
@@ -1757,42 +1795,47 @@ fn update_view(app: &mut AppState) {
                     .filter(|&&pp| pp >= prefix_char_count + path_char_count)
                     .map(|&pp| pp - prefix_char_count - path_char_count)
                     .collect();
+                let img_w = layout.map(|l| l.img_w).unwrap_or(1.0).max(1.0);
+                let prefix_lines = layout.map(|l| l.prefix_lines).unwrap_or(1);
                 if let Some(fr) = app.font_renderer.as_mut() {
-                    let mut label_x = text_prefix_x;
-                    if let Some(breadcrumb) = item_data.as_deref().filter(|s: &&str| !s.is_empty())
-                    {
-                        let bc_w = fr.measure_text_width(breadcrumb, scale);
+                    // Same continuous flow as a text result: the breadcrumb
+                    // wraps, then the caption resumes after its last line.
+                    let breadcrumb = item_data.as_deref().unwrap_or("");
+                    let flow = ext_flow(fr, breadcrumb, "", prefix_text, scale, img_w, em_width);
+                    for (n, (bc_line, _)) in flow.bc_lines.iter().enumerate() {
                         fr.prepare_text_for_rendering(
-                            breadcrumb,
-                            label_x,
-                            item_y,
+                            bc_line,
+                            text_prefix_x,
+                            item_y + n as f32 * line_height as f32,
                             scale,
                             p.ext_search,
                         );
-                        label_x += bc_w;
                     }
-                    if prefix_positions.is_empty() {
-                        fr.prepare_text_for_rendering(prefix_text, label_x, item_y, scale, p.text);
-                    } else {
-                        let rr = app.rect_renderer.as_mut();
-                        render_with_highlights(
-                            fr,
-                            rr,
-                            prefix_text,
-                            label_x,
-                            item_y,
-                            scale,
-                            ascender,
-                            line_height as f32,
-                            p.text,
-                            p.scroll_search,
-                            &prefix_positions,
-                            None,
-                        );
-                    }
+                    let label_x = text_prefix_x + flow.content_dx;
+                    let label_y = item_y + flow.content_line as f32 * line_height as f32;
+                    let wrap = Some(WrapLayout {
+                        first_width: flow.first_w,
+                        rest_x: text_prefix_x,
+                        rest_width: img_w,
+                    });
+                    let rr = app.rect_renderer.as_mut();
+                    render_with_highlights(
+                        fr,
+                        rr,
+                        prefix_text,
+                        label_x,
+                        label_y,
+                        scale,
+                        ascender,
+                        line_height as f32,
+                        p.text,
+                        p.scroll_search,
+                        &prefix_positions,
+                        wrap,
+                    );
                 }
-                // Image one line below the breadcrumb/prefix row.
-                let img_top_y = item_y + line_height as f32;
+                // Image below the breadcrumb/caption flow.
+                let img_top_y = item_y + prefix_lines as f32 * line_height as f32;
                 if let (Some(ir), Some(layout)) = (app.image_renderer.as_mut(), layout) {
                     let img_y = img_top_y - ascender * scale - crate::text::TEXT_PADDING;
                     let border = 2.0_f32;
@@ -1845,17 +1888,25 @@ fn update_view(app: &mut AppState) {
                     }
                 }
             } else if let Some(fr) = app.font_renderer.as_mut() {
-                // Render: [breadcrumb in ext_search color][prefix][content].
-                let mut label_x = text_prefix_x;
-                if let Some(breadcrumb) = item_data.as_deref().filter(|s: &&str| !s.is_empty()) {
-                    let bc_w = fr.measure_text_width(breadcrumb, scale);
-                    fr.prepare_text_for_rendering(breadcrumb, label_x, item_y, scale, p.ext_search);
-                    label_x += bc_w;
-                }
-                fr.prepare_text_for_rendering(prefix_str, label_x, item_y, scale, p.text);
-                let content_x = label_x + fr.measure_text_width(prefix_str, scale);
-                let first_w = (right_edge - content_x).max(1.0);
+                // Render [breadcrumb in ext_search color][prefix][content] as
+                // one continuous flow: the breadcrumb wraps, then the prefix and
+                // content resume after its last line.
                 let rest_w = (right_edge - text_prefix_x).max(1.0);
+                let breadcrumb = item_data.as_deref().unwrap_or("");
+                let flow = ext_flow(fr, breadcrumb, prefix_str, content, scale, rest_w, em_width);
+                for (n, (bc_line, _)) in flow.bc_lines.iter().enumerate() {
+                    fr.prepare_text_for_rendering(
+                        bc_line,
+                        text_prefix_x,
+                        item_y + n as f32 * line_height as f32,
+                        scale,
+                        p.ext_search,
+                    );
+                }
+                let content_y = item_y + flow.content_line as f32 * line_height as f32;
+                let prefix_x = text_prefix_x + flow.content_dx;
+                fr.prepare_text_for_rendering(prefix_str, prefix_x, content_y, scale, p.text);
+                let content_x = prefix_x + fr.measure_text_width(prefix_str, scale);
                 // Adjust match positions to be relative to content (subtract prefix char count)
                 let prefix_char_count = prefix_str.chars().count() as u32;
                 let content_positions: Vec<u32> = match_pos
@@ -1871,7 +1922,7 @@ fn update_view(app: &mut AppState) {
                     rr,
                     content,
                     content_x,
-                    item_y,
+                    content_y,
                     scale,
                     ascender,
                     line_height as f32,
@@ -1879,7 +1930,7 @@ fn update_view(app: &mut AppState) {
                     p.scroll_search,
                     &content_positions,
                     Some(WrapLayout {
-                        first_width: first_w,
+                        first_width: flow.first_w,
                         rest_x: text_prefix_x,
                         rest_width: rest_w,
                     }),
@@ -1911,12 +1962,17 @@ fn update_view(app: &mut AppState) {
                 if let Some(fr) = app.font_renderer.as_mut() {
                     fr.prepare_text_for_rendering(tag, text_prefix_x, current_y, scale, p.text);
                     if !content.is_empty() {
+                        // Wrap at the content column — `prefix_lines` above was
+                        // reserved on that assumption.
+                        let wrap_w = max_content_w.max(1.0);
                         if content_positions.is_empty() {
-                            fr.prepare_text_for_rendering(
+                            fr.prepare_text_wrapped(
                                 content,
                                 content_start_x,
                                 current_y,
                                 scale,
+                                wrap_w,
+                                line_height as f32,
                                 p.text,
                             );
                         } else {
@@ -1933,7 +1989,11 @@ fn update_view(app: &mut AppState) {
                                 p.text,
                                 p.scroll_search,
                                 &content_positions,
-                                None,
+                                Some(WrapLayout {
+                                    first_width: wrap_w,
+                                    rest_x: content_start_x,
+                                    rest_width: wrap_w,
+                                }),
                             );
                         }
                     }
@@ -1983,12 +2043,15 @@ fn update_view(app: &mut AppState) {
                     .map(|&pp| pp - prefix_char_count - path_char_count)
                     .collect();
                 if let Some(fr) = app.font_renderer.as_mut() {
+                    let wrap_w = max_content_w.max(1.0);
                     if suffix_positions.is_empty() {
-                        fr.prepare_text_for_rendering(
+                        fr.prepare_text_wrapped(
                             suffix_text,
                             content_start_x,
                             current_y,
                             scale,
+                            wrap_w,
+                            line_height as f32,
                             p.text,
                         );
                     } else {
@@ -2005,7 +2068,11 @@ fn update_view(app: &mut AppState) {
                             p.text,
                             p.scroll_search,
                             &suffix_positions,
-                            None,
+                            Some(WrapLayout {
+                                first_width: wrap_w,
+                                rest_x: content_start_x,
+                                rest_width: wrap_w,
+                            }),
                         );
                     }
                 }
@@ -2032,104 +2099,52 @@ fn update_view(app: &mut AppState) {
                 captured_elem_base_x = text_prefix_x;
                 captured_elem_y = item_y;
 
-                // Render input buffer — multiline-aware, with highlight only on the buffer
+                // Render input buffer — wrapped, with highlight only on the
+                // buffer. Same segmentation the height reservation above and
+                // the caret below use, so all three stay in step.
                 let buf = insert_buf.as_str();
                 let lh = line_height as f32;
-                if let Some(nl_pos) = buf.find('\n') {
-                    let first_line = &buf[..nl_pos];
-                    let rest = &buf[nl_pos + 1..];
-                    let first_text = if first_line.is_empty() {
-                        " "
-                    } else {
-                        first_line
+                let segs = insert_buf_segments(fr, buf, scale, pfx_w, item_max_w);
+                let mut last_seg_x = after_prefix_x;
+                let mut last_seg_w = 0.0;
+                let mut last_seg_y = item_y;
+                for (n, &(byte_start, byte_end, _)) in segs.iter().enumerate() {
+                    // An empty line still gets a one-space highlight so the
+                    // field remains visible.
+                    let seg_text = match &buf[byte_start..byte_end] {
+                        "" => " ",
+                        s => s,
                     };
-                    // Highlight first line of buffer
-                    let first_w = fr.measure_text_width(first_text, scale);
+                    let seg_x = if n == 0 {
+                        after_prefix_x
+                    } else {
+                        text_prefix_x
+                    };
+                    let seg_y = item_y + n as f32 * lh;
+                    let seg_w = fr.measure_text_width(seg_text, scale);
                     if let Some(rr) = app.rect_renderer.as_mut() {
                         rr.prepare_rectangle(
-                            after_prefix_x - crate::text::TEXT_PADDING,
-                            item_y - ascender * scale - crate::text::TEXT_PADDING,
-                            first_w + 2.0 * crate::text::TEXT_PADDING,
+                            seg_x - crate::text::TEXT_PADDING,
+                            seg_y - ascender * scale - crate::text::TEXT_PADDING,
+                            seg_w + 2.0 * crate::text::TEXT_PADDING,
                             lh,
                             p.selected,
                             5.0,
                         );
                     }
+                    fr.prepare_text_for_rendering(seg_text, seg_x, seg_y, scale, p.text);
+                    last_seg_x = seg_x;
+                    last_seg_w = seg_w;
+                    last_seg_y = seg_y;
+                }
+                if !insert_suffix.is_empty() {
                     fr.prepare_text_for_rendering(
-                        first_text,
-                        after_prefix_x,
-                        item_y,
+                        &insert_suffix,
+                        last_seg_x + last_seg_w,
+                        last_seg_y,
                         scale,
                         p.text,
                     );
-                    let mut rest_y = item_y + lh;
-                    let mut last_segment = "";
-                    for segment in rest.split('\n') {
-                        let seg_text = if segment.is_empty() { " " } else { segment };
-                        // Highlight each continuation line of buffer
-                        let seg_w = fr.measure_text_width(seg_text, scale);
-                        if let Some(rr) = app.rect_renderer.as_mut() {
-                            rr.prepare_rectangle(
-                                text_prefix_x - crate::text::TEXT_PADDING,
-                                rest_y - ascender * scale - crate::text::TEXT_PADDING,
-                                seg_w + 2.0 * crate::text::TEXT_PADDING,
-                                lh,
-                                p.selected,
-                                5.0,
-                            );
-                        }
-                        fr.prepare_text_for_rendering(
-                            seg_text,
-                            text_prefix_x,
-                            rest_y,
-                            scale,
-                            p.text,
-                        );
-                        last_segment = segment;
-                        rest_y += lh;
-                    }
-                    if !insert_suffix.is_empty() {
-                        let last_y = rest_y - lh;
-                        let last_w = fr.measure_text_width(
-                            if last_segment.is_empty() {
-                                " "
-                            } else {
-                                last_segment
-                            },
-                            scale,
-                        );
-                        fr.prepare_text_for_rendering(
-                            &insert_suffix,
-                            text_prefix_x + last_w,
-                            last_y,
-                            scale,
-                            p.text,
-                        );
-                    }
-                } else {
-                    let buf_text = if buf.is_empty() { " " } else { buf };
-                    let buf_w = fr.measure_text_width(buf_text, scale);
-                    // Highlight only the buffer portion
-                    if let Some(rr) = app.rect_renderer.as_mut() {
-                        rr.prepare_rectangle(
-                            after_prefix_x - crate::text::TEXT_PADDING,
-                            item_y - ascender * scale - crate::text::TEXT_PADDING,
-                            buf_w + 2.0 * crate::text::TEXT_PADDING,
-                            lh,
-                            p.selected,
-                            5.0,
-                        );
-                    }
-                    fr.prepare_text_for_rendering(buf_text, after_prefix_x, item_y, scale, p.text);
-                    if !insert_suffix.is_empty() {
-                        fr.prepare_text_for_rendering(
-                            &insert_suffix,
-                            after_prefix_x + buf_w,
-                            item_y,
-                            scale,
-                            p.text,
-                        );
-                    }
                 }
             } else if is_flat_list {
                 // Command/Meta: no prefix split — render the full label.
@@ -2410,12 +2425,22 @@ fn update_view(app: &mut AppState) {
         // falls through to the search-field branch below even though the
         // element buffer is rendered inline behind it.
         if in_insert_mode {
-            // Insert mode caret using stored element position
+            // Insert mode caret using stored element position. The buffer
+            // wraps, so the caret's row comes from the same segmentation the
+            // draw used — counting newlines would put it on the wrong line.
             let buf = insert_buf.as_str();
             let pos = insert_cursor.min(buf.len());
-            // Count newlines before cursor
-            let cursor_line = buf[..pos].chars().filter(|&c| c == '\n').count();
-            let line_start_off = buf[..pos].rfind('\n').map(|i| i + 1).unwrap_or(0);
+            let pfx_w = captured_elem_x - captured_elem_base_x;
+            let (cursor_line, line_start_off) = app
+                .font_renderer
+                .as_ref()
+                .map(|fr| insert_buf_segments(fr, buf, scale, pfx_w, item_max_w))
+                .and_then(|segs| {
+                    segs.iter()
+                        .rposition(|&(byte_start, _, _)| byte_start <= pos)
+                        .map(|n| (n, segs[n].0))
+                })
+                .unwrap_or((0, 0));
             let line_x = if cursor_line == 0 {
                 captured_elem_x
             } else {
@@ -2441,26 +2466,13 @@ fn update_view(app: &mut AppState) {
                 | Coordinate::InputSearch
                 | Coordinate::TabSwitcher
         ) {
-            // Search/command caret after the prefix
-            let (prefix, buf, cursor) = match app.renderer.coordinate {
-                Coordinate::Command => ("search: ", insert_buf.as_str(), insert_cursor),
-                Coordinate::ExtendedSearch => ("ext search: ", insert_buf.as_str(), insert_cursor),
-                Coordinate::TabSwitcher => ("switch tab: ", insert_buf.as_str(), insert_cursor),
-                _ => (
-                    "search: ",
-                    app.renderer.search_string.as_str(),
-                    insert_cursor,
-                ),
-            };
             // search_y is the baseline — shift to cell top + padding
             let search_y =
                 line_height as f32 + ascender * scale + crate::text::TEXT_PADDING + top_offset;
             let caret_top_y = search_y - ascender * scale;
-            if let Some(fr) = app.font_renderer.as_ref() {
-                let pfx_w = fr.measure_text_width(prefix, scale);
-                let base_x = text_x + pfx_w;
-                let col_text = &buf[..cursor.min(buf.len())];
-                let caret_x = base_x + fr.measure_text_width(col_text, scale);
+            // Position comes from the windowed draw above, so the caret follows
+            // the query when a long one elides from the front.
+            if let Some(caret_x) = search_caret_x {
                 if let Some(rr) = app.rect_renderer.as_mut() {
                     rr.prepare_rectangle(caret_x, caret_top_y, 2.0, caret_h, p.text, 0.0);
                 }
@@ -3051,26 +3063,34 @@ fn render_scroll_search_full(
         ScrollSearchCorpus::Content => "search",
         ScrollSearchCorpus::Prefix => "prefix search",
     };
-    let search_bar = format!("{bar_label}: {search_query} [{match_count} items]");
-    fr.prepare_text_for_rendering(&search_bar, text_x, search_bar_y, scale, p.text);
+    // The `search: ` label stays pinned; the query beyond it is windowed
+    // around the caret so a long one elides from the front rather than running
+    // off the right edge.
+    let bar_pin = format!("{bar_label}: ");
+    let bar_query = format!("{search_query} [{match_count} items]");
+    let chrome_w = (max_content_w - fr.measure_text_width(&bar_pin, scale)).max(1.0);
+    let window = fr.caret_window(&bar_query, cursor_position, scale, chrome_w);
+    fr.prepare_text_for_rendering(&bar_pin, text_x, search_bar_y, scale, p.text);
+    let base_x = text_x + fr.measure_text_width(&bar_pin, scale);
+    fr.prepare_text_for_rendering(&window.text, base_x, search_bar_y, scale, p.text);
 
-    // Text-selection highlight + blinking caret in the search input.
+    // Text-selection highlight + blinking caret in the search input, placed
+    // against the same window the query was drawn from.
     if let Some(rr) = rr.as_deref_mut() {
-        let base_x = text_x + fr.measure_text_width(&format!("{bar_label}: "), scale);
         let field_top = search_bar_y - ascender * scale;
         let field_h = lh - 2.0 * crate::text::TEXT_PADDING;
         if let Some((sel_start, sel_end)) = selection {
             let s = sel_start.min(search_query.len());
             let e = sel_end.min(search_query.len());
             if e > s {
-                let sel_x = base_x + fr.measure_text_width(&search_query[..s], scale);
-                let sel_w = fr.measure_text_width(&search_query[s..e], scale);
+                let sel_x = base_x + fr.window_offset_x(&window, &bar_query, s, scale);
+                let sel_end_x = base_x + fr.window_offset_x(&window, &bar_query, e, scale);
+                let sel_w = (sel_end_x - sel_x).max(0.0).min(chrome_w);
                 rr.prepare_rectangle(sel_x, field_top, sel_w, field_h, p.scroll_search, 0.0);
             }
         }
         if caret_visible {
-            let cur = cursor_position.min(search_query.len());
-            let caret_x = base_x + fr.measure_text_width(&search_query[..cur], scale);
+            let caret_x = base_x + window.caret_dx;
             rr.prepare_rectangle(caret_x, field_top, 2.0, field_h, p.text, 0.0);
         }
     }
@@ -3217,6 +3237,97 @@ struct WrapLayout {
     first_width: f32,
     rest_x: f32,
     rest_width: f32,
+}
+
+/// Continuous-flow layout of one ExtendedSearch result row.
+///
+/// The ancestor breadcrumb used to be drawn as a single unwrapped run, so a
+/// deep tree (a web page, typically) pushed both it and the start of the item
+/// text past the right edge of the content column. Here it wraps like ordinary
+/// text and the prefix + content resume inline right after its last line,
+/// dropping to a fresh line when too little room is left.
+///
+/// The three passes that lay out these rows — scroll metrics, draw metrics and
+/// the draw itself — all go through [`ext_flow`], so the height a row reserves
+/// cannot drift from the height it draws.
+struct ExtFlow {
+    /// Breadcrumb wrapped uniformly at `rest_w`; empty when there is none.
+    bc_lines: Vec<(String, usize)>,
+    /// Line index, relative to the row's first line, that the prefix starts on.
+    content_line: usize,
+    /// X offset from the left margin at which the prefix starts on that line.
+    content_dx: f32,
+    /// Wrap width of the content's first line (what the prefix leaves over).
+    first_w: f32,
+    /// Total visual lines the row occupies.
+    total_lines: usize,
+}
+
+/// Visual line segments of the insert-mode edit buffer, as
+/// `(byte_start, byte_end, char_start)` into `buf`.
+///
+/// The buffer used to break on `\n` only, so a long single-line value ran past
+/// the right edge and took the selection highlight and the caret with it. It
+/// now wraps at the content column: the first line starts `pfx_w` in, after the
+/// non-editable prefix, and continuation lines run full-width at the left
+/// margin. Height reservation, draw and caret all read this one segmentation,
+/// so they cannot disagree.
+fn insert_buf_segments(
+    fr: &crate::text::FontRenderer,
+    buf: &str,
+    scale: f32,
+    pfx_w: f32,
+    wrap_w: f32,
+) -> Vec<(usize, usize, u32)> {
+    fr.line_segments(buf, scale, Some(((wrap_w - pfx_w).max(1.0), wrap_w)))
+}
+
+/// Lay out `[breadcrumb][prefix][content]` as one continuous flow `rest_w` wide.
+/// See [`ExtFlow`]. Pass an empty `prefix` when the caller draws no separate tag.
+fn ext_flow(
+    fr: &crate::text::FontRenderer,
+    breadcrumb: &str,
+    prefix: &str,
+    content: &str,
+    scale: f32,
+    rest_w: f32,
+    em_width: f32,
+) -> ExtFlow {
+    let bc_lines = if breadcrumb.is_empty() {
+        Vec::new()
+    } else {
+        fr.wrap_lines_with_offsets(breadcrumb, scale, rest_w)
+    };
+    let last_bc_w = bc_lines
+        .last()
+        .map(|(line, _)| fr.measure_text_width(line, scale))
+        .unwrap_or(0.0);
+    let prefix_w = fr.measure_text_width(prefix, scale);
+    // Resume on the breadcrumb's last line unless that leaves a sliver too
+    // narrow to read, in which case the content starts fresh below it. Capped
+    // at half the column so a narrow window cannot force every row onto two
+    // lines.
+    let min_first_w = (8.0 * em_width).min(rest_w * 0.5);
+    let (content_line, content_dx, first_w) = if rest_w - last_bc_w - prefix_w < min_first_w {
+        (bc_lines.len(), 0.0, (rest_w - prefix_w).max(1.0))
+    } else {
+        (
+            bc_lines.len().saturating_sub(1),
+            last_bc_w,
+            (rest_w - last_bc_w - prefix_w).max(1.0),
+        )
+    };
+    let content_lines = fr
+        .wrap_lines_with_offsets_hanging(content, scale, first_w, rest_w)
+        .len()
+        .max(1);
+    ExtFlow {
+        bc_lines,
+        content_line,
+        content_dx,
+        first_w,
+        total_lines: content_line + content_lines,
+    }
 }
 
 /// Render `text` at `(x, y)` with background highlight rectangles behind
@@ -3505,27 +3616,6 @@ fn split_image_label<'a>(label: &'a str, path: &str) -> (&'a str, &'a str, bool)
     }
 }
 
-/// Counts display lines in text using 120-character column wrapping.
-/// Matches C render.c countTextLines().
-fn count_text_lines(text: &str) -> usize {
-    if text.is_empty() {
-        return 1;
-    }
-    let mut lines = 0usize;
-    for seg in text.split('\n') {
-        let len = seg.len();
-        if len <= 120 {
-            lines += 1;
-        } else {
-            lines += (len + 119) / 120;
-        }
-    }
-    if text.ends_with('\n') {
-        lines += 1;
-    }
-    lines.max(1)
-}
-
 /// Layout data for image items, pre-computed alongside item_metrics.
 struct ImageLayout {
     prefix_lines: usize,
@@ -3541,6 +3631,153 @@ mod tests {
 
     // `find_matches_ci` moved to handlers.rs (shared with InputSearch); its
     // tests moved with it.
+
+    // ---- ext_flow / insert_buf_segments ---
+    //
+    // `make_fr_uniform(10.0)` gives every glyph a 10px advance at scale 1.0, so
+    // a string of N chars is exactly N * 10 px wide and line breaks are easy to
+    // reason about. `em_width` is passed as 10.0 to match.
+
+    use crate::text::make_fr_uniform;
+
+    const EM: f32 = 10.0;
+
+    #[test]
+    fn ext_flow_no_breadcrumb_matches_plain_hanging_wrap() {
+        let fr = make_fr_uniform(10.0);
+        let flow = ext_flow(&fr, "", "- ", "hello world", 1.0, 200.0, EM);
+        assert!(flow.bc_lines.is_empty());
+        assert_eq!(flow.content_line, 0);
+        assert!((flow.content_dx - 0.0).abs() < 1e-3);
+        // The prefix eats 20px of the first line.
+        assert!((flow.first_w - 180.0).abs() < 1e-3);
+        assert_eq!(flow.total_lines, 1);
+    }
+
+    #[test]
+    fn ext_flow_short_breadcrumb_keeps_content_inline() {
+        let fr = make_fr_uniform(10.0);
+        // "Home > " is 7 chars = 70px, well inside a 300px column.
+        let flow = ext_flow(&fr, "Home > ", "- ", "Contact", 1.0, 300.0, EM);
+        assert_eq!(flow.bc_lines.len(), 1);
+        assert_eq!(flow.content_line, 0, "content stays on the breadcrumb line");
+        assert!((flow.content_dx - 70.0).abs() < 1e-3);
+        assert!((flow.first_w - 210.0).abs() < 1e-3, "300 - 70 - 20");
+        assert_eq!(flow.total_lines, 1);
+    }
+
+    #[test]
+    fn ext_flow_long_breadcrumb_wraps_instead_of_overflowing() {
+        let fr = make_fr_uniform(10.0);
+        // 100px column = 10 chars per line. This breadcrumb is far wider, and
+        // used to be drawn as one unwrapped run running off the right edge.
+        let bc = "Home > Onze diensten > Pakket versturen > ";
+        let flow = ext_flow(&fr, bc, "- ", "Frankrijk", 1.0, 100.0, EM);
+        assert!(flow.bc_lines.len() > 1, "breadcrumb must wrap");
+        for (line, _) in &flow.bc_lines {
+            assert!(
+                fr.measure_text_width(line, 1.0) <= 100.0,
+                "breadcrumb line {line:?} overflows the column",
+            );
+        }
+        assert!(flow.total_lines >= flow.bc_lines.len());
+        assert!(flow.first_w <= 100.0);
+    }
+
+    #[test]
+    fn ext_flow_pushes_content_down_when_the_last_line_is_nearly_full() {
+        let fr = make_fr_uniform(10.0);
+        // 200px column: min_first_w is min(8 em, half the column) = 80px.
+        // A 15-char breadcrumb (150px) plus a 20px prefix leaves only 30px, so
+        // the content must start on a fresh line.
+        let flow = ext_flow(&fr, "abcdefghijklmno", "- ", "text", 1.0, 200.0, EM);
+        assert_eq!(flow.bc_lines.len(), 1);
+        assert_eq!(flow.content_line, 1, "content moves below the breadcrumb");
+        assert!((flow.content_dx - 0.0).abs() < 1e-3);
+        assert!(
+            (flow.first_w - 180.0).abs() < 1e-3,
+            "full width minus prefix"
+        );
+        assert_eq!(flow.total_lines, 2);
+    }
+
+    #[test]
+    fn ext_flow_total_lines_covers_every_drawn_line() {
+        let fr = make_fr_uniform(10.0);
+        // The height a row reserves must cover the breadcrumb lines plus the
+        // wrapped content that follows them — the invariant the three call
+        // sites depend on.
+        for bc in ["", "Home > ", "a > b > c > d > e > f > g > h > i > "] {
+            for content in ["x", "one two three four five six seven eight"] {
+                for rest_w in [80.0_f32, 200.0, 400.0] {
+                    let flow = ext_flow(&fr, bc, "- ", content, 1.0, rest_w, EM);
+                    let content_lines = fr
+                        .wrap_lines_with_offsets_hanging(content, 1.0, flow.first_w, rest_w)
+                        .len()
+                        .max(1);
+                    assert_eq!(
+                        flow.total_lines,
+                        flow.content_line + content_lines,
+                        "bc={bc:?} content={content:?} rest_w={rest_w}",
+                    );
+                    assert!(
+                        flow.total_lines >= flow.bc_lines.len(),
+                        "reserved height must cover the breadcrumb: bc={bc:?} rest_w={rest_w}",
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn insert_buf_segments_wraps_a_long_single_line() {
+        let fr = make_fr_uniform(10.0);
+        // 30 chars in a 100px column with a 20px prefix: the first line holds
+        // 8, the rest 10 each. Before wrapping this was a single 300px run.
+        let buf = "abcdefghijklmnopqrstuvwxyz0123";
+        let segs = insert_buf_segments(&fr, buf, 1.0, 20.0, 100.0);
+        assert!(segs.len() > 1, "long buffer must wrap");
+        for (n, &(start, end, _)) in segs.iter().enumerate() {
+            let avail = if n == 0 { 80.0 } else { 100.0 };
+            assert!(
+                fr.measure_text_width(&buf[start..end], 1.0) <= avail,
+                "segment {n} ({:?}) overflows",
+                &buf[start..end],
+            );
+        }
+    }
+
+    #[test]
+    fn insert_buf_segments_still_break_on_newlines() {
+        let fr = make_fr_uniform(10.0);
+        let segs = insert_buf_segments(&fr, "a\nb\nc", 1.0, 0.0, 1000.0);
+        assert_eq!(segs.len(), 3);
+    }
+
+    #[test]
+    fn insert_buf_segments_empty_buffer_is_one_line() {
+        let fr = make_fr_uniform(10.0);
+        assert_eq!(insert_buf_segments(&fr, "", 1.0, 0.0, 100.0).len(), 1);
+    }
+
+    #[test]
+    fn insert_buf_caret_lands_on_the_segment_holding_the_cursor() {
+        let fr = make_fr_uniform(10.0);
+        let buf = "abcdefghijklmnopqrstuvwxyz0123";
+        let segs = insert_buf_segments(&fr, buf, 1.0, 20.0, 100.0);
+        // Same lookup the caret renderer does, for every cursor position.
+        for pos in 0..=buf.len() {
+            let n = segs
+                .iter()
+                .rposition(|&(start, _, _)| start <= pos)
+                .expect("a segment always starts at 0");
+            let (start, end, _) = segs[n];
+            assert!(
+                pos >= start && (pos <= end || n + 1 < segs.len()),
+                "cursor {pos} fell outside segment {n} ({start}..{end})",
+            );
+        }
+    }
 
     #[test]
     fn rgba_u32_to_f32_black() {
