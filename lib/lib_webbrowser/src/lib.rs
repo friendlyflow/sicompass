@@ -2494,7 +2494,19 @@ async fn set_desktop_viewport(page: &chromiumoxide::Page) {
 /// The live DOM is not destroyed — the form-submit paths click against it after
 /// this runs.  Hidden nodes are marked, a clone is pruned, and the markers are
 /// stripped again, so the only lasting change is nothing at all.
-const PRUNE_HIDDEN_SCRIPT: &str = r##"(function() {
+/// Constants, the visibility verdict, and the geometry reader — everything the
+/// pruning body and the banding pass both need.
+///
+/// The script is assembled from four consts into [`PRUNE_HIDDEN_SCRIPT`]:
+/// head, [`PRUNE_JS_BODY`], [`BAND_JS`], [`PRUNE_JS_END`].  The seams exist so
+/// `band_plan_js` can evaluate head + band alone and read the banding
+/// decisions back as JSON, which is the only way to assert on them: the
+/// algorithm is browser-side JS and there is no JS engine in the dependency
+/// tree, so it is unreachable from a pure Rust test.
+///
+/// Assembled by concatenation, never `format!`: the JS is full of braces and
+/// escaping every one of them would be a needless error surface.
+const PRUNE_JS_HEAD: &str = r##"(function() {
     // Never rendered content in the first place, and FFON drops them anyway
     // (HTML_SKIP_TAGS), so keeping them costs the reader nothing — while the
     // load flow does sniff inline <script> for Google's consent values and for
@@ -2511,6 +2523,22 @@ const PRUNE_HIDDEN_SCRIPT: &str = r##"(function() {
     const NEVER = new Set(['HTML','HEAD','BODY']);
     const MARK = 'data-sic-hidden';
     const PARK = 'data-sic-parked';
+    // Geometry, carried to the clone as "x y w h flags". It has to travel as an
+    // attribute: a detached clone is not laid out, so getBoundingClientRect on
+    // it returns zeros — the numbers can only come from the live nodes.
+    const GEO = 'data-sic-g';
+    // Parked: moved to the end of the document, so it must stay there. Nothing
+    // display:none has geometry to sort by, and the reading order pass would
+    // otherwise pull it back into the middle on the strength of a missing box.
+    const PIN = 'data-sic-pin';
+    const F_FIXED = 1, F_ABS = 2, F_RTL = 4, F_NOSORT = 8, F_INLINE = 16;
+    // Displays whose children are not independently positioned blocks, so
+    // sorting them by geometry would scramble a line of text or a table.
+    const NO_REFLOW_DISPLAY = new Set([
+        'inline','inline-block','inline-flex','inline-grid','contents','list-item',
+        'table','table-row','table-cell','table-row-group','table-header-group',
+        'table-footer-group','ruby','ruby-text',
+    ]);
 
     // Something the reader could act on: a link, a control, a heading. A
     // subtree holding any of these is the site's own navigation or UI, not
@@ -2526,21 +2554,34 @@ const PRUNE_HIDDEN_SCRIPT: &str = r##"(function() {
         catch (e) { return false; }
     }
 
-    function isHidden(el) {
-        if (NEVER_MARK.has(el.tagName)) return false;
+    const HIDE = 1, PARK_IT = 2, KEEP = 3;
+
+    // One element's verdict, with no side effects. Keeping this a pure read is
+    // what lets the walk below stay a read-only pass: interleaving
+    // getComputedStyle with setAttribute, which is what this did when marking
+    // was all it had to do, dirties style between reads and forces a fresh
+    // layout flush on the next one.
+    // The computed style `verdict` just read, so the geometry pass can reuse it
+    // instead of paying for a second getComputedStyle. That call is the single
+    // most expensive thing in this script; a rect read next to it is noise.
+    let lastStyle = null;
+    function verdict(el) {
+        lastStyle = null;
+        if (NEVER_MARK.has(el.tagName)) return KEEP;
         // `hidden` and `aria-hidden` are the author saying "assistive tech must
         // not see this". This app is assistive tech, so it obeys, links or no
         // links — that is what takes bpost's parked language modal out.
-        if (el.hasAttribute('hidden')) return true;
-        if (el.getAttribute('aria-hidden') === 'true') return true;
+        if (el.hasAttribute('hidden')) return HIDE;
+        if (el.getAttribute('aria-hidden') === 'true') return HIDE;
         let s;
-        try { s = getComputedStyle(el); } catch (e) { return false; }
-        if (!s) return false;
+        try { s = getComputedStyle(el); } catch (e) { return KEEP; }
+        if (!s) return KEEP;
+        lastStyle = s;
         const invisible = s.visibility === 'hidden' || s.visibility === 'collapse' ||
             (s.display === 'none' && !DISPLAY_EXEMPT.has(el.tagName));
         // Merely off-screen: dead weight goes, anything you could act on is
         // kept but gets moved out of the way (see PARK below).
-        if (!invisible) return false;
+        if (!invisible) return KEEP;
         if (actionable(el)) {
             // Parking is for menus. A subtree carrying the page's <h1> is the
             // content itself — bpost wraps its article in a container classed
@@ -2550,26 +2591,110 @@ const PRUNE_HIDDEN_SCRIPT: &str = r##"(function() {
             // anything not rendered.)
             let isContent = true;
             try { isContent = el.tagName === 'H1' || !!el.querySelector('h1'); } catch (e) {}
-            if (!isContent) el.setAttribute(PARK, '');
-            return false;
+            return isContent ? KEEP : PARK_IT;
         }
-        return true;
+        return HIDE;
     }
 
-    const marked = [];
-    // Top-down walk: once a subtree is marked its descendants go with it, so
-    // skip them rather than paying getComputedStyle on every one.
-    (function walk(el) {
-        for (const child of el.children) {
-            if (NEVER.has(child.tagName)) { walk(child); continue; }
-            if (isHidden(child)) {
-                child.setAttribute(MARK, '');
-                marked.push(child);
-            } else {
-                walk(child);
+    // A wrapper that is `display:contents`, floats-only or a zero-height flex
+    // parent measures 0x0 while its children are perfectly well placed. Take
+    // the union of what is inside instead. Capped hard: this is a repair for a
+    // handful of nodes, not a second traversal of the document.
+    function unionOfDescendants(el) {
+        let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity, seen = 0;
+        const queue = [el];
+        while (queue.length && seen < 32) {
+            const node = queue.shift();
+            for (const kid of node.children) {
+                seen++;
+                if (seen > 32) break;
+                let r;
+                try { r = kid.getBoundingClientRect(); } catch (e) { continue; }
+                if (r.width > 0 && r.height > 0) {
+                    x0 = Math.min(x0, r.left); y0 = Math.min(y0, r.top);
+                    x1 = Math.max(x1, r.right); y1 = Math.max(y1, r.bottom);
+                } else {
+                    queue.push(kid);
+                }
             }
         }
-    })(document.documentElement);
+        if (x0 === Infinity) return null;
+        return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+    }
+
+    // Read the layout Chrome has already done. `s` is the style `verdict` just
+    // computed for this element, so this adds a rect read and nothing else.
+    function measure(el, s) {
+        let r;
+        try { r = el.getBoundingClientRect(); } catch (e) { return null; }
+        let x = r.left, y = r.top, w = r.width, h = r.height;
+        if (w === 0 || h === 0) {
+            const u = unionOfDescendants(el);
+            if (u) { x = u.x; y = u.y; w = u.w; h = u.h; }
+        }
+        let f = 0;
+        if (s) {
+            if (s.position === 'fixed') f |= F_FIXED;
+            // `sticky` is deliberately absent: nothing scrolls this page, so at
+            // offset 0 a sticky element sits at its honest in-flow position.
+            else if (s.position === 'absolute') f |= F_ABS;
+            if (s.direction === 'rtl') f |= F_RTL;
+            // Multi-column text flows down one column then down the next, so a
+            // band-then-x sort would interleave the columns into nonsense.
+            if (s.columnCount !== 'auto' || s.columnWidth !== 'normal') f |= F_NOSORT;
+            if (NO_REFLOW_DISPLAY.has(s.display)) f |= F_INLINE;
+        }
+        // scrollX/scrollY are 0 (nothing has scrolled) but cost nothing and make
+        // the numbers document-absolute rather than viewport-relative.
+        return [Math.round(x + scrollX), Math.round(y + scrollY),
+                Math.round(w), Math.round(h), f];
+    }
+
+"##;
+
+/// The pruning and serialization body.  Split from [`PRUNE_JS_HEAD`] only so
+/// the head's constants and `measure` can be shared with the band-plan test
+/// seam without a second copy of the geometry reader.
+const PRUNE_JS_BODY: &str = r##"
+    // ---- read pass: no DOM writes at all ----
+    const toMark = [], toPark = [], geo = new Map();
+    // Top-down walk: once a subtree is marked its descendants go with it, so
+    // skip them rather than paying getComputedStyle on every one.  A parked
+    // subtree is still walked into, because PARK only moves the outermost one
+    // and its descendants each get their own verdict — but `live` goes false,
+    // because everything under a display:none node measures 0x0 and there is no
+    // point paying for the rect.
+    (function walk(el, live) {
+        for (const child of el.children) {
+            if (NEVER.has(child.tagName)) {
+                // <body> is never marked, but it still needs a box: the banding
+                // pass measures the wrapper chain under it against its area to
+                // find where the page's regions actually live.
+                if (live && child.tagName === 'BODY') {
+                    let s = null;
+                    try { s = getComputedStyle(child); } catch (e) {}
+                    const g = measure(child, s);
+                    if (g) geo.set(child, g);
+                }
+                walk(child, live);
+                continue;
+            }
+            const v = verdict(child);
+            if (v === HIDE) { toMark.push(child); continue; }
+            if (v === PARK_IT) { toPark.push(child); walk(child, false); continue; }
+            if (live) {
+                const g = measure(child, lastStyle);
+                if (g) geo.set(child, g);
+            }
+            walk(child, live);
+        }
+    })(document.documentElement, true);
+
+    // ---- write pass ----
+    const marked = toMark;
+    for (const el of toMark) el.setAttribute(MARK, '');
+    for (const el of toPark) el.setAttribute(PARK, '');
+    for (const [el, g] of geo) el.setAttribute(GEO, g.join(' '));
 
     let html;
     try {
@@ -2600,15 +2725,56 @@ const PRUNE_HIDDEN_SCRIPT: &str = r##"(function() {
                 // Only top-level parked nodes; a nested one travels with its parent.
                 if (node.parentElement && node.parentElement.closest('[' + PARK + ']')) continue;
                 node.removeAttribute(PARK);
+                // A parked <form> would have to leave its own shell behind and
+                // then be appended detached. It is display:none either way, so
+                // leave it exactly where it is.
+                if (node.tagName === 'FORM') continue;
+                // Moving a subtree to the end of the document renumbers every
+                // form after it, and the click path resolves buttons through
+                // `document.forms[n]` on the live page. The prune has the same
+                // problem and solves it with empty shells; parking never did,
+                // because an actionable subtree is not marked hidden and so
+                // never reached that code. Leave a shell for each form where it
+                // was, and take the real ones out of the copy that travels: a
+                // parked form is display:none, so it was never operable.
+                const forms = Array.from(node.querySelectorAll('form'));
+                if (forms.length && node.parentNode) {
+                    const shells = document.createDocumentFragment();
+                    for (let i = 0; i < forms.length; i++) shells.appendChild(document.createElement('form'));
+                    node.parentNode.insertBefore(shells, node);
+                    for (const f of forms) f.remove();
+                }
+                node.setAttribute(PIN, 'end');
                 body.appendChild(node);
             }
             for (const node of clone.querySelectorAll('[' + PARK + ']')) node.removeAttribute(PARK);
         }
+        // Group the page into regions and read them in the order they are laid
+        // out, from the geometry stamped above.  Its own try/catch on purpose:
+        // a throw escaping from here would leave `html` undefined and drop the
+        // whole page onto the unpruned `page.content()` fallback.
+        try {
+            const cbody = clone.querySelector('body');
+            if (cbody) {
+                sicApply(cbody, sicPlan(cbody));
+                sicWrapParked(cbody);
+                sicReflow(cbody, 0);
+            }
+        } catch (e) {}
         rehomeIds(clone);
+        // Geometry has done its work; ~30 bytes times every element is 100-200 kB
+        // of noise to push through the parser otherwise.
+        for (const node of clone.querySelectorAll('[' + GEO + ']')) node.removeAttribute(GEO);
+        for (const node of clone.querySelectorAll('[' + PIN + ']')) node.removeAttribute(PIN);
         html = '<!DOCTYPE html>' + clone.outerHTML;
     } finally {
         for (const node of marked) node.removeAttribute(MARK);
         for (const node of document.querySelectorAll('[' + PARK + ']')) node.removeAttribute(PARK);
+        // Every write in this script and its matching removal happen inside one
+        // synchronous task, so a MutationObserver sees the records but never a
+        // dirty DOM — and the submit paths that click the live page after this
+        // find it exactly as the site left it.
+        for (const node of geo.keys()) node.removeAttribute(GEO);
     }
     return html;
 
@@ -2664,20 +2830,20 @@ const PRUNE_HIDDEN_SCRIPT: &str = r##"(function() {
                     // Everything from the target onwards belongs to it: that is
                     // what "skip to content" means, and it stops the landmark
                     // being a single-child wrapper that FFON collapses again.
+                    // It stops at the next landmark, though — a <footer> after
+                    // the target is not part of the main content, and swallowing
+                    // one (the site's own, or one the banding pass synthesized)
+                    // files the whole end of the page under "main content".
                     let node = sec.nextSibling;
                     while (node) {
+                        if (node.nodeType === 1 && node.matches('footer, nav, aside, main')) break;
                         const after = node.nextSibling;
                         sec.appendChild(node);
                         node = after;
                     }
                     // A lone plain container in there is still a wrapper; lift
                     // its children so the landmark holds real structure.
-                    while (sec.children.length === 1 &&
-                           /^(DIV|SECTION|ARTICLE)$/.test(sec.children[0].tagName)) {
-                        const only = sec.children[0];
-                        while (only.firstChild) sec.insertBefore(only.firstChild, only);
-                        only.remove();
-                    }
+                    unwrapSingleWrapper(sec);
                     host = sec;
                 }
             }
@@ -2685,7 +2851,490 @@ const PRUNE_HIDDEN_SCRIPT: &str = r##"(function() {
             el.removeAttribute('id');
         }
     }
+"##;
+
+/// Region grouping and reading order, from the layout Chrome has already done.
+///
+/// Function declarations, hoisted into the enclosing IIFE, so this block can be
+/// concatenated anywhere inside it.  Two halves, deliberately separated:
+/// `sicPlan` is **pure** — it reads geometry and returns a description of what
+/// should change — and `sicApply` performs it.  Only that split makes the
+/// decisions assertable from a test, by evaluating `sicPlan` alone and reading
+/// the plan back as JSON.
+const BAND_JS: &str = r##"
+    // Stamp geometry over a live tree the way the read pass does, for the band
+    // plan test seam only.  The production path fuses this into its own walk so
+    // it never pays for a second getComputedStyle; this exists so a test can
+    // ask for a plan without running the prune.
+    function sicStampLive(root) {
+        const stamped = [];
+        (function walk(el) {
+            for (const child of el.children) {
+                if (NEVER_MARK.has(child.tagName)) continue;
+                let s = null;
+                try { s = getComputedStyle(child); } catch (e) {}
+                const g = measure(child, s);
+                if (g) { child.setAttribute(GEO, g.join(' ')); stamped.push(child); }
+                walk(child);
+            }
+        })(root);
+        return stamped;
+    }
+
+    // A landmark holding one plain container is still a wrapper: lift the
+    // children so it holds real structure. Shared with `rehomeIds`, which needs
+    // exactly the same thing for the <main> it synthesizes.
+    function unwrapSingleWrapper(el) {
+        while (el.children.length === 1 &&
+               /^(DIV|SECTION|ARTICLE)$/.test(el.children[0].tagName)) {
+            const only = el.children[0];
+            while (only.firstChild) el.insertBefore(only.firstChild, only);
+            only.remove();
+        }
+    }
+
+    const R_NONE = 0, R_NAV = 1, R_MAIN = 2, R_FOOTER = 3, R_ASIDE = 4;
+    const ROLE_TAG = ['', 'nav', 'main', 'footer', 'aside'];
+    const ROLE_NAME = ['none', 'nav', 'main', 'footer', 'aside'];
+    // Pins: an overlay is not in the flow, so it has no honest place in the
+    // band order. Send it where it belongs and keep it there.
+    const PIN_NONE = 0, PIN_FRONT = -1, PIN_END = 1;
+
+    function sicGeo(el) {
+        const a = el.getAttribute(GEO);
+        if (!a) return null;
+        const p = a.split(' ');
+        if (p.length < 5) return null;
+        const g = { x: +p[0], y: +p[1], w: +p[2], h: +p[3], f: +p[4] };
+        for (const k of ['x','y','w','h','f']) if (!isFinite(g[k])) return null;
+        return g;
+    }
+
+    function sicKids(el) {
+        const out = [];
+        for (const c of el.children) if (!NEVER_MARK.has(c.tagName)) out.push(c);
+        return out;
+    }
+
+    // The author's own markup, when there is any. Nothing here gets wrapped
+    // again, and a page with two or more of these is left alone entirely.
+    function sicNativeRole(el) {
+        switch (el.tagName) {
+            case 'NAV': case 'HEADER': return R_NAV;
+            case 'MAIN': return R_MAIN;
+            case 'FOOTER': return R_FOOTER;
+            case 'ASIDE': return R_ASIDE;
+        }
+        switch ((el.getAttribute('role') || '').toLowerCase()) {
+            case 'navigation': case 'banner': return R_NAV;
+            case 'main': return R_MAIN;
+            case 'contentinfo': return R_FOOTER;
+            case 'complementary': return R_ASIDE;
+        }
+        return null;
+    }
+
+    // Real pages are body > div#app > div > … as often as they are a flat run.
+    // Descend through wrappers that are just holding the page.
+    function sicBandHost(body) {
+        let host = body;
+        for (let depth = 0; depth < 8; depth++) {
+            const kids = sicKids(host);
+            if (kids.length !== 1) break;
+            const k = kids[0];
+            if (!/^(DIV|SECTION|ARTICLE|MAIN)$/.test(k.tagName)) break;
+            const hg = sicGeo(host), kg = sicGeo(k);
+            if (!hg || !kg || hg.w * hg.h <= 0) break;
+            if (kg.w * kg.h < 0.9 * hg.w * hg.h) break;
+            host = k;
+        }
+        return host;
+    }
+
+    // Reading order: cluster into horizontal bands, then read each band across.
+    // Items whose vertical extents overlap share a band, which keeps a row of
+    // unequal-height cards together while a clean vertical gap splits them.
+    function sicVisualOrder(items, rtl) {
+        const sized = items.filter(it => it.g && it.g.w > 0 && it.g.h > 0 && !it.pin);
+        if (!sized.length) return items.slice();
+        const byY = sized.slice().sort((a, b) => a.g.y - b.g.y || a.i - b.i);
+        let band = 0, bottom = -Infinity;
+        for (const it of byY) {
+            const tol = Math.min(0.5 * it.g.h, 8);
+            if (it.g.y >= bottom - tol) { band++; bottom = it.g.y + it.g.h; }
+            else bottom = Math.max(bottom, it.g.y + it.g.h);
+            it.band = band;
+        }
+        // Anything with no box of its own — screen-reader-only text, an
+        // absolutely positioned badge, an overlay staying put — rides along
+        // with the last sized sibling before it rather than being flung to an
+        // end. Its source position relative to that sibling is preserved.
+        let carry = null;
+        for (const it of items) {
+            if (it.band !== undefined) { carry = it; continue; }
+            const ref = carry || byY[0];
+            it.band = ref.band;
+            it.carryX = ref.g.x;
+            it.carryR = ref.g.x + ref.g.w;
+        }
+        const keyX = it => (it.g && it.g.w > 0 && !it.pin)
+            ? (rtl ? -(it.g.x + it.g.w) : it.g.x)
+            : (rtl ? -it.carryR : it.carryX);
+        const out = items.slice();
+        out.sort((a, b) =>
+            (a.pin - b.pin) || (a.band - b.band) || (keyX(a) - keyX(b)) || (a.i - b.i));
+        return out;
+    }
+
+    // Boxes that overlap by most of the smaller one are not laid out relative to
+    // each other; keep whatever order the markup gave them.
+    function sicOverlaps(a, b) {
+        if (!a || !b || a.w <= 0 || b.w <= 0) return false;
+        const ox = Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x);
+        const oy = Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y);
+        if (ox <= 0 || oy <= 0) return false;
+        return ox * oy >= 0.6 * Math.min(a.w * a.h, b.w * b.h);
+    }
+
+    function sicProbe(el) {
+        let links = 0, textLen = 0, hasH1 = false;
+        try { links = el.querySelectorAll('a[href], [role="link"]').length; } catch (e) {}
+        try { textLen = (el.textContent || '').trim().length; } catch (e) {}
+        try { hasH1 = el.tagName === 'H1' || !!el.querySelector('h1'); } catch (e) {}
+        return { links, textLen, hasH1,
+                 linkDense: links >= 4 && textLen / links < 80 };
+    }
+
+    const NAV_HINT = /header|masthead|topbar|navbar|menu/i;
+    const FOOT_HINT = /footer|colophon|legal/i;
+    function sicHint(el, re) {
+        return re.test(el.tagName) || re.test(el.className || '') || re.test(el.id || '');
+    }
+
+    // Decide what the page's regions are and in what order they read.  Pure: it
+    // returns a description, and `sicApply` performs it.  That split is what
+    // makes the decisions assertable from a test.
+    function sicPlan(body) {
+        const plan = { host: null, order: null, groups: [], items: [], declined: null };
+        if (!body) { plan.declined = 'no body'; return plan; }
+        // A consent or language gate is in flight. The page it becomes is built
+        // in Rust from labels, and its proxy forms must keep document order.
+        if (body.querySelector('button[id^="sic-lang-"], button[id^="sic-consent-"]')) {
+            plan.declined = 'gate in flight';
+            return plan;
+        }
+        // On a page this size the rect reads start to cost real time and the
+        // signal is poor anyway. Read it the way it was written.
+        let total = 0;
+        try { total = document.querySelectorAll('*').length; } catch (e) {}
+        if (total > 25000) { plan.declined = 'document too large'; return plan; }
+        const host = sicBandHost(body);
+        plan.host = host.tagName.toLowerCase() + (host.id ? '#' + host.id : '');
+        const kids = sicKids(host);
+        if (kids.length < 3) { plan.declined = 'too few regions'; return plan; }
+        if (kids.length > 200) { plan.declined = 'too many regions'; return plan; }
+
+        const vw = window.innerWidth || 1920;
+        const vh = window.innerHeight || 1080;
+        let DH = vh;
+        try { DH = Math.max(document.documentElement.scrollHeight, vh); } catch (e) {}
+
+        let rtl = false;
+        const hg = sicGeo(host);
+        if (hg && (hg.f & F_RTL)) rtl = true;
+
+        const items = [];
+        let missing = 0;
+        for (let i = 0; i < kids.length; i++) {
+            const el = kids[i], g = sicGeo(el);
+            const parked = el.getAttribute(PIN) === 'end';
+            // A parked menu is display:none, so it has no box by definition.
+            // That is not missing geometry, it is a region already placed.
+            if (!parked && (!g || g.w <= 0 || g.h <= 0)) missing++;
+            const it = { i, el, g, role: R_NONE, native: sicNativeRole(el),
+                         pin: parked ? PIN_END : PIN_NONE };
+            // A fixed overlay has no place in the flow. A full-width strip at
+            // the top reads first; one at the bottom is a cookie bar or a chat
+            // widget and reads last — never as the page's footer. Anything else
+            // fixed is a modal: leave it exactly where it is.
+            if (g && (g.f & F_FIXED)) {
+                if (g.y < 0.15 * vh && g.w >= 0.6 * vw) { it.pin = PIN_FRONT; it.role = R_NAV; }
+                else if (g.y + g.h > 0.85 * vh) it.pin = PIN_END;
+            }
+            items.push(it);
+        }
+        if (missing > 0.4 * kids.length) { plan.declined = 'not enough geometry'; return plan; }
+
+        let ordered = sicVisualOrder(items, rtl);
+        // Overlapping siblings are not in flow relative to each other.
+        for (let n = 1; n < ordered.length; n++) {
+            const a = ordered[n - 1], b = ordered[n];
+            if (a.i > b.i && sicOverlaps(a.g, b.g)) { ordered[n - 1] = b; ordered[n] = a; }
+        }
+
+        // Reordering must never change the relative order of anything holding a
+        // <form>: form_index is a document-order count, resolved against the
+        // live page as document.forms[n]. Wrapping cannot break that — it keeps
+        // preorder — but moving a region can, so check before moving.
+        const formy = kids.map(k => {
+            try { return k.tagName === 'FORM' || !!k.querySelector('form'); } catch (e) { return true; }
+        });
+        const srcForms = [], newForms = [];
+        for (let i = 0; i < kids.length; i++) if (formy[i]) srcForms.push(i);
+        for (const it of ordered) if (formy[it.i]) newForms.push(it.i);
+        const formSafe = srcForms.length === newForms.length
+            && srcForms.every((v, n) => v === newForms[n]);
+        if (!formSafe) {
+            plan.declined = 'reorder would renumber forms';
+            ordered = items.slice();
+        }
+
+        const perm = ordered.map(it => it.i);
+        plan.order = perm.some((v, n) => v !== n) ? perm : null;
+
+        // ---- roles, over the order the page actually reads in ----
+        const natives = items.filter(it => it.native !== null).length;
+        if (natives >= 2) {
+            plan.declined = plan.declined || 'author already marked up landmarks';
+            plan.items = ordered.map(it => sicItemReport(it));
+            return plan;
+        }
+        for (const it of ordered) if (it.native !== null) it.role = it.native;
+
+        const probes = new Map();
+        for (const it of ordered) if (it.g && it.g.w > 0) probes.set(it, sicProbe(it.el));
+        const probeOf = it => probes.get(it) || { links: 0, textLen: 0, hasH1: false, linkDense: false };
+
+        // Footer: a trailing run only. A link-dense block in the middle of a
+        // page is a card grid, not the colophon.
+        const footTop = DH - Math.max(0.25 * DH, 600);
+        for (let n = ordered.length - 1; n >= 0; n--) {
+            const it = ordered[n];
+            if (it.pin === PIN_END) continue;
+            if (it.role !== R_NONE || it.native !== null) break;
+            const g = it.g, p = probeOf(it);
+            if (!g || g.y < footTop || g.w < 0.6 * vw) break;
+            if (!(p.linkDense || sicHint(it.el, FOOT_HINT))) break;
+            it.role = R_FOOTER;
+        }
+        // Nav: a leading run only.
+        const navBottom = Math.max(0.10 * DH, 200);
+        for (const it of ordered) {
+            if (it.pin === PIN_FRONT) continue;
+            if (it.role !== R_NONE || it.native !== null) break;
+            const g = it.g, p = probeOf(it);
+            if (!g || g.y > navBottom || g.w < 0.6 * vw || g.h > 0.25 * vh) break;
+            if (!(p.linkDense || sicHint(it.el, NAV_HINT))) break;
+            it.role = R_NAV;
+        }
+        // Main: the dominant remaining region, if there is one.
+        let best = null, bestScore = -1, maxArea = 0, maxText = 0;
+        for (const it of ordered) {
+            if (it.role !== R_NONE || it.native !== null || it.pin) continue;
+            if (!it.g) continue;
+            maxArea = Math.max(maxArea, it.g.w * it.g.h);
+            maxText = Math.max(maxText, probeOf(it).textLen);
+        }
+        for (const it of ordered) {
+            if (it.role !== R_NONE || it.native !== null || it.pin) continue;
+            if (!it.g) continue;
+            const p = probeOf(it);
+            let score = maxArea > 0 ? (it.g.w * it.g.h) / maxArea : 0;
+            if (p.hasH1) score += 2;
+            if (maxText > 0 && p.textLen === maxText) score += 1;
+            if (score > bestScore) { bestScore = score; best = it; }
+        }
+        if (best && best.g.w * best.g.h >= 0.15 * vw * DH) {
+            best.role = R_MAIN;
+            // Complementary: a narrow column running alongside the main one.
+            if (best.g.w >= 0.5 * vw) {
+                for (const it of ordered) {
+                    if (it.role !== R_NONE || it.native !== null || it.pin || !it.g) continue;
+                    if (it.g.w > 0.35 * vw) continue;
+                    // A complementary region is a *column* running beside the
+                    // content. A one-line skip link is narrow too, and calling
+                    // it "complementary" is worse than saying nothing.
+                    if (it.g.h < 0.25 * best.g.h) continue;
+                    const top = Math.max(it.g.y, best.g.y);
+                    const bot = Math.min(it.g.y + it.g.h, best.g.y + best.g.h);
+                    if (bot - top > 0.5 * it.g.h) it.role = R_ASIDE;
+                }
+            }
+        }
+
+        // Contiguous runs of the same role, in reading order. Contiguous is not
+        // a detail: wrapping a run in place preserves document preorder, and
+        // that is the whole reason this cannot renumber a form.
+        for (let n = 0; n < ordered.length; ) {
+            const role = ordered[n].role;
+            if (role === R_NONE || ordered[n].native !== null) { n++; continue; }
+            let m = n;
+            while (m + 1 < ordered.length
+                   && ordered[m + 1].role === role
+                   && ordered[m + 1].native === null) m++;
+            plan.groups.push({ role, roleName: ROLE_NAME[role], tag: ROLE_TAG[role],
+                               from: n, to: m });
+            n = m + 1;
+        }
+        plan.items = ordered.map(it => sicItemReport(it));
+        return plan;
+    }
+
+    function sicItemReport(it) {
+        let label = it.el.tagName.toLowerCase();
+        if (it.el.id) label += '#' + it.el.id;
+        else if (typeof it.el.className === 'string' && it.el.className.trim())
+            label += '.' + it.el.className.trim().split(/\s+/)[0];
+        return { i: it.i, label, role: ROLE_NAME[it.role], pin: it.pin,
+                 x: it.g ? it.g.x : null, y: it.g ? it.g.y : null,
+                 w: it.g ? it.g.w : null, h: it.g ? it.g.h : null };
+    }
+
+    const REFLOW_TAGS = /^(BODY|DIV|SECTION|ARTICLE|MAIN|HEADER|FOOTER|ASIDE|NAV)$/;
+    // Containers whose child order is meaning, not layout. A list is a list in
+    // the order the author wrote it, a table row is not a band of cards, and a
+    // heading or paragraph holds a sentence.
+    const REFLOW_BLOCKED = 'form, table, ul, ol, dl, select, label, fieldset, p,' +
+        ' pre, h1, h2, h3, h4, h5, h6, blockquote, figure, picture';
+
+    function sicReflowEligible(host) {
+        if (!REFLOW_TAGS.test(host.tagName)) return false;
+        const g = sicGeo(host);
+        if (g && (g.f & (F_NOSORT | F_INLINE))) return false;
+        try { if (host.closest(REFLOW_BLOCKED)) return false; } catch (e) { return false; }
+        // Mixed inline flow: a container holding bare text between its elements
+        // is a sentence, and sorting its parts by position scrambles it.
+        for (const n of host.childNodes) {
+            if (n.nodeType === 3 && n.textContent && n.textContent.trim()) return false;
+        }
+        return true;
+    }
+
+    // Sort a container's children into the order they are laid out, wherever
+    // that disagrees with the order they were written in.  Recurses a few
+    // levels: deeper than this the returns fall off and the risk does not.
+    function sicReflow(host, depth) {
+        if (depth > 4) return;
+        const kids = sicKids(host);
+        if (kids.length >= 2 && kids.length <= 60 && sicReflowEligible(host)) {
+            // Anything holding a <form> keeps source order, full stop.
+            // form_index is a document-order count resolved against the live
+            // page, and no reading-order gain is worth filling the wrong field.
+            let formy = false;
+            for (const k of kids) {
+                try {
+                    if (k.tagName === 'FORM' || k.querySelector('form')) { formy = true; break; }
+                } catch (e) { formy = true; break; }
+            }
+            if (!formy) {
+                let missing = 0;
+                const items = kids.map((el, i) => {
+                    const g = sicGeo(el);
+                    if (!g || g.w <= 0 || g.h <= 0) missing++;
+                    return { i, el, g, pin: PIN_NONE };
+                });
+                if (missing <= 0.4 * kids.length) {
+                    const hg = sicGeo(host);
+                    const ordered = sicVisualOrder(items, !!(hg && (hg.f & F_RTL)));
+                    // Identity permutation: touch nothing. Most of the web is
+                    // written in the order it renders, and a no-op here means
+                    // no DOM churn and nothing to go wrong.
+                    if (ordered.some((it, n) => it.i !== n)) {
+                        for (const it of ordered) host.appendChild(it.el);
+                    }
+                }
+            }
+        }
+        for (const k of sicKids(host)) sicReflow(k, depth + 1);
+    }
+
+    // The parked menus end up as one contiguous run at the end of the body.
+    // Give them a landmark of their own: they are hidden navigation by
+    // construction, so `navigation` is honest, and — the real reason — a
+    // landmark is the only boundary that stops a menu's heading swallowing
+    // everything after it. Runs after the banding pass, so the wrapper it adds
+    // is not counted as markup the author supplied.
+    function sicWrapParked(body) {
+        const parked = [];
+        for (const el of sicKids(body)) {
+            if (el.getAttribute(PIN) === 'end') parked.push(el);
+            else if (parked.length) return false;  // not a trailing run; leave it
+        }
+        if (!parked.length) return false;
+        for (const el of parked) el.removeAttribute(PIN);
+        // Already bounded by the site's own markup. Wrapping these would only
+        // stack a navigation inside a navigation and name it twice.
+        if (parked.every(el => sicNativeRole(el) !== null)) return false;
+        let wrap = document.createElement('nav');
+        body.insertBefore(wrap, parked[0]);
+        for (const el of parked) wrap.appendChild(el);
+        unwrapSingleWrapper(wrap);
+        // Never stack a navigation inside a navigation. If what came out is
+        // already one, theirs is the better named of the two — a menu the site
+        // marked up itself carries its own label.
+        while (wrap.children.length === 1 && wrap.children[0].tagName === 'NAV') {
+            const inner = wrap.children[0];
+            wrap.replaceWith(inner);
+            wrap = inner;
+        }
+        return true;
+    }
+
+    // Perform what `sicPlan` described.  Returns true if anything changed.
+    function sicApply(body, plan) {
+        if (!body || (!plan.order && !plan.groups.length)) return false;
+        const host = sicBandHost(body);
+        let kids = sicKids(host);
+        if (plan.order) {
+            if (plan.order.length !== kids.length) return false;
+            const moved = plan.order.map(i => kids[i]);
+            for (const el of moved) host.appendChild(el);
+            kids = moved;
+        }
+        for (const grp of plan.groups) {
+            if (grp.from < 0 || grp.to >= kids.length) continue;
+            const wrap = document.createElement(grp.tag);
+            const first = kids[grp.from];
+            if (!first.parentNode) continue;
+            first.parentNode.insertBefore(wrap, first);
+            for (let n = grp.from; n <= grp.to; n++) wrap.appendChild(kids[n]);
+            unwrapSingleWrapper(wrap);
+        }
+        return true;
+    }
+"##;
+
+const PRUNE_JS_END: &str = r##"
 })()"##;
+
+/// The in-page pass: prune invisible subtrees, then group and order what is
+/// left by the geometry Chrome already computed.  See [`PRUNE_JS_HEAD`].
+static PRUNE_HIDDEN_SCRIPT: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
+    // BAND_JS goes *before* the body, and the order is not cosmetic: its `const`
+    // declarations sit in the temporal dead zone until they are evaluated, and
+    // the body calls into them as soon as it runs. Function declarations hoist,
+    // `const` does not — with the body first, the band pass throws
+    // "Cannot access 'R_NONE' before initialization" on every page, silently,
+    // into the catch that guards it.
+    [PRUNE_JS_HEAD, BAND_JS, PRUNE_JS_BODY, PRUNE_JS_END].concat()
+});
+
+/// Head + band alone, returning the banding decisions as JSON instead of
+/// applying them.  Test-only: it is how a fixture asserts on roles and
+/// permutations rather than grepping serialized HTML.
+#[cfg(test)]
+fn band_plan_js() -> String {
+    [
+        PRUNE_JS_HEAD,
+        BAND_JS,
+        r##"
+    sicStampLive(document.documentElement);
+    return JSON.stringify(sicPlan(document.body));
+"##,
+        PRUNE_JS_END,
+    ]
+    .concat()
+}
 
 /// Fetch the page's HTML, with invisible subtrees removed when pruning is on.
 ///
@@ -2694,7 +3343,7 @@ const PRUNE_HIDDEN_SCRIPT: &str = r##"(function() {
 async fn settled_html(page: &chromiumoxide::Page) -> Result<String, String> {
     let t = tokio::time::Duration::from_secs;
     let pruned = if prune_hidden() {
-        tokio::time::timeout(t(10), page.evaluate(PRUNE_HIDDEN_SCRIPT))
+        tokio::time::timeout(t(10), page.evaluate(PRUNE_HIDDEN_SCRIPT.as_str()))
             .await
             .ok()
             .and_then(|r| r.ok())
@@ -3991,6 +4640,155 @@ mod tests {
             result
                 .iter()
                 .any(|e| e.as_str().map_or(false, |s| s.contains("visible")))
+        );
+    }
+
+    // ---- what FFON does with a synthesized landmark ----
+    //
+    // The banding pass wraps geometric regions in real <nav>/<main>/<footer>
+    // elements, so these four pin the SDK behaviour it is built on.  They are
+    // pure, so they run in the default suite — unlike the banding algorithm
+    // itself, which is browser-side JS and needs Chrome.
+
+    #[test]
+    fn synthesized_landmarks_group_the_page() {
+        // The reason banding is worth more than reordering. FFON nests every
+        // element after a heading underneath it regardless of DOM ancestry, so
+        // without a landmark boundary an <h1> swallows the whole rest of the
+        // page — which is how bpost once filed itself under a login dropdown's
+        // heading. A landmark is the only thing that stops it.
+        let result = html_to_ffon(
+            "<html><body><nav><a href='/a'>Alpha</a><a href='/b'>Beta</a></nav>\
+             <main><h1>Article</h1><p>Body text</p></main>\
+             <footer><a href='/p'>Privacy</a></footer></body></html>",
+            "https://example.com",
+        );
+        let keys: Vec<String> = result
+            .iter()
+            .map(|e| {
+                e.as_obj()
+                    .map(|o| o.key.clone())
+                    .or_else(|| e.as_str().map(|s| s.to_owned()))
+                    .unwrap_or_default()
+            })
+            .collect();
+        let joined = keys.join(" | ");
+        assert!(
+            keys.iter().any(|k| k.starts_with("navigation")),
+            "expected a navigation landmark; got: {joined}"
+        );
+        assert!(
+            keys.iter().any(|k| k == "main content"),
+            "expected a main content landmark; got: {joined}"
+        );
+        assert!(
+            keys.iter().any(|k| k == "footer"),
+            "expected a footer landmark; got: {joined}"
+        );
+        // The heading must not have absorbed the footer.
+        let article = format!(
+            "{:?}",
+            result
+                .iter()
+                .find_map(|e| e.as_obj())
+                .map(|o| o.children.clone())
+                .unwrap_or_default()
+        );
+        let main = result
+            .iter()
+            .find_map(|e| e.as_obj().filter(|o| o.key == "main content"))
+            .expect("main content obj");
+        assert!(
+            !format!("{main:?}").contains("Privacy"),
+            "the <h1> must not swallow what follows the landmark; got: {article}"
+        );
+    }
+
+    #[test]
+    fn a_landmark_boundary_holds_even_when_its_name_collapses_away() {
+        // A region that opens with a heading — bpost's login dropdown, and half
+        // the menus on the web — loses the landmark *name*: "navigation" is a
+        // generic container key, so FFON collapses the wrapper and the
+        // heading's name wins. The containment survives, and containment is the
+        // point, so the banding pass wraps such a run anyway rather than
+        // declining. Undoing the wrap to save the name would restore exactly
+        // the bug the wrap is there to prevent, as the second half shows.
+        let wrapped = html_to_ffon(
+            "<html><body><nav><h2>Menu</h2><a href='/a'>Alpha</a></nav>\
+             <p>AFTER-TEXT</p></body></html>",
+            "https://example.com",
+        );
+        let after_is_sibling = wrapped
+            .iter()
+            .any(|e| e.as_str().is_some_and(|s| s.contains("AFTER-TEXT")));
+        assert!(
+            after_is_sibling,
+            "the landmark must stop the heading swallowing what follows; got: {wrapped:?}"
+        );
+
+        // The same markup without the landmark: the heading takes everything
+        // after it, regardless of DOM ancestry.
+        let bare = html_to_ffon(
+            "<html><body><h2>Menu</h2><a href='/a'>Alpha</a>\
+             <p>AFTER-TEXT</p></body></html>",
+            "https://example.com",
+        );
+        let bare_after_is_sibling = bare
+            .iter()
+            .any(|e| e.as_str().is_some_and(|s| s.contains("AFTER-TEXT")));
+        assert!(
+            !bare_after_is_sibling,
+            "without a landmark the heading swallows it — this is the bug \
+             banding exists to fix; got: {bare:?}"
+        );
+    }
+
+    #[test]
+    fn wrapping_a_run_in_a_landmark_does_not_renumber_forms() {
+        // The load-bearing property of the whole banding design: wrapping a
+        // contiguous run in a new parent leaves document preorder alone, so
+        // `document.forms[n]` on the live page still lines up. Only reordering
+        // could break that, which is why reordering skips containers holding
+        // forms and verifies the sequence afterwards.
+        let plain = "<html><body><form><input name='one'></form>\
+                     <form><input name='two'></form></body></html>";
+        let wrapped = "<html><body><form><input name='one'></form>\
+                       <main><form><input name='two'></form></main></body></html>";
+        let (_e, before) = html_to_ffon_with_forms(plain, "https://example.com");
+        let (_e, after) = html_to_ffon_with_forms(wrapped, "https://example.com");
+        let key_of = |map: &FormMap, name: &str| -> Option<String> {
+            map.iter()
+                .find(|(_, v)| v.css_selector.contains(name))
+                .map(|(k, _)| k.clone())
+        };
+        assert_eq!(
+            key_of(&before, "two"),
+            key_of(&after, "two"),
+            "wrapping must not renumber; before: {before:?} after: {after:?}"
+        );
+        assert!(
+            key_of(&after, "two")
+                .unwrap_or_default()
+                .starts_with("form_2/"),
+            "the second form is still form_2; got: {after:?}"
+        );
+    }
+
+    #[test]
+    fn a_generic_nav_is_renamed_from_its_content() {
+        // A synthesized navigation landmark does not read as a bare
+        // "navigation": FFON renames generic containers from what is inside.
+        // That is why wrapping bpost's hidden menu still leaves "Pakje
+        // verzenden" visible in the top-level keys.
+        let result = html_to_ffon(
+            "<html><body><nav><a href='/s'>Pakje verzenden</a>\
+             <a href='/o'>Pakje ontvangen</a></nav></body></html>",
+            "https://example.com",
+        );
+        let rendered = format!("{result:?}");
+        assert!(
+            rendered.contains("navigation:") && rendered.contains("Pakje verzenden"),
+            "the container is named from its links; got: {rendered}"
         );
     }
 
@@ -5570,6 +6368,356 @@ mod tests {
         out.expect("fixture should load")
     }
 
+    /// Load an HTML fixture and evaluate `js` in it, returning the result.
+    ///
+    /// How the geometry passes get asserted on at all: they are browser-side
+    /// JS, so the only way to see their decisions is to ask the page for them.
+    #[cfg(not(target_os = "windows"))]
+    fn eval_fixture(name: &str, html: &str, js: &str) -> String {
+        let path = std::env::temp_dir().join(name);
+        std::fs::write(&path, html).expect("write fixture");
+        let url = format!("file://{}", path.display());
+        let out = chromium_runtime().block_on(async {
+            let live = init_live_session().await.expect("launch chrome");
+            let _ = navigate_and_get_html(&live.page, &url).await;
+            let out = live
+                .page
+                .evaluate(js)
+                .await
+                .ok()
+                .and_then(|v| v.into_value::<String>().ok());
+            close_browser(&live.session).await;
+            out
+        });
+        let _ = std::fs::remove_file(&path);
+        out.expect("fixture should evaluate")
+    }
+
+    /// Stamp geometry over a fixture and read back `data-sic-g` for `selectors`.
+    #[cfg(not(target_os = "windows"))]
+    fn geo_probe_js(selectors: &[&str]) -> String {
+        [
+            PRUNE_JS_HEAD,
+            BAND_JS,
+            "\n    sicStampLive(document.documentElement);\n    return JSON.stringify(",
+            &js_array(selectors),
+            ".map(function(s) { var e = document.querySelector(s);\
+             return e ? e.getAttribute(GEO) : null; }));\n",
+            PRUNE_JS_END,
+        ]
+        .concat()
+    }
+
+    /// A page whose source order is the exact reverse of its visual order:
+    /// flex `order` puts the footer first in the markup and last on screen.
+    /// Nothing but geometry can tell you that.
+    #[cfg(not(target_os = "windows"))]
+    const BAND_FIXTURE: &str = r#"<!DOCTYPE html><html><head><style>
+        body{margin:0} .page{display:flex;flex-direction:column;width:1920px}
+        .hdr{order:1;height:80px} .content{order:2;display:flex;height:900px}
+        .art{width:1500px} .side{width:420px} .ftr{order:3;height:300px}
+        </style></head><body><div class="page">
+        <div class="ftr"><a href="/p">FOOTER-PRIVACY</a><a href="/t">FOOTER-TERMS</a>
+            <a href="/c">FOOTER-CONTACT</a><a href="/j">FOOTER-JOBS</a></div>
+        <div class="content">
+            <div class="art"><h1>ARTICLE-HEADING</h1><p>ARTICLE-BODY</p></div>
+            <div class="side"><h2>SIDEBAR-HEADING</h2><p>SIDEBAR-BODY</p></div></div>
+        <div class="hdr"><a href="/1">NAV-ONE</a><a href="/2">NAV-TWO</a>
+            <a href="/3">NAV-THREE</a><a href="/4">NAV-FOUR</a></div>
+        </div></body></html>"#;
+
+    #[test]
+    #[ignore]
+    #[cfg(not(target_os = "windows"))]
+    fn geometry_is_read_from_the_layout_chrome_already_did() {
+        // The whole premise of the change: Chrome has already laid the page out,
+        // and the numbers it computed disagree with source order. Source order
+        // here is footer, content, header; the layout says otherwise.
+        let _guard = launch_flag_guard(false);
+        let raw = eval_fixture(
+            "sic-geo-probe.html",
+            BAND_FIXTURE,
+            &geo_probe_js(&[".hdr", ".content", ".ftr", ".art", ".side"]),
+        );
+        let g: Vec<Option<String>> = serde_json::from_str(&raw).expect("probe returns JSON");
+        let at = |i: usize| -> Vec<i64> {
+            g[i].as_ref()
+                .unwrap_or_else(|| panic!("no geometry stamped for probe {i}; got: {raw}"))
+                .split(' ')
+                .map(|n| n.parse().expect("integer geometry"))
+                .collect()
+        };
+        let (hdr, content, ftr, art, side) = (at(0), at(1), at(2), at(3), at(4));
+        // Vertical order is header, content, footer — the reverse of the markup.
+        assert_eq!(hdr[1], 0, "header sits at the top; got {hdr:?}");
+        assert_eq!(
+            content[1], 80,
+            "content follows the header; got {content:?}"
+        );
+        assert_eq!(ftr[1], 980, "footer is last on screen; got {ftr:?}");
+        // And the two columns are side by side, which is what tells a wide
+        // content column from a narrow complementary one.
+        assert_eq!((art[0], art[2]), (0, 1500), "article column; got {art:?}");
+        assert_eq!(
+            (side[0], side[2]),
+            (1500, 420),
+            "sidebar column; got {side:?}"
+        );
+    }
+
+    /// Roles the banding pass assigned, as `label => role`, in reading order.
+    #[cfg(not(target_os = "windows"))]
+    fn band_roles(name: &str, html: &str) -> (Vec<(String, String)>, serde_json::Value) {
+        let raw = eval_fixture(name, html, &band_plan_js());
+        let plan: serde_json::Value =
+            serde_json::from_str(&raw).unwrap_or_else(|e| panic!("plan is JSON ({e}); got: {raw}"));
+        let items = plan["items"]
+            .as_array()
+            .unwrap_or_else(|| panic!("plan has items; got: {plan}"))
+            .iter()
+            .map(|it| {
+                (
+                    it["label"].as_str().unwrap_or_default().to_owned(),
+                    it["role"].as_str().unwrap_or_default().to_owned(),
+                )
+            })
+            .collect();
+        (items, plan)
+    }
+
+    #[test]
+    #[ignore]
+    #[cfg(not(target_os = "windows"))]
+    fn banding_reads_regions_in_the_order_they_are_laid_out() {
+        // Source order is footer, content, header. The layout says header,
+        // content, footer — and that is what the page must read as.
+        let _guard = launch_flag_guard(false);
+        let (roles, plan) = band_roles("sic-band-plan.html", BAND_FIXTURE);
+        let order: Vec<&str> = roles.iter().map(|(l, _)| l.as_str()).collect();
+        assert_eq!(
+            order,
+            vec!["div.hdr", "div.content", "div.ftr"],
+            "regions must read top to bottom; plan: {plan}"
+        );
+        let role_of = |label: &str| -> String {
+            roles
+                .iter()
+                .find(|(l, _)| l == label)
+                .map(|(_, r)| r.clone())
+                .unwrap_or_default()
+        };
+        assert_eq!(role_of("div.hdr"), "nav", "top link strip; plan: {plan}");
+        assert_eq!(
+            role_of("div.ftr"),
+            "footer",
+            "bottom link strip; plan: {plan}"
+        );
+        assert_eq!(
+            role_of("div.content"),
+            "main",
+            "the dominant region holding the h1; plan: {plan}"
+        );
+    }
+
+    #[test]
+    #[ignore]
+    #[cfg(not(target_os = "windows"))]
+    fn banding_puts_the_page_in_reading_order_end_to_end() {
+        // The same fixture through the real load path: landmarks in the HTML,
+        // reading order in the FFON, and the article's heading must not have
+        // swallowed the footer.
+        let _guard = launch_flag_guard(false);
+        let load = load_fixture("sic-band-e2e.html", BAND_FIXTURE);
+        let html = &load.html;
+        let at = |needle: &str| -> usize {
+            html.find(needle)
+                .unwrap_or_else(|| panic!("{needle} missing from output; got: {html}"))
+        };
+        assert!(
+            at("NAV-ONE") < at("ARTICLE-HEADING") && at("ARTICLE-HEADING") < at("FOOTER-PRIVACY"),
+            "reading order is nav, article, footer; got: {html}"
+        );
+        assert!(html.contains("<nav"), "a navigation landmark; got: {html}");
+        assert!(html.contains("<main"), "a main landmark; got: {html}");
+        assert!(html.contains("<footer"), "a footer landmark; got: {html}");
+
+        let (elems, _map) = html_to_ffon_with_forms(html, "");
+        let top: Vec<String> = elems
+            .iter()
+            .map(|e| {
+                e.as_obj()
+                    .map(|o| o.key.clone())
+                    .or_else(|| e.as_str().map(|s| s.to_owned()))
+                    .unwrap_or_default()
+            })
+            .collect();
+        let joined = top.join(" | ");
+        assert!(
+            top.iter().any(|k| k == "main content"),
+            "the content region is a landmark; got: {joined}"
+        );
+        assert!(
+            top.iter().any(|k| k == "footer"),
+            "the footer is its own group, not nested under the article; got: {joined}"
+        );
+    }
+
+    /// A fixed cookie strip written first in the source and painted over the
+    /// bottom of the window.  It is an overlay, not the page's colophon.
+    #[cfg(not(target_os = "windows"))]
+    const OVERLAY_FIXTURE: &str = r#"<!DOCTYPE html><html><head><style>
+        body{margin:0}
+        .cookie{position:fixed;bottom:0;left:0;width:1920px;height:120px}
+        .art{height:1400px} .tail{height:200px}
+        </style></head><body>
+        <div class="cookie"><a href="/1">COOKIE-ACCEPT</a><a href="/2">COOKIE-REJECT</a>
+            <a href="/3">COOKIE-MORE</a><a href="/4">COOKIE-SETTINGS</a></div>
+        <div class="art"><h1>ARTICLE-HEADING</h1><p>ARTICLE-BODY</p></div>
+        <div class="tail"><a href="/p">TAIL-PRIVACY</a><a href="/t">TAIL-TERMS</a>
+            <a href="/c">TAIL-CONTACT</a><a href="/j">TAIL-JOBS</a></div>
+        </body></html>"#;
+
+    /// A page an author already marked up correctly, already in visual order.
+    /// The pass must leave it completely alone.
+    #[cfg(not(target_os = "windows"))]
+    const IDENTITY_FIXTURE: &str = r#"<!DOCTYPE html><html><head><style>
+        body{margin:0} nav{height:80px} main{height:900px} footer{height:200px}
+        </style></head><body>
+        <nav><a href="/1">NAV-ONE</a><a href="/2">NAV-TWO</a></nav>
+        <main><h1>ARTICLE-HEADING</h1><p>ARTICLE-BODY</p></main>
+        <footer><a href="/p">FOOT-PRIVACY</a><a href="/t">FOOT-TERMS</a></footer>
+        </body></html>"#;
+
+    #[test]
+    #[ignore]
+    #[cfg(not(target_os = "windows"))]
+    fn a_fixed_overlay_is_not_mistaken_for_the_footer() {
+        // A cookie bar is painted over the bottom of the viewport, which is
+        // exactly where a footer lives. Position alone would call it one; being
+        // out of flow is what says otherwise. It reads last, and it stays a
+        // plain region — contentinfo would be a lie.
+        let _guard = launch_flag_guard(false);
+        let (roles, plan) = band_roles("sic-overlay.html", OVERLAY_FIXTURE);
+        let cookie = roles
+            .iter()
+            .find(|(l, _)| l == "div.cookie")
+            .unwrap_or_else(|| panic!("cookie strip in plan; got: {plan}"));
+        assert_eq!(
+            cookie.1, "none",
+            "an overlay is not a landmark; plan: {plan}"
+        );
+        assert_eq!(
+            roles.last().map(|(l, _)| l.as_str()),
+            Some("div.cookie"),
+            "the overlay reads last despite being first in source; plan: {plan}"
+        );
+        // The real trailing region is still allowed to be the footer.
+        assert_eq!(
+            roles
+                .iter()
+                .find(|(l, _)| l == "div.tail")
+                .map(|(_, r)| r.as_str()),
+            Some("footer"),
+            "the in-flow trailing strip is the footer; plan: {plan}"
+        );
+    }
+
+    #[test]
+    #[ignore]
+    #[cfg(not(target_os = "windows"))]
+    fn a_well_authored_page_is_left_exactly_as_it_is() {
+        // The author's markup beats our geometry. Nothing to reorder, nothing
+        // to synthesize, and above all no second <main> stacked on the first.
+        let _guard = launch_flag_guard(false);
+        let load = load_fixture("sic-identity.html", IDENTITY_FIXTURE);
+        let html = &load.html;
+        assert_eq!(
+            html.matches("<main").count(),
+            1,
+            "exactly one main landmark; got: {html}"
+        );
+        assert_eq!(
+            html.matches("<footer").count(),
+            1,
+            "exactly one footer landmark; got: {html}"
+        );
+        assert_eq!(
+            html.matches("<nav").count(),
+            1,
+            "exactly one navigation landmark; got: {html}"
+        );
+        let at = |needle: &str| html.find(needle).expect(needle);
+        assert!(
+            at("NAV-ONE") < at("ARTICLE-HEADING") && at("ARTICLE-HEADING") < at("FOOT-PRIVACY"),
+            "source order is already reading order and must be preserved; got: {html}"
+        );
+    }
+
+    /// Three boxes in a right-to-left flex row: the first in the source sits
+    /// furthest right, and right is where reading starts.
+    #[cfg(not(target_os = "windows"))]
+    const RTL_FIXTURE: &str = r#"<!DOCTYPE html><html><head><style>
+        body{margin:0} .row{display:flex;width:1920px}
+        .row > div{width:300px;height:200px}
+        </style></head><body><div class="row" dir="rtl">
+        <div class="one">RTL-ONE</div>
+        <div class="two">RTL-TWO</div>
+        <div class="three">RTL-THREE</div>
+        </div></body></html>"#;
+
+    #[test]
+    #[ignore]
+    #[cfg(not(target_os = "windows"))]
+    fn right_to_left_reads_from_the_right() {
+        // Sorting by ascending x is only correct in a left-to-right document.
+        // Here the leftmost box is the *last* one to read, and blindly sorting
+        // on x would reverse the row.
+        let _guard = launch_flag_guard(false);
+        let (roles, plan) = band_roles("sic-rtl.html", RTL_FIXTURE);
+        let order: Vec<&str> = roles.iter().map(|(l, _)| l.as_str()).collect();
+        assert_eq!(
+            order,
+            vec!["div.one", "div.two", "div.three"],
+            "right-to-left reading order, which here is source order; plan: {plan}"
+        );
+        // And the geometry really is reversed, so this is not a no-op test.
+        let x = |label: &str| -> i64 {
+            plan["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|it| it["label"] == label)
+                .and_then(|it| it["x"].as_i64())
+                .unwrap_or_else(|| panic!("no x for {label}; plan: {plan}"))
+        };
+        assert!(
+            x("div.one") > x("div.three"),
+            "the first box is laid out furthest right; plan: {plan}"
+        );
+    }
+
+    #[test]
+    #[ignore]
+    #[cfg(not(target_os = "windows"))]
+    fn screen_reader_only_text_stays_next_to_what_it_annotates() {
+        // .sr-only text is a clipped 1x1 box. It must never be pruned by
+        // geometry, and it must not be sorted to an end either: with no box of
+        // its own it rides along with the sibling before it.
+        let _guard = launch_flag_guard(false);
+        let load = load_fixture("sic-sronly-order.html", PRUNE_FIXTURE);
+        let html = &load.html;
+        let visible = html
+            .find("VISIBLE-PARAGRAPH")
+            .unwrap_or_else(|| panic!("visible text survives; got: {html}"));
+        let sronly = html
+            .find("SCREENREADER-ONLY")
+            .unwrap_or_else(|| panic!("screen-reader text survives; got: {html}"));
+        assert!(
+            visible < sronly,
+            "the annotation stays after what it annotates; got: {html}"
+        );
+    }
+
     /// Fixture covering every prune rule at once, including the one that must
     /// *not* fire: screen-reader-only text.
     #[cfg(not(target_os = "windows"))]
@@ -5713,6 +6861,42 @@ mod tests {
             map.keys().any(|k| k.starts_with("form_2/")),
             "the visible form must still be form_2; keys: {:?}",
             map.keys().collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    #[ignore]
+    #[cfg(not(target_os = "windows"))]
+    fn a_parked_subtree_keeps_its_forms_counted() {
+        // The pruner leaves an empty shell where it removes a hidden form, so
+        // `document.forms[n]` keeps lining up. Parking never did: a hidden but
+        // *actionable* subtree is not marked hidden, so it skips the shell path
+        // entirely and gets moved to the end of the body with its forms inside
+        // — renumbering every form after it. A hidden login dropdown over a
+        // search box is exactly that shape, and typing in the search box would
+        // fill the login form instead.
+        let _guard = launch_flag_guard(false);
+        let html = r#"<!DOCTYPE html><html><body>
+            <div style="display:none"><a href="/login">LOGIN-LINK</a>
+                <form><input name="ghost-user"></form></div>
+            <form><input type="search" name="q" placeholder="Search"><button>Go</button></form>
+            </body></html>"#;
+        let load = load_fixture("sic-park-form-index.html", html);
+        // The parked menu is kept — it is navigation, not dead weight.
+        assert!(
+            load.html.contains("LOGIN-LINK"),
+            "the parked menu survives; got: {}",
+            load.html
+        );
+        let (_e, map) = html_to_ffon_with_forms(&load.html, "");
+        assert!(
+            map.iter()
+                .any(|(k, v)| k.starts_with("form_2/") && v.css_selector.contains('q')),
+            "the search box is document.forms[1] on the live page, so it must \
+             stay form_2 whatever parking does to the order; keys: {:?}",
+            map.iter()
+                .map(|(k, v)| (k, &v.css_selector))
+                .collect::<Vec<_>>()
         );
     }
 
@@ -6027,7 +7211,7 @@ mod tests {
         // Reachable, not buried: bpost's menus are display:none containers that
         // sit before the article, and leaving them inline let their headings
         // swallow the whole page into "De voordelen van je bpost-account?".
-        let top = p
+        let top_keys = p
             .cached_page
             .as_ref()
             .unwrap()
@@ -6037,11 +7221,43 @@ mod tests {
                 FfonElement::Str(s) => s.clone(),
                 FfonElement::Obj(o) => o.key.clone(),
             })
-            .collect::<Vec<_>>()
-            .join(" | ");
+            .collect::<Vec<_>>();
+        let top = top_keys.join(" | ");
+        eprintln!("bpost top level: {top}");
+        // The page reads as regions now, not as a flat run of everything the
+        // template emitted: the content is a landmark of its own instead of
+        // sitting eighth of nineteen entries with the header spread either side
+        // of it.
         assert!(
-            top.contains("Pakje verzenden"),
-            "the site's navigation should be reachable from the top level, got: {top}"
+            top.contains("main content"),
+            "the content region should be a landmark of its own, got: {top}"
+        );
+        assert!(
+            top.split(" | ").count() < 8,
+            "the top level should be a handful of regions, not the whole page; got: {top}"
+        );
+        // The menus themselves are still reachable — the loop above checks all
+        // three labels survive somewhere in the tree, which is the half that
+        // matters. What this adds is that they no longer *dominate* it: the
+        // login dropdown opens with a heading, and FFON nests everything after
+        // a heading underneath it, so leaving it inline filed the whole page
+        // under "De voordelen van je bpost-account?". It has to be nested now,
+        // never a top-level entry of its own.
+        // (It may still be *sampled* into a container's generated name, which is
+        // just FFON labelling a group from its contents — what must not happen
+        // is the heading standing as an entry of its own with the page beneath.)
+        assert!(
+            !top_keys
+                .iter()
+                .any(|k| k.starts_with("De voordelen van je bpost-account?")),
+            "the login dropdown's heading must be contained, not leading the \
+             page, got: {top}"
+        );
+        // And the content comes before the parked menus, which is the whole
+        // point of parking them.
+        assert!(
+            top.find("main content") < top.find("navigation"),
+            "content should precede the parked menus, got: {top}"
         );
 
         // The skip link's target is an empty <a id="main-content">, which emits
