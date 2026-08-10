@@ -16,3 +16,6 @@ tokio = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true }
+# Reading the geometry and banding decisions back out of the page. Test-only:
+# the script itself hands Chrome a string and gets a string back.
+serde_json = { workspace = true }

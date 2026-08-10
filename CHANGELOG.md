@@ -5,6 +5,38 @@ GitHub Release body, so entries here are what users read on the download page.
 
 ## 0.1.17
 
+### Web pages read in the order you see them, grouped into regions
+
+The browser used to read a page in the order the site's templating engine wrote
+the markup, which is often nothing like the order the page appears on screen.
+A footer written first and shown last was read first, and a page with no
+landmarks arrived as one long flat run of everything on it.
+
+Chrome has already worked out where every element sits, so the browser now asks
+it, and uses the answer twice. Regions that read as navigation, main content,
+complementary and footer are grouped under those names, so you can move between
+them instead of scrolling past them. Within a region, anything laid out in a
+different order from the markup is now read in the order it is laid out.
+
+On bpost.be the front page went from nineteen top level entries, with the
+article stranded eighth among them, to three: the skip link, the content, and
+the navigation.
+
+Nothing here guesses when it is unsure. If a site already marks up its own
+landmarks, those are used untouched. If the page is too small, too large, or
+too short of layout information to be confident about, it is read exactly as
+before. `show hidden content` still turns the whole pass off and reloads, so
+the original order is always one command away.
+
+### A hidden menu could send what you typed to the wrong form
+
+A menu the site keeps hidden until you open it, a login dropdown for example, is
+kept and moved after the content so its heading does not swallow the page. When
+such a menu contained a form, moving it renumbered every form after it, so text
+typed into the first visible field could be filled into the hidden form instead.
+Search boxes on pages with a hidden login panel were the common case. The
+numbering now stays fixed wherever the menu is moved to.
+
 ### macOS: 0.1.14 could not draw anything, and this fixes it
 
 0.1.14 started and then failed to find any graphics device, so nothing rendered.
