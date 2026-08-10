@@ -9,6 +9,7 @@ use crate::render;
 use crate::shaders;
 use ash::vk;
 use freetype::freetype as ft;
+use std::borrow::Cow;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 
@@ -152,6 +153,22 @@ struct ColorAtlas {
     pipeline: vk::Pipeline,
     vertex_buffer: vk::Buffer,
     vertex_buffer_memory: vk::DeviceMemory,
+}
+
+/// What a single-line input field actually shows, from
+/// [`FontRenderer::caret_window`]. A field narrower than its value elides from
+/// the front, so the caret and any selection rects have to be placed against
+/// the same window the text was drawn from.
+pub struct CaretWindow {
+    /// Text to draw for the field, including any ellipsis.
+    pub text: String,
+    /// Byte offset in the source string where the window starts.
+    pub start: usize,
+    /// Pixel offset, within `text`, at which the source slice begins — past a
+    /// leading ellipsis, or zero when there is none.
+    pub text_dx: f32,
+    /// Pixel offset of the caret within `text`.
+    pub caret_dx: f32,
 }
 
 // ---------------------------------------------------------------------------
@@ -1561,6 +1578,106 @@ impl FontRenderer {
         text.chars().map(|ch| self.advance(ch) * scale).sum()
     }
 
+    /// Pixel offset, within a [`CaretWindow`] over `source`, of source byte
+    /// offset `b`. Offsets before the window start clamp to its left edge.
+    pub fn window_offset_x(&self, window: &CaretWindow, source: &str, b: usize, scale: f32) -> f32 {
+        let b = b.clamp(window.start, source.len());
+        window.text_dx + self.measure_text_width(&source[window.start..b], scale)
+    }
+
+    /// Longest prefix of `text` that fits in `max_width` pixels, with an
+    /// ellipsis appended when the text had to be cut.
+    ///
+    /// For single-line chrome (the header, the parent line) that cannot wrap
+    /// without shifting every row below it. Borrows `text` unchanged in the
+    /// common case where it already fits.
+    pub fn truncate_to_width<'a>(&self, text: &'a str, scale: f32, max_width: f32) -> Cow<'a, str> {
+        if self.measure_text_width(text, scale) <= max_width {
+            return Cow::Borrowed(text);
+        }
+        const ELLIPSIS: char = '\u{2026}';
+        let budget = max_width - self.advance(ELLIPSIS) * scale;
+        if budget <= 0.0 {
+            return Cow::Owned(String::new());
+        }
+        let mut w = 0.0;
+        let mut end = 0;
+        for (bi, ch) in text.char_indices() {
+            let cw = self.advance(ch) * scale;
+            if w + cw > budget {
+                break;
+            }
+            w += cw;
+            end = bi + ch.len_utf8();
+        }
+        let mut out = String::with_capacity(end + ELLIPSIS.len_utf8());
+        out.push_str(&text[..end]);
+        out.push(ELLIPSIS);
+        Cow::Owned(out)
+    }
+
+    /// The slice of `text` to show in a single-line field `max_width` wide that
+    /// keeps the caret at byte offset `cursor` visible.
+    ///
+    /// Overlong values elide from the **front** with a leading ellipsis: the
+    /// caret is normally near the end of what is being typed, so keeping the
+    /// tail in view matters more than keeping the head. Text, caret and any
+    /// selection rects all derive from this one call, so they cannot disagree
+    /// about where the window starts.
+    pub fn caret_window(
+        &self,
+        text: &str,
+        cursor: usize,
+        scale: f32,
+        max_width: f32,
+    ) -> CaretWindow {
+        // Snap to a char boundary so every slice below is valid.
+        let cursor = (0..=cursor.min(text.len()))
+            .rev()
+            .find(|&i| text.is_char_boundary(i))
+            .unwrap_or(0);
+        let head_w = self.measure_text_width(&text[..cursor], scale);
+        if self.measure_text_width(text, scale) <= max_width {
+            return CaretWindow {
+                text: text.to_string(),
+                start: 0,
+                text_dx: 0.0,
+                caret_dx: head_w,
+            };
+        }
+        const ELLIPSIS: &str = "\u{2026}";
+        let ell_w = self.advance('\u{2026}') * scale;
+        if head_w <= max_width - ell_w {
+            // The caret still fits from the start — only the tail is cut.
+            return CaretWindow {
+                text: self.truncate_to_width(text, scale, max_width).into_owned(),
+                start: 0,
+                text_dx: 0.0,
+                caret_dx: head_w,
+            };
+        }
+        // Elide from the front, walking back from the caret while it fits.
+        let budget = (max_width - ell_w).max(0.0);
+        let mut start = cursor;
+        let mut w = 0.0;
+        for (bi, ch) in text[..cursor].char_indices().rev() {
+            let cw = self.advance(ch) * scale;
+            if w + cw > budget {
+                break;
+            }
+            w += cw;
+            start = bi;
+        }
+        let mut out = String::from(ELLIPSIS);
+        out.push_str(&self.truncate_to_width(&text[start..], scale, budget));
+        CaretWindow {
+            text: out,
+            start,
+            text_dx: ell_w,
+            caret_dx: ell_w + w,
+        }
+    }
+
     /// Number of lines required to render `text` with word-wrapping at `max_width` pixels.
     pub fn count_wrapped_lines(&self, text: &str, scale: f32, max_width: f32) -> usize {
         self.compute_wrap_lines(text, scale, max_width).len().max(1)
@@ -1790,47 +1907,69 @@ impl FontRenderer {
     }
 }
 
+/// Build a minimal FontRenderer with zeroed Vulkan/FT handles for math-only
+/// tests. With no faces loaded, `ensure_glyph` never rasterizes — it only
+/// reads back the pre-seeded `glyphs` map, so these tests stay Vulkan-free.
+#[cfg(test)]
+pub(crate) fn fr_from_glyphs(
+    dpi: f32,
+    line_height: f32,
+    glyphs: HashMap<u32, GlyphInfo>,
+) -> FontRenderer {
+    FontRenderer {
+        ft_library: std::ptr::null_mut(),
+        faces: Vec::new(),
+        glyphs: RefCell::new(glyphs),
+        missing: RefCell::new(std::collections::HashSet::new()),
+        line_height,
+        ascender: line_height * 0.8,
+        descender: -(line_height * 0.2),
+        dpi,
+        atlas_size: 0,
+        atlas_data: RefCell::new(Vec::new()),
+        pen_x: Cell::new(0),
+        pen_y: Cell::new(0),
+        row_height: Cell::new(0),
+        dirty: Cell::new(false),
+        font_atlas_image: vk::Image::null(),
+        font_atlas_memory: vk::DeviceMemory::null(),
+        font_atlas_view: vk::ImageView::null(),
+        font_atlas_sampler: vk::Sampler::null(),
+        atlas_staging_buffer: vk::Buffer::null(),
+        atlas_staging_memory: vk::DeviceMemory::null(),
+        vertex_buffer: vk::Buffer::null(),
+        vertex_buffer_memory: vk::DeviceMemory::null(),
+        descriptor_set_layout: vk::DescriptorSetLayout::null(),
+        descriptor_pool: vk::DescriptorPool::null(),
+        descriptor_sets: Vec::new(),
+        pipeline_layout: vk::PipelineLayout::null(),
+        pipeline: vk::Pipeline::null(),
+        vertices: Vec::new(),
+        color: None,
+        color_vertices: Vec::new(),
+    }
+}
+
+/// Vulkan-free `FontRenderer` for layout maths: every Latin-1 codepoint
+/// advances by `advance`, so pixel widths are exactly `chars * advance * scale`.
+#[cfg(test)]
+pub(crate) fn make_fr_uniform(advance: f32) -> FontRenderer {
+    let mut glyphs = HashMap::new();
+    for cp in 32u32..256 {
+        glyphs.insert(
+            cp,
+            GlyphInfo {
+                advance,
+                ..GlyphInfo::default()
+            },
+        );
+    }
+    fr_from_glyphs(96.0, 20.0, glyphs)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// Build a minimal FontRenderer with zeroed Vulkan/FT handles for math-only
-    /// tests. With no faces loaded, `ensure_glyph` never rasterizes — it only
-    /// reads back the pre-seeded `glyphs` map, so these tests stay Vulkan-free.
-    fn fr_from_glyphs(dpi: f32, line_height: f32, glyphs: HashMap<u32, GlyphInfo>) -> FontRenderer {
-        FontRenderer {
-            ft_library: std::ptr::null_mut(),
-            faces: Vec::new(),
-            glyphs: RefCell::new(glyphs),
-            missing: RefCell::new(std::collections::HashSet::new()),
-            line_height,
-            ascender: line_height * 0.8,
-            descender: -(line_height * 0.2),
-            dpi,
-            atlas_size: 0,
-            atlas_data: RefCell::new(Vec::new()),
-            pen_x: Cell::new(0),
-            pen_y: Cell::new(0),
-            row_height: Cell::new(0),
-            dirty: Cell::new(false),
-            font_atlas_image: vk::Image::null(),
-            font_atlas_memory: vk::DeviceMemory::null(),
-            font_atlas_view: vk::ImageView::null(),
-            font_atlas_sampler: vk::Sampler::null(),
-            atlas_staging_buffer: vk::Buffer::null(),
-            atlas_staging_memory: vk::DeviceMemory::null(),
-            vertex_buffer: vk::Buffer::null(),
-            vertex_buffer_memory: vk::DeviceMemory::null(),
-            descriptor_set_layout: vk::DescriptorSetLayout::null(),
-            descriptor_pool: vk::DescriptorPool::null(),
-            descriptor_sets: Vec::new(),
-            pipeline_layout: vk::PipelineLayout::null(),
-            pipeline: vk::Pipeline::null(),
-            vertices: Vec::new(),
-            color: None,
-            color_vertices: Vec::new(),
-        }
-    }
 
     fn make_fr(dpi: f32, line_height: f32, m_advance: f32) -> FontRenderer {
         let mut glyphs = HashMap::new();
@@ -1953,20 +2092,6 @@ mod tests {
     }
 
     // ---- measure_text_width ---
-
-    fn make_fr_uniform(advance: f32) -> FontRenderer {
-        let mut glyphs = HashMap::new();
-        for cp in 32u32..256 {
-            glyphs.insert(
-                cp,
-                GlyphInfo {
-                    advance,
-                    ..GlyphInfo::default()
-                },
-            );
-        }
-        fr_from_glyphs(96.0, 20.0, glyphs)
-    }
 
     #[test]
     fn measure_empty() {
@@ -2124,6 +2249,93 @@ mod tests {
             assert_eq!(char_start, text[..byte_start].chars().count() as u32);
         }
         assert_eq!(segs[0].2, 0);
+    }
+
+    // ---- truncate_to_width / caret_window ---
+    //
+    // Every glyph is 10px wide at scale 1.0, so "abcde" is 50px and the
+    // ellipsis costs one glyph.
+
+    #[test]
+    fn truncate_fits_borrows_unchanged() {
+        let fr = make_fr_uniform(10.0);
+        let out = fr.truncate_to_width("abcde", 1.0, 50.0);
+        assert_eq!(out, "abcde");
+        assert!(matches!(out, Cow::Borrowed(_)), "should not allocate");
+    }
+
+    #[test]
+    fn truncate_cuts_and_appends_ellipsis() {
+        let fr = make_fr_uniform(10.0);
+        // 40px budget, minus 10px for the ellipsis, leaves room for 3 chars.
+        assert_eq!(fr.truncate_to_width("abcdefgh", 1.0, 40.0), "abc\u{2026}");
+    }
+
+    #[test]
+    fn truncate_empty_and_no_room() {
+        let fr = make_fr_uniform(10.0);
+        assert_eq!(fr.truncate_to_width("", 1.0, 0.0), "");
+        // Not even the ellipsis fits.
+        assert_eq!(fr.truncate_to_width("abc", 1.0, 5.0), "");
+    }
+
+    #[test]
+    fn truncate_multibyte_cuts_on_char_boundary() {
+        let fr = make_fr_uniform(10.0);
+        // "héllo" is 6 bytes but 5 glyphs; a 40px budget keeps 3 of them.
+        let out = fr.truncate_to_width("héllo", 1.0, 40.0);
+        assert_eq!(out, "hél\u{2026}");
+    }
+
+    #[test]
+    fn caret_window_fits_keeps_whole_text() {
+        let fr = make_fr_uniform(10.0);
+        let w = fr.caret_window("abcde", 3, 1.0, 100.0);
+        assert_eq!(w.text, "abcde");
+        assert_eq!(w.start, 0);
+        assert!((w.text_dx - 0.0).abs() < 1e-3);
+        assert!((w.caret_dx - 30.0).abs() < 1e-3, "got {}", w.caret_dx);
+    }
+
+    #[test]
+    fn caret_window_caret_near_start_cuts_the_tail() {
+        let fr = make_fr_uniform(10.0);
+        // Caret at offset 1 still fits from the left, so only the tail goes.
+        let w = fr.caret_window("abcdefghij", 1, 1.0, 50.0);
+        assert_eq!(w.text, "abcd\u{2026}");
+        assert_eq!(w.start, 0);
+        assert!((w.caret_dx - 10.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn caret_window_caret_at_end_elides_the_front() {
+        let fr = make_fr_uniform(10.0);
+        // 50px field, 10px ellipsis, so 4 chars before the caret stay visible.
+        let w = fr.caret_window("abcdefghij", 10, 1.0, 50.0);
+        assert!(w.text.starts_with('\u{2026}'), "got {:?}", w.text);
+        assert_eq!(w.start, 6, "window should start at 'g'");
+        assert!((w.text_dx - 10.0).abs() < 1e-3);
+        assert!((w.caret_dx - 50.0).abs() < 1e-3, "got {}", w.caret_dx);
+    }
+
+    #[test]
+    fn caret_window_offset_x_tracks_the_window() {
+        let fr = make_fr_uniform(10.0);
+        let src = "abcdefghij";
+        let w = fr.caret_window(src, 10, 1.0, 50.0);
+        // Offsets before the window clamp to its left edge...
+        assert!((fr.window_offset_x(&w, src, 0, 1.0) - w.text_dx).abs() < 1e-3);
+        // ...and the caret offset agrees with `caret_dx`.
+        assert!((fr.window_offset_x(&w, src, 10, 1.0) - w.caret_dx).abs() < 1e-3);
+    }
+
+    #[test]
+    fn caret_window_cursor_snaps_to_char_boundary() {
+        let fr = make_fr_uniform(10.0);
+        // Byte 1 is inside 'é' (2 bytes); it must snap back to 0, not panic.
+        let w = fr.caret_window("é", 1, 1.0, 100.0);
+        assert_eq!(w.text, "é");
+        assert!((w.caret_dx - 0.0).abs() < 1e-3);
     }
 
     #[test]
