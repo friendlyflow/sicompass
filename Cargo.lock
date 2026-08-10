@@ -4571,6 +4571,7 @@ version = "0.1.17"
 dependencies = [
  "chromiumoxide",
  "futures",
+ "serde",
  "sicompass-sdk",
  "tokio",
  "which",
