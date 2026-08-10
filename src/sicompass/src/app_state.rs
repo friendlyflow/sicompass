@@ -1059,11 +1059,30 @@ impl AppRenderer {
         //
         // Only for providers whose path segments map one-to-one onto tree levels
         // (`path_is_filesystem`). Others build their path by other rules, and
-        // popping it here would be guesswork.
+        // popping it here would be guesswork: the webbrowser clears its segment
+        // list in `set_current_path`, so `pop_path` there is a no-op, and the
+        // email client's `pop_path` writes the open draft to IMAP.
+        //
+        // At depth <= 2 there is nothing to guess. The cursor is back on the
+        // provider's own root listing, and `"/"` is the root every provider that
+        // does not override `Provider::at_root` reports — the same value
+        // `sync_inmemory_provider_path_to_cursor` derives for a depth-2 cursor
+        // and `collapse_inactive_for_relocalize` resets to. Without this the
+        // webbrowser, which does not persist its page so a restored cursor
+        // always lands back on the URL bar, keeps the previous page's path:
+        // `at_root()` stays false and the depth-2 parent line announces
+        // "form_1" instead of "web browser". Keyed off the *final* cursor depth
+        // rather than "the clamp popped something" — quitting while sitting on
+        // the URL bar with a page open saves depth 2 with a stale path, which
+        // `deep_rebuild_provider_tree` restores verbatim with nothing to pop.
         if let Some(pi) = restored_provider {
-            if pi < self.providers.len() && self.providers[pi].path_is_filesystem() {
-                for _ in 0..restored_depth.saturating_sub(current_id.depth()) {
-                    self.providers[pi].pop_path();
+            if pi < self.providers.len() {
+                if self.providers[pi].path_is_filesystem() {
+                    for _ in 0..restored_depth.saturating_sub(current_id.depth()) {
+                        self.providers[pi].pop_path();
+                    }
+                } else if current_id.depth() <= 2 {
+                    self.providers[pi].set_current_path("/");
                 }
             }
         }
