@@ -25,6 +25,11 @@ fn ensure_builtins() {
     // whichever test runs first must not leave the developer's real history
     // file rewritten.
     sicompass_webbrowser::_set_test_no_history(true);
+    // Same for the terminal, and for a stronger reason: it *appends* every
+    // submitted line, so the residue of these tests (`printf '\033[?1049h'…`,
+    // bare `true`, `cd /tmp/…/elsewhere`) accumulated in the developer's own
+    // recall history, one run at a time, interleaved with real commands.
+    sicompass_terminal::_set_test_no_history(true);
 }
 
 // ---------------------------------------------------------------------------
@@ -1300,6 +1305,231 @@ fn webbrowser_history_row_navigates_rather_than_filling_the_url_bar() {
         Coordinate::General,
         "a filled input would have left the user waiting to press Enter again"
     );
+}
+
+// ---------------------------------------------------------------------------
+// Web browser bookmarks
+// ---------------------------------------------------------------------------
+
+/// The display text of the web browser's history rows, marker included.
+fn webbrowser_row_labels(h: &Harness, wb_idx: usize) -> Vec<String> {
+    webbrowser_root_rows(h, wb_idx)
+        .iter()
+        .filter(|r| sicompass_sdk::tags::has_button(r))
+        .filter_map(|r| sicompass_sdk::tags::extract_button_display_text(r))
+        .collect()
+}
+
+/// Walk the cursor onto history row `n` (1-based from the URL bar) at the
+/// provider's top level.
+fn move_to_history_row(h: &mut Harness, n: usize) {
+    for _ in 0..n {
+        press_down(h.r());
+    }
+}
+
+/// `b` on a history row marks that row, leaves the ranking alone, and leaves
+/// the cursor exactly where it was — the row must not jump out from under it.
+#[test]
+fn webbrowser_b_on_a_history_row_marks_that_row_and_keeps_the_cursor() {
+    let mut h = Harness::new_with_webbrowser();
+    let wb_idx = enter_webbrowser_at_url_bar(&mut h);
+
+    commit_url(&mut h, "https://first.invalid");
+    press_left(h.r());
+    commit_url(&mut h, "https://second.invalid");
+    press_left(h.r());
+
+    move_to_history_row(&mut h, 2); // the older row, "first.invalid"
+    let before = h.renderer.current_id.clone();
+    press(h.r(), Keycode::B);
+
+    assert_eq!(h.renderer.current_id, before, "the cursor must not move");
+    assert_eq!(h.renderer.list_index, 2);
+    assert_eq!(
+        webbrowser_row_labels(&h, wb_idx),
+        vec![
+            "https://second.invalid".to_owned(),
+            "[bookmark] https://first.invalid".to_owned(),
+        ],
+    );
+    // The marker is display text only: the rows are still pressable.
+    let rows = webbrowser_root_rows(&h, wb_idx);
+    assert_eq!(
+        rows[1..]
+            .iter()
+            .filter_map(|r| sicompass_sdk::tags::extract_button_function_name(r))
+            .collect::<Vec<_>>(),
+        vec!["https://second.invalid", "https://first.invalid"],
+    );
+
+    // And pressing it again takes the mark off.
+    press(h.r(), Keycode::B);
+    assert_eq!(
+        webbrowser_row_labels(&h, wb_idx),
+        vec![
+            "https://second.invalid".to_owned(),
+            "https://first.invalid".to_owned(),
+        ],
+    );
+}
+
+/// `b` while reading a page bookmarks the loaded site without disturbing the
+/// reading position.
+#[test]
+fn webbrowser_b_inside_a_page_keeps_the_reading_position() {
+    let mut h = Harness::new_with_webbrowser();
+    let wb_idx = enter_webbrowser_at_url_bar(&mut h);
+
+    commit_url(&mut h, "https://first.invalid"); // lands inside the page
+    assert!(h.renderer.current_id.depth() >= 3, "cursor is in the page");
+    let before = h.renderer.current_id.clone();
+
+    press(h.r(), Keycode::B);
+
+    assert_eq!(h.renderer.current_id, before);
+    assert_eq!(
+        webbrowser_row_labels(&h, wb_idx),
+        vec!["[bookmark] https://first.invalid".to_owned()],
+    );
+}
+
+/// A page reached by following an in-page `<link>` was fetched and grafted by
+/// the *app*; the provider never saw it. `b` must bookmark that page, and must
+/// not throw the reader out of it — which is what a whole-root rebuild would do,
+/// since the grafted children live only in `r.ffon`.
+#[test]
+fn webbrowser_b_bookmarks_a_followed_link_without_destroying_the_page() {
+    use sicompass_sdk::ffon::FfonElement;
+
+    let mut h = Harness::new_with_webbrowser();
+    let wb_idx = enter_webbrowser_at_url_bar(&mut h);
+    commit_url(&mut h, "https://first.invalid");
+
+    // Stand in for a followed link: an article Obj whose children are the page
+    // the app fetched for it. Grafted directly because resolving a real link
+    // would go to the network.
+    let mut article = FfonElement::new_obj("Some article <link>https://followed.invalid</link>");
+    let obj = article.as_obj_mut().unwrap();
+    obj.push(FfonElement::new_str("First paragraph"));
+    obj.push(FfonElement::new_str("Second paragraph"));
+
+    let url_bar = h.renderer.ffon[wb_idx].as_obj_mut().unwrap().children[0]
+        .as_obj_mut()
+        .expect("a page is loaded");
+    let article_idx = url_bar.children.len();
+    url_bar.children.push(article);
+
+    // Cursor inside the followed page, on its second paragraph.
+    let mut id = h.renderer.current_id.clone();
+    while id.depth() > 3 {
+        id.pop();
+    }
+    id.set_last(article_idx);
+    id.push(1);
+    h.renderer.current_id = id.clone();
+    sicompass::list::create_list_current_layer(h.r());
+
+    press(h.r(), Keycode::B);
+
+    assert_eq!(
+        h.renderer.current_id, id,
+        "the reader must stay where they were"
+    );
+    let article = sicompass_sdk::ffon::get_ffon_at_id(&h.renderer.ffon, &id)
+        .expect("the followed page must still be there");
+    assert_eq!(article.len(), 2, "its content must survive: {article:?}");
+
+    assert_eq!(
+        webbrowser_row_labels(&h, wb_idx),
+        vec![
+            "[bookmark] https://followed.invalid".to_owned(),
+            "https://first.invalid".to_owned(),
+        ],
+        "the link's page is bookmarked, not the last URL typed",
+    );
+}
+
+/// The confirmation has to survive the list rebuild `b` triggers, or the screen
+/// reader never says anything happened.
+#[test]
+fn webbrowser_b_announces_what_it_did() {
+    let mut h = Harness::new_with_webbrowser();
+    enter_webbrowser_at_url_bar(&mut h);
+    commit_url(&mut h, "https://first.invalid");
+
+    press(h.r(), Keycode::B);
+
+    assert!(
+        h.renderer.error_message.contains("https://first.invalid"),
+        "the URL belongs in the message, or a second bookmark is suppressed as \
+         a repeat: {:?}",
+        h.renderer.error_message
+    );
+    h.r().announce_error_if_new();
+    assert!(announced_text(h.r()).is_some_and(|t| t.contains("first.invalid")));
+}
+
+/// The `toggle bookmark` colon command is the same action as `b`, including
+/// keeping the reading position — the generic state-toggle path would unwind the
+/// cursor to the provider root.
+#[test]
+fn webbrowser_toggle_bookmark_command_matches_the_b_key() {
+    let mut h = Harness::new_with_webbrowser();
+    let wb_idx = enter_webbrowser_at_url_bar(&mut h);
+    commit_url(&mut h, "https://first.invalid");
+    let before = h.renderer.current_id.clone();
+
+    press(h.r(), Keycode::Colon);
+    let idx = h
+        .renderer
+        .total_list
+        .iter()
+        .position(|item| item.nav_path.as_deref() == Some("toggle bookmark"))
+        .expect("toggle bookmark command not found");
+    move_to_index(&mut h, idx);
+    press_enter(h.r());
+
+    assert_eq!(h.renderer.coordinate, Coordinate::General);
+    assert_eq!(h.renderer.current_id, before, "still reading the page");
+    assert_eq!(
+        webbrowser_row_labels(&h, wb_idx),
+        vec!["[bookmark] https://first.invalid".to_owned()],
+    );
+}
+
+/// `b` at the root provider list is inert. `get_commands` resolves through the
+/// *highlighted* provider even there, so without the `not_at_root` gate standing
+/// on the web browser's own row would bookmark.
+#[test]
+fn webbrowser_b_at_the_provider_root_is_inert() {
+    let mut h = Harness::new_with_webbrowser();
+    let wb_idx = enter_webbrowser_at_url_bar(&mut h);
+    commit_url(&mut h, "https://first.invalid");
+    press_left(h.r());
+    press_left(h.r());
+    assert_eq!(h.renderer.current_id.depth(), 1, "at the provider list");
+
+    press(h.r(), Keycode::B);
+
+    assert_eq!(
+        webbrowser_row_labels(&h, wb_idx),
+        vec!["https://first.invalid".to_owned()],
+    );
+}
+
+/// A provider that does not advertise the command does not get the key.
+#[test]
+fn b_in_a_provider_without_bookmarks_is_inert() {
+    let mut h = Harness::new();
+    press_right(h.r());
+    let before = h.renderer.ffon.clone();
+    let id_before = h.renderer.current_id.clone();
+
+    press(h.r(), Keycode::B);
+
+    assert_eq!(h.renderer.current_id, id_before);
+    assert_eq!(h.renderer.ffon, before);
 }
 
 /// Pressing Enter in insert mode without changing the URL should still exit

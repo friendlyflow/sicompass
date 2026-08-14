@@ -55,6 +55,42 @@ pub fn register_translations() {
     });
 }
 
+// ---------------------------------------------------------------------------
+// Test stub: keep the ↑-recall command history purely in memory.
+//
+// `record_command` appends every submitted line to
+// `state_home()/sicompass/terminal/history`, so a test that drives a real shell
+// writes into the developer's own recall history and it accumulates, run after
+// run. That is what filled it with `printf '\033[?1049h'; …`, bare `true`, and
+// `cd /tmp/…/elsewhere`.
+//
+// Two audiences, hence both a compile-time default and a runtime setter:
+//
+// * This crate's own unit tests get it for free from `cfg!(test)`. Setting the
+//   per-instance `command_history_path` override is the established way to make
+//   a test safe, but forgetting it does not fail the test — it silently
+//   corrupts real user data. The default makes a forgotten override resolve to
+//   no file rather than the real one. The override still wins, so every
+//   tempdir-backed history test is unaffected.
+// * The app's integration tests are a different binary, where this crate is an
+//   ordinary dependency compiled *without* `cfg(test)`, and they reach the
+//   provider as a `Box<dyn Provider>` with no way to set the override. They
+//   call `_set_test_no_history(true)` once per binary instead.
+// ---------------------------------------------------------------------------
+
+static TEST_NO_HISTORY: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(cfg!(test));
+
+#[doc(hidden)]
+pub fn _set_test_no_history(enabled: bool) {
+    TEST_NO_HISTORY.store(enabled, std::sync::atomic::Ordering::Release);
+}
+
+#[inline]
+fn test_no_history() -> bool {
+    TEST_NO_HISTORY.load(std::sync::atomic::Ordering::Acquire)
+}
+
 /// Command id: swap from the folder listing to the shell, running in the folder
 /// the user browsed to. The app binds `:` to this for the terminal.
 pub const CMD_SHELL: &str = "shell";
@@ -279,10 +315,15 @@ impl TerminalProvider {
     }
 
     /// Resolve the on-disk path for the persisted ↑-recall history. Returns
-    /// `None` if no usable state directory is available (e.g. `$HOME` unset).
+    /// `None` if no usable state directory is available (e.g. `$HOME` unset),
+    /// or if [`TEST_NO_HISTORY`] is set — which it is by default under test, so
+    /// that a test without an override cannot reach the real file.
     fn resolve_command_history_path(&self) -> Option<PathBuf> {
         if let Some(p) = &self.command_history_path {
             return Some(p.clone());
+        }
+        if test_no_history() {
+            return None;
         }
         sicompass_sdk::platform::state_home()
             .map(|s| s.join("sicompass").join("terminal").join("history"))
@@ -2006,8 +2047,38 @@ mod tests {
         assert_eq!(p.resolve_command_history_path(), Some(custom));
     }
 
+    /// Serialises the tests that move `TEST_NO_HISTORY` off its default.
+    ///
+    /// The flag is process-global and cargo runs tests in parallel, so clearing
+    /// it while another test is mid-`record_command` would send that one at the
+    /// developer's real recall history. Only tests that need the real path
+    /// resolution take this; everything else relies on the `cfg!(test)` default.
+    static HISTORY_FLAG: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// Holds the lock for the caller's scope and puts the flag back on its
+    /// safe default on drop, so a panicking test cannot leave the rest of the
+    /// binary pointed at the real history file.
+    struct HistoryFlagGuard(#[allow(dead_code)] std::sync::MutexGuard<'static, ()>);
+
+    impl Drop for HistoryFlagGuard {
+        fn drop(&mut self) {
+            _set_test_no_history(cfg!(test));
+        }
+    }
+
+    fn history_flag_guard(no_history: bool) -> HistoryFlagGuard {
+        // A test that panicked while holding this poisoned it, which says
+        // nothing about the flag itself — take it regardless.
+        let guard = HISTORY_FLAG.lock().unwrap_or_else(|e| e.into_inner());
+        _set_test_no_history(no_history);
+        HistoryFlagGuard(guard)
+    }
+
     #[test]
     fn resolve_command_history_path_uses_state_home() {
+        // Explicitly off, so this still checks the shape of the real path
+        // instead of quietly passing on the `None` the test default hands out.
+        let _flag = history_flag_guard(false);
         let p = TerminalProvider::new();
         let resolved = p.resolve_command_history_path();
         if let Some(path) = resolved {
@@ -2015,6 +2086,25 @@ mod tests {
             assert!(s.contains("sicompass"));
             assert!(s.ends_with("history"));
         }
+    }
+
+    /// No in-crate test may reach the real recall history under `state_home()`.
+    ///
+    /// The tempdir-backed tests set `command_history_path`, but nothing forces
+    /// them to, and a test that forgets does not fail — it appends whatever it
+    /// runs to the developer's own shell history, permanently. This is what
+    /// left `printf '\033[?1049h'; …` and bare `true` in it.
+    #[test]
+    fn no_unit_test_can_reach_the_real_command_history() {
+        let p = TerminalProvider::new();
+        assert!(
+            p.resolve_command_history_path().is_none(),
+            "a provider with no path override must resolve to nothing in tests"
+        );
+        // And the override still wins, or every history test would be inert.
+        let mut p = TerminalProvider::new();
+        p.command_history_path = Some(PathBuf::from("/tmp/somewhere/history"));
+        assert!(p.resolve_command_history_path().is_some());
     }
 
     #[test]

@@ -1272,6 +1272,20 @@ pub fn handle_enter_command(r: &mut AppRenderer) {
                 }
             };
 
+            // The bookmark toggle re-labels a row and nothing else. The generic
+            // state-toggle path below would unwind the cursor to the provider
+            // root and rebuild the whole tree for that — fine for the commands
+            // that reload the page anyway, but here it would throw the reader
+            // out of what they were reading. Route it to the `b` key's handler
+            // so both entry points behave identically.
+            if cmd == CMD_TOGGLE_BOOKMARK {
+                r.current_command = CommandPhase::None;
+                r.coordinate = r.previous_coordinate;
+                r.previous_coordinate = Coordinate::General;
+                handle_toggle_bookmark(r);
+                return;
+            }
+
             // Get the current element key for the provider
             let (element_key, element_type) = {
                 let arr = get_ffon_at_id(&r.ffon, &r.current_id);
@@ -4050,6 +4064,70 @@ pub fn handle_load_provider_config(r: &mut AppRenderer, path: &str) {
         }
     }
     r.needs_redraw = true;
+}
+
+/// The provider command behind the `b` key. Hardcoded here the same way
+/// `"delete"` is by [`invoke_provider_delete`]: the SDK boundary means the app
+/// reaches a provider only by command name, and advertising the name in
+/// `commands()` is how a provider opts into the key.
+pub(crate) const CMD_TOGGLE_BOOKMARK: &str = "toggle bookmark";
+
+/// Handle `b` — ask the active provider to toggle the bookmark on whatever the
+/// cursor identifies. Also where the `toggle bookmark` colon command lands, so
+/// the two entry points cannot drift apart.
+pub fn handle_toggle_bookmark(r: &mut AppRenderer) {
+    let Some((element_key, element_type)) = focused_element_key(r) else {
+        return;
+    };
+    // A page reached by following an in-page <link> was fetched and grafted
+    // entirely app-side (`resolve_link_to_elements`), so the provider's notion
+    // of the loaded URL is still the last one it navigated to itself. Hand it
+    // the nearest enclosing link instead, which names the page actually being
+    // read. Ancestors only: sitting *on* an unfollowed link should bookmark the
+    // page containing it, not the link's destination.
+    let element_key = if tags::has_button(&element_key) || tags::has_link(&element_key) {
+        element_key
+    } else {
+        nearest_link_ancestor_key(r).unwrap_or(element_key)
+    };
+
+    crate::provider::handle_command(r, CMD_TOGGLE_BOOKMARK, &element_key, element_type);
+    // `create_list_current_layer` clears `error_message` unconditionally, and
+    // that slot is how the provider's confirmation reaches
+    // `announce_error_if_new`. Carry it across the rebuild.
+    let message = std::mem::take(&mut r.error_message);
+    crate::provider::refresh_provider_root_rows(r);
+    list::create_list_current_layer(r);
+    r.sync_current_id_from_list();
+    r.error_message = message;
+    r.needs_redraw = true;
+}
+
+/// The focused element's raw FFON key, plus its type tag (`0` = `Str`,
+/// `1` = `Obj`) in the encoding [`Provider::handle_command`] expects.
+fn focused_element_key(r: &AppRenderer) -> Option<(String, i32)> {
+    let arr = get_ffon_at_id(&r.ffon, &r.current_id)?;
+    match arr.get(r.current_id.last().unwrap_or(0))? {
+        FfonElement::Str(s) => Some((s.clone(), 0)),
+        FfonElement::Obj(o) => Some((o.key.clone(), 1)),
+    }
+}
+
+/// The key of the innermost ancestor `Obj` carrying a `<link>` tag, searching
+/// upward from the cursor and stopping above the provider's own top level
+/// (depth 2, where the container is the provider root itself).
+fn nearest_link_ancestor_key(r: &AppRenderer) -> Option<String> {
+    let mut id = r.current_id.clone();
+    while id.depth() > 2 {
+        id.pop();
+        let arr = get_ffon_at_id(&r.ffon, &id)?;
+        if let Some(FfonElement::Obj(o)) = arr.get(id.last().unwrap_or(0))
+            && tags::has_link(&o.key)
+        {
+            return Some(o.key.clone());
+        }
+    }
+    None
 }
 
 /// Handle F5 — hard-refresh current provider (clear caches then re-fetch).

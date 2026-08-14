@@ -4355,6 +4355,7 @@ dependencies = [
  "sicompass-remote",
  "sicompass-sdk",
  "sicompass-settings",
+ "sicompass-terminal",
  "sicompass-tutorial",
  "sicompass-updater",
  "sicompass-webbrowser",

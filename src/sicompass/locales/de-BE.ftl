@@ -54,6 +54,7 @@ hint-f5-refresh = F5     Aktualisieren
 hint-m-meta = M      Meta
 hint-z-timeline = Z      Verlauf
 hint-w-where-am-i = w      Wo bin ich
+hint-b-bookmark = b      Lesezeichen
 hint-i-edit = I      Bearbeiten
 hint-i-edit-input = I      Eingabe bearb.
 hint-a-append = A      Anhängen

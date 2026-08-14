@@ -44,7 +44,7 @@ use sicompass_sdk::ffon::html_resolve_href;
 #[cfg(test)]
 use sicompass_sdk::ffon::html_to_ffon;
 use sicompass_sdk::ffon::{html_submit_selector, html_to_ffon_with_forms};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
@@ -79,9 +79,18 @@ fn test_no_launch() -> bool {
 // `resolve_url_history_path` returns `None`: `init()` reads nothing and no
 // write ever lands, while the in-memory list still behaves normally, so a test
 // can build history through the real UI and press a history button.
+//
+// It defaults to *on* under `cfg(test)`, which is what keeps this crate's own
+// unit tests off the developer's real history file. Relying on each test to
+// remember an override does not hold: a single test that builds a
+// `WebbrowserProvider::new()` without setting `url_history_path`, calls `init()`
+// and then commits a URL will read, merge and rewrite `state_home()`, seeding
+// someone's real browser history with `a.invalid` and friends. That happened.
+// The per-instance override still wins over this (`resolve_url_history_path`
+// checks it first), so the tempdir-backed history tests are unaffected.
 // ---------------------------------------------------------------------------
 
-static TEST_NO_HISTORY: AtomicBool = AtomicBool::new(false);
+static TEST_NO_HISTORY: AtomicBool = AtomicBool::new(cfg!(test));
 
 #[doc(hidden)]
 pub fn _set_test_no_history(enabled: bool) {
@@ -114,6 +123,11 @@ static PRUNE_HIDDEN: AtomicBool = AtomicBool::new(true);
 const CMD_SHOW_HIDDEN: &str = "show hidden content";
 const CMD_HIDE_HIDDEN: &str = "hide hidden content";
 const CMD_CHOOSE_LANGUAGE: &str = "choose language";
+
+/// Mark the focused history row — or, from anywhere else, the page being read —
+/// as one worth keeping.  The app hardcodes this name too: it is what gates and
+/// dispatches the `b` key, the same way `"delete"` gates Ctrl+D.
+pub const CMD_TOGGLE_BOOKMARK: &str = "toggle bookmark";
 
 #[inline]
 fn prune_hidden() -> bool {
@@ -202,8 +216,18 @@ pub struct WebbrowserProvider {
     // the URL bar's children are the loaded page, and the app descends into
     // them when a load lands.
     url_history: Vec<String>,
+    // Which of `url_history`'s URLs the user has marked as worth keeping. A
+    // subset of `url_history` at all times: a bookmark is an annotation on a
+    // row, so bookmarking a URL that is not listed yet inserts it first.
+    //
+    // A side set rather than a `Vec<HistoryEntry>` so the ranking machinery —
+    // `dedup_keeping_first`, the move-to-top in `record_url_history`, the
+    // membership test in `on_button_press` — keeps operating on plain URLs.
+    bookmarks: HashSet<String>,
     // Cap on `url_history`, mirroring the terminal's `command_history_size`.
-    // 0 means unbounded.
+    // 0 means unbounded. Bookmarked entries do not count against it and are
+    // never dropped by it: losing one silently is exactly what marking it was
+    // meant to prevent.
     url_history_size: usize,
     // Once-guard for the disk read, and the gate on every disk write: nothing
     // is written before something has been read. A provider whose `init()` was
@@ -236,6 +260,7 @@ impl WebbrowserProvider {
             pending_enter_content: false,
             enter_content_request: false,
             url_history: Vec::new(),
+            bookmarks: HashSet::new(),
             url_history_size: 50_000,
             url_history_loaded: false,
             url_history_path: None,
@@ -397,7 +422,8 @@ impl WebbrowserProvider {
             .map(|s| s.join("sicompass").join("webbrowser").join("history"))
     }
 
-    /// Read every line of the history file, newest first.
+    /// Read every line of the history file, newest first, plus the set of URLs
+    /// whose line carried the [`BOOKMARK_PREFIX`] mark.
     ///
     /// `Some` when the history is known: the file was read, or there is no file
     /// yet (a first run — an empty list, with nothing to lose). `None` when a
@@ -409,13 +435,44 @@ impl WebbrowserProvider {
     /// permanent loss of the user's history the moment they visit one more
     /// page. Callers must leave the file untouched on `None`. This is the same
     /// rule `load_root_for_write` applies to `settings.json` in lib_settings.
-    fn read_url_history_file(&self) -> Option<Vec<String>> {
-        let Some(path) = self.resolve_url_history_path() else {
-            return Some(Vec::new());
-        };
+    ///
+    /// No state directory at all is `None` too, for the same reason: there is no
+    /// file, so there is nothing newer than memory to merge or to take a
+    /// bookmark's state from. Reporting an empty file instead would make every
+    /// navigation wipe the in-memory bookmarks, and make a bookmark impossible
+    /// to remove — the disk set it was compared against would always be empty.
+    ///
+    /// A file written before bookmarks existed has no marks, so it reads back
+    /// as an unbookmarked history — no migration step.
+    fn read_url_history_file(&self) -> Option<(Vec<String>, HashSet<String>)> {
+        let path = self.resolve_url_history_path()?;
         match std::fs::read_to_string(&path) {
-            Ok(content) => Some(content.lines().filter_map(sanitize_history_url).collect()),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Some(Vec::new()),
+            Ok(content) => {
+                let mut urls = Vec::new();
+                let mut bookmarks = HashSet::new();
+                for line in content.lines() {
+                    // Trim before stripping the mark: a line with leading
+                    // whitespace would otherwise read back unbookmarked.
+                    // `sanitize_history_url` percent-encodes a leading `*`, so
+                    // the mark is unambiguous by construction.
+                    let trimmed = line.trim();
+                    let (marked, rest) = match trimmed.strip_prefix(BOOKMARK_PREFIX) {
+                        Some(rest) => (true, rest),
+                        None => (false, trimmed),
+                    };
+                    let Some(url) = sanitize_history_url(rest) else {
+                        continue;
+                    };
+                    if marked {
+                        bookmarks.insert(url.clone());
+                    }
+                    urls.push(url);
+                }
+                Some((urls, bookmarks))
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                Some((Vec::new(), HashSet::new()))
+            }
             Err(e) => {
                 eprintln!(
                     "sicompass: {} is unreadable ({e}) — URL history left intact, \
@@ -440,18 +497,44 @@ impl WebbrowserProvider {
         // An unreadable file starts the session with an empty list, but
         // `record_url_history` re-reads before every save and will refuse to
         // write over what it could not read.
-        let mut lines = self.read_url_history_file().unwrap_or_default();
+        let (mut lines, bookmarks) = self.read_url_history_file().unwrap_or_default();
         dedup_keeping_first(&mut lines);
         self.url_history = lines;
+        self.bookmarks = bookmarks;
         self.trim_url_history();
     }
 
     /// Drop the oldest entries past the cap. The list is newest-first, so that
     /// is a truncation from the tail.
+    ///
+    /// Bookmarked entries neither count against the cap nor get dropped by it.
+    /// A bookmark says "do not lose this"; ageing one out of a most-recently-used
+    /// ranking would be the one deletion the user explicitly asked against, and
+    /// it would happen silently. So the cap governs the unbookmarked rows only.
     fn trim_url_history(&mut self) {
-        if self.url_history_size > 0 && self.url_history.len() > self.url_history_size {
-            self.url_history.truncate(self.url_history_size);
+        if self.url_history_size == 0 {
+            return;
         }
+        let mut kept = 0usize;
+        let bookmarks = &self.bookmarks;
+        let limit = self.url_history_size;
+        self.url_history.retain(|url| {
+            if bookmarks.contains(url) {
+                return true;
+            }
+            kept += 1;
+            kept <= limit
+        });
+    }
+
+    /// Drop bookmarks whose URL is no longer listed, restoring the
+    /// `bookmarks ⊆ url_history` invariant after a merge or a trim.
+    fn prune_orphan_bookmarks(&mut self) {
+        if self.bookmarks.is_empty() {
+            return;
+        }
+        let listed: HashSet<&str> = self.url_history.iter().map(String::as_str).collect();
+        self.bookmarks.retain(|url| listed.contains(url.as_str()));
     }
 
     /// Rewrite the history file from memory.
@@ -474,6 +557,9 @@ impl WebbrowserProvider {
         }
         let mut content = String::with_capacity(self.url_history.len() * 32);
         for url in &self.url_history {
+            if self.bookmarks.contains(url) {
+                content.push_str(BOOKMARK_PREFIX);
+            }
             content.push_str(url);
             content.push('\n');
         }
@@ -491,33 +577,110 @@ impl WebbrowserProvider {
         let Some(url) = sanitize_history_url(url) else {
             return;
         };
+        self.merge_and_save(&url, true, None);
+    }
+
+    /// Read-merge-write the history file around a single `target` URL.
+    ///
+    /// `promote` lifts it to the top of the ranking, which is what a navigation
+    /// does. Without it the target keeps whatever position the merge gives it,
+    /// and is only prepended when the merge would not list it at all — a
+    /// bookmark is an annotation on a row, so there has to be a row, but marking
+    /// one must never move it out from under the cursor that marked it.
+    ///
+    /// `bookmark` sets or clears the target's mark; `None` leaves it to disk.
+    ///
+    /// Read-merge-write rather than a blind rewrite: each browser tab owns its
+    /// own provider instance with its own copy of the list, so writing only
+    /// what this instance remembers would drop everything another tab recorded
+    /// since this one last read.
+    ///
+    /// The *flags* come from disk rather than from a union with this instance's
+    /// set, and that asymmetry is deliberate. A union can only ever add, so a
+    /// tab still holding a stale bookmark would resurrect one the user had just
+    /// removed in another tab. Every toggle writes through immediately, so this
+    /// instance never holds an unsaved flag worth preserving — except the one
+    /// being set right now, which `bookmark` carries in explicitly.
+    ///
+    /// Nothing is written when the read reports no usable file — either it
+    /// failed, where saving from a list missing everything it could not see is
+    /// how a passing I/O error becomes a lost history, or there is no state
+    /// directory, where the in-memory list is all there has ever been.
+    fn merge_and_save(&mut self, target: &str, promote: bool, bookmark: Option<bool>) {
         let disk = self.read_url_history_file();
         let mut merged = Vec::with_capacity(1 + self.url_history.len());
-        merged.push(url);
+        // Going in first is what promotes: `dedup_keeping_first` then drops the
+        // older copy, wherever down the list it sat.
+        if promote {
+            merged.push(target.to_owned());
+        }
         merged.append(&mut self.url_history);
-        if let Some(disk) = &disk {
-            merged.extend(disk.iter().cloned());
+        if let Some((disk_urls, _)) = &disk {
+            merged.extend(disk_urls.iter().cloned());
         }
         dedup_keeping_first(&mut merged);
+        if !merged.iter().any(|u| u == target) {
+            merged.insert(0, target.to_owned());
+        }
         self.url_history = merged;
+        if let Some((_, disk_bookmarks)) = &disk {
+            self.bookmarks = disk_bookmarks.clone();
+        }
+        match bookmark {
+            Some(true) => {
+                self.bookmarks.insert(target.to_owned());
+            }
+            Some(false) => {
+                self.bookmarks.remove(target);
+            }
+            None => {}
+        }
         self.trim_url_history();
-        // Only when the pre-write read succeeded. Saving now would rewrite the
-        // file from a list that is missing everything the failed read could not
-        // see, which is how a passing I/O error becomes a lost history.
+        self.prune_orphan_bookmarks();
         if disk.is_some() {
             self.save_url_history();
         }
     }
 
-    /// The recall history as activatable rows, newest first.
+    /// The recall history as activatable rows, newest first, each bookmarked one
+    /// prefixed with the bookmark marker.
     ///
     /// Same payload shape as the terminal's history buttons: the function name
-    /// is the URL itself, so `on_button_press` receives it directly.
+    /// is the URL itself, so `on_button_press` receives it directly. The marker
+    /// goes in the *display* text after `</button>` so the function name stays
+    /// the bare URL — the row's identity must not change when it is marked.
     fn history_buttons(&self) -> Vec<FfonElement> {
+        // Not `init()`: the in-crate tests build providers without it, and an
+        // unregistered message id resolves to the id itself.
+        register_translations();
+        let marker = localize::t("webbrowser-bookmark-marker");
         self.url_history
             .iter()
-            .map(|u| FfonElement::new_str(format!("<button>{u}</button>{u}")))
+            .map(|u| {
+                let mark = if self.bookmarks.contains(u) {
+                    format!("{marker} ")
+                } else {
+                    String::new()
+                };
+                FfonElement::new_str(format!("<button>{u}</button>{mark}{u}"))
+            })
             .collect()
+    }
+
+    /// Flip `url`'s bookmark, listing it first if the history does not have it
+    /// yet. Returns the new state.
+    ///
+    /// Not undoable: the provider emits no `TimelineEntry`, so Ctrl+Z after a
+    /// toggle steps the *navigation* back instead. Press `b` again to reverse it.
+    fn toggle_bookmark(&mut self, url: &str) -> bool {
+        // Against disk, not against memory: another tab may have changed the
+        // flag since this instance last read, and its view is the newer one.
+        let on = match self.read_url_history_file() {
+            Some((_, disk_bookmarks)) => !disk_bookmarks.contains(url),
+            None => !self.bookmarks.contains(url),
+        };
+        self.merge_and_save(url, false, Some(on));
+        on
     }
 
     /// Persist a form field's new value into `cached_page` so re-fetches keep it.
@@ -937,6 +1100,9 @@ impl Provider for WebbrowserProvider {
             "clear cookies".to_owned(),
             CMD_CHOOSE_LANGUAGE.to_owned(),
             hidden_toggle.to_owned(),
+            // Advertising this is also what gates the `b` key: the app looks for
+            // the name rather than for a provider called "webbrowser".
+            CMD_TOGGLE_BOOKMARK.to_owned(),
         ]
     }
 
@@ -947,6 +1113,10 @@ impl Provider for WebbrowserProvider {
         _elem_type: i32,
         _error: &mut String,
     ) -> Option<FfonElement> {
+        if cmd == CMD_TOGGLE_BOOKMARK {
+            self.handle_toggle_bookmark_command(_elem_key, _error);
+            return None;
+        }
         if cmd == "refresh" {
             let url = self.current_url.clone();
             if !url.is_empty() {
@@ -982,6 +1152,58 @@ impl Provider for WebbrowserProvider {
 }
 
 impl WebbrowserProvider {
+    /// Body of the [`CMD_TOGGLE_BOOKMARK`] command.
+    ///
+    /// Resolves what to bookmark from the focused element's key, then reports
+    /// the outcome through `error` — the slot the app announces and puts on the
+    /// status line. The URL is part of the message on purpose:
+    /// `announce_error_if_new` suppresses text identical to the last thing it
+    /// spoke, so a bare "Bookmarked" would make a second consecutive bookmark
+    /// silent.
+    fn handle_toggle_bookmark_command(&mut self, elem_key: &str, error: &mut String) {
+        register_translations();
+        let Some(url) = self.bookmark_target(elem_key) else {
+            *error = localize::t("webbrowser-bookmark-nothing");
+            return;
+        };
+        let on = self.toggle_bookmark(&url);
+        let mut args = localize::Args::new();
+        args.set("url", url.as_str());
+        *error = localize::t_args(
+            if on {
+                "webbrowser-bookmark-added"
+            } else {
+                "webbrowser-bookmark-removed"
+            },
+            &args,
+        );
+    }
+
+    /// What the bookmark command acts on, given the focused element's key.
+    ///
+    /// In order:
+    /// 1. A history row the cursor is standing on. Matched by membership in
+    ///    `url_history`, not by shape, so a `<button>` the *page* carries can
+    ///    never be mistaken for one — the same rule `on_button_press` follows.
+    /// 2. A `<link>` the app resolved for us: the nearest one enclosing the
+    ///    cursor, i.e. the page actually being read. Following an in-page link
+    ///    is handled entirely app-side, so `current_url` still names the last
+    ///    URL that went through `load_url` and would bookmark the wrong page.
+    /// 3. Otherwise the loaded URL — the URL bar, or plain page content.
+    fn bookmark_target(&self, elem_key: &str) -> Option<String> {
+        if let Some(name) = sicompass_sdk::tags::extract_button_function_name(elem_key)
+            && self.url_history.contains(&name)
+        {
+            return Some(name);
+        }
+        if let Some(url) = sicompass_sdk::tags::extract_link(elem_key)
+            && (url.starts_with("http://") || url.starts_with("https://"))
+        {
+            return sanitize_history_url(&url);
+        }
+        sanitize_history_url(&self.current_url)
+    }
+
     /// Clear all cookies from the persistent profile. On non-Windows there is a
     /// live browser holding the cookie store open, so clear it over CDP (which
     /// also empties the backing store). On Windows each fetch uses a throwaway
@@ -1160,6 +1382,9 @@ fn normalize_url_input(input: &str) -> Option<String> {
 /// worth carrying in a file that is rewritten on every navigation.
 const MAX_HISTORY_URL_LEN: usize = 4096;
 
+/// Marks a bookmarked line in the history file.
+const BOOKMARK_PREFIX: &str = "*";
+
 /// Make `url` safe to carry as a `<button>…</button>` payload and as one line
 /// of the history file, or reject it.
 ///
@@ -1170,6 +1395,13 @@ const MAX_HISTORY_URL_LEN: usize = 4096;
 /// whitespace are rejected outright rather than encoded: the file is
 /// line-based, and a URL bar entry containing them is a paste accident, not an
 /// address worth remembering.
+///
+/// A *leading* `*` is encoded for the same reason: it is what marks a line as
+/// bookmarked, so `*://x.invalid` — which `normalize_url_input` accepts as-is,
+/// since it contains `://` — would otherwise read back as a bookmarked
+/// `://x.invalid`. That is a different string, and `on_button_press` matches
+/// history rows by membership, so the row would be dead. `*` is a sub-delim, so
+/// `%2A` denotes the same URL.
 fn sanitize_history_url(url: &str) -> Option<String> {
     let trimmed = url.trim();
     if trimmed.is_empty() || trimmed.len() > MAX_HISTORY_URL_LEN {
@@ -1178,7 +1410,11 @@ fn sanitize_history_url(url: &str) -> Option<String> {
     if trimmed.chars().any(|c| c.is_control() || c.is_whitespace()) {
         return None;
     }
-    Some(trimmed.replace('<', "%3C").replace('>', "%3E"))
+    let escaped = trimmed.replace('<', "%3C").replace('>', "%3E");
+    match escaped.strip_prefix(BOOKMARK_PREFIX) {
+        Some(rest) => Some(format!("%2A{rest}")),
+        None => Some(escaped),
+    }
 }
 
 /// Drop later duplicates, keeping the first occurrence of each value.
@@ -4102,20 +4338,32 @@ fn language_code_from_selector(selector: &str) -> Option<String> {
     (!code.is_empty()).then(|| code.to_owned())
 }
 
-/// Where the remembered language choice lives.
+/// Where the remembered language choice lives, or `None` when the provider is
+/// under test and must not touch persisted user state.
 ///
 /// Next to the Chrome profile rather than inside it, so "clear cookies" (which
 /// wipes what *sites* remember) leaves the user's own choice alone.
-fn language_pref_path() -> std::path::PathBuf {
-    chrome_profile_dir()
-        .parent()
-        .map(|p| p.to_path_buf())
-        .unwrap_or_else(std::env::temp_dir)
-        .join("webbrowser-language")
+///
+/// Gated on [`TEST_NO_HISTORY`] like the URL history: `forget_language` is a
+/// real `remove_file`, and the unit tests invoke `choose language`, so without
+/// the gate running the suite silently cleared whatever choice the developer
+/// had made. The flag covers every file this provider persists, not just the
+/// URL list.
+fn language_pref_path() -> Option<std::path::PathBuf> {
+    if test_no_history() {
+        return None;
+    }
+    Some(
+        chrome_profile_dir()
+            .parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(std::env::temp_dir)
+            .join("webbrowser-language"),
+    )
 }
 
 fn stored_language() -> Option<String> {
-    let raw = std::fs::read_to_string(language_pref_path()).ok()?;
+    let raw = std::fs::read_to_string(language_pref_path()?).ok()?;
     let code = raw.trim().to_ascii_lowercase();
     // A code, not a sentence: guards against a corrupted file becoming a
     // selector fragment we then inject into the page.
@@ -4127,7 +4375,9 @@ fn stored_language() -> Option<String> {
 }
 
 fn store_language(code: &str) {
-    let path = language_pref_path();
+    let Some(path) = language_pref_path() else {
+        return;
+    };
     if let Some(dir) = path.parent() {
         let _ = std::fs::create_dir_all(dir);
     }
@@ -4135,7 +4385,9 @@ fn store_language(code: &str) {
 }
 
 fn forget_language() {
-    let _ = std::fs::remove_file(language_pref_path());
+    if let Some(path) = language_pref_path() {
+        let _ = std::fs::remove_file(path);
+    }
 }
 
 /// Build the in-page pass that finds the current gate and turns it into forms.
@@ -4644,6 +4896,31 @@ mod tests {
         let guard = LAUNCH_FLAG.lock().unwrap_or_else(|e| e.into_inner());
         _set_test_no_launch(no_launch);
         guard
+    }
+
+    /// Turns the provider's real persistence back on, and off again on drop.
+    ///
+    /// `TEST_NO_HISTORY` defaults to on under test so no unit test can reach the
+    /// developer's files. The live tests are the exception: they drive a real
+    /// Chrome through the language step and have to see the choice actually
+    /// remembered. They are `#[ignore]`d, and each already holds
+    /// `launch_flag_guard`, so they are serialised against each other and this
+    /// needs no lock of its own. Their doc comments say to run them with
+    /// `XDG_CONFIG_HOME=$(mktemp -d)`, which is what keeps the writes off the
+    /// developer's real profile.
+    struct RealPersistence;
+
+    impl RealPersistence {
+        fn enable() -> Self {
+            _set_test_no_history(false);
+            RealPersistence
+        }
+    }
+
+    impl Drop for RealPersistence {
+        fn drop(&mut self) {
+            _set_test_no_history(cfg!(test));
+        }
     }
 
     // ---- Linux Chrome launch mode ----
@@ -6072,6 +6349,12 @@ mod tests {
                 "`{cmd}` reloads the page, so it must land the user back in it"
             );
         }
+
+        // The bookmark toggle is the one command that reloads nothing, so it
+        // must not arm the descent: pressing `b` on a history row would yank
+        // the reader into the page they were only pointing at.
+        p.handle_command(CMD_TOGGLE_BOOKMARK, "", 0, &mut error);
+        assert_eq!(p.take_navigation_request(), None);
     }
 
     // ---- URL recall history ----
@@ -6277,7 +6560,14 @@ mod tests {
         let ranked = p.url_history.clone();
 
         let mut error = String::new();
-        for cmd in ["refresh", CMD_CHOOSE_LANGUAGE, CMD_SHOW_HIDDEN] {
+        for cmd in [
+            "refresh",
+            CMD_CHOOSE_LANGUAGE,
+            CMD_SHOW_HIDDEN,
+            // Not a reload, but held to the same rule: marking a row must not
+            // move it, or it jumps out from under the cursor that marked it.
+            CMD_TOGGLE_BOOKMARK,
+        ] {
             p.handle_command(cmd, "", 0, &mut error);
             assert_eq!(
                 p.url_history, ranked,
@@ -6362,6 +6652,16 @@ mod tests {
         assert_eq!(
             sanitize_history_url("  https://a.invalid  "),
             Some("https://a.invalid".to_owned()),
+        );
+        // A leading `*` is what marks a line as bookmarked in the history file.
+        assert_eq!(
+            sanitize_history_url("*://x.invalid"),
+            Some("%2A://x.invalid".to_owned()),
+        );
+        assert_eq!(
+            sanitize_history_url("https://x.invalid/*star"),
+            Some("https://x.invalid/*star".to_owned()),
+            "only the leading one is ambiguous",
         );
     }
 
@@ -6480,6 +6780,375 @@ mod tests {
             vec!["https://ok.invalid", "https://other.invalid"],
             "unusable lines dropped, duplicates collapsed to the first (newest) copy"
         );
+    }
+
+    // ---- Bookmarks ----
+
+    /// The FFON key of the history row for `url`, as the app hands it to
+    /// `handle_command` when the cursor is standing on that row.
+    fn row_key(p: &mut WebbrowserProvider, url: &str) -> String {
+        p.fetch()
+            .iter()
+            .filter_map(|e| e.as_str())
+            .find(|k| sicompass_sdk::tags::extract_button_function_name(k).as_deref() == Some(url))
+            .map(str::to_owned)
+            .unwrap_or_else(|| panic!("no history row for {url}"))
+    }
+
+    /// The display text of every history row, marker included.
+    fn row_labels(p: &mut WebbrowserProvider) -> Vec<String> {
+        p.fetch()
+            .iter()
+            .filter_map(|e| e.as_str())
+            .filter(|k| sicompass_sdk::tags::has_button(k))
+            .filter_map(sicompass_sdk::tags::extract_button_display_text)
+            .collect()
+    }
+
+    #[test]
+    fn toggling_a_bookmark_marks_the_row_without_moving_it() {
+        let _flag = launch_flag_guard(true);
+        let dir = tempfile::tempdir().unwrap();
+        let mut p = history_provider(dir.path());
+        p.commit_edit("", "https://a.invalid");
+        p.commit_edit("", "https://b.invalid");
+
+        let key = row_key(&mut p, "https://a.invalid");
+        let mut error = String::new();
+        p.handle_command(CMD_TOGGLE_BOOKMARK, &key, 0, &mut error);
+
+        assert_eq!(
+            p.url_history,
+            vec!["https://b.invalid", "https://a.invalid"],
+            "the ranking is untouched, so the row cannot jump under the cursor"
+        );
+        assert_eq!(
+            row_labels(&mut p),
+            vec!["https://b.invalid", "[bookmark] https://a.invalid"],
+        );
+        assert!(
+            error.contains("https://a.invalid"),
+            "the URL belongs in the message, or a second bookmark is announced \
+             identically and therefore silently: {error}"
+        );
+    }
+
+    #[test]
+    fn history_rows_keep_the_bare_url_as_the_button_function_name() {
+        let _flag = launch_flag_guard(true);
+        let dir = tempfile::tempdir().unwrap();
+        let mut p = history_provider(dir.path());
+        p.commit_edit("", "https://a.invalid");
+
+        let key = row_key(&mut p, "https://a.invalid");
+        p.handle_command(CMD_TOGGLE_BOOKMARK, &key, 0, &mut String::new());
+
+        // The marker is display text only. `on_button_press` matches by
+        // membership in `url_history`, so a marked function name is a dead row.
+        assert_eq!(history_rows(&mut p), vec!["https://a.invalid"]);
+        p.on_button_press("https://a.invalid");
+        assert_eq!(p.current_url, "https://a.invalid");
+    }
+
+    #[test]
+    fn toggling_twice_removes_the_bookmark() {
+        let _flag = launch_flag_guard(true);
+        let dir = tempfile::tempdir().unwrap();
+        let mut p = history_provider(dir.path());
+        p.commit_edit("", "https://a.invalid");
+        let key = row_key(&mut p, "https://a.invalid");
+
+        let mut error = String::new();
+        p.handle_command(CMD_TOGGLE_BOOKMARK, &key, 0, &mut error);
+        assert!(p.bookmarks.contains("https://a.invalid"));
+
+        p.handle_command(CMD_TOGGLE_BOOKMARK, &key, 0, &mut error);
+        assert!(p.bookmarks.is_empty());
+        assert_eq!(row_labels(&mut p), vec!["https://a.invalid"]);
+    }
+
+    #[test]
+    fn the_history_file_marks_bookmarked_lines_with_a_star() {
+        let _flag = launch_flag_guard(true);
+        let dir = tempfile::tempdir().unwrap();
+        let mut p = history_provider(dir.path());
+        p.commit_edit("", "https://a.invalid");
+        p.commit_edit("", "https://b.invalid");
+
+        let key = row_key(&mut p, "https://a.invalid");
+        p.handle_command(CMD_TOGGLE_BOOKMARK, &key, 0, &mut String::new());
+
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("history")).unwrap(),
+            "https://b.invalid\n*https://a.invalid\n",
+            "unbookmarked lines keep the pre-bookmark format exactly"
+        );
+    }
+
+    #[test]
+    fn bookmarks_survive_a_restart() {
+        let _flag = launch_flag_guard(true);
+        let dir = tempfile::tempdir().unwrap();
+        {
+            let mut p = history_provider(dir.path());
+            p.commit_edit("", "https://a.invalid");
+            p.commit_edit("", "https://b.invalid");
+            let key = row_key(&mut p, "https://a.invalid");
+            p.handle_command(CMD_TOGGLE_BOOKMARK, &key, 0, &mut String::new());
+        }
+        let mut p = history_provider(dir.path());
+        assert_eq!(
+            row_labels(&mut p),
+            vec!["https://b.invalid", "[bookmark] https://a.invalid"],
+        );
+    }
+
+    #[test]
+    fn an_unprefixed_history_file_reads_as_all_unbookmarked() {
+        let _flag = launch_flag_guard(true);
+        let dir = tempfile::tempdir().unwrap();
+        // Exactly what every version before bookmarks wrote.
+        std::fs::write(
+            dir.path().join("history"),
+            "https://a.invalid\nhttps://b.invalid\n",
+        )
+        .unwrap();
+
+        let mut p = history_provider(dir.path());
+
+        assert!(p.bookmarks.is_empty(), "no migration step to get wrong");
+        assert_eq!(
+            row_labels(&mut p),
+            vec!["https://a.invalid", "https://b.invalid"],
+        );
+    }
+
+    #[test]
+    fn bookmarking_a_url_not_in_the_history_adds_a_row_at_the_top() {
+        let _flag = launch_flag_guard(true);
+        let dir = tempfile::tempdir().unwrap();
+        let mut p = history_provider(dir.path());
+        p.commit_edit("", "https://typed.invalid");
+
+        // The page the reader followed a link into: the app resolved the
+        // enclosing <link> and hands its key over, since `current_url` still
+        // names the last URL that went through `load_url`.
+        p.handle_command(
+            CMD_TOGGLE_BOOKMARK,
+            "Some article <link>https://followed.invalid</link>",
+            1,
+            &mut String::new(),
+        );
+
+        assert_eq!(
+            p.url_history,
+            vec!["https://followed.invalid", "https://typed.invalid"],
+            "a bookmark is an annotation on a row, so there has to be a row"
+        );
+        assert!(p.bookmarks.contains("https://followed.invalid"));
+        assert_eq!(
+            p.current_url, "https://typed.invalid",
+            "bookmarking must not navigate"
+        );
+    }
+
+    #[test]
+    fn a_history_row_wins_over_the_loaded_url() {
+        let _flag = launch_flag_guard(true);
+        let dir = tempfile::tempdir().unwrap();
+        let mut p = history_provider(dir.path());
+        p.commit_edit("", "https://a.invalid");
+        p.commit_edit("", "https://b.invalid");
+
+        let key = row_key(&mut p, "https://a.invalid");
+        p.handle_command(CMD_TOGGLE_BOOKMARK, &key, 0, &mut String::new());
+
+        assert_eq!(
+            p.bookmarks.iter().collect::<Vec<_>>(),
+            vec!["https://a.invalid"],
+            "the cursor's row, not the page being displayed"
+        );
+    }
+
+    #[test]
+    fn a_page_button_is_not_mistaken_for_a_history_row() {
+        let _flag = launch_flag_guard(true);
+        let dir = tempfile::tempdir().unwrap();
+        let mut p = history_provider(dir.path());
+        p.commit_edit("", "https://a.invalid");
+
+        // A `<button>` the page carries, whose payload happens to be a URL.
+        p.handle_command(
+            CMD_TOGGLE_BOOKMARK,
+            "<button>https://elsewhere.invalid</button>Subscribe",
+            0,
+            &mut String::new(),
+        );
+
+        assert_eq!(
+            p.url_history,
+            vec!["https://a.invalid"],
+            "matched by membership, so it falls through to the loaded page"
+        );
+        assert!(p.bookmarks.contains("https://a.invalid"));
+    }
+
+    #[test]
+    fn bookmarking_with_no_url_loaded_reports_nothing_to_bookmark() {
+        let _flag = launch_flag_guard(true);
+        let dir = tempfile::tempdir().unwrap();
+        let mut p = history_provider(dir.path());
+
+        let mut error = String::new();
+        p.handle_command(CMD_TOGGLE_BOOKMARK, "", 0, &mut error);
+
+        assert_eq!(error, "No page to bookmark");
+        assert!(p.url_history.is_empty());
+        assert!(p.bookmarks.is_empty());
+    }
+
+    #[test]
+    fn a_bookmark_is_not_dropped_by_the_history_cap() {
+        let _flag = launch_flag_guard(true);
+        let dir = tempfile::tempdir().unwrap();
+        let mut p = history_provider(dir.path());
+        p.commit_edit("", "https://keep.invalid");
+        let key = row_key(&mut p, "https://keep.invalid");
+        p.handle_command(CMD_TOGGLE_BOOKMARK, &key, 0, &mut String::new());
+        p.commit_edit("", "https://a.invalid");
+        p.commit_edit("", "https://b.invalid");
+        p.commit_edit("", "https://c.invalid");
+
+        p.on_setting_change("urlHistorySize", "2");
+
+        assert_eq!(
+            p.url_history,
+            vec![
+                "https://c.invalid",
+                "https://b.invalid",
+                "https://keep.invalid"
+            ],
+            "the cap governs the unbookmarked rows; ageing a bookmark out would \
+             silently delete the one thing the user asked to keep"
+        );
+        // And it survives the next navigation's read-merge-write too.
+        p.commit_edit("", "https://d.invalid");
+        assert_eq!(
+            p.url_history,
+            vec![
+                "https://d.invalid",
+                "https://c.invalid",
+                "https://keep.invalid"
+            ],
+        );
+    }
+
+    #[test]
+    fn unbookmarking_is_not_resurrected_by_another_tab() {
+        let _flag = launch_flag_guard(true);
+        let dir = tempfile::tempdir().unwrap();
+        let mut tab_a = history_provider(dir.path());
+        let mut tab_b = history_provider(dir.path());
+
+        tab_a.commit_edit("", "https://a.invalid");
+        // Tab B picks the bookmark up off disk...
+        let key = row_key(&mut tab_a, "https://a.invalid");
+        tab_a.handle_command(CMD_TOGGLE_BOOKMARK, &key, 0, &mut String::new());
+        tab_b.commit_edit("", "https://b.invalid");
+        assert!(tab_b.bookmarks.contains("https://a.invalid"));
+
+        // ...and A removes it again.
+        let key = row_key(&mut tab_a, "https://a.invalid");
+        tab_a.handle_command(CMD_TOGGLE_BOOKMARK, &key, 0, &mut String::new());
+
+        // Merging the flags as a union would let B's stale copy put it back.
+        tab_b.commit_edit("", "https://c.invalid");
+        assert!(
+            tab_b.bookmarks.is_empty(),
+            "disk is authoritative for the flag: {:?}",
+            tab_b.bookmarks
+        );
+        assert!(
+            !std::fs::read_to_string(dir.path().join("history"))
+                .unwrap()
+                .contains('*'),
+        );
+    }
+
+    /// No state directory (`$HOME` unset, or the test flag): the feature still
+    /// works, purely in memory. Treating "no file" as "an empty file" would make
+    /// the disk set authoritative over nothing at all — every navigation would
+    /// wipe the bookmarks, and a bookmark could never be removed, because the
+    /// empty set it is compared against never contains it.
+    #[test]
+    fn bookmarks_work_in_memory_without_a_history_file() {
+        let _flag = launch_flag_guard(true);
+        // No `url_history_path`, which under `cfg(test)` means no path at all —
+        // see `TEST_NO_HISTORY`. Without that default this test would read,
+        // merge and rewrite the developer's real history file.
+        let mut p = WebbrowserProvider::new();
+        p.init();
+        assert!(
+            p.resolve_url_history_path().is_none(),
+            "this test is only meaningful, and only safe, with no file behind it"
+        );
+        p.commit_edit("", "https://a.invalid");
+
+        let key = row_key(&mut p, "https://a.invalid");
+        p.handle_command(CMD_TOGGLE_BOOKMARK, &key, 0, &mut String::new());
+        assert!(p.bookmarks.contains("https://a.invalid"));
+
+        p.commit_edit("", "https://b.invalid");
+        assert!(
+            p.bookmarks.contains("https://a.invalid"),
+            "a navigation must not wipe it"
+        );
+
+        p.handle_command(CMD_TOGGLE_BOOKMARK, &key, 0, &mut String::new());
+        assert!(p.bookmarks.is_empty(), "and it has to be removable");
+    }
+
+    /// No in-crate test may reach the real history file under `state_home()`.
+    ///
+    /// The tempdir-backed tests set `url_history_path`, but nothing forces them
+    /// to, and a test that forgets does not fail — it quietly reads, merges and
+    /// rewrites the developer's own browsing history, seeding it with
+    /// `a.invalid`. `TEST_NO_HISTORY` defaults to `cfg!(test)` so that a
+    /// forgotten override yields no file at all instead of the real one.
+    #[test]
+    fn no_unit_test_can_reach_the_real_history_file() {
+        let p = WebbrowserProvider::new();
+        assert!(
+            p.resolve_url_history_path().is_none(),
+            "a provider with no path override must resolve to nothing in tests"
+        );
+        // And the override still wins, or every history test would be inert.
+        let mut p = WebbrowserProvider::new();
+        p.url_history_path = Some(std::path::PathBuf::from("/tmp/somewhere/history"));
+        assert!(p.resolve_url_history_path().is_some());
+    }
+
+    #[test]
+    fn a_url_starting_with_a_star_is_encoded() {
+        let _flag = launch_flag_guard(true);
+        let dir = tempfile::tempdir().unwrap();
+        let mut p = history_provider(dir.path());
+
+        // `normalize_url_input` passes anything containing "://" through
+        // verbatim, so this reaches the file as-is unless it is encoded — and
+        // would then read back as a *bookmarked* "://x.invalid".
+        p.commit_edit("", "*://x.invalid");
+
+        assert_eq!(p.url_history, vec!["%2A://x.invalid"]);
+        assert!(p.bookmarks.is_empty());
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("history")).unwrap(),
+            "%2A://x.invalid\n",
+        );
+        // Which survives a restart as the same, still-pressable row.
+        let mut p = history_provider(dir.path());
+        assert!(p.bookmarks.is_empty());
+        assert_eq!(history_rows(&mut p), vec!["%2A://x.invalid"]);
     }
 
     #[test]
@@ -7818,6 +8487,9 @@ mod tests {
     #[cfg(target_os = "linux")]
     fn live_bpost_walks_language_then_cookies_then_content() {
         let _guard = launch_flag_guard(false);
+        // This test asserts the choice is *remembered*, so it needs the real
+        // file. Run it with `XDG_CONFIG_HOME=$(mktemp -d)` as the header says.
+        let _persist = RealPersistence::enable();
         forget_language();
         let mut p = TestProvider::new();
         p.load_url("https://www.bpost.be/");

@@ -9,3 +9,10 @@ webbrowser-step-consent = Diese Website fragt nach Cookies. Wählen Sie eine Opt
 webbrowser-consent-unrecognised = Diese Website zeigt eine Cookie-Einwilligungsseite, aus der keine Auswahl übernommen werden konnte. Die Einwilligungsseite selbst steht unten.
 webbrowser-consent-accept-all = Alle Cookies akzeptieren
 webbrowser-consent-reject-all = Alle Cookies ablehnen
+
+# Bookmarks. The marker is prepended to a bookmarked row's display text, so it
+# is read out before the address; keep it short and keep the brackets.
+webbrowser-bookmark-marker = [Lesezeichen]
+webbrowser-bookmark-added = { $url } als Lesezeichen gespeichert
+webbrowser-bookmark-removed = Lesezeichen für { $url } entfernt
+webbrowser-bookmark-nothing = Keine Seite zum Speichern als Lesezeichen
