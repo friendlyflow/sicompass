@@ -1187,7 +1187,7 @@ pub static SHORTCUTS: &[Shortcut] = &[
     // ---- Colon / Semicolon+Shift (command mode entry) --------------------
     // `handle_colon` branches on the provider itself; these rows differ only in
     // the hint they advertise. The terminal has no command palette — its `:`
-    // opens a shell in the focused folder — so it gets its own label. Inside the
+    // opens a shell in the folder being listed — so it gets its own label. Inside the
     // shell no row matches, so `:` does not dispatch at all: Escape is the only
     // way back to the folders.
     Shortcut {

@@ -146,6 +146,22 @@ pub fn refresh_all_provider_root_keys(renderer: &mut AppRenderer) {
     }
 }
 
+/// Seed the `i` insert placeholder into an empty level, so every path that
+/// materializes a container agrees on what "no children" looks like.
+///
+/// A level with no rows at all is unreachable by ear: nothing is announced and
+/// nothing is on screen. The placeholder is the app's standing answer to that,
+/// and it is offered even where the provider refuses creates (the terminal's
+/// read-only folder tree), because being able to *stand* in an empty directory
+/// is what makes it usable as a working directory.
+fn seed_insert_placeholder(children: &mut Vec<sicompass_sdk::ffon::FfonElement>) {
+    if children.is_empty() {
+        children.push(sicompass_sdk::ffon::FfonElement::Str(
+            sicompass_sdk::placeholders::I_PLACEHOLDER.to_owned(),
+        ));
+    }
+}
+
 /// Explicitly re-fetch the active provider and graft the result onto the
 /// container Obj currently in view (the level whose children form the visible
 /// list). Used by F5 / `needs_refresh`.
@@ -169,13 +185,7 @@ pub fn refresh_current_directory(renderer: &mut AppRenderer) {
         renderer.error_message = err;
     }
     // Empty container → seed the `i` insert placeholder, matching navigate-right.
-    // The terminal is exempt: its folder tree is read-only, so the placeholder
-    // would offer a create the provider always refuses (see `navigate_right_raw`).
-    if children.is_empty() && renderer.providers[idx].name() != "terminal" {
-        children.push(FfonElement::Str(
-            sicompass_sdk::placeholders::I_PLACEHOLDER.to_owned(),
-        ));
-    }
+    seed_insert_placeholder(&mut children);
 
     // Some providers' `fetch()` returns their whole navigable tree rather than
     // the children of the current sub-path. Grafting such a fetch onto a deep
@@ -368,8 +378,8 @@ fn locate_child_by_name(
 }
 
 /// Rebuild a filesystem provider's tree from the filesystem root down to its
-/// `current_path()`, leaving the cursor on that directory inside its parent's
-/// listing.
+/// `current_path()`, leaving the cursor *inside* that directory, on the first
+/// row of its own listing.
 ///
 /// Where [`refresh_visible_path`] re-walks the path the cursor already took,
 /// this walks to a path the user never browsed. The terminal needs it when the
@@ -377,8 +387,13 @@ fn locate_child_by_name(
 /// somewhere else entirely, so every level has to be re-read for the breadcrumb
 /// above the cursor to describe where the user now is.
 ///
+/// Landing inside rather than on the directory is what keeps `:` idempotent:
+/// the shell runs in the folder being listed, so coming back to that folder's
+/// own listing means the next `:` reopens the shell exactly where the last one
+/// was, instead of one level up.
+///
 /// A path with no components (the filesystem root itself) leaves the cursor at
-/// the top of the provider's own listing — there is no parent to show it in.
+/// the top of the provider's own listing.
 ///
 /// Returns `false` when a level cannot be walked, e.g. a directory removed while
 /// the shell was open. The tree is not rolled back: every level rebuilt so far
@@ -396,16 +411,16 @@ pub(crate) fn rebuild_path_from_root(renderer: &mut AppRenderer) -> bool {
     }
 
     let target = std::path::PathBuf::from(renderer.providers[idx].current_path());
-    // Components below the filesystem root. The last is where the cursor lands;
-    // the ones before it are levels to descend through.
-    let mut names: Vec<String> = target
+    // Components below the filesystem root — every one of them a level to
+    // descend through, the last included: the cursor comes to rest inside the
+    // target, not on it.
+    let names: Vec<String> = target
         .components()
         .filter_map(|c| match c {
             Component::Normal(s) => Some(s.to_string_lossy().into_owned()),
             _ => None,
         })
         .collect();
-    let leaf = names.pop();
 
     // Level 2: the provider root's children are the filesystem root's folders.
     // Walk from the *target's own* root so a Windows path keeps its drive
@@ -420,7 +435,8 @@ pub(crate) fn rebuild_path_from_root(renderer: &mut AppRenderer) -> bool {
         root.to_string_lossy().into_owned()
     };
     renderer.providers[idx].set_current_path(&root);
-    let children = renderer.providers[idx].fetch();
+    let mut children = renderer.providers[idx].fetch();
+    seed_insert_placeholder(&mut children);
     let key = renderer.providers[idx].display_name();
     let mut root = FfonElement::new_obj(&key);
     root.as_obj_mut().unwrap().children = children;
@@ -437,7 +453,8 @@ pub(crate) fn rebuild_path_from_root(renderer: &mut AppRenderer) -> bool {
         };
         id.set_last(pos);
         renderer.providers[idx].push_path(name);
-        let kids = renderer.providers[idx].fetch();
+        let mut kids = renderer.providers[idx].fetch();
+        seed_insert_placeholder(&mut kids);
         let last = id.last().unwrap_or(0);
         if let Some(slice) = get_ffon_at_id_mut(&mut renderer.ffon, &id) {
             if let Some(obj) = slice.get_mut(last).and_then(|e| e.as_obj_mut()) {
@@ -447,15 +464,6 @@ pub(crate) fn rebuild_path_from_root(renderer: &mut AppRenderer) -> bool {
         id.push(0);
     }
 
-    if let Some(leaf) = leaf {
-        match locate_child_by_name(&renderer.ffon, &id, &leaf) {
-            Some(pos) => id.set_last(pos),
-            None => {
-                renderer.current_id = id;
-                return false;
-            }
-        }
-    }
     renderer.current_id = id;
     true
 }

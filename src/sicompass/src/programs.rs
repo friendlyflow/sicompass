@@ -960,8 +960,9 @@ pub fn apply_tabs_section(
                 r.rebuild_and_clamp(&path, id);
             }
             let current_id = r.current_id.clone();
-            // `rebuild_on_path` moves the provider to the parent of `path`, so
-            // read the live value back rather than re-storing what was saved.
+            // `rebuild_on_path` leaves the provider at `path` on success, and at
+            // the deepest level it could reach when a directory has gone missing,
+            // so read the live value back rather than re-storing what was saved.
             let provider_path = crate::app_state::active_provider_path(r);
             let (cp, cf) = r.detach_content();
             tabs.push(TabSnapshot {

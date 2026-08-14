@@ -223,9 +223,9 @@ fn press_up(r: &mut AppRenderer) {
 /// because pressing `:` is also what spawns the PTY and therefore what makes
 /// the `+i` live input slot exist at all.
 ///
-/// `:` opens the shell in the folder under the cursor, so this descends one
-/// level past the provider root. Returns the id of the live input slot, which
-/// is where the cursor is left.
+/// `:` opens the shell in the folder being listed, so the scrollback replaces
+/// the provider root's own listing at that same depth. Returns the id of the
+/// live input slot, which is where the cursor is left.
 fn register_terminal_in_shell(renderer: &mut AppRenderer) -> sicompass_sdk::ffon::IdArray {
     register(
         renderer,
@@ -11054,8 +11054,10 @@ fn terminal_opens_on_a_folder_listing() {
 }
 
 #[test]
-fn terminal_colon_opens_a_shell_in_the_focused_folder() {
-    // One keypress: put the cursor on a folder and press `:`. No Right first.
+fn terminal_colon_opens_a_shell_in_the_folder_being_listed() {
+    // The cursor sits on `workspace`, but the folder the user is *in* is the
+    // root — that is the one whose contents the list is showing, and the one
+    // `ls` at the prompt has to describe.
     let tmp = TempDir::new().unwrap();
     let root = tmp.path().canonicalize().unwrap();
     let ws = root.join("workspace");
@@ -11066,6 +11068,7 @@ fn terminal_colon_opens_a_shell_in_the_focused_folder() {
     register_terminal_rooted_at(&mut renderer, &root);
     press_right(&mut renderer); // into the provider, cursor on `workspace`
     assert_eq!(renderer.providers[0].current_path(), root.to_str().unwrap());
+    let depth_before = renderer.current_id.depth();
 
     press_colon(&mut renderer);
 
@@ -11073,8 +11076,13 @@ fn terminal_colon_opens_a_shell_in_the_focused_folder() {
     assert_eq!(renderer.coordinate, Coordinate::General);
     assert_eq!(
         renderer.providers[0].current_path(),
-        ws.to_str().unwrap(),
-        "`:` descends into the focused folder on the way in",
+        root.to_str().unwrap(),
+        "the shell runs where the user stands, not in the folder under the cursor",
+    );
+    assert_eq!(
+        renderer.current_id.depth(),
+        depth_before,
+        "the scrollback replaces the listing in place",
     );
     let last = renderer
         .total_list
@@ -11085,14 +11093,45 @@ fn terminal_colon_opens_a_shell_in_the_focused_folder() {
         "expected the input slot; got {:?}",
         last.label
     );
+    let root_name = root.file_name().unwrap().to_str().unwrap();
     assert!(
-        last.label.contains("workspace$ ") || last.label.contains("workspace> "),
-        "prompt should sit in the focused folder; got {:?}",
+        last.label.contains(&format!("{root_name}$ "))
+            || last.label.contains(&format!("{root_name}> ")),
+        "prompt should name the listed folder; got {:?}",
         last.label,
     );
     assert!(
         renderer.providers[0].process_id().is_some(),
         "`:` spawns the PTY"
+    );
+}
+
+#[test]
+fn terminal_right_then_colon_opens_a_shell_one_folder_down() {
+    // The replacement route for "a shell in that folder": walk into it with
+    // Right, which is the same key that moves anywhere else in the app, then
+    // `:` runs the shell in the folder now being listed.
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    let ws = root.join("workspace");
+    std::fs::create_dir(&ws).unwrap();
+    std::fs::create_dir(ws.join("inner")).unwrap();
+
+    ensure_builtins();
+    let mut renderer = AppRenderer::new();
+    register_terminal_rooted_at(&mut renderer, &root);
+    press_right(&mut renderer); // into the provider
+    press_right(&mut renderer); // into `workspace`
+    assert_eq!(renderer.providers[0].current_path(), ws.to_str().unwrap());
+
+    press_colon(&mut renderer);
+
+    assert_eq!(renderer.providers[0].current_path(), ws.to_str().unwrap());
+    let last = renderer.total_list.last().unwrap();
+    assert!(
+        last.label.contains("workspace$ ") || last.label.contains("workspace> "),
+        "prompt should sit in the folder walked into; got {:?}",
+        last.label,
     );
 }
 
@@ -11119,14 +11158,11 @@ fn restart_terminal(renderer: &AppRenderer) -> AppRenderer {
 }
 
 #[test]
-fn terminal_restart_with_a_shell_open_lands_on_the_focused_folder() {
-    // Closing the app in the shell view and reopening used to come back with
-    // the cursor *inside* the folder the shell ran in, so `:` reopened a shell
-    // in one of its subfolders. The shell view is not restorable (the process
-    // dies with the app), so what comes back is the folder entry itself.
-    //
-    // `workspace` deliberately has a subfolder: without one the restore clamp
-    // would collapse the level anyway and hide the bug.
+fn terminal_restart_with_a_shell_open_lands_inside_the_shells_folder() {
+    // The shell view is not restorable (the process dies with the app), so what
+    // comes back is the folder listing of wherever it was running. It has to be
+    // the listing *of* that folder: landing on it inside its parent would make
+    // the first `:` after a restart open the shell one level up.
     let tmp = TempDir::new().unwrap();
     let root = tmp.path().canonicalize().unwrap();
     let ws = root.join("workspace");
@@ -11136,7 +11172,8 @@ fn terminal_restart_with_a_shell_open_lands_on_the_focused_folder() {
     ensure_builtins();
     let mut renderer = AppRenderer::new();
     register_terminal_rooted_at(&mut renderer, &root);
-    press_right(&mut renderer);
+    press_right(&mut renderer); // into the provider
+    press_right(&mut renderer); // into `workspace`
     press_colon(&mut renderer);
     assert_eq!(renderer.providers[0].current_path(), ws.to_str().unwrap());
 
@@ -11150,16 +11187,16 @@ fn terminal_restart_with_a_shell_open_lands_on_the_focused_folder() {
             .total_list
             .get(restarted.list_index)
             .map(|i| i.label.as_str()),
-        Some("+ workspace"),
-        "back on the folder the shell was running in",
+        Some("+ inner"),
+        "inside the folder the shell was running in, listing its contents",
     );
     assert_eq!(
         restarted.providers[0].current_path(),
-        root.to_str().unwrap(),
+        ws.to_str().unwrap(),
         "path in step with the cursor",
     );
 
-    // And `:` reopens the shell where it was, not in a subfolder of it.
+    // And `:` reopens the shell where it was, not in its parent.
     let mut restarted = restarted;
     press_colon(&mut restarted);
     assert_eq!(
@@ -11187,6 +11224,7 @@ fn terminal_restart_follows_a_cd_typed_before_closing() {
     register_terminal_rooted_at(&mut renderer, &root);
     press_right(&mut renderer);
     press_down(&mut renderer); // sorted: `elsewhere` leads, `workspace` follows
+    press_right(&mut renderer); // into `workspace`
     press_colon(&mut renderer);
     assert_eq!(renderer.providers[0].current_path(), ws.to_str().unwrap());
 
@@ -11202,12 +11240,17 @@ fn terminal_restart_follows_a_cd_typed_before_closing() {
 
     let mut restarted = restart_terminal(&renderer);
     assert_eq!(
+        restarted.providers[0].current_path(),
+        other.to_str().unwrap(),
+        "restart lands inside the folder the shell was left in",
+    );
+    assert_eq!(
         restarted
             .total_list
             .get(restarted.list_index)
             .map(|i| i.label.as_str()),
-        Some("+ elsewhere"),
-        "restart lands on the folder the shell was left in",
+        Some("+ inner"),
+        "listing that folder's own contents",
     );
 
     press_colon(&mut restarted);
@@ -11235,6 +11278,7 @@ fn terminal_escape_follows_a_cd_typed_in_the_shell() {
     let other = root.join("elsewhere");
     std::fs::create_dir(&ws).unwrap();
     std::fs::create_dir(&other).unwrap();
+    std::fs::create_dir(other.join("inner")).unwrap();
 
     ensure_builtins();
     let mut renderer = AppRenderer::new();
@@ -11242,6 +11286,7 @@ fn terminal_escape_follows_a_cd_typed_in_the_shell() {
     press_right(&mut renderer);
     // The listing is sorted, so `elsewhere` leads and `workspace` follows.
     press_down(&mut renderer);
+    press_right(&mut renderer); // into `workspace`
     press_colon(&mut renderer);
     assert_eq!(renderer.providers[0].current_path(), ws.to_str().unwrap());
 
@@ -11254,23 +11299,26 @@ fn terminal_escape_follows_a_cd_typed_in_the_shell() {
 
     assert_eq!(
         renderer.providers[0].current_path(),
-        root.to_str().unwrap(),
-        "back in the parent of where the shell ended up",
+        other.to_str().unwrap(),
+        "inside the folder the shell ended up in",
     );
     assert_eq!(
         renderer
             .total_list
             .get(renderer.list_index)
             .map(|i| i.label.as_str()),
-        Some("+ elsewhere"),
-        "cursor follows the cd, not the folder `:` was pressed on",
+        Some("+ inner"),
+        "listing follows the cd, not the folder `:` was pressed in",
     );
 }
 
 #[test]
-fn terminal_folder_without_subfolders_shows_no_insert_placeholder() {
-    // The folder tree is read-only, so an `i` placeholder would offer a create
-    // the provider always refuses. Such a folder is simply not navigable.
+fn terminal_folder_without_subfolders_is_still_enterable() {
+    // A folder holding nothing but files is a perfectly good working directory,
+    // and since `:` runs the shell in the folder being listed, stepping into it
+    // is the only way to get a shell there. The level shows the `i` placeholder
+    // the app seeds in any empty container — inert here, because the terminal's
+    // folder tree is read-only, but it keeps the level speakable.
     let tmp = TempDir::new().unwrap();
     let root = tmp.path().canonicalize().unwrap();
     let ws = root.join("workspace");
@@ -11283,22 +11331,22 @@ fn terminal_folder_without_subfolders_shows_no_insert_placeholder() {
     press_right(&mut renderer); // into the provider
     let before = renderer.current_id.clone();
 
-    press_right(&mut renderer); // `workspace` has no subfolders
+    press_right(&mut renderer); // into `workspace`, which has no subfolders
 
-    assert_eq!(renderer.current_id, before, "Right on it does nothing");
+    assert_ne!(renderer.current_id, before, "Right descends into it");
+    assert_eq!(
+        renderer.providers[0].current_path(),
+        ws.to_str().unwrap(),
+        "the path follows the descent",
+    );
     let labels: Vec<&str> = renderer
         .total_list
         .iter()
         .map(|i| i.label.as_str())
         .collect();
-    assert_eq!(labels, vec!["+ workspace"], "no `i` placeholder anywhere");
-    assert_eq!(
-        renderer.providers[0].current_path(),
-        root.to_str().unwrap(),
-        "the refused descent must not leave the path pushed",
-    );
+    assert_eq!(labels, vec!["i"], "an empty level still announces a row");
 
-    // `:` still opens a shell in it — that never needed the folder to have contents.
+    // And `:` there runs the shell in it.
     press_colon(&mut renderer);
     assert_eq!(renderer.providers[0].current_path(), ws.to_str().unwrap());
     assert!(renderer.total_list.last().unwrap().label.starts_with("+i "));
@@ -11339,14 +11387,14 @@ fn terminal_escape_returns_to_the_folder_listing() {
     let mut renderer = AppRenderer::new();
     register_terminal_rooted_at(&mut renderer, &root);
     press_right(&mut renderer);
-    press_colon(&mut renderer); // shell, running in `workspace`
+    press_colon(&mut renderer); // shell, running in the root being listed
     assert!(renderer.total_list.last().unwrap().label.starts_with("+i "));
     let pid = renderer.providers[0].process_id();
 
     press_escape(&mut renderer);
 
-    // Escape undoes the `:`: back to the listing `:` was pressed in, with the
-    // cursor on the folder itself — not inside it, where there may be nothing.
+    // Escape undoes the `:`: the listing comes back where the scrollback was,
+    // at the same level and on the same row.
     let labels: Vec<&str> = renderer
         .total_list
         .iter()
@@ -11355,7 +11403,7 @@ fn terminal_escape_returns_to_the_folder_listing() {
     assert_eq!(
         labels,
         vec!["+ workspace"],
-        "Escape backs out to the folder"
+        "Escape restores the listing the shell covered"
     );
     assert_eq!(
         renderer
@@ -11363,7 +11411,7 @@ fn terminal_escape_returns_to_the_folder_listing() {
             .get(renderer.list_index)
             .map(|i| i.label.as_str()),
         Some("+ workspace"),
-        "cursor lands back on the folder the shell was opened from",
+        "cursor lands back on the row `:` was pressed on",
     );
     assert_eq!(renderer.providers[0].current_path(), root.to_str().unwrap());
     assert_eq!(
@@ -11372,15 +11420,15 @@ fn terminal_escape_returns_to_the_folder_listing() {
         "leaving the view keeps the shell running",
     );
 
-    // And `:` on it again returns to the same session, not a new shell.
+    // And `:` again returns to the same session, in the same folder.
     press_colon(&mut renderer);
     assert!(renderer.total_list.last().unwrap().label.starts_with("+i "));
     assert_eq!(renderer.providers[0].process_id(), pid);
-    assert_eq!(renderer.providers[0].current_path(), ws.to_str().unwrap());
+    assert_eq!(renderer.providers[0].current_path(), root.to_str().unwrap());
 }
 
 #[test]
-fn terminal_left_is_inert_in_the_shell_and_escape_pops_the_path() {
+fn terminal_left_is_inert_in_the_shell_and_escape_keeps_the_path() {
     // Left must not leave the shell — that is Escape's job alone. Consuming it
     // is also what keeps the browse path honest: `pop_path` is inert in the
     // shell view, so popping a level would strand `browse_path` one directory
@@ -11394,7 +11442,8 @@ fn terminal_left_is_inert_in_the_shell_and_escape_pops_the_path() {
     let mut renderer = AppRenderer::new();
     register_terminal_rooted_at(&mut renderer, &root);
     press_right(&mut renderer); // into the provider, cursor on `workspace`
-    press_colon(&mut renderer); // descends + shell, running in `workspace`
+    press_right(&mut renderer); // into `workspace`
+    press_colon(&mut renderer); // shell, running in `workspace`
     assert_eq!(renderer.providers[0].current_path(), ws.to_str().unwrap());
     let in_shell = renderer.current_id.clone();
 
@@ -11407,19 +11456,28 @@ fn terminal_left_is_inert_in_the_shell_and_escape_pops_the_path() {
     assert_eq!(renderer.providers[0].current_path(), ws.to_str().unwrap());
     assert!(renderer.total_list.last().unwrap().label.starts_with("+i "));
 
-    // Escape is what leaves, and the path pops with it.
+    // Escape leaves the view, and the path stays where the shell was.
     press_escape(&mut renderer);
-    assert_eq!(renderer.providers[0].current_path(), root.to_str().unwrap());
+    assert_eq!(renderer.providers[0].current_path(), ws.to_str().unwrap());
     let labels: Vec<&str> = renderer
         .total_list
         .iter()
         .map(|i| i.label.as_str())
         .collect();
-    assert_eq!(labels, vec!["+ workspace"]);
+    assert_eq!(
+        labels,
+        vec!["i"],
+        "coming back into a folder with no subfolders still announces a row",
+    );
 
-    // And `:` again lands on the real directory, not a doubled one.
-    press_colon(&mut renderer);
-    assert_eq!(renderer.providers[0].current_path(), ws.to_str().unwrap());
+    // `:` / Escape is a fixed point: repeating it must not walk the shell up or
+    // down the tree, nor double a segment (`/root/workspace/workspace`).
+    for _ in 0..3 {
+        press_colon(&mut renderer);
+        assert_eq!(renderer.providers[0].current_path(), ws.to_str().unwrap());
+        press_escape(&mut renderer);
+        assert_eq!(renderer.providers[0].current_path(), ws.to_str().unwrap());
+    }
 }
 #[test]
 fn terminal_history_children_are_still_reachable_and_escapable() {

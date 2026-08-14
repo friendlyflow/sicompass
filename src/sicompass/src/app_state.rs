@@ -663,6 +663,16 @@ pub struct AppRenderer {
     /// Configured save folder (relative to home, absolute, or empty → Downloads).
     pub save_folder_path: String,
 
+    // ---- Terminal shell view -----------------------------------------------
+    /// `current_id` at the moment `:` swapped the terminal's folder listing for
+    /// the shell scrollback, so Escape can put the cursor back on the row it
+    /// came from. `None` when no swap is outstanding.
+    ///
+    /// It has to be remembered across the two key events: while the shell is up,
+    /// the cursor's last index is a position in the scrollback, which says
+    /// nothing about which folder was focused before the swap.
+    pub terminal_shell_return_id: Option<IdArray>,
+
     // ---- Current URI -------------------------------------------------------
     pub current_uri: String,
 
@@ -847,6 +857,7 @@ impl AppRenderer {
             save_as_source_root_idx: 0,
             save_as_return_id: IdArray::new(),
             save_folder_path: String::new(),
+            terminal_shell_return_id: None,
             current_uri: String::new(),
             pending_announcement: None,
             announcement_parity: false,
@@ -958,7 +969,10 @@ impl AppRenderer {
         let (cp, cf) = self.detach_content();
         self.tabs[active].providers = cp;
         self.tabs[active].ffon = cf;
-        // Swap in the target tab's parked content.
+        // Swap in the target tab's parked content. The pending shell-return row
+        // belongs to the outgoing tab's tree, so it dies with the switch rather
+        // than being consumed by an Escape over here.
+        self.terminal_shell_return_id = None;
         self.active_tab = target;
         let cp = std::mem::take(&mut self.tabs[target].providers);
         let cf = std::mem::take(&mut self.tabs[target].ffon);
@@ -978,13 +992,15 @@ impl AppRenderer {
         self.rebuild_and_clamp(&provider_path, current_id);
     }
 
-    /// Restore a tab by putting the cursor **on** `path` rather than inside it,
-    /// rebuilding the tree from the filesystem root to locate it by name.
+    /// Restore a tab by rebuilding the tree from the filesystem root to locate
+    /// `path` by name, leaving the cursor inside it.
     ///
     /// Used for a terminal saved with a shell open. The shell level cannot come
     /// back, and the folder it was running in need not be anywhere in the tree
     /// the user browsed — a `cd` can jump clean across the filesystem — so the
     /// ordinary "descend the saved path" restore has nothing to work from.
+    /// Landing inside the folder is what makes `:` after a restart reopen the
+    /// shell in the directory it was left in.
     ///
     /// Falls back to [`Self::rebuild_and_clamp`] if the path cannot be walked,
     /// e.g. a directory removed between sessions.
