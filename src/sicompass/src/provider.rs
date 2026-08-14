@@ -212,6 +212,51 @@ pub fn refresh_current_directory(renderer: &mut AppRenderer) {
     }
 }
 
+/// Re-fetch the active provider and replace only the `<button>` rows trailing
+/// its root, keeping child 0 and its whole subtree verbatim. Never moves the
+/// cursor.
+///
+/// For providers laid out as "one navigable document, then a block of
+/// regenerated sibling rows" — the web browser's URL bar followed by its recall
+/// history. [`refresh_current_directory`] rebuilds such a root wholesale from
+/// `fetch()`, which is built from the provider's own cache; every subtree the
+/// *app* grafted under a followed `<link>` (see `resolve_link_to_elements`)
+/// lives only in `renderer.ffon` and would be discarded, throwing the reader out
+/// of the page they were in. So a change that only re-labels the rows — marking
+/// one as bookmarked — must not go through it.
+///
+/// Only the fetched `Str`s carrying a `<button>` tag are spliced in, which also
+/// keeps a "Loading…" status line from landing where a row belongs. Child 0 is
+/// kept rather than replaced because the caller is not navigating: whatever the
+/// URL bar says now is still current.
+pub fn refresh_provider_root_rows(renderer: &mut AppRenderer) {
+    use sicompass_sdk::ffon::FfonElement;
+
+    let Some(idx) = renderer.current_id.get(0) else {
+        return;
+    };
+    if idx >= renderer.providers.len() || idx >= renderer.ffon.len() {
+        return;
+    }
+    let rows: Vec<FfonElement> = renderer.providers[idx]
+        .fetch()
+        .into_iter()
+        .skip(1)
+        .filter(|e| e.as_str().is_some_and(sicompass_sdk::tags::has_button))
+        .collect();
+    if let Some(err) = renderer.providers[idx].take_error() {
+        renderer.error_message = err;
+    }
+    let Some(root) = renderer.ffon[idx].as_obj_mut() else {
+        return;
+    };
+    if root.children.is_empty() {
+        return;
+    }
+    root.children.truncate(1);
+    root.children.extend(rows);
+}
+
 /// After a whole-tree rebuild, pull the cursor back to the deepest level that
 /// still exists.
 ///

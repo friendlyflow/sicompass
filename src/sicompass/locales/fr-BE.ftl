@@ -54,6 +54,7 @@ hint-f5-refresh = F5     Actualiser
 hint-m-meta = M      Méta
 hint-z-timeline = Z      Chronologie
 hint-w-where-am-i = w      Où suis-je
+hint-b-bookmark = b      Favori
 hint-i-edit = I      Modifier
 hint-i-edit-input = I      Modifier saisie
 hint-a-append = A      Ajouter

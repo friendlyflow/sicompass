@@ -398,6 +398,10 @@ sicompass-settings = { workspace = true }
 sicompass-filebrowser = { workspace = true }
 sicompass-tutorial = { workspace = true }
 sicompass-webbrowser = { workspace = true }
+# Only to switch its recall history off for the test binary — see
+# `ensure_builtins`. Without it, every run appends the commands these tests run
+# to the developer's own shell history.
+sicompass-terminal = { workspace = true }
 sicompass-chatclient = { workspace = true }
 sicompass-emailclient = { workspace = true }
 sicompass-remote = { workspace = true }

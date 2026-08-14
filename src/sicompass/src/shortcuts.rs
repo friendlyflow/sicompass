@@ -212,6 +212,20 @@ fn avail_provider_has_delete(r: &AppRenderer) -> bool {
         .any(|c| c == "delete")
 }
 
+/// True when the active provider's command list includes `"toggle bookmark"`.
+///
+/// Gates `b` on the advertised command rather than on a provider name, so any
+/// provider that grows bookmarks gets the key for free. `not_at_root` is
+/// required and is not redundant: `get_commands` resolves through
+/// `current_id.get(0)`, which on the root provider list still returns the
+/// *highlighted* provider, so without it `b` there would bookmark.
+fn avail_provider_has_toggle_bookmark(r: &AppRenderer) -> bool {
+    not_at_root(r)
+        && crate::provider::get_commands(r)
+            .iter()
+            .any(|c| c == crate::handlers::CMD_TOGGLE_BOOKMARK)
+}
+
 /// True when the focused container's children contain an `<input>` element.
 fn children_have_input(r: &AppRenderer) -> bool {
     let Some(slice) = get_ffon_at_id(&r.ffon, &r.current_id) else {
@@ -1426,6 +1440,19 @@ pub static SHORTCUTS: &[Shortcut] = &[
         label: "w      Where am I",
         is_available: always,
         handle: handlers::handle_speak_position,
+    },
+    // ---- b (toggle bookmark) ---------------------------------------------
+    // General mode only, and only for a provider advertising the command (the
+    // web browser). Marks the focused history row, or the page being read.
+    Shortcut {
+        key: Keycode::B,
+        key2: None,
+        ctrl: false,
+        shift: false,
+        modes: &[Coordinate::General],
+        label: "b      Bookmark",
+        is_available: avail_provider_has_toggle_bookmark,
+        handle: handlers::handle_toggle_bookmark,
     },
     // ---- Ctrl+D / Delete key → provider delete command (email message delete) ----
     // These must come before the editor/filebrowser Ctrl+D rows so they win when

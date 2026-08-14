@@ -56,6 +56,7 @@ hint-f5-refresh = F5     Refresh
 hint-m-meta = M      Meta
 hint-z-timeline = Z      Timeline
 hint-w-where-am-i = w      Where am I
+hint-b-bookmark = b      Bookmark
 hint-i-edit = I      Edit
 hint-i-edit-input = I      Edit input
 hint-a-append = A      Append
