@@ -177,14 +177,22 @@ pub fn refresh_current_directory(renderer: &mut AppRenderer) {
         ));
     }
 
-    // The settings provider's `fetch()` returns its whole navigable tree (the
-    // sections), not the children of the current sub-path — its in-memory tree
-    // is canonical and pre-built. Grafting that whole-tree fetch onto a deep
-    // container (a settings section) would nest the entire tree inside one
-    // section and derail navigation, so it must always rebuild the provider
-    // root. Path-scoped providers (filebrowser, …) fetch only the current
-    // level and graft it in place.
-    let whole_tree = renderer.providers[idx].name() == "settings";
+    // Some providers' `fetch()` returns their whole navigable tree rather than
+    // the children of the current sub-path. Grafting such a fetch onto a deep
+    // container nests the entire tree inside one of its own descendants and
+    // derails navigation, so these must always rebuild the provider root.
+    // Path-scoped providers (filebrowser, …) fetch only the current level and
+    // graft it in place.
+    //
+    // - settings: its in-memory tree is canonical and pre-built, so a fetch
+    //   grafted onto a section would nest every section inside that one.
+    // - webbrowser: `fetch()` always returns the URL bar (with the loaded page
+    //   as its children) plus the recall history, whatever `current_path()`
+    //   says. Grafting that into the page — which F5 does, from anywhere the
+    //   user is reading — buried a second URL bar and a copy of the history at
+    //   depth 3, where neither the history rows nor the "enter the page"
+    //   descent work, because both are anchored to the provider's own top level.
+    let whole_tree = matches!(renderer.providers[idx].name(), "settings" | "webbrowser");
 
     if renderer.current_id.depth() >= 2 && !whole_tree {
         // Replace the children vec backing the current list, in place.
@@ -200,6 +208,42 @@ pub fn refresh_current_directory(renderer: &mut AppRenderer) {
             root.as_obj_mut().unwrap().push(child);
         }
         renderer.ffon[idx] = root;
+        clamp_cursor_into_rebuilt_tree(renderer, idx);
+    }
+}
+
+/// After a whole-tree rebuild, pull the cursor back to the deepest level that
+/// still exists.
+///
+/// A rebuilt root can be shallower than the one the cursor was standing in: the
+/// web browser's URL bar is a childless `Str` while a load is in flight, so a
+/// cursor inside the previous page has nothing left to resolve against and the
+/// list renders blank. Mirrors the clamp `AppRenderer::load_active_tab` applies
+/// to a restored cursor, including resetting the provider path once the cursor
+/// is back on the provider's own listing — a stale path would make the next URL
+/// bar commit look like a form field to `commit_edit`.
+fn clamp_cursor_into_rebuilt_tree(renderer: &mut AppRenderer, idx: usize) {
+    let before = renderer.current_id.depth();
+    while renderer.current_id.depth() > 2
+        && sicompass_sdk::ffon::get_ffon_at_id(&renderer.ffon, &renderer.current_id)
+            .is_none_or(|slice| slice.is_empty())
+    {
+        renderer.current_id.pop();
+    }
+    if renderer.current_id.depth() < before
+        && renderer.current_id.depth() <= 2
+        && let Some(p) = renderer.providers.get_mut(idx)
+        && !p.path_is_filesystem()
+    {
+        p.set_current_path("/");
+    }
+    // Keep the index inside the row count the rebuilt level actually has.
+    if let Some(slice) = sicompass_sdk::ffon::get_ffon_at_id(&renderer.ffon, &renderer.current_id) {
+        let last = renderer.current_id.last().unwrap_or(0);
+        let max = slice.len().saturating_sub(1);
+        if last > max {
+            renderer.current_id.set_last(max);
+        }
     }
 }
 
