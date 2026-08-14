@@ -71,6 +71,29 @@ fn test_no_launch() -> bool {
 }
 
 // ---------------------------------------------------------------------------
+// Test stub: keep the URL history purely in memory.
+//
+// Set via `_set_test_no_history(true)` from integration tests, which reach the
+// provider as a `Box<dyn Provider>` and so cannot set the per-instance
+// `url_history_path` override the in-crate tests use.  When enabled,
+// `resolve_url_history_path` returns `None`: `init()` reads nothing and no
+// write ever lands, while the in-memory list still behaves normally, so a test
+// can build history through the real UI and press a history button.
+// ---------------------------------------------------------------------------
+
+static TEST_NO_HISTORY: AtomicBool = AtomicBool::new(false);
+
+#[doc(hidden)]
+pub fn _set_test_no_history(enabled: bool) {
+    TEST_NO_HISTORY.store(enabled, std::sync::atomic::Ordering::Release);
+}
+
+#[inline]
+fn test_no_history() -> bool {
+    TEST_NO_HISTORY.load(std::sync::atomic::Ordering::Acquire)
+}
+
+// ---------------------------------------------------------------------------
 // Hidden-content pruning
 //
 // The provider uses Chrome as a JS-capable HTML fetcher and then throws the
@@ -174,6 +197,21 @@ pub struct WebbrowserProvider {
     pending_enter_content: bool,
     // Handed to the app through `take_navigation_request` on the next poll.
     enter_content_request: bool,
+    // URLs the user has committed, newest first and deduplicated, emitted as
+    // root-level `<button>` siblings *below* the URL bar. Not children of it:
+    // the URL bar's children are the loaded page, and the app descends into
+    // them when a load lands.
+    url_history: Vec<String>,
+    // Cap on `url_history`, mirroring the terminal's `command_history_size`.
+    // 0 means unbounded.
+    url_history_size: usize,
+    // Once-guard for the disk read, and the gate on every disk write: nothing
+    // is written before something has been read. A provider whose `init()` was
+    // never called therefore cannot truncate the user's history file — which is
+    // also what keeps every in-crate unit test off the real one.
+    url_history_loaded: bool,
+    // Per-instance path override for the in-crate tests.
+    url_history_path: Option<std::path::PathBuf>,
 }
 
 impl WebbrowserProvider {
@@ -197,6 +235,10 @@ impl WebbrowserProvider {
             submit_in_flight: Arc::new(AtomicBool::new(false)),
             pending_enter_content: false,
             enter_content_request: false,
+            url_history: Vec::new(),
+            url_history_size: 50_000,
+            url_history_loaded: false,
+            url_history_path: None,
         }
     }
 
@@ -219,6 +261,20 @@ impl WebbrowserProvider {
     fn load_url(&mut self, url: &str) {
         // URL is changing: any form values typed for the previous page are stale.
         self.form_field_values.clear();
+
+        // Every navigation this provider starts ends with the user in the page:
+        // a typed URL, a recall-history row, and the three commands that reload
+        // the current page (refresh, choose language, show/hide hidden).
+        //
+        // The reload commands are included because a refresh rebuilds the
+        // provider root, and while the load is in flight the URL bar is a
+        // childless Str — so a cursor that was inside the page has nothing left
+        // to stand on and gets clamped back to the bar. Without re-arming, F5
+        // from inside an article would silently strand the reader on the URL
+        // bar. The app only honours the request from the provider's own top
+        // level, so on the synchronous path — where the cursor never left the
+        // page — this is a no-op rather than a second descent.
+        self.pending_enter_content = true;
 
         // Test stub: skip Chrome entirely, set a placeholder page.
         if test_no_launch() {
@@ -312,6 +368,156 @@ impl WebbrowserProvider {
             self.pending_enter_content = false;
             self.enter_content_request = true;
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // URL recall history
+    //
+    // The terminal keeps a chronological log of every command. A browser wants
+    // the same recall, but ranked: revisiting a site should lift it back to the
+    // top rather than add a second copy. That one difference is why the file is
+    // rewritten in full on every change instead of appended to.
+    // -----------------------------------------------------------------------
+
+    /// Where the recall history lives. `None` if no usable state directory is
+    /// available (e.g. `$HOME` unset), which disables the feature's persistence
+    /// without disabling the in-memory list.
+    ///
+    /// Deliberately not next to the Chrome profile like `language_pref_path`:
+    /// that one sits there so "clear cookies" leaves it alone, whereas this is
+    /// user state and belongs in the state dir, next to the terminal's.
+    fn resolve_url_history_path(&self) -> Option<std::path::PathBuf> {
+        if let Some(p) = &self.url_history_path {
+            return Some(p.clone());
+        }
+        if test_no_history() {
+            return None;
+        }
+        sicompass_sdk::platform::state_home()
+            .map(|s| s.join("sicompass").join("webbrowser").join("history"))
+    }
+
+    /// Read every line of the history file, newest first.
+    ///
+    /// `Some` when the history is known: the file was read, or there is no file
+    /// yet (a first run — an empty list, with nothing to lose). `None` when a
+    /// file is there but could not be read: no permission, a failing disk, a
+    /// home directory that has not finished mounting.
+    ///
+    /// The distinction matters because the whole file is rewritten on every
+    /// save. Treating "cannot read" as "empty" would turn a passing error into
+    /// permanent loss of the user's history the moment they visit one more
+    /// page. Callers must leave the file untouched on `None`. This is the same
+    /// rule `load_root_for_write` applies to `settings.json` in lib_settings.
+    fn read_url_history_file(&self) -> Option<Vec<String>> {
+        let Some(path) = self.resolve_url_history_path() else {
+            return Some(Vec::new());
+        };
+        match std::fs::read_to_string(&path) {
+            Ok(content) => Some(content.lines().filter_map(sanitize_history_url).collect()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Some(Vec::new()),
+            Err(e) => {
+                eprintln!(
+                    "sicompass: {} is unreadable ({e}) — URL history left intact, \
+                     this session's pages will not be remembered",
+                    path.display()
+                );
+                None
+            }
+        }
+    }
+
+    /// Load the recall history from disk. Called once, from `init()`.
+    ///
+    /// Reading here rather than lazily from `fetch()` is deliberate: it means a
+    /// provider built without `init()` — every in-crate unit test — has an empty
+    /// history and never touches the user's real file.
+    fn load_url_history(&mut self) {
+        if self.url_history_loaded {
+            return;
+        }
+        self.url_history_loaded = true;
+        // An unreadable file starts the session with an empty list, but
+        // `record_url_history` re-reads before every save and will refuse to
+        // write over what it could not read.
+        let mut lines = self.read_url_history_file().unwrap_or_default();
+        dedup_keeping_first(&mut lines);
+        self.url_history = lines;
+        self.trim_url_history();
+    }
+
+    /// Drop the oldest entries past the cap. The list is newest-first, so that
+    /// is a truncation from the tail.
+    fn trim_url_history(&mut self) {
+        if self.url_history_size > 0 && self.url_history.len() > self.url_history_size {
+            self.url_history.truncate(self.url_history_size);
+        }
+    }
+
+    /// Rewrite the history file from memory.
+    ///
+    /// Gated on `url_history_loaded`: writing from memory that was never loaded
+    /// would truncate whatever the user already had.
+    ///
+    /// `atomic_write` rather than `fs::write` because the whole file is
+    /// rewritten on every navigation, and `fs::write` truncates the target
+    /// first — a second tab starting up could read it empty.
+    fn save_url_history(&self) {
+        if !self.url_history_loaded {
+            return;
+        }
+        let Some(path) = self.resolve_url_history_path() else {
+            return;
+        };
+        if let Some(parent) = path.parent() {
+            sicompass_sdk::platform::make_dirs(parent);
+        }
+        let mut content = String::with_capacity(self.url_history.len() * 32);
+        for url in &self.url_history {
+            content.push_str(url);
+            content.push('\n');
+        }
+        sicompass_sdk::platform::atomic_write(&path, &content);
+    }
+
+    /// Put `url` at the top of the recall history, in memory and on disk.
+    /// Already present means moved, not duplicated.
+    ///
+    /// Read-merge-write rather than a blind rewrite: each browser tab owns its
+    /// own provider instance with its own copy of the list, so writing only
+    /// what this instance remembers would drop everything another tab recorded
+    /// since this one last read.
+    fn record_url_history(&mut self, url: &str) {
+        let Some(url) = sanitize_history_url(url) else {
+            return;
+        };
+        let disk = self.read_url_history_file();
+        let mut merged = Vec::with_capacity(1 + self.url_history.len());
+        merged.push(url);
+        merged.append(&mut self.url_history);
+        if let Some(disk) = &disk {
+            merged.extend(disk.iter().cloned());
+        }
+        dedup_keeping_first(&mut merged);
+        self.url_history = merged;
+        self.trim_url_history();
+        // Only when the pre-write read succeeded. Saving now would rewrite the
+        // file from a list that is missing everything the failed read could not
+        // see, which is how a passing I/O error becomes a lost history.
+        if disk.is_some() {
+            self.save_url_history();
+        }
+    }
+
+    /// The recall history as activatable rows, newest first.
+    ///
+    /// Same payload shape as the terminal's history buttons: the function name
+    /// is the URL itself, so `on_button_press` receives it directly.
+    fn history_buttons(&self) -> Vec<FfonElement> {
+        self.url_history
+            .iter()
+            .map(|u| FfonElement::new_str(format!("<button>{u}</button>{u}")))
+            .collect()
     }
 
     /// Persist a form field's new value into `cached_page` so re-fetches keep it.
@@ -455,6 +661,10 @@ impl Provider for WebbrowserProvider {
         if self.load_inflight.load(Ordering::Acquire) {
             result.push(FfonElement::new_str(url_bar));
             result.push(FfonElement::new_str("Loading…".to_owned()));
+            // History stays put while loading. Dropping it here would shrink
+            // the root list to two rows and grow it back seconds later, moving
+            // every index out from under a cursor parked on one.
+            result.extend(self.history_buttons());
             return result;
         }
 
@@ -469,6 +679,11 @@ impl Provider for WebbrowserProvider {
         } else {
             result.push(FfonElement::new_str(url_bar));
         }
+
+        // Recall history, newest first, as siblings *below* the URL bar. Index
+        // 0 is always the URL bar and 1.. is always the history: the app relies
+        // on that when it parks the cursor after a history row is pressed.
+        result.extend(self.history_buttons());
 
         result
     }
@@ -502,12 +717,12 @@ impl Provider for WebbrowserProvider {
         let Some(full_url) = normalize_url_input(new_content) else {
             return false;
         };
-        // The cursor is on the URL bar the user just typed into. Once the page
-        // is readable the app should drop them into its content, so they don't
-        // have to press Right after every load. Armed here rather than inside
-        // `load_url` so the "refresh" command — which can run from anywhere in
-        // the page — never moves the cursor.
-        self.pending_enter_content = true;
+        // Recorded here rather than in `load_url`, whose other callers — the
+        // refresh, language and hidden-content commands — reload the page the
+        // user is already on and must not reorder the history.
+        self.record_url_history(&full_url);
+        // `load_url` arms the descent into the loaded page, so the user does not
+        // have to press Right after every navigation.
         self.load_url(&full_url);
         true
     }
@@ -534,6 +749,20 @@ impl Provider for WebbrowserProvider {
     }
 
     fn on_button_press(&mut self, function_name: &str) {
+        // A recall-history row: load it, and lift it back to the top so the
+        // list stays ranked by last use. Identical to typing the same URL into
+        // the bar, including arming the descent into the page content.
+        //
+        // Matched by membership rather than by shape, so a button the *page*
+        // happens to carry can never be mistaken for a history row and
+        // navigate the tab out from under the user.
+        if self.url_history.iter().any(|u| u == function_name) {
+            let url = function_name.to_owned();
+            self.record_url_history(&url);
+            self.load_url(&url);
+            return;
+        }
+
         // "submit:form_N" — find the submit button selector and click it.
         let Some(form_n_str) = function_name.strip_prefix("submit:form_") else {
             return;
@@ -660,6 +889,21 @@ impl Provider for WebbrowserProvider {
 
     fn take_error(&mut self) -> Option<String> {
         self.pending_error.lock().ok().and_then(|mut g| g.take())
+    }
+
+    fn init(&mut self) {
+        self.load_url_history();
+    }
+
+    fn on_setting_change(&mut self, key: &str, value: &str) {
+        if key == "urlHistorySize" {
+            // Garbage is ignored rather than reset to a default: a typo in the
+            // settings file should not silently discard the user's history.
+            if let Ok(n) = value.parse::<usize>() {
+                self.url_history_size = n;
+                self.trim_url_history();
+            }
+        }
     }
 
     fn cleanup(&mut self) {
@@ -910,6 +1154,41 @@ fn normalize_url_input(input: &str) -> Option<String> {
     } else {
         Some(format!("https://{trimmed}"))
     }
+}
+
+/// Longest URL the recall history will store. A runaway `data:` URL is not
+/// worth carrying in a file that is rewritten on every navigation.
+const MAX_HISTORY_URL_LEN: usize = 4096;
+
+/// Make `url` safe to carry as a `<button>…</button>` payload and as one line
+/// of the history file, or reject it.
+///
+/// `tags::extract_button_function_name` slices to the *first* `</button>`, so a
+/// URL containing that literal would come back truncated and press a different
+/// site than the row says. `<` and `>` are excluded characters in RFC 3986, so
+/// percent-encoding them denotes the same URL. Control characters and embedded
+/// whitespace are rejected outright rather than encoded: the file is
+/// line-based, and a URL bar entry containing them is a paste accident, not an
+/// address worth remembering.
+fn sanitize_history_url(url: &str) -> Option<String> {
+    let trimmed = url.trim();
+    if trimmed.is_empty() || trimmed.len() > MAX_HISTORY_URL_LEN {
+        return None;
+    }
+    if trimmed.chars().any(|c| c.is_control() || c.is_whitespace()) {
+        return None;
+    }
+    Some(trimmed.replace('<', "%3C").replace('>', "%3E"))
+}
+
+/// Drop later duplicates, keeping the first occurrence of each value.
+///
+/// `Vec::dedup` only collapses *adjacent* equals, which is the wrong tool for a
+/// most-recently-used list: the whole point is that a repeat visit appears at
+/// the top and its older copy, arbitrarily far down, disappears.
+fn dedup_keeping_first(items: &mut Vec<String>) {
+    let mut seen = std::collections::HashSet::new();
+    items.retain(|item| seen.insert(item.clone()));
 }
 
 /// Compare typed form values against a freshly-fetched form map.  Used by the
@@ -5766,7 +6045,7 @@ mod tests {
     }
 
     #[test]
-    fn url_commit_arms_enter_content_but_refresh_does_not() {
+    fn every_navigation_arms_the_descent_into_the_page() {
         let _flag = launch_flag_guard(true);
         let mut p = WebbrowserProvider::new();
         assert!(p.commit_edit("", "https://example.invalid"));
@@ -5776,11 +6055,431 @@ mod tests {
             "committing a URL should drop the user into the loaded page"
         );
 
-        // `refresh` reloads the same URL, but can be run from anywhere inside
-        // the page — it must leave the cursor alone.
+        // `refresh` used to be asserted *not* to arm this, back when it grafted
+        // the new content in place and so left the cursor standing on something
+        // real. It now rebuilds the provider root, and while the reload is in
+        // flight the URL bar is childless — a cursor inside the page is clamped
+        // back to the bar. Re-arming is what carries the reader back into the
+        // article they pressed F5 on. The app ignores the request unless the
+        // cursor is at the provider's top level, so this cannot double-descend
+        // someone who never left the page.
         let mut error = String::new();
-        p.handle_command("refresh", "", 0, &mut error);
-        assert!(p.take_navigation_request().is_none());
+        for cmd in ["refresh", CMD_CHOOSE_LANGUAGE, CMD_SHOW_HIDDEN] {
+            p.handle_command(cmd, "", 0, &mut error);
+            assert_eq!(
+                p.take_navigation_request(),
+                Some(sicompass_sdk::NavigationRequest::EnterChildren),
+                "`{cmd}` reloads the page, so it must land the user back in it"
+            );
+        }
+    }
+
+    // ---- URL recall history ----
+
+    /// A provider whose history file lives in `dir`, with `init()` already run
+    /// so the disk side is live. The path override is per-instance, so these
+    /// tests stay parallel-safe.
+    fn history_provider(dir: &std::path::Path) -> WebbrowserProvider {
+        let mut p = WebbrowserProvider::new();
+        p.url_history_path = Some(dir.join("history"));
+        p.init();
+        p
+    }
+
+    /// The URLs behind the `<button>` rows `fetch()` emitted, in order.
+    fn history_rows(p: &mut WebbrowserProvider) -> Vec<String> {
+        p.fetch()
+            .iter()
+            .filter_map(|e| e.as_str())
+            .filter_map(sicompass_sdk::tags::extract_button_function_name)
+            .collect()
+    }
+
+    #[test]
+    fn committing_a_url_prepends_it_to_the_history() {
+        let _flag = launch_flag_guard(true);
+        let dir = tempfile::tempdir().unwrap();
+        let mut p = history_provider(dir.path());
+
+        p.commit_edit("", "https://a.invalid");
+        p.commit_edit("", "https://b.invalid");
+
+        assert_eq!(
+            p.url_history,
+            vec!["https://b.invalid", "https://a.invalid"],
+            "newest first"
+        );
+    }
+
+    #[test]
+    fn revisiting_a_url_moves_it_to_the_top_instead_of_duplicating_it() {
+        let _flag = launch_flag_guard(true);
+        let dir = tempfile::tempdir().unwrap();
+        let mut p = history_provider(dir.path());
+
+        p.commit_edit("", "https://a.invalid");
+        p.commit_edit("", "https://b.invalid");
+        p.commit_edit("", "https://a.invalid");
+
+        assert_eq!(
+            p.url_history,
+            vec!["https://a.invalid", "https://b.invalid"],
+            "a revisit ranks, it does not accumulate"
+        );
+    }
+
+    #[test]
+    fn url_history_survives_a_restart() {
+        let _flag = launch_flag_guard(true);
+        let dir = tempfile::tempdir().unwrap();
+        {
+            let mut p = history_provider(dir.path());
+            p.commit_edit("", "https://a.invalid");
+            p.commit_edit("", "https://b.invalid");
+        }
+        let p = history_provider(dir.path());
+        assert_eq!(
+            p.url_history,
+            vec!["https://b.invalid", "https://a.invalid"]
+        );
+    }
+
+    #[test]
+    fn the_history_file_is_newest_first_one_url_per_line() {
+        let _flag = launch_flag_guard(true);
+        let dir = tempfile::tempdir().unwrap();
+        let mut p = history_provider(dir.path());
+        p.commit_edit("", "https://a.invalid");
+        p.commit_edit("", "https://b.invalid");
+
+        let raw = std::fs::read_to_string(dir.path().join("history")).unwrap();
+        assert_eq!(raw, "https://b.invalid\nhttps://a.invalid\n");
+    }
+
+    #[test]
+    fn fetch_puts_history_below_the_url_bar_as_root_siblings() {
+        let _flag = launch_flag_guard(true);
+        let dir = tempfile::tempdir().unwrap();
+        let mut p = history_provider(dir.path());
+        p.commit_edit("", "https://a.invalid");
+        p.commit_edit("", "https://b.invalid");
+
+        let items = p.fetch();
+        assert_eq!(items.len(), 3, "URL bar plus two history rows: {items:?}");
+
+        // Index 0 is still the URL bar, and it is the loaded page's parent.
+        let url_bar = items[0].as_obj().expect("a page is loaded");
+        assert!(sicompass_sdk::tags::has_input(&url_bar.key));
+        assert!(
+            !url_bar
+                .children
+                .iter()
+                .filter_map(|c| c.as_str())
+                .any(sicompass_sdk::tags::has_button),
+            "history must not be mixed into the page content: {:?}",
+            url_bar.children
+        );
+
+        // Everything below it is a history button, newest first.
+        for row in &items[1..] {
+            assert!(sicompass_sdk::tags::has_button(row.as_str().unwrap()));
+        }
+        assert_eq!(
+            history_rows(&mut p),
+            vec!["https://b.invalid", "https://a.invalid"]
+        );
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    #[test]
+    fn fetch_keeps_history_visible_while_loading() {
+        let _flag = launch_flag_guard(true);
+        let dir = tempfile::tempdir().unwrap();
+        let mut p = history_provider(dir.path());
+        p.commit_edit("", "https://a.invalid");
+
+        p.load_inflight.store(true, Ordering::Release);
+        let items = p.fetch();
+        p.load_inflight.store(false, Ordering::Release);
+
+        assert_eq!(
+            items.len(),
+            3,
+            "URL bar, status line, and the history row: {items:?}"
+        );
+        assert_eq!(items[1].as_str().unwrap(), "Loading…");
+        assert_eq!(
+            sicompass_sdk::tags::extract_button_function_name(items[2].as_str().unwrap()),
+            Some("https://a.invalid".to_owned()),
+        );
+    }
+
+    #[test]
+    fn pressing_a_history_row_moves_it_to_the_top_and_loads_it() {
+        let _flag = launch_flag_guard(true);
+        let dir = tempfile::tempdir().unwrap();
+        let mut p = history_provider(dir.path());
+        p.commit_edit("", "https://a.invalid");
+        p.commit_edit("", "https://b.invalid");
+        let _ = p.take_navigation_request();
+
+        p.on_button_press("https://a.invalid");
+
+        assert_eq!(p.current_url, "https://a.invalid", "the site is loaded");
+        assert_eq!(
+            p.url_history,
+            vec!["https://a.invalid", "https://b.invalid"],
+            "the pressed row moves to the top"
+        );
+        assert_eq!(
+            p.take_navigation_request(),
+            Some(sicompass_sdk::NavigationRequest::EnterChildren),
+            "and the user is dropped into the page, as if they had typed it"
+        );
+    }
+
+    #[test]
+    fn a_form_submit_press_is_not_mistaken_for_a_history_row() {
+        let _flag = launch_flag_guard(true);
+        let dir = tempfile::tempdir().unwrap();
+        let mut p = history_provider(dir.path());
+        p.commit_edit("", "https://a.invalid");
+        let before = p.url_history.clone();
+
+        p.on_button_press("submit:form_1");
+
+        assert_eq!(p.url_history, before);
+    }
+
+    #[test]
+    fn a_page_button_carrying_a_url_does_not_navigate_the_tab() {
+        let _flag = launch_flag_guard(true);
+        let dir = tempfile::tempdir().unwrap();
+        let mut p = history_provider(dir.path());
+        p.commit_edit("", "https://a.invalid");
+
+        // Shaped like a history row, but never recorded as one.
+        p.on_button_press("https://elsewhere.invalid");
+
+        assert_eq!(p.current_url, "https://a.invalid");
+        assert_eq!(p.url_history, vec!["https://a.invalid"]);
+    }
+
+    #[test]
+    fn reloading_commands_do_not_reorder_the_history() {
+        let _flag = launch_flag_guard(true);
+        let dir = tempfile::tempdir().unwrap();
+        let mut p = history_provider(dir.path());
+        p.commit_edit("", "https://a.invalid");
+        p.commit_edit("", "https://b.invalid");
+        // The user walked back to an older site, so it is on top again.
+        p.on_button_press("https://a.invalid");
+        let ranked = p.url_history.clone();
+
+        let mut error = String::new();
+        for cmd in ["refresh", CMD_CHOOSE_LANGUAGE, CMD_SHOW_HIDDEN] {
+            p.handle_command(cmd, "", 0, &mut error);
+            assert_eq!(
+                p.url_history, ranked,
+                "`{cmd}` reloads the current page and must not touch the ranking"
+            );
+        }
+    }
+
+    #[test]
+    fn url_history_size_setting_drops_the_oldest() {
+        let _flag = launch_flag_guard(true);
+        let dir = tempfile::tempdir().unwrap();
+        let mut p = history_provider(dir.path());
+        p.commit_edit("", "https://a.invalid");
+        p.commit_edit("", "https://b.invalid");
+        p.commit_edit("", "https://c.invalid");
+
+        p.on_setting_change("urlHistorySize", "2");
+
+        assert_eq!(
+            p.url_history,
+            vec!["https://c.invalid", "https://b.invalid"]
+        );
+        // And the cap survives the next navigation's read-merge-write, rather
+        // than the dropped entry coming back off disk.
+        p.commit_edit("", "https://d.invalid");
+        assert_eq!(
+            p.url_history,
+            vec!["https://d.invalid", "https://c.invalid"]
+        );
+    }
+
+    #[test]
+    fn url_history_size_zero_is_unbounded() {
+        let _flag = launch_flag_guard(true);
+        let dir = tempfile::tempdir().unwrap();
+        let mut p = history_provider(dir.path());
+        p.on_setting_change("urlHistorySize", "0");
+        for i in 0..10 {
+            p.commit_edit("", &format!("https://{i}.invalid"));
+        }
+        assert_eq!(p.url_history.len(), 10);
+    }
+
+    #[test]
+    fn on_setting_change_ignores_a_garbage_history_size() {
+        let mut p = WebbrowserProvider::new();
+        p.on_setting_change("urlHistorySize", "lots");
+        assert_eq!(p.url_history_size, 50_000);
+    }
+
+    #[test]
+    fn a_url_containing_a_close_button_tag_round_trips() {
+        let _flag = launch_flag_guard(true);
+        let dir = tempfile::tempdir().unwrap();
+        let mut p = history_provider(dir.path());
+
+        p.commit_edit("", "https://x.invalid/?q=</button>evil");
+
+        assert_eq!(
+            p.url_history,
+            vec!["https://x.invalid/?q=%3C/button%3Eevil"],
+            "the tag is encoded before it can truncate the button payload"
+        );
+        // Which is what the app will hand back to `on_button_press`.
+        assert_eq!(history_rows(&mut p), p.url_history);
+    }
+
+    #[test]
+    fn sanitize_history_url_rejects_unusable_entries() {
+        assert_eq!(sanitize_history_url(""), None);
+        assert_eq!(sanitize_history_url("   "), None);
+        assert_eq!(sanitize_history_url("https://a.invalid/a b"), None);
+        assert_eq!(sanitize_history_url("https://a.invalid\u{7}"), None);
+        assert_eq!(
+            sanitize_history_url(&format!(
+                "https://{}.invalid",
+                "x".repeat(MAX_HISTORY_URL_LEN)
+            )),
+            None,
+        );
+        assert_eq!(
+            sanitize_history_url("  https://a.invalid  "),
+            Some("https://a.invalid".to_owned()),
+        );
+    }
+
+    #[test]
+    fn a_provider_that_was_never_initialised_never_touches_disk() {
+        let _flag = launch_flag_guard(true);
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("history");
+        std::fs::write(&path, "https://kept.invalid\n").unwrap();
+
+        // No `init()`: this is every in-crate unit test, and a real provider
+        // whose registration was cut short.
+        let mut p = WebbrowserProvider::new();
+        p.url_history_path = Some(path.clone());
+        p.commit_edit("", "https://new.invalid");
+
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "https://kept.invalid\n",
+            "writing from a list that was never loaded would truncate the user's history"
+        );
+    }
+
+    #[test]
+    fn a_second_tab_recording_does_not_lose_the_first_tabs_entries() {
+        let _flag = launch_flag_guard(true);
+        let dir = tempfile::tempdir().unwrap();
+        // Two tabs, each with its own provider instance, both loaded up front.
+        let mut tab_a = history_provider(dir.path());
+        let mut tab_b = history_provider(dir.path());
+
+        tab_a.commit_edit("", "https://a.invalid");
+        tab_b.commit_edit("", "https://b.invalid");
+
+        assert_eq!(
+            tab_b.url_history,
+            vec!["https://b.invalid", "https://a.invalid"],
+            "the file is rewritten in full, so tab B has to merge what tab A wrote"
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("history")).unwrap(),
+            "https://b.invalid\nhttps://a.invalid\n",
+        );
+    }
+
+    /// The file cannot be read, but its directory is perfectly writable — a
+    /// permission problem, the everyday shape of this failure. Without the
+    /// `disk.is_some()` guard in `record_url_history` the save succeeds and
+    /// replaces a full history with the single URL of this session.
+    ///
+    /// Not a directory-in-place-of-the-file: `atomic_write` renames onto the
+    /// target, which fails against a directory too, so that version of the test
+    /// passes whether or not the guard is there.
+    #[cfg(unix)]
+    #[test]
+    fn an_unreadable_history_file_is_never_overwritten() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let _flag = launch_flag_guard(true);
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("history");
+        std::fs::write(
+            &path,
+            "https://kept-one.invalid\nhttps://kept-two.invalid\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+        // root ignores the mode bits, so there is nothing to test there.
+        if std::fs::read_to_string(&path).is_ok() {
+            return;
+        }
+
+        let mut p = WebbrowserProvider::new();
+        p.url_history_path = Some(path.clone());
+        p.init();
+        p.commit_edit("", "https://new.invalid");
+
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "https://kept-one.invalid\nhttps://kept-two.invalid\n",
+            "a history that could not be read must survive exactly as it was"
+        );
+        // The session still works; the new URL is just not persisted over
+        // something we could not see.
+        assert_eq!(p.url_history, vec!["https://new.invalid"]);
+    }
+
+    #[test]
+    fn a_missing_history_file_is_a_first_run_not_an_error() {
+        let _flag = launch_flag_guard(true);
+        let dir = tempfile::tempdir().unwrap();
+        let mut p = history_provider(dir.path());
+        p.commit_edit("", "https://a.invalid");
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("history")).unwrap(),
+            "https://a.invalid\n",
+            "no file yet must still start recording"
+        );
+    }
+
+    #[test]
+    fn a_corrupt_history_file_is_filtered_not_fatal() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("history"),
+            "https://ok.invalid\n\nnot a url with spaces\nhttps://ok.invalid\nhttps://other.invalid\n",
+        )
+        .unwrap();
+
+        let p = history_provider(dir.path());
+
+        assert_eq!(
+            p.url_history,
+            vec!["https://ok.invalid", "https://other.invalid"],
+            "unusable lines dropped, duplicates collapsed to the first (newest) copy"
+        );
     }
 
     #[test]
@@ -7315,9 +8014,18 @@ mod tests {
 /// Register the web browser with the SDK factory and manifest registries.
 pub fn register() {
     sicompass_sdk::register_provider_factory("webbrowser", || Box::new(WebbrowserProvider::new()));
-    sicompass_sdk::register_builtin_manifest(sicompass_sdk::BuiltinManifest::new(
-        "webbrowser",
-        "web browser",
-    ));
+    sicompass_sdk::register_builtin_manifest(
+        sicompass_sdk::BuiltinManifest::new("webbrowser", "web browser").with_settings(vec![
+            // `urlHistorySize`, not `historySize`: settings are broadcast to
+            // every provider in every tab by bare key, so the key namespace is
+            // shared across the whole app.
+            sicompass_sdk::SettingDecl::text(
+                "web browser",
+                "URL history",
+                "urlHistorySize",
+                "50000",
+            ),
+        ]),
+    );
     sicompass_sdk::register_url_fetcher(fetch_url_to_ffon);
 }

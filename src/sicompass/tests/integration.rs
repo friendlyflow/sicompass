@@ -18,6 +18,13 @@ use tempfile::TempDir;
 /// Call once per test binary to populate the SDK factory registry.
 fn ensure_builtins() {
     sicompass_builtins::register_all();
+    // Keep the web browser's URL history in memory for the whole binary.
+    // Set here rather than in `new_with_webbrowser` because a webbrowser
+    // provider is also built behind the app's own back — the `enable_webbrowser`
+    // settings tests go through `programs.rs`, not through the harness — and
+    // whichever test runs first must not leave the developer's real history
+    // file rewritten.
+    sicompass_webbrowser::_set_test_no_history(true);
 }
 
 // ---------------------------------------------------------------------------
@@ -1018,6 +1025,280 @@ fn webbrowser_url_commit_enters_page_content() {
     assert!(
         label.contains("second.invalid"),
         "second navigation should land in the new page's content, got: {label:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Web browser URL recall history
+// ---------------------------------------------------------------------------
+
+/// Walk to the web browser's URL bar and leave the cursor on it (depth 2,
+/// index 0).
+fn enter_webbrowser_at_url_bar(h: &mut Harness) -> usize {
+    let wb_idx = h.provider_idx("webbrowser").expect("webbrowser not found");
+    navigate_to_provider(h.r(), wb_idx);
+    press_right(h.r());
+    let cur = h.renderer.current_id.get(1).unwrap_or(0);
+    for _ in 0..cur {
+        press_up(h.r());
+    }
+    wb_idx
+}
+
+/// Type `url` into the URL bar and commit it, leaving the cursor inside the
+/// loaded page. Assumes the cursor is on the URL bar.
+///
+/// `i` opens insert mode on whatever the bar already holds (`https://`, or the
+/// previous site), so this selects it first — the same Ctrl+A the user presses
+/// to replace an address rather than type around it.
+fn commit_url(h: &mut Harness, url: &str) {
+    press(h.r(), Keycode::I);
+    press_ctrl(h.r(), Keycode::A);
+    type_text(h.r(), url);
+    press_enter(h.r());
+}
+
+/// The web browser's root-level rows, as their raw FFON text.
+fn webbrowser_root_rows(h: &Harness, wb_idx: usize) -> Vec<String> {
+    h.renderer.ffon[wb_idx]
+        .as_obj()
+        .unwrap()
+        .children
+        .iter()
+        .map(|e| {
+            e.as_obj()
+                .map(|o| o.key.clone())
+                .or_else(|| e.as_str().map(|s| s.to_owned()))
+                .unwrap_or_default()
+        })
+        .collect()
+}
+
+/// Committed URLs become buttons *below* the URL bar at the same level, never
+/// children of it — the URL bar's children are the loaded page.
+#[test]
+fn webbrowser_history_rows_are_siblings_below_the_url_bar() {
+    let mut h = Harness::new_with_webbrowser();
+    let wb_idx = enter_webbrowser_at_url_bar(&mut h);
+
+    commit_url(&mut h, "https://first.invalid");
+    press_left(h.r());
+    commit_url(&mut h, "https://second.invalid");
+    press_left(h.r());
+
+    let rows = webbrowser_root_rows(&h, wb_idx);
+    assert_eq!(rows.len(), 3, "URL bar plus two history rows: {rows:?}");
+    assert!(
+        sicompass_sdk::tags::has_input(&rows[0]),
+        "row 0 is the URL bar: {rows:?}"
+    );
+    assert_eq!(
+        rows[1..]
+            .iter()
+            .filter_map(|r| sicompass_sdk::tags::extract_button_function_name(r))
+            .collect::<Vec<_>>(),
+        vec!["https://second.invalid", "https://first.invalid"],
+        "newest first: {rows:?}"
+    );
+
+    // And nothing was grafted into the page content.
+    let url_bar = h.renderer.ffon[wb_idx].as_obj().unwrap().children[0]
+        .as_obj()
+        .expect("a page is loaded, so the URL bar is an Obj");
+    assert!(
+        !url_bar
+            .children
+            .iter()
+            .filter_map(|c| c.as_str())
+            .any(sicompass_sdk::tags::has_button),
+        "history must stay out of the page content: {:?}",
+        url_bar.children
+    );
+}
+
+/// Enter on a history row loads that site and drops the user into its content,
+/// exactly as retyping the URL would, and lifts the row back to the top.
+#[test]
+fn webbrowser_history_row_loads_the_site_and_enters_its_content() {
+    let mut h = Harness::new_with_webbrowser();
+    let wb_idx = enter_webbrowser_at_url_bar(&mut h);
+
+    commit_url(&mut h, "https://first.invalid");
+    press_left(h.r());
+    commit_url(&mut h, "https://second.invalid");
+    press_left(h.r());
+
+    // Root is [URL bar, second, first] — walk down to the older entry.
+    press_down(h.r());
+    press_down(h.r());
+    assert_eq!(h.renderer.current_id.get(1), Some(2));
+    press_enter(h.r());
+
+    // The press parks the cursor on the URL bar, where the page lands.
+    assert_eq!(
+        h.renderer.current_id.last(),
+        Some(0),
+        "the pressed row is gone from under the cursor; the page is at index 0"
+    );
+    assert_eq!(h.renderer.list_index, 0);
+
+    sicompass::events::run_provider_ticks(h.r());
+    sicompass::events::apply_navigation_requests(h.r());
+
+    assert_eq!(
+        h.renderer.current_id.depth(),
+        3,
+        "cursor should sit inside the newly loaded page"
+    );
+    let label = h
+        .renderer
+        .current_list_item()
+        .map(|it| it.label.clone())
+        .unwrap_or_default();
+    assert!(
+        label.contains("first.invalid"),
+        "the pressed site should be the one loaded, got: {label:?}"
+    );
+
+    press_left(h.r());
+    let rows = webbrowser_root_rows(&h, wb_idx);
+    assert_eq!(
+        rows[1..]
+            .iter()
+            .filter_map(|r| sicompass_sdk::tags::extract_button_function_name(r))
+            .collect::<Vec<_>>(),
+        vec!["https://first.invalid", "https://second.invalid"],
+        "the pressed row moves to the top: {rows:?}"
+    );
+}
+
+/// F5 from inside a loaded page used to graft the whole provider root — a
+/// second URL bar plus a copy of the history — into the page content at depth
+/// 3, where history rows are below the level both the focus jump and the
+/// "enter the page" descent are anchored to. Pressing a history row there did
+/// nothing at all.
+#[test]
+fn webbrowser_f5_inside_a_page_keeps_history_at_the_provider_top_level() {
+    let mut h = Harness::new_with_webbrowser();
+    let wb_idx = enter_webbrowser_at_url_bar(&mut h);
+
+    commit_url(&mut h, "https://first.invalid");
+    press_left(h.r());
+    commit_url(&mut h, "https://second.invalid");
+    // Sitting inside the loaded page, which is where F5 is normally pressed.
+    assert_eq!(h.renderer.current_id.depth(), 3);
+
+    sicompass::handlers::handle_f5(h.r());
+
+    // The provider root still reads [URL bar, newest, older] — nothing was
+    // nested into the page.
+    let rows = webbrowser_root_rows(&h, wb_idx);
+    assert!(sicompass_sdk::tags::has_input(&rows[0]), "{rows:?}");
+    assert_eq!(
+        rows[1..]
+            .iter()
+            .filter_map(|r| sicompass_sdk::tags::extract_button_function_name(r))
+            .collect::<Vec<_>>(),
+        vec!["https://second.invalid", "https://first.invalid"],
+        "F5 must not duplicate the history into the page: {rows:?}"
+    );
+    let url_bar = h.renderer.ffon[wb_idx].as_obj().unwrap().children[0]
+        .as_obj()
+        .expect("the page is still loaded under the URL bar");
+    assert!(
+        !url_bar
+            .children
+            .iter()
+            .filter_map(|c| c.as_str())
+            .any(sicompass_sdk::tags::has_button),
+        "no second URL bar or history copy inside the page: {:?}",
+        url_bar.children
+    );
+
+    // And a history row still works after the refresh — the actual symptom.
+    while h.renderer.current_id.depth() > 2 {
+        press_left(h.r());
+    }
+    while h.renderer.current_id.last() != Some(2) {
+        press_down(h.r());
+    }
+    press_enter(h.r());
+    assert_eq!(
+        h.renderer.current_id.last(),
+        Some(0),
+        "focus should still jump to the URL bar after an F5"
+    );
+    sicompass::events::run_provider_ticks(h.r());
+    sicompass::events::apply_navigation_requests(h.r());
+    assert_eq!(h.renderer.current_id.depth(), 3);
+    let label = h
+        .renderer
+        .current_list_item()
+        .map(|it| it.label.clone())
+        .unwrap_or_default();
+    assert!(
+        label.contains("first.invalid"),
+        "the pressed site should load, got: {label:?}"
+    );
+}
+
+/// F5 pressed while reading a page puts the reader back in that page. The
+/// refresh rebuilds the provider root, so a cursor inside the old page is
+/// clamped to the URL bar; the reload re-arms the descent to carry it back.
+#[test]
+fn webbrowser_f5_inside_a_page_returns_the_cursor_to_the_page() {
+    let mut h = Harness::new_with_webbrowser();
+    enter_webbrowser_at_url_bar(&mut h);
+    commit_url(&mut h, "https://first.invalid");
+    assert_eq!(h.renderer.current_id.depth(), 3, "reading the page");
+
+    // Simulate the async path: clamp the cursor to the URL bar the way an
+    // in-flight reload does, then let the landed content apply its request.
+    sicompass::handlers::handle_f5(h.r());
+    while h.renderer.current_id.depth() > 2 {
+        press_left(h.r());
+    }
+    sicompass::events::run_provider_ticks(h.r());
+    sicompass::events::apply_navigation_requests(h.r());
+
+    assert_eq!(
+        h.renderer.current_id.depth(),
+        3,
+        "F5 should hand the reader back to the page, not strand them on the bar"
+    );
+    let label = h
+        .renderer
+        .current_list_item()
+        .map(|it| it.label.clone())
+        .unwrap_or_default();
+    assert!(label.contains("first.invalid"), "got: {label:?}");
+}
+
+/// The terminal and claude providers turn Enter on a history button into "fill
+/// the input". The browser must not inherit that: its rows navigate.
+#[test]
+fn webbrowser_history_row_navigates_rather_than_filling_the_url_bar() {
+    let mut h = Harness::new_with_webbrowser();
+    let wb_idx = enter_webbrowser_at_url_bar(&mut h);
+
+    commit_url(&mut h, "https://first.invalid");
+    press_left(h.r());
+    commit_url(&mut h, "https://second.invalid");
+    press_left(h.r());
+
+    press_down(h.r());
+    press_down(h.r()); // the "first.invalid" row
+    press_enter(h.r());
+
+    let rows = webbrowser_root_rows(&h, wb_idx);
+    assert!(
+        rows[0].contains("first.invalid"),
+        "the URL bar should show the site that was actually loaded: {rows:?}"
+    );
+    assert_eq!(
+        h.renderer.coordinate,
+        Coordinate::General,
+        "a filled input would have left the user waiting to press Enter again"
     );
 }
 

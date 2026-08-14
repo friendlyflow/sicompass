@@ -1509,6 +1509,18 @@ pub fn handle_enter_general(r: &mut AppRenderer) {
         FfonElement::Obj(o) => o.key.clone(),
     }) {
         crate::provider::notify_button_pressed(r);
+        // A web-browser URL-history row starts a page load and arms the
+        // provider's "enter the content" request. That request is applied later
+        // by `apply_navigation_requests`, which descends from wherever the
+        // cursor is — still on the row just pressed, which after the
+        // move-to-top reorder is a *different* URL's button, and is a Str with
+        // no children, so the descent would silently do nothing. The page
+        // always lands under the URL bar at index 0, so park the cursor there
+        // now: exactly where typing the same URL into the bar would leave it.
+        if r.current_id.depth() == 2 && is_webbrowser(r) {
+            r.current_id.set_last(0);
+            r.scroll_offset = 0;
+        }
         // Preserve any error set by the button handler — create_list_current_layer clears it.
         let button_error = std::mem::take(&mut r.error_message);
         list::create_list_current_layer(r);
@@ -2037,6 +2049,16 @@ fn is_live_input_slot(r: &AppRenderer, key: &str) -> bool {
         && crate::provider::get_active_provider_ref(r)
             .map(|p| matches!(p.name(), "terminal" | "claude"))
             .unwrap_or(false)
+}
+
+/// True when the active provider is the web browser. Keyed off the name like
+/// `is_live_input_slot` and the `is_filebrowser` checks elsewhere in this
+/// module: the app crate reaches providers only through the SDK trait and never
+/// knows their concrete types.
+fn is_webbrowser(r: &AppRenderer) -> bool {
+    crate::provider::get_active_provider_ref(r)
+        .map(|p| p.name() == "webbrowser")
+        .unwrap_or(false)
 }
 
 /// Fill a live input slot Obj's `<input>` with `value`, move focus onto that
