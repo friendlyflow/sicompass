@@ -3,6 +3,39 @@
 cargo-dist parses this file and uses the matching version's section as the
 GitHub Release body, so entries here are what users read on the download page.
 
+## 0.1.18
+
+### The address bar remembers where you have been
+
+Every address you load is kept, newest first, as rows under the web browser's
+address bar. Press Enter on one to go back to that page, and it returns to the
+top of the list, so the handful of sites you actually use stay within a keypress
+or two. The list is written to disk, so it survives a restart, and tabs that
+were open at the same time merge their additions rather than overwriting each
+other.
+
+Not everything worth keeping is somewhere you go often, so `b` marks the row
+under the cursor as a bookmark. It also works on the page you are reading, which
+matters most for a page you arrived at by following a link, since that address
+was never typed and would otherwise be hard to name. Bookmarked rows are
+announced with `[bookmark]` in front of them, and `b` again removes the mark.
+
+The history has a size limit, `URL history` under web browser in Settings,
+default 50000 addresses. Bookmarks are exempt from it. Trimming the list to fit
+drops old addresses, never a bookmarked one, so a bookmark is the way to say
+that an address should outlive your ordinary browsing.
+
+### The tutorial caught up with the app
+
+The in-app tutorial had drifted since the browser, the file browser and the
+plugin system all changed under it. It now covers the browser's recall history,
+bookmarks and its `clear cookies`, `choose language` and `show hidden content`
+commands, and the keys that had never been listed at all: cut, copy-value,
+forward delete, structural insert, and text selection. Two sections were also
+simply wrong. Plugins are WASM components, not TypeScript scripts or compiled C
+libraries, and the terminal's `:` opens a shell in the folder you are reading
+rather than the one under the cursor.
+
 ## 0.1.17
 
 ### Web pages read in the order you see them, grouped into regions
