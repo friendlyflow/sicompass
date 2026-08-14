@@ -132,7 +132,8 @@ pub struct TerminalProvider {
     /// Filesystem position of the directory-browse view. Rooted at `/` (like
     /// the file browser) so every directory on the machine is reachable;
     /// `pop_path` clamps there. Also the `cwd` the shell is spawned into /
-    /// `cd`-ed to when the user presses `:`.
+    /// `cd`-ed to when the user presses `:`, which is the folder whose contents
+    /// the list is showing at that moment.
     browse_path: PathBuf,
 
     shell: Option<Shell>,
@@ -149,6 +150,13 @@ pub struct TerminalProvider {
     /// where they started.
     output_since_submit: bool,
     init_attempted: bool,
+    /// Why the last spawn attempt failed, shown as the one row above the input
+    /// slot. Deliberately *not* a scrollback entry: a failed `:` leaves the tab
+    /// shell-less, so the next `:` in another folder tries again, and a history
+    /// of refusals would follow the user around, each one looking like it
+    /// belonged to the folder they had just moved to. Only the current attempt
+    /// is worth reporting, so a new attempt replaces it and a success clears it.
+    spawn_error: Option<String>,
     /// User name for the synthesized prompt — captured once at construction
     /// from `$USER`, falling back to `"user"`.
     user: String,
@@ -233,6 +241,7 @@ impl TerminalProvider {
             // live cwd could be lagging behind.
             output_since_submit: true,
             init_attempted: false,
+            spawn_error: None,
             user: std::env::var("USER").unwrap_or_else(|_| "user".to_owned()),
             host: hostname_short(),
             emulator: None,
@@ -431,7 +440,7 @@ impl TerminalProvider {
             .collect()
     }
 
-    /// Swap to the shell view, running in whichever folder the user browsed to.
+    /// Swap to the shell view, running in the folder the browse view is listing.
     ///
     /// First call spawns the PTY straight into `browse_path`. Later calls reuse
     /// the same shell and walk it over with a `cd`, so scrollback, recall
@@ -443,7 +452,7 @@ impl TerminalProvider {
         if self.shell.is_none() {
             self.cwd = Some(self.browse_path.clone());
             self.ensure_shell();
-            // The cwd is now whichever folder the user put the cursor on, so a
+            // The cwd is whichever folder the user had walked into, so a
             // spawn can fail for reasons the next attempt won't share (an
             // unreadable directory, one deleted between listing and `:`).
             // Clear the one-shot latch so `:` in another folder can try again
@@ -560,6 +569,11 @@ impl TerminalProvider {
                 out.push(FfonElement::Str(line.to_owned()));
             }
         }
+        // Directly above the input slot, where the output of a command would
+        // be: the last thing that happened is the last thing read out.
+        if let Some(msg) = &self.spawn_error {
+            out.push(FfonElement::Str(msg.clone()));
+        }
         self.load_command_history();
         let key = format!("{}<input>{}</input>", live_prompt, self.pending_input);
         let mut slot = FfonElement::new_obj(key);
@@ -594,12 +608,24 @@ impl TerminalProvider {
             Ok(s) => {
                 self.shell = Some(s);
                 self.banner_pending = true;
+                self.spawn_error = None;
             }
-            Err(e) => self.entries.push(Entry {
-                prompt: String::new(),
-                input: format!("(failed to start `{}`)", self.shell_program),
-                output: e.to_string(),
-            }),
+            // Carries the reason, which the user otherwise never sees: the
+            // common refusals (a directory they cannot enter, a shell binary
+            // that has gone missing) are indistinguishable without it. The
+            // directory is named because the message outlives the keypress
+            // only until the next attempt, and a bare "failed to start" gives
+            // no clue which folder was refused.
+            Err(e) => {
+                self.spawn_error = Some(match &self.cwd {
+                    Some(dir) => format!(
+                        "(failed to start `{}` in {}: {e})",
+                        self.shell_program,
+                        dir.display()
+                    ),
+                    None => format!("(failed to start `{}`: {e})", self.shell_program),
+                })
+            }
         }
         self.trim_scrollback();
     }
@@ -670,6 +696,7 @@ impl Provider for TerminalProvider {
     }
 
     fn cleanup(&mut self) {
+        self.spawn_error = None;
         self.shell = None;
         self.init_attempted = false;
     }
@@ -1742,6 +1769,90 @@ mod tests {
         assert_eq!(p.cwd, Some(target));
         // Nothing was typed, so the scrollback starts clean.
         assert!(p.entries.is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_shell_that_cannot_start_reports_the_directory_and_the_reason() {
+        // A directory the process cannot enter (`/root` for a normal user) is
+        // still listed by its parent, so `:` on it is one keypress away. The
+        // spawn then fails, and the reason has to reach the user: it is the
+        // only thing separating "this folder is forbidden" from "the shell
+        // binary is gone".
+        use std::os::unix::fs::PermissionsExt as _;
+        let dir = tempfile::tempdir().unwrap();
+        let locked = dir.path().join("locked");
+        let also_locked = dir.path().join("also-locked");
+        std::fs::create_dir(&locked).unwrap();
+        std::fs::create_dir(&also_locked).unwrap();
+        for d in [&locked, &also_locked] {
+            std::fs::set_permissions(d, std::fs::Permissions::from_mode(0o000)).unwrap();
+        }
+        if std::fs::read_dir(&locked).is_ok() {
+            // Running as root, where the mode bits forbid nothing.
+            return;
+        }
+
+        let mut p = TerminalProvider::new();
+        p.command_history_path = Some(dir.path().join("history"));
+        p.browse_path = locked.clone();
+
+        let mut err = String::new();
+        p.handle_command(CMD_SHELL, "", 0, &mut err);
+
+        assert!(p.shell.is_none(), "the spawn cannot succeed here");
+        let rows = scrollback_rows(&mut p);
+        assert_eq!(rows.len(), 1, "one report line, got {rows:?}");
+        assert!(
+            rows[0].contains(&locked.display().to_string()),
+            "the line must name the directory; got {:?}",
+            rows[0]
+        );
+        assert!(
+            rows[0].to_lowercase().contains("permission denied"),
+            "the line must carry the reason; got {:?}",
+            rows[0]
+        );
+
+        // Refused again one folder over: the first refusal must not follow the
+        // user there, where it would read as a second failure in this folder.
+        p.handle_command(CMD_BROWSE, "", 0, &mut err);
+        p.browse_path = also_locked.clone();
+        p.handle_command(CMD_SHELL, "", 0, &mut err);
+
+        let rows = scrollback_rows(&mut p);
+        assert_eq!(rows.len(), 1, "still one report line, got {rows:?}");
+        assert!(
+            rows[0].contains(&also_locked.display().to_string()),
+            "the surviving line is the current attempt; got {:?}",
+            rows[0]
+        );
+
+        // And a shell that does start clears it.
+        p.handle_command(CMD_BROWSE, "", 0, &mut err);
+        p.browse_path = dir.path().to_path_buf();
+        p.handle_command(CMD_SHELL, "", 0, &mut err);
+        assert!(p.shell.is_some(), "a readable directory spawns fine");
+        assert!(
+            scrollback_rows(&mut p).is_empty(),
+            "a working shell reports nothing"
+        );
+
+        // Leave the directories removable by the TempDir drop.
+        for d in [&locked, &also_locked] {
+            std::fs::set_permissions(d, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+    }
+
+    /// The `Str` rows of the shell view — everything above the `+i` input slot.
+    fn scrollback_rows(p: &mut TerminalProvider) -> Vec<String> {
+        p.fetch()
+            .iter()
+            .filter_map(|e| match e {
+                FfonElement::Str(s) => Some(s.clone()),
+                _ => None,
+            })
+            .collect()
     }
 
     #[test]

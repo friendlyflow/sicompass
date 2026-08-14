@@ -459,21 +459,12 @@ pub fn navigate_right_raw(r: &mut AppRenderer) -> bool {
             None => Vec::new(),
         };
         // Empty container → seed the `i` insert placeholder so the user can
-        // create children by typing (renders as "i", not "-i").
+        // create children by typing (renders as "i", not "-i"). In the terminal,
+        // whose folder tree is read-only, the placeholder is inert — but the
+        // descent itself has to work: `:` runs the shell in the folder being
+        // listed, so a folder with no subfolders is only reachable as a working
+        // directory by stepping into it first.
         if children.is_empty() {
-            // Except a folder inside the terminal, whose tree is read-only: an
-            // insert placeholder there offers to create something the provider
-            // always refuses. Such a folder is simply not navigable, so stay put
-            // and undo the path push made above. `:` still opens a shell in it —
-            // that never needed the folder to have contents.
-            //
-            // Only at depth >= 2, i.e. a folder *within* the provider. Depth 1 is
-            // entering the terminal itself, which must always work even if its
-            // root directory happens to hold no subdirectories at all.
-            if item_id.depth() >= 2 && is_terminal_provider(r) {
-                crate::provider::pop_path(r);
-                return false;
-            }
             children.push(FfonElement::Str(I_PLACEHOLDER.to_owned()));
         }
         let last_idx = item_id.last().unwrap_or(0);
@@ -1139,41 +1130,20 @@ pub(crate) fn at_terminal_shell_level(r: &AppRenderer) -> bool {
 /// Direction comes from the provider's own `commands()`, which offers exactly
 /// the transition that is available right now.
 ///
-/// From the folder listing, `:` opens the shell in the folder **under the
-/// cursor**, so picking a working directory costs one keypress instead of Right
-/// then `:`. It gets there by performing the Right itself: descending first
-/// leaves the cursor, the provider path, and the FFON depth in exactly the
-/// relationship a manual Right would have, which is what keeps Escape and Left
-/// consistent afterwards.
+/// The shell runs in the folder **being listed**, never in the one under the
+/// cursor: the scrollback replaces that listing in place, so the shell sits at
+/// the depth the listing occupied and `pwd` names the directory whose contents
+/// the user was just reading. Wanting a shell one level deeper is a Right away.
 pub(crate) fn open_terminal_shell(r: &mut AppRenderer) {
     // Already in the shell: `:` does nothing. Escape is the one way out, so
     // there is a single key to learn and no way to lose the shell by reflex.
     if terminal_is_in_shell(r) {
         return;
     }
-    // Descend into the focused folder, then let `apply_terminal_view_command`
-    // graft the shell where that folder's own listing would have gone.
-    //
-    // Done directly rather than through `navigate_right_raw`, which would read
-    // the folder's contents only for them to be replaced a moment later, and
-    // would refuse to descend into a folder with no subfolders — a perfectly
-    // good place to open a shell.
-    if let Some(name) = focused_browse_folder(r) {
-        crate::provider::push_path(r, &name);
-        r.current_id.push(0);
-    }
+    // Remembered now because it cannot be recovered later: once the scrollback
+    // is grafted, the cursor's index is a position in it, not a folder row.
+    r.terminal_shell_return_id = Some(r.current_id.clone());
     apply_terminal_view_command(r, TERMINAL_CMD_SHELL);
-}
-
-/// Name of the folder under the cursor in the terminal's browse view, or `None`
-/// when the cursor is not on one (an empty level, or already in the shell).
-fn focused_browse_folder(r: &AppRenderer) -> Option<String> {
-    let idx = r.current_id.last()?;
-    let elem = sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &r.current_id)?.get(idx)?;
-    match elem {
-        FfonElement::Obj(o) => Some(crate::provider::element_nav_name(&o.key)),
-        _ => None,
-    }
 }
 
 /// Fire one of the terminal's view-swap commands and rebuild the list around it.
@@ -1188,17 +1158,21 @@ fn apply_terminal_view_command(r: &mut AppRenderer, cmd: &str) {
 
     // Leaving the shell: the provider has just pointed `current_path()` at the
     // folder the shell actually ended in, which a typed `cd` may have moved.
-    // Rebuild the tree down to it, so the cursor comes to rest *on* that folder
-    // inside its parent's listing and the breadcrumb above describes where the
-    // user really is. Landing on the folder rather than inside it also avoids an
-    // empty list — a folder need not have subfolders of its own.
-    if cmd == TERMINAL_CMD_BROWSE && crate::provider::rebuild_path_from_root(r) {
-        r.scroll_offset = 0;
-        list::create_list_current_layer(r);
-        r.list_index = r.current_id.last().unwrap_or(0);
-        r.speak_current_element();
-        r.needs_redraw = true;
-        return;
+    // Rebuild the tree down to it, so the current level lists that folder's own
+    // contents — the level the scrollback was covering — and the breadcrumb
+    // above describes where the user really is.
+    if cmd == TERMINAL_CMD_BROWSE {
+        // Consumed either way: a remembered row that outlives one swap is stale.
+        let origin = r.terminal_shell_return_id.take();
+        if crate::provider::rebuild_path_from_root(r) {
+            restore_row_within_level(r, origin.as_ref());
+            r.scroll_offset = 0;
+            list::create_list_current_layer(r);
+            r.list_index = r.current_id.last().unwrap_or(0);
+            r.speak_current_element();
+            r.needs_redraw = true;
+            return;
+        }
     }
 
     crate::provider::refresh_current_directory(r);
@@ -1213,6 +1187,37 @@ fn apply_terminal_view_command(r: &mut AppRenderer, cmd: &str) {
     r.list_index = r.current_id.last().unwrap_or(0);
     r.speak_current_element();
     r.needs_redraw = true;
+}
+
+/// Move the cursor back to the row `saved` was on, but only if the rebuilt
+/// `current_id` sits on the same level — every index above the last one matches.
+///
+/// A `cd` typed in the shell moves the rebuild to a different level entirely
+/// (usually a different depth too), where the saved row means nothing and the
+/// top of the listing is the honest place to land. The prefix includes the
+/// provider index, so another provider's row can never be adopted either.
+fn restore_row_within_level(r: &mut AppRenderer, saved: Option<&IdArray>) {
+    let Some(saved) = saved else {
+        return;
+    };
+    let depth = saved.depth();
+    if depth == 0 || depth != r.current_id.depth() {
+        return;
+    }
+    if saved.as_slice()[..depth - 1] != r.current_id.as_slice()[..depth - 1] {
+        return;
+    }
+    let Some(row) = saved.last() else {
+        return;
+    };
+    // The listing is re-read from disk, so it can have shrunk while the shell
+    // was up. A row past the end would resolve to nothing at all.
+    let len = sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &r.current_id)
+        .map(|slice| slice.len())
+        .unwrap_or(0);
+    if row < len {
+        r.current_id.set_last(row);
+    }
 }
 
 /// Open the window-controls palette (`c` key) — minimize / maximize / close.
@@ -6504,8 +6509,10 @@ fn insert_ffon_element(
 /// its `current_id` indices and the provider path to restore on next launch.
 /// How a tab's live navigation should be written down so it can be restored.
 ///
-/// `on_path` asks the restore to put the cursor **on** `path` rather than inside
-/// it, rebuilding the tree from the filesystem root to find it.
+/// `on_path` asks the restore to locate `path` by rebuilding the tree from the
+/// filesystem root, rather than replaying the saved cursor down the tree the
+/// user browsed. (The name is kept for the `onPath` key already written to
+/// settings.json by earlier builds.)
 pub struct RestorableNav {
     pub current_id: IdArray,
     pub path: String,
@@ -6518,9 +6525,10 @@ pub struct RestorableNav {
 /// after a restart `fetch()` returns a folder listing where the scrollback used
 /// to be. Two things follow.
 ///
-/// First, the cursor must come back on the *folder* the shell was running in,
-/// not inside it — `:` there would otherwise open a shell in one of its
-/// subfolders. That is what `on_path` asks for.
+/// First, the cursor must come back *inside* the folder the shell was running
+/// in, listing its contents — `:` opens a shell in the folder being listed, so
+/// landing on the folder within its parent would reopen the next shell one
+/// level up. That is what `on_path` asks for.
 ///
 /// Second, that folder is whatever `current_path()` reports, which follows a
 /// typed `cd`. So it need not be anywhere in the tree the user browsed: `cd` can
@@ -7624,6 +7632,46 @@ mod tests {
     }
 
     #[test]
+    fn colon_in_the_terminal_swaps_the_level_it_stands_on() {
+        // The shell runs in the folder being listed, so it replaces that
+        // listing where it is. Descending first would run it one folder deeper
+        // than the user ever asked for.
+        let mut r = make_renderer_with_terminal();
+        let before = r.current_id.clone();
+
+        handle_colon(&mut r);
+
+        assert_eq!(
+            r.current_id.depth(),
+            before.depth(),
+            "`:` must not walk the cursor deeper into the tree"
+        );
+        assert_eq!(r.current_id.as_slice()[..1], before.as_slice()[..1]);
+    }
+
+    #[test]
+    fn escape_in_the_terminal_shell_restores_the_row_colon_was_pressed_on() {
+        // Coming back to the top of a listing the user had already walked into
+        // costs them their place, and the row cannot be recovered from the
+        // cursor: while the shell is up it indexes the scrollback.
+        let mut r = make_renderer_with_terminal();
+        r.current_id.set_last(1); // on `docs`, the second folder
+        r.list_index = 1;
+
+        handle_colon(&mut r);
+        handle_escape(&mut r);
+
+        assert!(!terminal_is_in_shell(&r));
+        assert_eq!(r.current_id.last(), Some(1), "back on the row `:` was on");
+        assert_eq!(r.list_index, 1);
+        assert!(
+            r.total_list[1].label.contains("docs"),
+            "got {:?}",
+            r.total_list[1].label
+        );
+    }
+
+    #[test]
     fn colon_inside_the_terminal_shell_does_nothing() {
         // Escape is the only way out, so `:` cannot drop the user's shell by
         // reflex — and pressing it twice is not a toggle.
@@ -7649,9 +7697,10 @@ mod tests {
     }
 
     #[test]
-    fn restorable_nav_asks_to_land_on_the_shells_folder() {
+    fn restorable_nav_asks_to_land_inside_the_shells_folder() {
         // The saved path is whatever `current_path()` reports, which follows a
-        // typed `cd` — so it is saved verbatim and the restore lands *on* it.
+        // typed `cd` — so it is saved verbatim and the restore rebuilds *into*
+        // it, which is where `:` runs a shell.
         let mut r = make_renderer_with_terminal();
         handle_colon(&mut r);
 
@@ -7659,7 +7708,7 @@ mod tests {
 
         assert!(
             nav.on_path,
-            "restore must land on the folder, not inside it"
+            "restore must locate the folder from the root and land inside it"
         );
         assert_eq!(nav.path, "/var/log", "saved verbatim, wherever the cd went");
         assert_eq!(nav.current_id, r.current_id);
