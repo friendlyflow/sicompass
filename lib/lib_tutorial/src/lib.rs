@@ -152,6 +152,8 @@ static SECTIONS: &[Node] = &[
                     Leaf("tutorial-sc-gen-whereami"),
                     Leaf("tutorial-sc-gen-meta"),
                     Leaf("tutorial-sc-gen-dashboard"),
+                    Leaf("tutorial-sc-gen-bookmark"),
+                    Leaf("tutorial-sc-gen-insert"),
                 ],
             },
             Branch {
@@ -161,6 +163,10 @@ static SECTIONS: &[Node] = &[
                     Leaf("tutorial-sc-in-a"),
                     Leaf("tutorial-sc-in-enter"),
                     Leaf("tutorial-sc-in-backspace"),
+                    Leaf("tutorial-sc-in-delete"),
+                    Leaf("tutorial-sc-in-newline"),
+                    Leaf("tutorial-sc-in-select"),
+                    Leaf("tutorial-sc-in-chain"),
                 ],
             },
             Branch {
@@ -169,6 +175,7 @@ static SECTIONS: &[Node] = &[
                     Leaf("tutorial-sc-cmd-colon"),
                     Leaf("tutorial-sc-cmd-tab"),
                     Leaf("tutorial-sc-cmd-ctrlf"),
+                    Leaf("tutorial-sc-cmd-lineends"),
                     Leaf("tutorial-sc-cmd-scroll"),
                     Leaf("tutorial-sc-cmd-history"),
                 ],
@@ -215,6 +222,9 @@ static SECTIONS: &[Node] = &[
             Leaf("tutorial-prog-filebrowser"),
             Leaf("tutorial-prog-texteditor"),
             Leaf("tutorial-prog-web"),
+            Leaf("tutorial-prog-web-history"),
+            Leaf("tutorial-prog-web-bookmark"),
+            Leaf("tutorial-prog-web-commands"),
             Leaf("tutorial-prog-terminal"),
             Leaf("tutorial-prog-chat"),
             Leaf("tutorial-prog-email"),
@@ -704,10 +714,35 @@ mod tests {
             );
         }
         let text = joined(&elems);
-        for token in ["Right", "Left", "Enter", "Escape", "w:", "m:"] {
+        for token in ["Right", "Left", "Enter", "Escape", "w:", "m:", "b:"] {
             assert!(
                 text.contains(token),
                 "general shortcuts must mention {token}, got:\n{text}"
+            );
+        }
+    }
+
+    /// The web browser's own keys and commands must be discoverable from the
+    /// programs section. `b` and the recall history shipped without any tutorial
+    /// text at all, which is what this test exists to stop happening again.
+    #[test]
+    fn test_programs_documents_the_browser_history_and_bookmarks() {
+        let mut p = provider();
+        p.push_path("The programs");
+        let text = joined(&p.fetch());
+        assert!(
+            text.contains("[bookmark]"),
+            "must give the marker a bookmarked row is announced with, got:\n{text}"
+        );
+        assert!(
+            text.contains("address bar"),
+            "must say where the recall history sits, got:\n{text}"
+        );
+        // The colon commands a reader cannot otherwise guess at.
+        for cmd in ["clear cookies", "choose language", "show hidden content"] {
+            assert!(
+                text.contains(cmd),
+                "must document the {cmd} command, got:\n{text}"
             );
         }
     }
@@ -876,9 +911,16 @@ mod tests {
             text.contains("lib/lib_sales_demo/"),
             "must point to the reference program"
         );
+        // Rust for built-ins, WASM for anything installed. The `native` and
+        // `script` plugin kinds are gone (docs/wasm-plugins.md), so naming them
+        // here would send a plugin author down a road that no longer exists.
         assert!(
-            text.contains("Rust") && text.contains("TypeScript") && text.contains("ProviderOps"),
-            "must mention Rust (the standard), TypeScript, and C/ProviderOps plugin kinds"
+            text.contains("Rust") && text.contains("WASM"),
+            "must name Rust (the standard) and WASM (the only installable kind)"
+        );
+        assert!(
+            text.contains("docs/wasm-plugins.md"),
+            "must point at the sandbox contract rather than inlining it"
         );
     }
 
