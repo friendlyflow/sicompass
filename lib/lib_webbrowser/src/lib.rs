@@ -6,6 +6,10 @@
 //! flat FFON tree of strings and objects that mirrors the C provider's
 //! lexbor-based output.
 //!
+//! A cookie banner is lifted out and answered as a page of its own before the
+//! content is handed over (see the gate section).  Nothing else is: a language
+//! switcher in particular is part of the page, not a question in front of it.
+//!
 //! ## FFON tree layout
 //!
 //! ```text
@@ -122,7 +126,6 @@ static PRUNE_HIDDEN: AtomicBool = AtomicBool::new(true);
 /// `commands()` is not localized anywhere in the app yet.
 const CMD_SHOW_HIDDEN: &str = "show hidden content";
 const CMD_HIDE_HIDDEN: &str = "hide hidden content";
-const CMD_CHOOSE_LANGUAGE: &str = "choose language";
 
 /// Mark the focused history row — or, from anywhere else, the page being read —
 /// as one worth keeping.  The app hardcodes this name too: it is what gates and
@@ -288,8 +291,8 @@ impl WebbrowserProvider {
         self.form_field_values.clear();
 
         // Every navigation this provider starts ends with the user in the page:
-        // a typed URL, a recall-history row, and the three commands that reload
-        // the current page (refresh, choose language, show/hide hidden).
+        // a typed URL, a recall-history row, and the commands that reload the
+        // current page (refresh, show/hide hidden).
         //
         // The reload commands are included because a refresh rebuilds the
         // provider root, and while the load is in flight the URL bar is a
@@ -408,9 +411,9 @@ impl WebbrowserProvider {
     /// available (e.g. `$HOME` unset), which disables the feature's persistence
     /// without disabling the in-memory list.
     ///
-    /// Deliberately not next to the Chrome profile like `language_pref_path`:
-    /// that one sits there so "clear cookies" leaves it alone, whereas this is
-    /// user state and belongs in the state dir, next to the terminal's.
+    /// Deliberately not next to the Chrome profile: that dir holds what *sites*
+    /// remember and is what "clear cookies" wipes, whereas this is the user's
+    /// own state and belongs in the state dir, next to the terminal's.
     fn resolve_url_history_path(&self) -> Option<std::path::PathBuf> {
         if let Some(p) = &self.url_history_path {
             return Some(p.clone());
@@ -932,21 +935,6 @@ impl Provider for WebbrowserProvider {
         };
         let form_n: usize = form_n_str.parse().unwrap_or(0);
 
-        // A language step carries its code in the proxy button's id, so pressing
-        // one is also how the choice gets remembered — after this, the step is
-        // never shown again and the matching page is opened directly.
-        if let Some(code) = self
-            .form_map
-            .iter()
-            .find(|(key, node)| {
-                key.starts_with(&format!("form_{form_n}/"))
-                    && matches!(node.kind, FormNodeKind::Submit)
-            })
-            .and_then(|(_, node)| language_code_from_selector(&node.css_selector))
-        {
-            store_language(&code);
-        }
-
         #[cfg(target_os = "windows")]
         {
             self.submit_form_windows(form_n);
@@ -1098,7 +1086,6 @@ impl Provider for WebbrowserProvider {
         vec![
             "refresh".to_owned(),
             "clear cookies".to_owned(),
-            CMD_CHOOSE_LANGUAGE.to_owned(),
             hidden_toggle.to_owned(),
             // Advertising this is also what gates the `b` key: the app looks for
             // the name rather than for a provider called "webbrowser".
@@ -1128,15 +1115,6 @@ impl Provider for WebbrowserProvider {
             }
         } else if cmd == "clear cookies" {
             self.clear_cookies(_error);
-        } else if cmd == CMD_CHOOSE_LANGUAGE {
-            // Forget the remembered choice so the language step is offered
-            // again on the next site that has one.
-            forget_language();
-            let url = self.current_url.clone();
-            if !url.is_empty() {
-                self.cached_page = None;
-                self.load_url(&url);
-            }
         } else if cmd == CMD_SHOW_HIDDEN || cmd == CMD_HIDE_HIDDEN {
             // The prune decides what the *serialised* page contains, so the page
             // has to be fetched again to show the other version of itself.
@@ -1209,8 +1187,12 @@ impl WebbrowserProvider {
     /// also empties the backing store). On Windows each fetch uses a throwaway
     /// browser, so there is nothing live to clear — remove the cookie files from
     /// the persistent profile dir instead.
+    ///
+    /// Also sweeps the language preference 0.1.17 used to keep, since this is
+    /// the command for "forget what has been remembered about me".
     #[cfg_attr(target_os = "windows", allow(unused_variables))]
     fn clear_cookies(&mut self, error: &mut String) {
+        remove_stale_language_pref();
         #[cfg(not(target_os = "windows"))]
         {
             let guard = chromium_runtime().block_on(self.live.lock());
@@ -1236,6 +1218,41 @@ impl WebbrowserProvider {
         {
             remove_cookie_files(&chrome_profile_dir());
         }
+    }
+}
+
+/// Where 0.1.17 kept the remembered language choice, or `None` under test.
+///
+/// Next to the Chrome profile rather than inside it, which is what kept it out
+/// of the way of `clear cookies` back when the choice was worth keeping.
+/// Nothing writes this any more — the file is only still named here so the
+/// leftover can be swept up. Derived rather than hardcoded so it keeps pointing
+/// at the same place if the profile dir ever moves.
+fn stale_language_pref_path() -> Option<std::path::PathBuf> {
+    if test_no_history() {
+        return None;
+    }
+    Some(stale_language_pref_in(&chrome_profile_dir()))
+}
+
+/// The derivation on its own, so a test can pin the location without a real
+/// config dir and without turning the persistence guard off.
+fn stale_language_pref_in(profile: &std::path::Path) -> std::path::PathBuf {
+    profile
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(std::env::temp_dir)
+        .join("webbrowser-language")
+}
+
+/// Delete the leftover language preference, if this machine ever wrote one.
+///
+/// The language step is gone (see the gate section), so the file is dead state
+/// that would otherwise sit in the config dir forever. Safe to drop this, and
+/// its caller in `clear_cookies`, once 0.1.17 is far enough behind.
+fn remove_stale_language_pref() {
+    if let Some(path) = stale_language_pref_path() {
+        let _ = std::fs::remove_file(path);
     }
 }
 
@@ -3532,9 +3549,9 @@ const BAND_JS: &str = r##"
     function sicPlan(body) {
         const plan = { host: null, order: null, groups: [], items: [], declined: null };
         if (!body) { plan.declined = 'no body'; return plan; }
-        // A consent or language gate is in flight. The page it becomes is built
-        // in Rust from labels, and its proxy forms must keep document order.
-        if (body.querySelector('button[id^="sic-lang-"], button[id^="sic-consent-"]')) {
+        // A consent gate is in flight. The page it becomes is built in Rust
+        // from labels, and its proxy forms must keep document order.
+        if (body.querySelector('button[id^="sic-consent-"]')) {
             plan.declined = 'gate in flight';
             return plan;
         }
@@ -4240,14 +4257,18 @@ fn google_consent_or_fallback(html: &str) -> GoogleConsent {
 }
 
 // ---------------------------------------------------------------------------
-// Gates: the decisions a site puts in front of its content
+// The cookie gate: the decision a site puts in front of its content
 //
-// A site can interrupt with a language chooser, then a cookie banner, then
-// finally show what you came for.  Those are answered one at a time, each as a
-// page of its own: the language list leads to the cookie list leads to the
+// A cookie banner sits between the reader and the page, so it is answered as a
+// page of its own: the list of choices, and nothing else, leading to the
 // content.  A decision the site already has on file is never asked again — it
 // simply stops rendering its dialog, so no gate is detected and the content is
 // what loads.
+//
+// Only the cookie question is treated this way.  A language switcher does not
+// block anything, it is part of the page, and asking about it interrupted every
+// multilingual site with a list the reader had not asked for — see
+// `a_page_with_a_language_switcher_is_just_a_page` and the 0.1.18 CHANGELOG.
 //
 // Every choice is a single-button `<form>` whose click forwards to the real
 // control (see `gate_surface_js`).  FFON can only activate a `<button>` inside
@@ -4255,42 +4276,18 @@ fn google_consent_or_fallback(html: &str) -> GoogleConsent {
 // form per choice is what makes each choice individually pressable.
 // ---------------------------------------------------------------------------
 
-/// Which decision a page is currently blocking on.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum GateKind {
-    Language,
-    Consent,
-}
-
-impl GateKind {
-    fn from_js(s: &str) -> Option<Self> {
-        match s {
-            "language" => Some(GateKind::Language),
-            "consent" => Some(GateKind::Consent),
-            _ => None,
-        }
-    }
-
-    /// Fluent key for the line that introduces the step.
-    fn notice_key(self) -> &'static str {
-        match self {
-            GateKind::Language => "webbrowser-step-language",
-            GateKind::Consent => "webbrowser-step-consent",
-        }
-    }
-}
+/// Fluent key for the line that introduces the step.
+const CONSENT_NOTICE_KEY: &str = "webbrowser-step-consent";
 
 /// What the in-page pass found.
 #[derive(Debug, Default, serde::Deserialize)]
 struct GateReport {
-    /// `"language"`, `"consent"`, or empty when the page is not gated.
-    kind: String,
+    /// Set when the page is showing a cookie decision that was turned into
+    /// choices.
+    #[serde(default)]
+    gated: bool,
     /// Choice labels, in the order their forms were inserted.
     labels: Vec<String>,
-    /// Set when a stored language preference was applied without asking; the
-    /// page is navigating and has to be re-read.
-    #[serde(default)]
-    auto: bool,
     /// Set when the pass marked anything for the prune to take out, so the page
     /// is worth serialising again.
     #[serde(default)]
@@ -4319,89 +4316,11 @@ const CONSENT_VENDOR_SCRIPTS: &[&str] = &[
     "sourcepoint.mgr.consensu.org",
 ];
 
-/// Prefix of the id given to a language choice's proxy button.  The chosen code
-/// is read back out of the `FormMap` selector when the button is pressed, which
-/// is how the preference gets remembered without threading state through the
-/// background load task.
-const LANG_BUTTON_PREFIX: &str = "sic-lang-";
+/// Prefix of the id given to a choice's proxy button.
 const CONSENT_BUTTON_PREFIX: &str = "sic-consent-";
 
-/// Recover the language code from a proxy button's CSS selector.
-///
-/// `#sic-lang-nl-0` -> `nl`.  Returns `None` for anything else, including the
-/// consent buttons, so pressing an accept button never records a language.
-fn language_code_from_selector(selector: &str) -> Option<String> {
-    let rest = selector
-        .strip_prefix('#')
-        .and_then(|s| s.strip_prefix(LANG_BUTTON_PREFIX))?;
-    let code = rest.rsplit_once('-').map(|(c, _)| c).unwrap_or(rest);
-    (!code.is_empty()).then(|| code.to_owned())
-}
-
-/// Where the remembered language choice lives, or `None` when the provider is
-/// under test and must not touch persisted user state.
-///
-/// Next to the Chrome profile rather than inside it, so "clear cookies" (which
-/// wipes what *sites* remember) leaves the user's own choice alone.
-///
-/// Gated on [`TEST_NO_HISTORY`] like the URL history: `forget_language` is a
-/// real `remove_file`, and the unit tests invoke `choose language`, so without
-/// the gate running the suite silently cleared whatever choice the developer
-/// had made. The flag covers every file this provider persists, not just the
-/// URL list.
-fn language_pref_path() -> Option<std::path::PathBuf> {
-    if test_no_history() {
-        return None;
-    }
-    Some(
-        chrome_profile_dir()
-            .parent()
-            .map(|p| p.to_path_buf())
-            .unwrap_or_else(std::env::temp_dir)
-            .join("webbrowser-language"),
-    )
-}
-
-fn stored_language() -> Option<String> {
-    let raw = std::fs::read_to_string(language_pref_path()?).ok()?;
-    let code = raw.trim().to_ascii_lowercase();
-    // A code, not a sentence: guards against a corrupted file becoming a
-    // selector fragment we then inject into the page.
-    let ok = (2..=8).contains(&code.len())
-        && code
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
-    ok.then_some(code)
-}
-
-fn store_language(code: &str) {
-    let Some(path) = language_pref_path() else {
-        return;
-    };
-    if let Some(dir) = path.parent() {
-        let _ = std::fs::create_dir_all(dir);
-    }
-    let _ = std::fs::write(path, code);
-}
-
-fn forget_language() {
-    if let Some(path) = language_pref_path() {
-        let _ = std::fs::remove_file(path);
-    }
-}
-
-/// Build the in-page pass that finds the current gate and turns it into forms.
-///
-/// `allow_auto` is cleared on the second run of a single load: applying a stored
-/// language preference navigates, and a site whose `hreflang` disagrees with the
-/// page it points at would otherwise bounce forever.
-fn gate_surface_js(
-    google: Option<&GoogleConsent>,
-    is_wall: bool,
-    stored_lang: Option<&str>,
-    allow_auto: bool,
-    rebuild: bool,
-) -> String {
+/// Build the in-page pass that finds the cookie decision and turns it into forms.
+fn gate_surface_js(google: Option<&GoogleConsent>, is_wall: bool, rebuild: bool) -> String {
     register_translations();
     let containers = js_array(&CONSENT_BANNERS.iter().map(|(_, s)| *s).collect::<Vec<_>>());
     let cmp_sels = js_array(CMP_SELECTORS);
@@ -4418,10 +4337,6 @@ fn gate_surface_js(
         ),
         None => "null".to_owned(),
     };
-    let stored_js = match stored_lang {
-        Some(l) => format!("{l:?}"),
-        None => "null".to_owned(),
-    };
     let accept_label = localize::t("webbrowser-consent-accept-all");
     let reject_label = localize::t("webbrowser-consent-reject-all");
     format!(
@@ -4436,88 +4351,27 @@ fn gate_surface_js(
     const VENDORS = {vendor_scripts};
     const GOOGLE = {google_js};
     const IS_WALL = {is_wall};
-    const STORED_LANG = {stored_js};
-    const ALLOW_AUTO = {allow_auto};
     const REBUILD = {rebuild};
     const L = {{accept: {accept_label:?}, reject: {reject_label:?}}};
-    const LANG_ID = {LANG_BUTTON_PREFIX:?};
     const CONSENT_ID = {CONSENT_BUTTON_PREFIX:?};
     const SRC_MARK = 'data-sic-consent-src';
     const VISIBLE = 'display:block !important;visibility:visible !important;';
 
     const textOf = el => ((el.innerText || el.textContent || '').replace(/\s+/g, ' ').trim());
     const visible = el => {{ try {{ return el.getClientRects().length > 0; }} catch (e) {{ return false; }} }};
-    const base = c => (c || '').toLowerCase().split(/[-_]/)[0];
 
     // Idempotent: a second settle on the same page must not stack another copy
     // of the choices.  A deliberate retry does the opposite — it tears the
     // previous set down and rebuilds, because a CMP can render its buttons a
     // beat apart and an early scan would otherwise lock in a partial list.
-    const existing = document.querySelectorAll('button[id^="' + LANG_ID + '"], button[id^="' + CONSENT_ID + '"]');
+    const existing = document.querySelectorAll('button[id^="' + CONSENT_ID + '"]');
     if (existing.length) {{
         if (!REBUILD) {{
-            const kind = existing[0].id.startsWith(LANG_ID) ? 'language' : 'consent';
-            return {{kind: kind, labels: Array.from(existing).map(b => b.textContent), auto: false}};
+            return {{gated: true, labels: Array.from(existing).map(b => b.textContent)}};
         }}
         for (const btn of existing) {{ const f = btn.closest('form'); if (f) f.remove(); else btn.remove(); }}
     }}
 
-    // ---- step 1: language ------------------------------------------------
-    // Two sources, merged by language code. <link rel=alternate hreflang> is the
-    // standard one and carries a real URL; a site's own chooser carries a better
-    // label and, often, no href at all (bpost's options are bare <a data-lang>).
-    const byCode = new Map();
-    const put = (code, patch) => {{
-        const c = base(code);
-        if (!c || c === 'x') return;
-        const cur = byCode.get(c) || {{code: c}};
-        byCode.set(c, Object.assign(cur, patch));
-    }};
-
-    for (const link of document.querySelectorAll('link[rel="alternate"][hreflang]')) {{
-        const href = link.getAttribute('href');
-        if (href) put(link.getAttribute('hreflang'), {{href: new URL(href, location.href).href}});
-    }}
-
-    // A chooser is a visible element offering several language-tagged options.
-    const optSel = '[data-lang], [hreflang], a[lang], [data-language]';
-    const opts = Array.from(document.querySelectorAll(optSel)).filter(visible);
-    for (const el of opts) {{
-        const code = el.getAttribute('data-lang') || el.getAttribute('data-language')
-                  || el.getAttribute('hreflang') || el.getAttribute('lang');
-        const label = textOf(el);
-        if (!code || !label || label.length > 60) continue;
-        const patch = {{label: label, el: el}};
-        const href = el.getAttribute && el.getAttribute('href');
-        if (href && !href.startsWith('#')) patch.href = new URL(href, location.href).href;
-        put(code, patch);
-    }}
-
-    const langs = Array.from(byCode.values()).filter(o => o.href || o.el);
-    if (langs.length >= 2) {{
-        const here = base(document.documentElement.getAttribute('lang'));
-        const mine = STORED_LANG ? langs.find(o => o.code === base(STORED_LANG)) : null;
-        if (STORED_LANG) {{
-            // The choice is already made: act on it silently, or, if this site
-            // has nothing in that language, stop asking and show the page.
-            if (mine && base(STORED_LANG) !== here && ALLOW_AUTO) {{
-                if (mine.href && mine.href !== location.href) {{ window.location.href = mine.href; return {{kind:'', labels:[], auto:true}}; }}
-                if (mine.el) {{ mine.el.click(); return {{kind:'', labels:[], auto:true}}; }}
-            }}
-        }} else {{
-            langs.sort((a, b) => a.code.localeCompare(b.code));
-            const made = langs.map((o, i) => ({{
-                label: o.label || o.code.toUpperCase(),
-                id: LANG_ID + o.code + '-' + i,
-                href: o.href,
-                el: o.el,
-            }}));
-            insert(made);
-            return {{kind: 'language', labels: made.map(c => c.label), auto: false}};
-        }}
-    }}
-
-    // ---- step 2: cookies -------------------------------------------------
     // Off-screen vendor scaffolding goes regardless of what we find: it is
     // never content, and the prune deliberately keeps hidden subtrees that
     // contain buttons.  Anything actually on screen is left alone, so a
@@ -4596,7 +4450,7 @@ fn gate_surface_js(
         const coming = VENDORS.some(v => {{
             try {{ return !!document.querySelector('script[src*="' + v + '"]'); }} catch (e) {{ return false; }}
         }});
-        return {{kind: '', labels: [], auto: false, marked: marked, pending: coming}};
+        return {{gated: false, labels: [], marked: marked, pending: coming}};
     }}
 
     // Refusing is the choice a user has to go looking for on the real web, so
@@ -4606,7 +4460,7 @@ fn gate_surface_js(
     insert(ordered);
     // A banner that has offered only one button so far is probably mid-render:
     // worth one more look, so refusing does not go missing.
-    return {{kind: 'consent', labels: ordered.map(c => c.label), auto: false, marked: true, pending: ordered.length < 2}};
+    return {{gated: true, labels: ordered.map(c => c.label), marked: true, pending: ordered.length < 2}};
 
     // One single-button form per choice, prepended to <body> so they are
     // document.forms[0..n-1] — the indices FFON derives from the step page have
@@ -4628,7 +4482,7 @@ fn gate_surface_js(
                 // next settle would find our own buttons still standing and
                 // offer the same step forever — a CMP that hides its banner in
                 // place (OneTrust) never navigates to clear them for us.
-                for (const b of document.querySelectorAll('button[id^="' + LANG_ID + '"], button[id^="' + CONSENT_ID + '"]')) {{
+                for (const b of document.querySelectorAll('button[id^="' + CONSENT_ID + '"]')) {{
                     const f = b.closest('form');
                     if (f) f.remove(); else b.remove();
                 }}
@@ -4650,11 +4504,9 @@ async fn surface_gate(
     page: &chromiumoxide::Page,
     google: Option<&GoogleConsent>,
     is_wall: bool,
-    stored_lang: Option<&str>,
-    allow_auto: bool,
     rebuild: bool,
 ) -> GateReport {
-    let js = gate_surface_js(google, is_wall, stored_lang, allow_auto, rebuild);
+    let js = gate_surface_js(google, is_wall, rebuild);
     tokio::time::timeout(tokio::time::Duration::from_secs(5), page.evaluate(js))
         .await
         .ok()
@@ -4676,7 +4528,7 @@ fn html_escape(s: &str) -> String {
 /// The forms mirror, in order, the proxy forms `gate_surface_js` prepended to
 /// the live document, so `form_1..form_N` here resolve to `document.forms[0..N-1]`
 /// there.  Ids match too, which is what `html_submit_selector` turns into the
-/// `#sic-lang-nl-0` selector the click is finally made through.
+/// `#sic-consent-0` selector the click is finally made through.
 fn gate_page_html(labels: &[String], ids: &[String]) -> String {
     let mut body = String::new();
     for (label, id) in labels.iter().zip(ids) {
@@ -4691,11 +4543,11 @@ fn gate_page_html(labels: &[String], ids: &[String]) -> String {
 
 /// Recreate the ids `gate_surface_js` assigned, from the labels it returned.
 ///
-/// Read back out of the live page rather than guessed, so the language codes in
-/// the language ids are the ones the page actually offered.
+/// Read back out of the live page rather than guessed, so a rebuild that
+/// renumbered the choices cannot leave the ids and the labels disagreeing.
 async fn gate_button_ids(page: &chromiumoxide::Page) -> Vec<String> {
     let js = format!(
-        r#"Array.from(document.querySelectorAll('button[id^="{LANG_BUTTON_PREFIX}"], button[id^="{CONSENT_BUTTON_PREFIX}"]')).map(b => b.id)"#
+        r#"Array.from(document.querySelectorAll('button[id^="{CONSENT_BUTTON_PREFIX}"]')).map(b => b.id)"#
     );
     tokio::time::timeout(tokio::time::Duration::from_secs(5), page.evaluate(js))
         .await
@@ -4708,8 +4560,7 @@ async fn gate_button_ids(page: &chromiumoxide::Page) -> Vec<String> {
 /// Resolve whatever the site is asking before it will show its content.
 ///
 /// Returns the page to render and whether it is a gate.  A gated page contains
-/// only that step's choices; answering one leads to the next step, and when
-/// nothing is pending the content is what loads.
+/// only the cookie choices; answering one leads to the content.
 async fn settle_gates(
     page: &chromiumoxide::Page,
     current_url: &str,
@@ -4725,54 +4576,34 @@ async fn settle_gates(
 
     let is_wall = is_consent_wall_str(current_url) || html_has_consent_wall(&html);
     let google = html_has_consent_wall(&html).then(|| google_consent_or_fallback(&html));
-    let stored = stored_language();
 
     let mut report = GateReport::default();
-    // Twice at most: the first pass may apply a stored language and navigate,
-    // and the page that lands is the one that gets to state its next step.
-    for allow_auto in [true, false] {
-        // A client-rendered CMP may not have its buttons in the DOM yet — the
-        // same hydration lag the old auto-accept retried for.
-        for attempt in 0..4u32 {
-            if attempt > 0 {
-                tokio::time::sleep(tokio::time::Duration::from_millis(700)).await;
-            }
-            report = surface_gate(
-                page,
-                google.as_ref(),
-                is_wall,
-                stored.as_deref(),
-                allow_auto,
-                attempt > 0,
-            )
-            .await;
-            if report.auto {
-                break;
-            }
-            // `pending` means the page may still be putting choices on screen:
-            // a tag manager injecting the banner, or a CMP that has rendered
-            // only one of its buttons so far.  It is read from the live DOM, so
-            // a banner that arrived after our snapshot still counts.
-            if !report.pending && (!report.labels.is_empty() || is_wall) {
-                break;
-            }
-            if !report.pending && !html_has_inline_consent_banner(&html) {
-                break;
-            }
+    // A client-rendered CMP may not have its buttons in the DOM yet — the same
+    // hydration lag the old auto-accept retried for.
+    for attempt in 0..4u32 {
+        if attempt > 0 {
+            tokio::time::sleep(tokio::time::Duration::from_millis(700)).await;
         }
-        if !report.auto {
+        report = surface_gate(page, google.as_ref(), is_wall, attempt > 0).await;
+        // `pending` means the page may still be putting choices on screen:
+        // a tag manager injecting the banner, or a CMP that has rendered
+        // only one of its buttons so far.  It is read from the live DOM, so
+        // a banner that arrived after our snapshot still counts.
+        if !report.pending && (!report.labels.is_empty() || is_wall) {
             break;
         }
-        await_stable_url(page, tokio::time::Duration::from_secs(8)).await;
+        if !report.pending && !html_has_inline_consent_banner(&html) {
+            break;
+        }
     }
 
-    if let Some(kind) = GateKind::from_js(&report.kind) {
+    if report.gated {
         let ids = gate_button_ids(page).await;
         if ids.len() == report.labels.len() {
             return (
                 PageLoad {
                     html: gate_page_html(&report.labels, &ids),
-                    notices: vec![localize::t(kind.notice_key())],
+                    notices: vec![localize::t(CONSENT_NOTICE_KEY)],
                 },
                 true,
             );
@@ -4780,9 +4611,9 @@ async fn settle_gates(
     }
 
     // Not gated (any more): the page is whatever the site is now serving. Only
-    // worth re-serialising if something moved — a banner container was marked
-    // for the prune, or a stored language preference navigated us elsewhere.
-    let html = if report.auto || report.marked || html_has_inline_consent_banner(&html) {
+    // worth re-serialising if something moved — a banner container marked for
+    // the prune to take out.
+    let html = if report.marked || html_has_inline_consent_banner(&html) {
         settled_html(page).await.unwrap_or(html)
     } else {
         html
@@ -4896,31 +4727,6 @@ mod tests {
         let guard = LAUNCH_FLAG.lock().unwrap_or_else(|e| e.into_inner());
         _set_test_no_launch(no_launch);
         guard
-    }
-
-    /// Turns the provider's real persistence back on, and off again on drop.
-    ///
-    /// `TEST_NO_HISTORY` defaults to on under test so no unit test can reach the
-    /// developer's files. The live tests are the exception: they drive a real
-    /// Chrome through the language step and have to see the choice actually
-    /// remembered. They are `#[ignore]`d, and each already holds
-    /// `launch_flag_guard`, so they are serialised against each other and this
-    /// needs no lock of its own. Their doc comments say to run them with
-    /// `XDG_CONFIG_HOME=$(mktemp -d)`, which is what keeps the writes off the
-    /// developer's real profile.
-    struct RealPersistence;
-
-    impl RealPersistence {
-        fn enable() -> Self {
-            _set_test_no_history(false);
-            RealPersistence
-        }
-    }
-
-    impl Drop for RealPersistence {
-        fn drop(&mut self) {
-            _set_test_no_history(cfg!(test));
-        }
     }
 
     // ---- Linux Chrome launch mode ----
@@ -6341,7 +6147,7 @@ mod tests {
         // cursor is at the provider's top level, so this cannot double-descend
         // someone who never left the page.
         let mut error = String::new();
-        for cmd in ["refresh", CMD_CHOOSE_LANGUAGE, CMD_SHOW_HIDDEN] {
+        for cmd in ["refresh", CMD_SHOW_HIDDEN] {
             p.handle_command(cmd, "", 0, &mut error);
             assert_eq!(
                 p.take_navigation_request(),
@@ -6562,7 +6368,6 @@ mod tests {
         let mut error = String::new();
         for cmd in [
             "refresh",
-            CMD_CHOOSE_LANGUAGE,
             CMD_SHOW_HIDDEN,
             // Not a reload, but held to the same rule: marking a row must not
             // move it, or it jumps out from under the cursor that marked it.
@@ -7486,7 +7291,7 @@ mod tests {
         // for: bpost's Dutch OneTrust banner says "Alles afwijzen", but the id
         // is the same everywhere.
         assert!(CMP_REJECT_SELECTORS.contains(&"#onetrust-reject-all-handler"));
-        let js = gate_surface_js(None, false, None, true, false);
+        let js = gate_surface_js(None, false, false);
         for sel in CMP_REJECT_SELECTORS {
             // `js_array` emits each selector as a JSON string, so an attribute
             // selector arrives with its quotes escaped.
@@ -7605,7 +7410,7 @@ mod tests {
     #[test]
     fn gate_script_embeds_the_google_values_it_was_given() {
         let g = google_consent_values(GOOGLE_WALL_SNIPPET).unwrap();
-        let js = gate_surface_js(Some(&g), true, None, true, false);
+        let js = gate_surface_js(Some(&g), true, false);
         assert!(js.contains(&g.accept));
         assert!(js.contains(&g.reject));
         assert!(js.contains(".google.com"));
@@ -7614,10 +7419,9 @@ mod tests {
 
     #[test]
     fn gate_script_carries_the_vendor_selectors_and_no_google_block() {
-        let js = gate_surface_js(None, false, None, true, false);
+        let js = gate_surface_js(None, false, false);
         assert!(js.contains("const GOOGLE = null;"));
         assert!(js.contains("const IS_WALL = false;"));
-        assert!(js.contains("const STORED_LANG = null;"));
         assert!(js.contains("#onetrust-banner-sdk"));
         assert!(js.contains("#CybotCookiebotDialog"));
         // One form per choice is the whole point — several submit buttons in
@@ -7626,33 +7430,19 @@ mod tests {
     }
 
     #[test]
-    fn gate_script_passes_a_stored_language_and_the_auto_guard() {
-        let js = gate_surface_js(None, false, Some("nl"), false, false);
-        assert!(js.contains(r#"const STORED_LANG = "nl";"#));
-        // Cleared on the second pass of a load so an hreflang set that
-        // disagrees with the page it points at cannot bounce forever.
-        assert!(js.contains("const ALLOW_AUTO = false;"));
-    }
-
-    // ---- language preference ----
-
-    #[test]
-    fn language_code_is_recovered_from_a_proxy_button_selector() {
-        assert_eq!(
-            language_code_from_selector("#sic-lang-nl-0").as_deref(),
-            Some("nl")
-        );
-        assert_eq!(
-            language_code_from_selector("#sic-lang-de-3").as_deref(),
-            Some("de")
-        );
-        // A consent press must never be mistaken for a language choice.
-        assert_eq!(language_code_from_selector("#sic-consent-0"), None);
-        assert_eq!(
-            language_code_from_selector("#onetrust-accept-btn-handler"),
-            None
-        );
-        assert_eq!(language_code_from_selector(r#"[type="submit"]"#), None);
+    fn the_gate_script_never_looks_for_a_language_chooser() {
+        // A language switcher does not block anything, so it is left in the
+        // page as the links it is. Asking about it interrupted every
+        // multilingual site, and with a list that could omit the language the
+        // page was already in — anysurfer.be marks its current language with a
+        // <span lang> the chooser scan could not see.
+        let js = gate_surface_js(None, false, false);
+        for probe in ["hreflang", "data-lang", "STORED_LANG", "sic-lang-"] {
+            assert!(
+                !js.contains(probe),
+                "the gate script still reasons about languages via {probe}"
+            );
+        }
     }
 
     #[test]
@@ -7661,24 +7451,49 @@ mod tests {
         // and nothing more, and its forms line up 1:1 with the proxy forms in
         // the live document.
         let html = gate_page_html(
-            &[
-                "Ik spreek Nederlands".to_owned(),
-                "I speak English".to_owned(),
-            ],
-            &["sic-lang-nl-0".to_owned(), "sic-lang-en-1".to_owned()],
+            &["Alles weigeren".to_owned(), "Alles aanvaarden".to_owned()],
+            &["sic-consent-0".to_owned(), "sic-consent-1".to_owned()],
         );
         let (elems, map) = html_to_ffon_with_forms(&html, "");
         assert_eq!(elems.len(), 2, "expected exactly two choices: {elems:?}");
         assert_eq!(
-            map.get("form_1/Ik spreek Nederlands")
+            map.get("form_1/Alles weigeren")
                 .map(|n| n.css_selector.as_str()),
-            Some("#sic-lang-nl-0")
+            Some("#sic-consent-0")
         );
         assert_eq!(
-            map.get("form_2/I speak English")
+            map.get("form_2/Alles aanvaarden")
                 .map(|n| n.css_selector.as_str()),
-            Some("#sic-lang-en-1")
+            Some("#sic-consent-1")
         );
+    }
+
+    // ---- the leftover language preference ----
+
+    #[test]
+    fn the_stale_language_pref_is_looked_for_where_0_1_17_wrote_it() {
+        // Beside the profile dir, not inside it — that is where the old code
+        // put the file precisely so `clear cookies` would leave it alone. Get
+        // this wrong and the sweep quietly deletes nothing.
+        let profile = std::path::Path::new("/cfg/sicompass/chrome-profile");
+        assert_eq!(
+            stale_language_pref_in(profile),
+            std::path::PathBuf::from("/cfg/sicompass/webbrowser-language")
+        );
+    }
+
+    #[test]
+    fn clearing_cookies_never_touches_real_files_under_test() {
+        // `remove_stale_language_pref` is a real `remove_file`, and the command
+        // tests below invoke `clear cookies`. Without the same guard the URL
+        // history has, running the suite would delete the developer's own file.
+        assert!(
+            stale_language_pref_path().is_none(),
+            "the persistence guard must cover every file this provider removes"
+        );
+        let mut p = WebbrowserProvider::new();
+        let mut error = String::new();
+        p.clear_cookies(&mut error);
     }
 
     #[test]
@@ -8316,6 +8131,61 @@ mod tests {
         assert!(map.keys().any(|k| k.starts_with("form_2/")));
     }
 
+    /// An ordinary multilingual page, shaped like anysurfer.be and
+    /// elevenways.be: content, a switcher in the nav, `<link rel=alternate>`
+    /// for the other two languages, and `hreflang` sprayed over content links.
+    ///
+    /// Every part of that is a trap the old language step fell into. The
+    /// current language is a `<span lang>` rather than a link, so it was left
+    /// out of the list of languages entirely, and the content links carrying
+    /// `hreflang="nl"` overwrote the switcher's Dutch entry with their own text
+    /// and href.
+    #[cfg(not(target_os = "windows"))]
+    const SWITCHER_FIXTURE: &str = r#"<!DOCTYPE html><html lang="nl"><head>
+        <link href="https://x.invalid/en" rel="alternate" hreflang="en">
+        <link href="https://x.invalid/fr" rel="alternate" hreflang="fr">
+        </head><body>
+        <ul class="languages">
+          <li><span lang="NL">Nederlands</span></li>
+          <li><a lang="en" hreflang="en" href="https://x.invalid/en">English</a></li>
+          <li><a lang="fr" hreflang="fr" href="https://x.invalid/fr">Français</a></li>
+        </ul>
+        <h1>ARTICLE-HEADING</h1>
+        <p>ARTICLE-BODY</p>
+        <a hreflang="nl" href="/nl/contact">CONTACT-LINK</a>
+        </body></html>"#;
+
+    #[test]
+    #[ignore]
+    #[cfg(not(target_os = "windows"))]
+    fn a_page_with_a_language_switcher_is_just_a_page() {
+        let _guard = launch_flag_guard(false);
+        let load = load_fixture("sic-switcher.html", SWITCHER_FIXTURE);
+
+        // The page is what loads. Nothing is asked first.
+        assert!(
+            load.notices.is_empty(),
+            "a language switcher is not a question: {:?}",
+            load.notices
+        );
+        let (elems, _) = html_to_ffon_with_forms(&load.html, "https://x.invalid/nl");
+        let rendered = format!("{elems:?}");
+        for want in ["ARTICLE-HEADING", "ARTICLE-BODY", "CONTACT-LINK"] {
+            assert!(
+                rendered.contains(want),
+                "content missing {want}: {rendered}"
+            );
+        }
+        // The switcher reads as the links it is, current language included —
+        // that entry is exactly the one the old step could not see.
+        for lang in ["Nederlands", "English", "Français"] {
+            assert!(
+                rendered.contains(lang),
+                "the switcher lost {lang}: {rendered}"
+            );
+        }
+    }
+
     /// A provider that shuts its Chrome down when the test ends, panic or not.
     ///
     /// Nothing kills the child on drop and `cleanup` is only ever called by the
@@ -8475,69 +8345,29 @@ mod tests {
         );
     }
 
-    // Live end-to-end against the site that prompted all of this, walking the
-    // whole chain: bpost offers four languages (a Bootstrap modal whose options
-    // are <a data-lang> with no href, plus <link rel=alternate hreflang>), then
-    // a OneTrust banner via GTM, and only then its content.
+    // Live end-to-end against the site that prompted all of this: bpost loads a
+    // OneTrust banner via GTM, so its cookie step arrives a beat after the page
+    // has otherwise settled, and only then comes the content.
     //
-    //   XDG_CONFIG_HOME=$(mktemp -d) cargo test -p sicompass-webbrowser \
-    //     live_bpost -- --ignored --nocapture
+    // It also pins that the language question is gone. bpost offers four
+    // languages, so it used to ask before showing anything.
+    //
+    //   cargo test -p sicompass-webbrowser live_bpost -- --ignored --nocapture
     #[test]
     #[ignore]
     #[cfg(target_os = "linux")]
-    fn live_bpost_walks_language_then_cookies_then_content() {
+    fn live_bpost_answers_cookies_then_shows_content() {
         let _guard = launch_flag_guard(false);
-        // This test asserts the choice is *remembered*, so it needs the real
-        // file. Run it with `XDG_CONFIG_HOME=$(mktemp -d)` as the header says.
-        let _persist = RealPersistence::enable();
-        forget_language();
         let mut p = TestProvider::new();
-        p.load_url("https://www.bpost.be/");
+        // The language is pinned by the address, which is how a reader gets a
+        // language now that nothing asks: bpost's own switcher is in the page.
+        p.load_url("https://www.bpost.be/nl");
         assert!(pump(&mut p), "bpost never finished loading");
 
-        // ---- step 1: language -------------------------------------------
-        let step1 = format!("{:?}", p.cached_page.as_ref().unwrap().elements);
-        assert!(
-            step1.contains("Ik spreek Nederlands"),
-            "expected the language step, got: {step1}"
-        );
-        // The step is the list and nothing else.
-        assert!(
-            !step1.contains("Welkom bij Bpost"),
-            "content leaked into the language step: {step1}"
-        );
-        // Codes come from hreflang/data-lang, so the options sort nl, fr, de, en
-        // by code: de, en, fr, nl.
-        let nl_form = p
-            .form_map
-            .iter()
-            .find(|(_, n)| n.css_selector.starts_with("#sic-lang-nl-"))
-            .map(|(k, _)| k.clone())
-            .expect("no Dutch choice in the language step");
-        let nl_n: usize = nl_form
-            .trim_start_matches("form_")
-            .split('/')
-            .next()
-            .unwrap()
-            .parse()
-            .unwrap();
-
-        p.on_button_press(&format!("submit:form_{nl_n}"));
-        assert!(pump(&mut p), "no page after choosing Dutch");
-        assert_eq!(
-            stored_language().as_deref(),
-            Some("nl"),
-            "the choice should be remembered so the step is never shown again"
-        );
-
-        // ---- step 2: cookies ---------------------------------------------
+        // ---- step 1: cookies ---------------------------------------------
         let step2 = format!("{:?}", p.cached_page.as_ref().unwrap().elements);
-        assert!(
-            !step2.contains("Ik spreek Nederlands"),
-            "the language step came back: {step2}"
-        );
-        // Checked through the proxy ids, not the wording: bpost now serves
-        // Dutch, and its reject button reads "Alles afwijzen".
+        // Checked through the proxy ids, not the wording: bpost serves Dutch
+        // here, and its reject button reads "Alles afwijzen".
         let consent: Vec<usize> = p
             .form_map
             .iter()
@@ -8564,11 +8394,11 @@ mod tests {
         p.on_button_press(&format!("submit:form_{reject_n}"));
         assert!(pump(&mut p), "no page after choosing on cookies");
 
-        // ---- step 3: the content ------------------------------------------
+        // ---- step 2: the content ------------------------------------------
         let content = format!("{:?}", p.cached_page.as_ref().unwrap().elements);
         assert!(
             content.contains("Welkom bij Bpost"),
-            "expected bpost's content after the chain, got: {content}"
+            "expected bpost's content after the cookie step, got: {content}"
         );
         // bpost keeps its whole main menu in a .navbar-collapse that stays
         // display:none at 1920px, so an unconditional prune silently ate the
