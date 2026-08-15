@@ -2,9 +2,8 @@
 
 webbrowser-display-name = webbrowser
 
-# A site can put a language choice, then a cookie choice, in front of its
-# content. Each is answered on a page of its own; these introduce them.
-webbrowser-step-language = Deze site bestaat in meerdere talen. Kies er een om verder te gaan.
+# A site can put a cookie choice in front of its content. It is answered on a
+# page of its own; this introduces it.
 webbrowser-step-consent = Deze site vraagt naar cookies. Kies er een om verder te gaan.
 webbrowser-consent-unrecognised = Deze site toont een cookiemelding en er kon geen keuze uit gehaald worden. De cookiepagina zelf staat hieronder.
 webbrowser-consent-accept-all = Alle cookies aanvaarden

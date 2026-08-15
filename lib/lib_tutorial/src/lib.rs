@@ -739,7 +739,7 @@ mod tests {
             "must say where the recall history sits, got:\n{text}"
         );
         // The colon commands a reader cannot otherwise guess at.
-        for cmd in ["clear cookies", "choose language", "show hidden content"] {
+        for cmd in ["clear cookies", "show hidden content"] {
             assert!(
                 text.contains(cmd),
                 "must document the {cmd} command, got:\n{text}"

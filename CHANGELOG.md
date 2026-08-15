@@ -5,6 +5,29 @@ GitHub Release body, so entries here are what users read on the download page.
 
 ## 0.1.18
 
+### Multilingual sites no longer ask you to pick a language first
+
+0.1.17 could interrupt a page with a list of languages to choose from before it
+would show anything. It was meant for a site that genuinely will not continue
+until you have chosen, but the test for that was only "this page mentions more
+than one language", which is true of almost every Belgian site. So elevenways.be
+and anysurfer.be, among many others, replaced their own content with a question
+nobody had asked.
+
+The lists it offered were wrong as often as not. A site usually marks the
+language you are already reading differently from the ones you could switch to,
+so anysurfer.be, in Dutch, offered only English and French, with no way to stay
+where you were. On elevenways.be the language markers scattered over ordinary
+content links leaked into the list, so the Dutch entry led to the contact page.
+
+The question is gone. A site's own language links are read as part of the page,
+which is where you would look for them, and the address you asked for is the
+address that loads. The `choose language` command went with it, and if you had
+already answered the question once, `clear cookies` now clears that too. Cookie
+banners are unchanged: those really do sit between you and the page, so they
+are still answered as a step of their own, and nothing is accepted on your
+behalf.
+
 ### The address bar remembers where you have been
 
 Every address you load is kept, newest first, as rows under the web browser's
@@ -29,8 +52,8 @@ that an address should outlive your ordinary browsing.
 
 The in-app tutorial had drifted since the browser, the file browser and the
 plugin system all changed under it. It now covers the browser's recall history,
-bookmarks and its `clear cookies`, `choose language` and `show hidden content`
-commands, and the keys that had never been listed at all: cut, copy-value,
+bookmarks and its `clear cookies` and `show hidden content` commands, and the
+keys that had never been listed at all: cut, copy-value,
 forward delete, structural insert, and text selection. Two sections were also
 simply wrong. Plugins are WASM components, not TypeScript scripts or compiled C
 libraries, and the terminal's `:` opens a shell in the folder you are reading
