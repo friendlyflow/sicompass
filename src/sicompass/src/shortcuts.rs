@@ -149,25 +149,34 @@ fn active_provider_name(r: &AppRenderer) -> Option<&str> {
 
 /// True in the terminal's folder-browse view, where `:` opens a shell there.
 fn terminal_browsing(r: &AppRenderer) -> bool {
-    active_provider_name(r) == Some("terminal") && !handlers::terminal_is_in_shell(r)
+    active_provider_name(r) == Some("terminal") && !handlers::in_session_view(r)
 }
 
-/// True in the terminal's shell view, where `:` and Escape both go back to the
-/// folder listing.
-fn terminal_shell(r: &AppRenderer) -> bool {
-    handlers::terminal_is_in_shell(r)
+/// True in claude's folder-browse view, where `:` starts a claude session there.
+///
+/// Separate from [`terminal_browsing`] only because `Shortcut::label` is a
+/// `&'static str`: the two providers need the same handler but different hints.
+fn claude_browsing(r: &AppRenderer) -> bool {
+    active_provider_name(r) == Some("claude") && !handlers::in_session_view(r)
 }
 
-/// True where Left steps out to the parent list. The terminal's shell level is
-/// the exception: Left is inert there, leaving is Escape's job.
+/// True in a browse-then-session provider's session view, where Escape goes back
+/// to the folder listing.
+fn in_session_view(r: &AppRenderer) -> bool {
+    handlers::in_session_view(r)
+}
+
+/// True where Left steps out to the parent list. A session level is the
+/// exception: Left is inert there, leaving is Escape's job.
 fn left_goes_back(r: &AppRenderer) -> bool {
-    not_at_root(r) && !handlers::at_terminal_shell_level(r)
+    not_at_root(r) && !handlers::at_session_input_level(r)
 }
 
-/// True for every provider except the terminal, whose `:` opens a shell rather
-/// than the command palette.
-fn not_terminal(r: &AppRenderer) -> bool {
-    active_provider_name(r) != Some("terminal")
+/// True for every provider that actually has a command palette. The
+/// browse-then-session providers do not: their `:` opens a session instead, and
+/// leaving this true for them would advertise two conflicting `:` hints at once.
+fn has_command_palette(r: &AppRenderer) -> bool {
+    !handlers::is_browse_then_session_provider(r)
 }
 
 fn is_filebrowser(r: &AppRenderer) -> bool {
@@ -441,7 +450,7 @@ pub static SHORTCUTS: &[Shortcut] = &[
         shift: false,
         modes: &[Coordinate::General],
         label: "Esc    Folders",
-        is_available: terminal_shell,
+        is_available: in_session_view,
         handle: handlers::handle_escape,
     },
     Shortcut {
@@ -1186,10 +1195,15 @@ pub static SHORTCUTS: &[Shortcut] = &[
     },
     // ---- Colon / Semicolon+Shift (command mode entry) --------------------
     // `handle_colon` branches on the provider itself; these rows differ only in
-    // the hint they advertise. The terminal has no command palette — its `:`
-    // opens a shell in the folder being listed — so it gets its own label. Inside the
-    // shell no row matches, so `:` does not dispatch at all: Escape is the only
-    // way back to the folders.
+    // the hint they advertise. The browse-then-session providers have no command
+    // palette — their `:` opens a session in the folder being listed — so each
+    // gets its own label, and only the generic row is left for everyone else.
+    // Inside a session no row matches, so `:` does not dispatch at all: Escape is
+    // the only way back to the folders.
+    //
+    // `:` is Shift+`;` on most layouts, but SDL reports it as either
+    // `Semicolon` with shift or `Colon` without, depending on the layout — hence
+    // two keycodes per hint.
     Shortcut {
         key: Keycode::Semicolon,
         key2: None,
@@ -1206,8 +1220,18 @@ pub static SHORTCUTS: &[Shortcut] = &[
         ctrl: false,
         shift: true,
         modes: &[Coordinate::General],
+        label: ":      Claude",
+        is_available: claude_browsing,
+        handle: handlers::handle_colon,
+    },
+    Shortcut {
+        key: Keycode::Semicolon,
+        key2: None,
+        ctrl: false,
+        shift: true,
+        modes: &[Coordinate::General],
         label: ":      Command",
-        is_available: not_terminal,
+        is_available: has_command_palette,
         handle: handlers::handle_colon,
     },
     Shortcut {
@@ -1226,8 +1250,18 @@ pub static SHORTCUTS: &[Shortcut] = &[
         ctrl: false,
         shift: false,
         modes: &[Coordinate::General],
+        label: ":      Claude",
+        is_available: claude_browsing,
+        handle: handlers::handle_colon,
+    },
+    Shortcut {
+        key: Keycode::Colon,
+        key2: None,
+        ctrl: false,
+        shift: false,
+        modes: &[Coordinate::General],
         label: ":      Command",
-        is_available: not_terminal,
+        is_available: has_command_palette,
         handle: handlers::handle_colon,
     },
     // ---- I / A (enter insert/append mode) --------------------------------

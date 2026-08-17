@@ -172,6 +172,16 @@ fn seed_insert_placeholder(children: &mut Vec<sicompass_sdk::ffon::FfonElement>)
 pub fn refresh_current_directory(renderer: &mut AppRenderer) {
     use sicompass_sdk::ffon::FfonElement;
 
+    // Reading inside a session's own rows — a message's lines, a tool call, the
+    // header holding the working directory. The provider's `fetch()` would hand
+    // back the whole conversation, and replacing this level with it buries a
+    // copy of the list the row came from inside that row. Streaming output has
+    // nowhere useful to go while the user is a level down anyway; the next
+    // refresh after they step back up picks it all up.
+    if crate::handlers::below_session_level(renderer) {
+        return;
+    }
+
     let idx = match renderer.current_id.get(0) {
         Some(i) => i,
         None => return,

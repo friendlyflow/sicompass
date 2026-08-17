@@ -436,6 +436,14 @@ pub fn navigate_right_raw(r: &mut AppRenderer) -> bool {
         new_id.push(0);
         r.current_id = new_id;
     } else {
+        // A session view has nothing to lazily load: its `fetch()` returns the
+        // whole conversation regardless of depth, so grafting it here would fill
+        // this Obj with a copy of the list the cursor is standing in. A childless
+        // row there — an input slot with no recall history yet — is simply a
+        // dead end, so Right does nothing.
+        if in_session_view(r) {
+            return false;
+        }
         // No children loaded yet. Fetch this Obj's level from the provider and
         // graft it onto the Obj in place, then descend one level. For
         // filesystem/server-backed providers the `fetch()` is the directory or
@@ -649,7 +657,7 @@ pub fn handle_left(r: &mut AppRenderer) {
     // popping a level out of the shell would leave `browse_path` one directory
     // deeper than the cursor and the next descent would double the segment.
     // Deeper in (inside the input slot's history) Left is unchanged.
-    if at_terminal_shell_level(r) {
+    if at_session_input_level(r) {
         return;
     }
     let pre_nav_id = r.current_id.clone();
@@ -1057,11 +1065,12 @@ pub fn handle_colon(r: &mut AppRenderer) {
     if r.current_id.depth() <= 1 {
         return;
     }
-    // The terminal's only two commands are the two halves of one view swap
-    // (folder listing ⇄ shell), so a one-item palette would be pure ceremony:
-    // `:` fires the transition directly and never enters Command mode.
-    if is_terminal_provider(r) {
-        open_terminal_shell(r);
+    // A browse-then-session provider's only two commands are the two halves of
+    // one view swap (folder listing ⇄ session), so a one-item palette would be
+    // pure ceremony: `:` fires the transition directly and never enters Command
+    // mode.
+    if is_browse_then_session_provider(r) {
+        open_session_view(r);
         return;
     }
     r.previous_coordinate = r.coordinate;
@@ -1078,43 +1087,82 @@ pub fn handle_colon(r: &mut AppRenderer) {
     r.needs_redraw = true;
 }
 
-/// Command id the terminal exposes to swap its list to the shell.
-pub(crate) const TERMINAL_CMD_SHELL: &str = "shell";
-/// Command id the terminal exposes to swap its list back to the folder listing.
-pub(crate) const TERMINAL_CMD_BROWSE: &str = "browse";
+/// Command id every browse-then-session provider exposes to swap its list back
+/// to the folder listing.
+///
+/// The *enter* half deliberately has no constant here: the terminal calls it
+/// `shell` and claude calls it `session`, and [`open_session_view`] fires
+/// whichever single transition the provider is currently advertising rather than
+/// naming either. Only this one is shared, because it is what the app reads to
+/// tell the two views apart.
+pub(crate) const VIEW_CMD_BROWSE: &str = "browse";
 
-/// True when the cursor is inside the terminal provider.
+/// True for the providers laid out as "browse a folder tree, then `:` opens a
+/// live session in the folder being listed": the terminal (a shell) and claude
+/// (a `claude` child). Both expose the same two-view `commands()` contract, so
+/// every helper below is written against the contract and only this pair of
+/// functions names them.
 ///
 /// Matched by name rather than a trait method: `sicompass-sdk` is consumed from
 /// crates.io at a pinned version, so a new `Provider` hook would need a publish
-/// round-trip. The app already identifies the terminal this way for the live
-/// input slot, the tab-switcher label, and the redraw path.
-pub(crate) fn is_terminal_provider(r: &AppRenderer) -> bool {
-    crate::provider::get_active_provider_ref(r).map(|p| p.name()) == Some("terminal")
+/// round-trip. The app already identifies these this way for the live input
+/// slot, the tab-switcher label, and the redraw path.
+pub(crate) fn is_browse_then_session_name(name: &str) -> bool {
+    matches!(name, "terminal" | "claude")
 }
 
-/// True when the terminal is currently showing the shell rather than folders.
+/// [`is_browse_then_session_name`] for the active provider. The by-name variant
+/// exists because `restorable_nav` sees a bare provider slice, not the renderer.
+pub(crate) fn is_browse_then_session_provider(r: &AppRenderer) -> bool {
+    crate::provider::get_active_provider_ref(r)
+        .is_some_and(|p| is_browse_then_session_name(p.name()))
+}
+
+/// True when the provider is currently showing its session rather than folders.
 ///
-/// Read off `commands()`: the provider offers `browse` only while the shell is
+/// Read off `commands()`: the provider offers `browse` only while the session is
 /// up, so the app never has to ask it for view state directly.
-pub(crate) fn terminal_is_in_shell(r: &AppRenderer) -> bool {
-    is_terminal_provider(r)
+pub(crate) fn in_session_view(r: &AppRenderer) -> bool {
+    is_browse_then_session_provider(r)
         && crate::provider::get_commands(r)
             .iter()
-            .any(|c| c == TERMINAL_CMD_BROWSE)
+            .any(|c| c == VIEW_CMD_BROWSE)
 }
 
-/// True when the cursor sits on the shell's *own* list level — the one holding
+/// True when the cursor has descended *below* the level the session list
+/// occupies — into an assistant message's lines, a tool call, the session
+/// header, or the input slot's recall history.
+///
+/// A session provider's `fetch()` returns the **whole** conversation whatever
+/// the cursor's depth, unlike a path-scoped provider that returns the children
+/// of `current_path()`. Grafting that below the level it belongs to buries a
+/// second copy of the conversation inside one of its own rows, which is what
+/// both the streaming refresh and the lazy Right-fetch used to do.
+///
+/// The session's own depth is the depth `:` was pressed at, which
+/// [`open_session_view`] records precisely because it cannot be recovered later.
+/// With no record (a tab restored straight into a session) there is nothing to
+/// compare against, so the caller keeps its previous behaviour.
+pub(crate) fn below_session_level(r: &AppRenderer) -> bool {
+    if !in_session_view(r) {
+        return false;
+    }
+    r.session_view_return_id
+        .as_ref()
+        .is_some_and(|id| r.current_id.depth() > id.depth())
+}
+
+/// True when the cursor sits on the session's *own* list level — the one holding
 /// the live input slot — rather than inside that slot's history children.
 ///
-/// The distinction matters for every "back out of the shell" path: swapping the
-/// view rebuilds whichever level the cursor is on, so doing it from inside the
-/// history would graft the folder listing over the history list instead.
+/// The distinction matters for every "back out of the session" path: swapping
+/// the view rebuilds whichever level the cursor is on, so doing it from inside
+/// the history would graft the folder listing over the history list instead.
 /// Detected by the trailing element being an `<input>` Obj, which the browse
 /// listing never produces (its directories carry no tag) and the history
 /// children never are (they are `<button>` Strs).
-pub(crate) fn at_terminal_shell_level(r: &AppRenderer) -> bool {
-    if !terminal_is_in_shell(r) {
+pub(crate) fn at_session_input_level(r: &AppRenderer) -> bool {
+    if !in_session_view(r) {
         return false;
     }
     sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &r.current_id)
@@ -1125,45 +1173,55 @@ pub(crate) fn at_terminal_shell_level(r: &AppRenderer) -> bool {
         })
 }
 
-/// `:` in the terminal — swap its list between the folder browser and the shell.
+/// `:` in a browse-then-session provider — swap its list between the folder
+/// browser and the session.
 ///
-/// Direction comes from the provider's own `commands()`, which offers exactly
-/// the transition that is available right now.
+/// Direction *and identity* come from the provider's own `commands()`, which
+/// offers exactly the transition that is available right now. That is why the
+/// terminal's `shell` and claude's `session` are never named here: the app fires
+/// whatever the provider is advertising, so a third provider adopting the
+/// pattern needs no change on this side.
 ///
-/// The shell runs in the folder **being listed**, never in the one under the
-/// cursor: the scrollback replaces that listing in place, so the shell sits at
-/// the depth the listing occupied and `pwd` names the directory whose contents
-/// the user was just reading. Wanting a shell one level deeper is a Right away.
-pub(crate) fn open_terminal_shell(r: &mut AppRenderer) {
-    // Already in the shell: `:` does nothing. Escape is the one way out, so
-    // there is a single key to learn and no way to lose the shell by reflex.
-    if terminal_is_in_shell(r) {
+/// The session runs in the folder **being listed**, never in the one under the
+/// cursor: the session replaces that listing in place, so it sits at the depth
+/// the listing occupied and the working directory is the one whose contents the
+/// user was just reading. Wanting a session one level deeper is a Right away.
+pub(crate) fn open_session_view(r: &mut AppRenderer) {
+    // Already in the session: `:` does nothing. Escape is the one way out, so
+    // there is a single key to learn and no way to lose the session by reflex.
+    if in_session_view(r) {
         return;
     }
-    // Remembered now because it cannot be recovered later: once the scrollback
-    // is grafted, the cursor's index is a position in it, not a folder row.
-    r.terminal_shell_return_id = Some(r.current_id.clone());
-    apply_terminal_view_command(r, TERMINAL_CMD_SHELL);
+    // Safe to take the first: every caller gates on
+    // `is_browse_then_session_provider`, and those providers advertise exactly
+    // one transition per view.
+    let Some(cmd) = crate::provider::get_commands(r).into_iter().next() else {
+        return;
+    };
+    // Remembered now because it cannot be recovered later: once the session is
+    // grafted, the cursor's index is a position in it, not a folder row.
+    r.session_view_return_id = Some(r.current_id.clone());
+    apply_view_command(r, &cmd);
 }
 
-/// Fire one of the terminal's view-swap commands and rebuild the list around it.
+/// Fire one of a provider's view-swap commands and rebuild the list around it.
 ///
 /// `refresh_current_directory` replaces the *current level's* slice in place, so
 /// the breadcrumb above stays intact: pressing `:` inside `/home/nico/Projects`
-/// puts the scrollback where that folder's subdirectories were, and the
-/// provider's `current_path()` still reads `/home/nico/Projects` — the folder
-/// the shell is actually running in.
-fn apply_terminal_view_command(r: &mut AppRenderer, cmd: &str) {
+/// puts the session where that folder's subdirectories were, and the provider's
+/// `current_path()` still reads `/home/nico/Projects` — the folder the session
+/// is actually running in.
+fn apply_view_command(r: &mut AppRenderer, cmd: &str) {
     crate::provider::handle_command(r, cmd, "", 0);
 
-    // Leaving the shell: the provider has just pointed `current_path()` at the
-    // folder the shell actually ended in, which a typed `cd` may have moved.
-    // Rebuild the tree down to it, so the current level lists that folder's own
-    // contents — the level the scrollback was covering — and the breadcrumb
-    // above describes where the user really is.
-    if cmd == TERMINAL_CMD_BROWSE {
+    // Leaving the session: the provider has just pointed `current_path()` at the
+    // folder the session actually ended in, which a `cd` typed at a shell prompt
+    // may have moved. Rebuild the tree down to it, so the current level lists
+    // that folder's own contents — the level the session was covering — and the
+    // breadcrumb above describes where the user really is.
+    if cmd == VIEW_CMD_BROWSE {
         // Consumed either way: a remembered row that outlives one swap is stale.
-        let origin = r.terminal_shell_return_id.take();
+        let origin = r.session_view_return_id.take();
         if crate::provider::rebuild_path_from_root(r) {
             restore_row_within_level(r, origin.as_ref());
             r.scroll_offset = 0;
@@ -3048,8 +3106,8 @@ pub fn handle_escape(r: &mut AppRenderer) {
     // shell itself keeps running, so `:` resumes the same session with its
     // scrollback intact. Only General mode — inside Insert, Escape still means
     // "cancel this edit".
-    if r.coordinate == Coordinate::General && at_terminal_shell_level(r) {
-        apply_terminal_view_command(r, TERMINAL_CMD_BROWSE);
+    if r.coordinate == Coordinate::General && at_session_input_level(r) {
+        apply_view_command(r, VIEW_CMD_BROWSE);
         return;
     }
     match r.coordinate {
@@ -6541,16 +6599,17 @@ pub fn restorable_nav(
     current_id: &IdArray,
     provider_path: &str,
 ) -> RestorableNav {
-    let in_terminal_shell = current_id
+    let in_session = current_id
         .get(0)
         .and_then(|i| providers.get(i))
         .is_some_and(|p| {
-            p.name() == "terminal" && p.commands().iter().any(|c| c == TERMINAL_CMD_BROWSE)
+            is_browse_then_session_name(p.name())
+                && p.commands().iter().any(|c| c == VIEW_CMD_BROWSE)
         });
     RestorableNav {
         current_id: current_id.clone(),
         path: provider_path.to_owned(),
-        on_path: in_terminal_shell && current_id.depth() >= 2,
+        on_path: in_session && current_id.depth() >= 2,
     }
 }
 
@@ -7591,6 +7650,130 @@ mod tests {
         }
     }
 
+    /// Stands in for claude: the same two-view contract as [`TermProvider`], but
+    /// its *enter* command is `session`, not `shell`. That difference is the
+    /// point — the app must fire whatever transition `commands()` advertises
+    /// rather than a hardcoded id.
+    struct ClaudeStub {
+        in_session: bool,
+    }
+    impl sicompass_sdk::provider::Provider for ClaudeStub {
+        fn name(&self) -> &str {
+            "claude"
+        }
+        fn fetch(&mut self) -> Vec<FfonElement> {
+            if self.in_session {
+                vec![FfonElement::new_obj("send to claude<input></input>")]
+            } else {
+                vec![
+                    FfonElement::new_obj("workspace"),
+                    FfonElement::new_obj("docs"),
+                ]
+            }
+        }
+        fn commands(&self) -> Vec<String> {
+            vec![if self.in_session {
+                "browse".to_owned()
+            } else {
+                "session".to_owned()
+            }]
+        }
+        fn handle_command(
+            &mut self,
+            cmd: &str,
+            _k: &str,
+            _t: i32,
+            _e: &mut String,
+        ) -> Option<FfonElement> {
+            match cmd {
+                "session" => self.in_session = true,
+                "browse" => self.in_session = false,
+                _ => {}
+            }
+            None
+        }
+    }
+
+    fn make_renderer_with_claude() -> AppRenderer {
+        use sicompass_sdk::provider::Provider as _;
+        let mut r = AppRenderer::new();
+        let mut prov = ClaudeStub { in_session: false };
+        let mut root = FfonElement::new_obj("claude");
+        for child in prov.fetch() {
+            root.as_obj_mut().unwrap().push(child);
+        }
+        r.ffon = vec![root];
+        r.current_id = {
+            let mut id = IdArray::new();
+            id.push(0);
+            id.push(0);
+            id
+        };
+        r.providers.push(Box::new(prov));
+        list::create_list_current_layer(&mut r);
+        r
+    }
+
+    #[test]
+    fn colon_in_claude_swaps_to_the_session_instead_of_the_palette() {
+        let mut r = make_renderer_with_claude();
+        r.coordinate = Coordinate::General;
+        handle_colon(&mut r);
+        assert_eq!(
+            r.coordinate,
+            Coordinate::General,
+            "`:` must not open the command palette"
+        );
+        assert!(in_session_view(&r));
+    }
+
+    #[test]
+    fn open_session_view_fires_whatever_transition_the_provider_offers() {
+        // The app knows neither `shell` nor `session` — it fires the one command
+        // the provider is currently advertising. This stub proves it by naming
+        // its enter-command differently from the terminal's.
+        let mut r = make_renderer_with_claude();
+        r.coordinate = Coordinate::General;
+        open_session_view(&mut r);
+        assert!(
+            in_session_view(&r),
+            "a provider whose enter-command is `session` must still be entered"
+        );
+    }
+
+    #[test]
+    fn escape_in_the_claude_session_returns_to_the_folder_listing() {
+        let mut r = make_renderer_with_claude();
+        r.coordinate = Coordinate::General;
+        handle_colon(&mut r);
+        assert!(in_session_view(&r));
+        handle_escape(&mut r);
+        assert!(!in_session_view(&r), "Escape backs out to the folders");
+    }
+
+    #[test]
+    fn colon_inside_the_claude_session_does_nothing() {
+        // Escape is the one way out, so `:` cannot lose the session by reflex.
+        let mut r = make_renderer_with_claude();
+        r.coordinate = Coordinate::General;
+        handle_colon(&mut r);
+        assert!(in_session_view(&r));
+        handle_colon(&mut r);
+        assert!(in_session_view(&r), "still in the session");
+        assert_eq!(r.coordinate, Coordinate::General);
+    }
+
+    #[test]
+    fn left_inside_the_claude_session_does_nothing() {
+        let mut r = make_renderer_with_claude();
+        r.coordinate = Coordinate::General;
+        handle_colon(&mut r);
+        let before = r.current_id.clone();
+        handle_left(&mut r);
+        assert!(in_session_view(&r), "Left must not leave the session");
+        assert_eq!(r.current_id, before);
+    }
+
     fn make_renderer_with_terminal() -> AppRenderer {
         use sicompass_sdk::provider::Provider as _;
         let mut r = AppRenderer::new();
@@ -7620,7 +7803,7 @@ mod tests {
 
         assert_eq!(r.coordinate, Coordinate::General, "no command palette here");
         assert_eq!(r.current_command, CommandPhase::None);
-        assert!(terminal_is_in_shell(&r));
+        assert!(in_session_view(&r));
         // The list swapped in place, and the cursor landed on the input slot.
         assert_eq!(r.total_list.len(), 1);
         assert!(
@@ -7661,7 +7844,7 @@ mod tests {
         handle_colon(&mut r);
         handle_escape(&mut r);
 
-        assert!(!terminal_is_in_shell(&r));
+        assert!(!in_session_view(&r));
         assert_eq!(r.current_id.last(), Some(1), "back on the row `:` was on");
         assert_eq!(r.list_index, 1);
         assert!(
@@ -7677,7 +7860,7 @@ mod tests {
         // reflex — and pressing it twice is not a toggle.
         let mut r = make_renderer_with_terminal();
         handle_colon(&mut r);
-        assert!(terminal_is_in_shell(&r));
+        assert!(in_session_view(&r));
         let before = r
             .total_list
             .iter()
@@ -7686,7 +7869,7 @@ mod tests {
 
         handle_colon(&mut r);
 
-        assert!(terminal_is_in_shell(&r), "still in the shell");
+        assert!(in_session_view(&r), "still in the shell");
         assert_eq!(
             r.total_list
                 .iter()
@@ -7739,7 +7922,7 @@ mod tests {
 
         handle_left(&mut r);
 
-        assert!(terminal_is_in_shell(&r), "Left must not leave the shell");
+        assert!(in_session_view(&r), "Left must not leave the shell");
         assert_eq!(r.current_id, id, "and must not move the cursor");
     }
 
@@ -7747,11 +7930,11 @@ mod tests {
     fn escape_in_terminal_shell_returns_to_the_folder_listing() {
         let mut r = make_renderer_with_terminal();
         handle_colon(&mut r);
-        assert!(terminal_is_in_shell(&r));
+        assert!(in_session_view(&r));
 
         handle_escape(&mut r);
 
-        assert!(!terminal_is_in_shell(&r));
+        assert!(!in_session_view(&r));
         assert_eq!(r.coordinate, Coordinate::General);
         assert_eq!(r.total_list.len(), 2);
     }
@@ -7767,7 +7950,7 @@ mod tests {
         handle_escape(&mut r);
 
         assert_eq!(r.coordinate, Coordinate::General);
-        assert!(!terminal_is_in_shell(&r));
+        assert!(!in_session_view(&r));
     }
 
     #[test]
@@ -7779,7 +7962,7 @@ mod tests {
             id
         };
         handle_colon(&mut r);
-        assert!(!terminal_is_in_shell(&r), "`:` needs a provider to act on");
+        assert!(!in_session_view(&r), "`:` needs a provider to act on");
     }
 
     // -----------------------------------------------------------------------

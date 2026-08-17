@@ -11551,6 +11551,316 @@ fn terminal_input_slot_renders_as_plus_i() {
     );
 }
 
+// ---------------------------------------------------------------------------
+// Claude: browse folders, then `:` for a session in the folder you picked
+// ---------------------------------------------------------------------------
+
+/// Register a claude provider whose browse view is re-rooted at `path`, with its
+/// binary pointed at a name that cannot exist.
+///
+/// The bogus binary is the safety rail: these tests drive `:`, and a machine
+/// with a real `claude` on PATH would otherwise start an actual API session per
+/// test. Spawning still *fails* usefully — the view swap, the working directory
+/// and the placeholder behaviour under test all happen either way.
+fn register_claude_rooted_at(renderer: &mut AppRenderer, path: &std::path::Path) {
+    register(
+        renderer,
+        sicompass_sdk::create_provider_by_name("claude").unwrap(),
+    );
+    renderer.providers[0].on_setting_change("claudeBinary", "definitely-not-claude-xyz-9000");
+    renderer.providers[0].set_current_path(path.to_str().unwrap());
+    let children = renderer.providers[0].fetch();
+    renderer.ffon[0].as_obj_mut().unwrap().children = children;
+    sicompass::list::create_list_current_layer(renderer);
+}
+
+#[test]
+fn claude_opens_on_a_folder_listing() {
+    // The provider root's children are directories, not a conversation — and no
+    // child has been started, because `:` is what spawns it.
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    std::fs::create_dir(root.join("workspace")).unwrap();
+    std::fs::write(root.join("notes.txt"), "x").unwrap();
+
+    ensure_builtins();
+    let mut renderer = AppRenderer::new();
+    register_claude_rooted_at(&mut renderer, &root);
+    press_right(&mut renderer);
+
+    let labels: Vec<&str> = renderer
+        .total_list
+        .iter()
+        .map(|i| i.label.as_str())
+        .collect();
+    // Directories render as plain `+` (navigable, not renameable); the file is
+    // not listed at all.
+    assert_eq!(labels, vec!["+ workspace"], "got {labels:?}");
+    assert_eq!(
+        renderer.providers[0].process_id(),
+        None,
+        "browsing spawns no claude"
+    );
+}
+
+#[test]
+fn claude_right_and_left_walk_the_folder_tree() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    let ws = root.join("workspace");
+    std::fs::create_dir(&ws).unwrap();
+    std::fs::create_dir(ws.join("sub")).unwrap();
+
+    ensure_builtins();
+    let mut renderer = AppRenderer::new();
+    register_claude_rooted_at(&mut renderer, &root);
+    press_right(&mut renderer); // into the provider
+    press_right(&mut renderer); // into `workspace`
+
+    assert_eq!(
+        renderer.providers[0].current_path(),
+        ws.to_str().unwrap(),
+        "the path follows the descent",
+    );
+
+    press_left(&mut renderer);
+    assert_eq!(
+        renderer.providers[0].current_path(),
+        root.to_str().unwrap(),
+        "Left pops back out",
+    );
+}
+
+#[test]
+fn claude_colon_starts_a_session_in_the_folder_being_listed() {
+    // The cursor sits on `workspace`, but the folder the user is *in* is the
+    // root — that is the one whose contents the list is showing, and the one
+    // claude has to resolve CLAUDE.md and .claude/skills/ from.
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    std::fs::create_dir(root.join("workspace")).unwrap();
+
+    ensure_builtins();
+    let mut renderer = AppRenderer::new();
+    register_claude_rooted_at(&mut renderer, &root);
+    press_right(&mut renderer);
+
+    press_colon(&mut renderer);
+
+    assert_eq!(
+        renderer.providers[0].current_path(),
+        root.to_str().unwrap(),
+        "the session runs in the listed folder, not the focused one",
+    );
+    assert!(
+        renderer.total_list.last().unwrap().label.starts_with("+i "),
+        "the session view ends with the live input slot",
+    );
+}
+
+#[test]
+fn claude_right_then_colon_starts_a_session_one_folder_down() {
+    // Wanting a session one level deeper is a Right away.
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    let ws = root.join("workspace");
+    std::fs::create_dir(&ws).unwrap();
+    std::fs::create_dir(ws.join("sub")).unwrap();
+
+    ensure_builtins();
+    let mut renderer = AppRenderer::new();
+    register_claude_rooted_at(&mut renderer, &root);
+    press_right(&mut renderer); // into the provider
+    press_right(&mut renderer); // into `workspace`
+
+    press_colon(&mut renderer);
+
+    assert_eq!(renderer.providers[0].current_path(), ws.to_str().unwrap());
+}
+
+#[test]
+fn claude_folder_without_subfolders_is_still_enterable() {
+    // A folder holding nothing but files is a perfectly good working directory
+    // for claude, and since `:` runs in the folder being listed, stepping into
+    // it is the only way to start a session there. The level shows the `i`
+    // placeholder the app seeds in any empty container — inert here, because the
+    // folder tree is read-only, but it keeps the level speakable.
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    let ws = root.join("workspace");
+    std::fs::create_dir(&ws).unwrap();
+    std::fs::write(ws.join("notes.txt"), "x").unwrap();
+
+    ensure_builtins();
+    let mut renderer = AppRenderer::new();
+    register_claude_rooted_at(&mut renderer, &root);
+    press_right(&mut renderer); // into the provider
+    let before = renderer.current_id.clone();
+
+    press_right(&mut renderer); // into `workspace`, which has no subfolders
+
+    assert_ne!(renderer.current_id, before, "Right descends into it");
+    let labels: Vec<&str> = renderer
+        .total_list
+        .iter()
+        .map(|i| i.label.as_str())
+        .collect();
+    assert_eq!(labels, vec!["i"], "an empty level still announces a row");
+
+    // And `:` there starts the session in it.
+    press_colon(&mut renderer);
+    assert_eq!(renderer.providers[0].current_path(), ws.to_str().unwrap());
+}
+
+#[test]
+fn claude_placeholder_cannot_be_turned_into_a_file() {
+    // The seeded `i` row exists so an empty folder is standable and speakable,
+    // not so it can create anything: the folder tree is read-only, and
+    // `commit_edit` refuses while browsing.
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    let ws = root.join("workspace");
+    std::fs::create_dir(&ws).unwrap();
+
+    ensure_builtins();
+    let mut renderer = AppRenderer::new();
+    register_claude_rooted_at(&mut renderer, &root);
+    press_right(&mut renderer); // into the provider
+    press_right(&mut renderer); // into `workspace`, empty
+
+    assert!(
+        !renderer.providers[0].commit_edit("", "newfile.txt"),
+        "browsing must refuse the create the placeholder would otherwise offer",
+    );
+    let entries: Vec<_> = std::fs::read_dir(&ws).unwrap().flatten().collect();
+    assert!(entries.is_empty(), "nothing was written to disk");
+}
+
+#[test]
+fn claude_escape_returns_to_the_folder_listing() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    std::fs::create_dir(root.join("workspace")).unwrap();
+
+    ensure_builtins();
+    let mut renderer = AppRenderer::new();
+    register_claude_rooted_at(&mut renderer, &root);
+    press_right(&mut renderer);
+    press_colon(&mut renderer);
+
+    press_escape(&mut renderer);
+
+    let labels: Vec<&str> = renderer
+        .total_list
+        .iter()
+        .map(|i| i.label.as_str())
+        .collect();
+    assert_eq!(labels, vec!["+ workspace"], "back on the folders");
+    assert_eq!(renderer.providers[0].current_path(), root.to_str().unwrap());
+}
+
+#[test]
+fn claude_right_in_the_session_never_grafts_a_copy_of_the_conversation() {
+    // The session view's `fetch()` returns the *whole* conversation, whatever
+    // the cursor's depth. Right on a childless Obj there (an input slot with no
+    // recall history yet) used to lazy-fetch and graft that whole list in as the
+    // slot's children, so the same rows appeared again one level down.
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    std::fs::create_dir(root.join("workspace")).unwrap();
+
+    ensure_builtins();
+    let mut renderer = AppRenderer::new();
+    register_claude_rooted_at(&mut renderer, &root);
+    press_right(&mut renderer);
+    press_colon(&mut renderer);
+
+    // The cursor lands on the `+i` slot, which has no recall history yet.
+    let slot_id = renderer.current_id.clone();
+    assert!(
+        renderer.total_list.last().unwrap().label.starts_with("+i "),
+        "expected to be standing on the input slot",
+    );
+
+    press_right(&mut renderer);
+
+    // An empty slot is a dead end: Right refuses rather than inventing children.
+    assert_eq!(
+        renderer.current_id, slot_id,
+        "Right must not descend into an empty input slot",
+    );
+    let slot_children = sicompass_sdk::ffon::get_ffon_at_id(&renderer.ffon, &renderer.current_id)
+        .and_then(|arr| arr.get(renderer.current_id.last().unwrap()).cloned())
+        .and_then(|e| e.as_obj().map(|o| o.children.len()))
+        .unwrap_or(0);
+    assert_eq!(
+        slot_children, 0,
+        "the conversation must not be grafted in as the slot's children",
+    );
+}
+
+#[test]
+fn claude_streaming_does_not_overwrite_the_level_being_read() {
+    // A tick that reports a change makes the app re-fetch and replace the
+    // *current* level. While the cursor is down inside a message (or the session
+    // header, where the working directory is shown), that level is not the
+    // conversation's own level, and replacing it buried a second copy of the
+    // whole conversation where the message's own lines belonged.
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    std::fs::create_dir(root.join("workspace")).unwrap();
+
+    ensure_builtins();
+    let mut renderer = AppRenderer::new();
+    register_claude_rooted_at(&mut renderer, &root);
+    press_right(&mut renderer);
+    press_colon(&mut renderer);
+
+    // Stand one level down, as if inside the session header reading `cwd:`.
+    let session_level = renderer.current_id.clone();
+    let mut inside = session_level.clone();
+    inside.push(0);
+    renderer.current_id = inside;
+
+    let session_rows = sicompass_sdk::ffon::get_ffon_at_id(&renderer.ffon, &session_level)
+        .map(|s| s.len())
+        .unwrap_or(0);
+
+    // What the streaming path does every frame it reports a change.
+    sicompass::provider::refresh_current_directory(&mut renderer);
+
+    let now = sicompass_sdk::ffon::get_ffon_at_id(&renderer.ffon, &renderer.current_id)
+        .map(|s| s.len())
+        .unwrap_or(0);
+    assert_ne!(
+        now, session_rows,
+        "the level being read was replaced by a copy of the conversation",
+    );
+}
+
+#[test]
+fn claude_left_is_inert_in_the_session() {
+    // Left is a dead end inside the session; Escape is the one way out.
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    std::fs::create_dir(root.join("workspace")).unwrap();
+
+    ensure_builtins();
+    let mut renderer = AppRenderer::new();
+    register_claude_rooted_at(&mut renderer, &root);
+    press_right(&mut renderer);
+    press_colon(&mut renderer);
+    let before = renderer.current_id.clone();
+
+    press_left(&mut renderer);
+
+    assert_eq!(
+        renderer.current_id, before,
+        "Left must not leave the session"
+    );
+    assert_eq!(renderer.providers[0].current_path(), root.to_str().unwrap());
+}
+
 #[test]
 fn enter_on_history_button_fills_input() {
     // Enter on a `<button>` history child fills the `+i` slot's <input> with

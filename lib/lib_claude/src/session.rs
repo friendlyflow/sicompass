@@ -208,6 +208,15 @@ impl Session {
         !matches!(self.child.try_wait(), Ok(Some(_)))
     }
 
+    /// OS process id of the child, for the tab-switcher label.
+    ///
+    /// A method rather than a stored field on purpose: `Child::id()` is
+    /// infallible and always current, and adding a field here would break the
+    /// hand-built `Session` literal in this module's round-trip test.
+    pub fn pid(&self) -> u32 {
+        self.child.id()
+    }
+
     /// Kill the child and reap it.
     pub fn kill(&mut self) {
         let _ = self.child.kill();

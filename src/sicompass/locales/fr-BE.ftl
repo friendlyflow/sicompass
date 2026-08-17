@@ -62,6 +62,7 @@ hint-d-dashboard = D      Tableau de bord
 hint-s-scroll = S      Défiler
 hint-command = :      Commande
 hint-shell = :      Shell
+hint-claude = :      Claude
 
 hint-ctrl-a-insert-after = Ctrl+A Insérer après
 hint-ctrl-a-select-all = Ctrl+A Tout sél.

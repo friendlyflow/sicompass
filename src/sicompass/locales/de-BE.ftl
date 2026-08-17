@@ -62,6 +62,7 @@ hint-d-dashboard = D      Dashboard
 hint-s-scroll = S      Scrollen
 hint-command = :      Befehl
 hint-shell = :      Shell
+hint-claude = :      Claude
 
 hint-ctrl-a-insert-after = Ctrl+A Nach einf.
 hint-ctrl-a-select-all = Ctrl+A Alles ausw.

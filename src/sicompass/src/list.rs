@@ -710,8 +710,9 @@ pub(crate) fn tab_breadcrumb(ffon: &[FfonElement], id: &IdArray) -> String {
 /// Shell PID and navigation breadcrumb for tab `ti`, used to label tab-switcher
 /// rows as "{pid} - {breadcrumb}".
 ///
-/// The PID is the tab's terminal provider's child shell ([`Provider::process_id`]);
-/// `None` when the tab has no terminal provider or its shell has not started yet.
+/// The PID is the tab's child process ([`Provider::process_id`]) — the
+/// terminal's shell or claude's CLI; `None` when the tab has no such provider or
+/// its child has not started yet.
 /// The breadcrumb is the Ctrl+F-style navigation path (see [`tab_breadcrumb`]).
 ///
 /// The active tab reads from the live FFON tree / cursor; inactive tabs read
@@ -719,23 +720,17 @@ pub(crate) fn tab_breadcrumb(ffon: &[FfonElement], id: &IdArray) -> String {
 /// `tab.providers`).
 fn tab_pid_and_path(r: &AppRenderer, ti: usize) -> (Option<u32>, String) {
     if ti == r.active_tab {
-        // The shared settings provider lives last and is never a terminal, so
-        // scanning the whole live set for the shell PID is safe.
-        let pid = r
-            .providers
-            .iter()
-            .find(|p| p.name() == "terminal")
-            .and_then(|p| p.process_id());
+        // `process_id` defaults to `None` on the trait, and only a provider that
+        // owns a child process overrides it — so the first one that reports a
+        // pid is the tab's child, whether that is the terminal's shell or
+        // claude's CLI. The shared settings provider never reports one.
+        let pid = r.providers.iter().find_map(|p| p.process_id());
         (pid, tab_breadcrumb(&r.ffon, &r.current_id))
     } else {
         let Some(tab) = r.tabs.get(ti) else {
             return (None, String::new());
         };
-        let pid = tab
-            .providers
-            .iter()
-            .find(|p| p.name() == "terminal")
-            .and_then(|p| p.process_id());
+        let pid = tab.providers.iter().find_map(|p| p.process_id());
         // The shared settings provider is never parked into `tab.ffon`; a tab
         // sitting on it has a `current_id[0]` past the parked content, so resolve
         // those against the live FFON tree where the shared provider lives.
