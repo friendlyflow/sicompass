@@ -179,6 +179,34 @@ fn has_command_palette(r: &AppRenderer) -> bool {
     !handlers::is_browse_then_session_provider(r)
 }
 
+/// True where `:` opens an insert palette: standing on a level that ends in a
+/// live `<input>` slot, for a provider offering something beyond the view swap.
+///
+/// Provider-agnostic on purpose — see the module comment on
+/// `handlers::insert_palette_commands`.
+fn insert_palette_available(r: &AppRenderer) -> bool {
+    handlers::insert_palette_available(r)
+}
+
+/// True while an insert palette is open, in either phase.
+fn in_insert_palette(r: &AppRenderer) -> bool {
+    handlers::in_insert_palette(r)
+}
+
+/// True while an insert palette is showing the rows to insert.
+fn in_insert_palette_items(r: &AppRenderer) -> bool {
+    handlers::in_insert_palette_items(r)
+}
+
+/// True for the generic Command-mode Enter — everything except an insert
+/// palette's row list, which has its own Enter that fills the prompt.
+///
+/// Without this the hint screen would advertise two different Enter actions at
+/// once: `hints_for` filters by availability but dedupes only by label.
+fn generic_command_enter(r: &AppRenderer) -> bool {
+    !handlers::in_insert_palette_items(r)
+}
+
 fn is_filebrowser(r: &AppRenderer) -> bool {
     active_provider_name(r) == Some("filebrowser")
 }
@@ -443,6 +471,21 @@ pub static SHORTCUTS: &[Shortcut] = &[
     // In the terminal's shell view Escape returns to the folder listing rather
     // than popping a level, so it advertises that instead of the generic "Back".
     // Same handler either way — only the hint differs.
+    // An open insert palette owns Escape: the generic Command arm clears the
+    // buffer and returns to the mode it came from, which for a palette opened
+    // mid-typing means landing in Insert with an empty buffer over a live edit
+    // session — the next keystroke would then wipe the element. Must precede
+    // every other Escape row that covers Command mode.
+    Shortcut {
+        key: Keycode::Escape,
+        key2: None,
+        ctrl: false,
+        shift: false,
+        modes: &[Coordinate::Command],
+        label: "Esc    Back",
+        is_available: in_insert_palette,
+        handle: handlers::handle_escape_insert_palette,
+    },
     Shortcut {
         key: Keycode::Escape,
         key2: None,
@@ -1101,6 +1144,18 @@ pub static SHORTCUTS: &[Shortcut] = &[
         is_available: always,
         handle: handlers::handle_enter_search,
     },
+    // Insert palette: Enter → splice the chosen row into the live prompt.
+    // Must precede the generic Command Enter below, which is `always`.
+    Shortcut {
+        key: Keycode::Return,
+        key2: Some(Keycode::KpEnter),
+        ctrl: false,
+        shift: false,
+        modes: &[Coordinate::Command],
+        label: "Enter  Insert",
+        is_available: in_insert_palette_items,
+        handle: handlers::handle_enter_insert_palette,
+    },
     // Command: Enter → execute command
     Shortcut {
         key: Keycode::Return,
@@ -1109,7 +1164,7 @@ pub static SHORTCUTS: &[Shortcut] = &[
         shift: false,
         modes: &[Coordinate::Command],
         label: "Enter  Execute",
-        is_available: always,
+        is_available: generic_command_enter,
         handle: handlers::handle_enter_command,
     },
     // Scroll modes: Enter → go to the highlighted element in General mode
@@ -1204,6 +1259,52 @@ pub static SHORTCUTS: &[Shortcut] = &[
     // `:` is Shift+`;` on most layouts, but SDL reports it as either
     // `Semicolon` with shift or `Colon` without, depending on the layout — hence
     // two keycodes per hint.
+    // Standing on a live prompt, `:` opens the provider's insert palette rather
+    // than starting a session — the session is already up. Keyed on the shape of
+    // the list, not on any provider name, so a plugin gets it too. Must precede
+    // the rows below, which are about the folder view.
+    Shortcut {
+        key: Keycode::Semicolon,
+        key2: None,
+        ctrl: false,
+        shift: true,
+        modes: &[Coordinate::General],
+        label: ":      Insert",
+        is_available: insert_palette_available,
+        handle: handlers::handle_insert_palette,
+    },
+    Shortcut {
+        key: Keycode::Colon,
+        key2: None,
+        ctrl: false,
+        shift: false,
+        modes: &[Coordinate::General],
+        label: ":      Insert",
+        is_available: insert_palette_available,
+        handle: handlers::handle_insert_palette,
+    },
+    // Ctrl+: reaches the same palette from *inside* the prompt, where a bare `:`
+    // is just a typed colon. A half-typed message survives the trip.
+    Shortcut {
+        key: Keycode::Semicolon,
+        key2: None,
+        ctrl: true,
+        shift: true,
+        modes: &[Coordinate::Insert],
+        label: "Ctrl+: Insert",
+        is_available: insert_palette_available,
+        handle: handlers::handle_insert_palette,
+    },
+    Shortcut {
+        key: Keycode::Colon,
+        key2: None,
+        ctrl: true,
+        shift: false,
+        modes: &[Coordinate::Insert],
+        label: "Ctrl+: Insert",
+        is_available: insert_palette_available,
+        handle: handlers::handle_insert_palette,
+    },
     Shortcut {
         key: Keycode::Semicolon,
         key2: None,

@@ -453,6 +453,29 @@ pub struct InsertSession {
     pub timeline_position_at_start: usize,
 }
 
+/// The live `<input>` edit that the insert palette suspended when it opened.
+///
+/// `Coordinate::Command` borrows `input_buffer` for its type-to-filter query, so
+/// the text being edited has to be parked for the palette's lifetime. The
+/// `InsertSession` is parked with it, and not merely left in place, because
+/// `handle_backspace` shares one arm across Command and Insert and ends in
+/// `apply_insert_session_chunk` — with the session taken, that call is a no-op,
+/// so a Backspace typed into the filter cannot reach the FFON.
+///
+/// `None` inside `Option` for a palette opened from General, where there is no
+/// edit in progress to suspend.
+#[derive(Debug, Clone)]
+pub struct SuspendedInputEdit {
+    pub buffer: String,
+    pub cursor: usize,
+    pub session: Option<InsertSession>,
+    /// True when the palette was opened from Insert, so both exits know to
+    /// return there and put the parked text back. Recorded explicitly rather
+    /// than inferred from `session.is_some()`, which happens to coincide today
+    /// but is a property of the element, not of how the palette was entered.
+    pub from_insert: bool,
+}
+
 // ---------------------------------------------------------------------------
 // AppRenderer
 // ---------------------------------------------------------------------------
@@ -519,6 +542,10 @@ pub struct AppRenderer {
     /// Active per-keystroke edit session on an `<input>` tag (see
     /// [`InsertSession`]). `Some` from insert-mode entry until Enter or Escape.
     pub insert_session: Option<InsertSession>,
+    /// The edit suspended by an open insert palette, and the marker that one is
+    /// open. `Some` for exactly the palette's lifetime, whichever mode it was
+    /// opened from — see [`SuspendedInputEdit`].
+    pub suspended_input_edit: Option<SuspendedInputEdit>,
 
     // ---- Scroll state ------------------------------------------------------
     pub scroll_offset: i32,
@@ -809,6 +836,7 @@ impl AppRenderer {
             input_suffix: String::new(),
             input_is_password: false,
             insert_session: None,
+            suspended_input_edit: None,
             scroll_offset: 0,
             text_scroll_offset: 0,
             text_scroll_total_height: 0,
@@ -1382,12 +1410,28 @@ impl AppRenderer {
     }
 
     /// User-facing mode label for the header, window title, and spoken mode
-    /// change. Identical to [`Coordinate::display_label`] except that the
-    /// window-controls palette (`c`) — which reuses `Coordinate::Command`
-    /// machinery — is reported as "controls" rather than "command". Keyed off
-    /// `current_command`, so the colon command palette (`CommandPhase::None`)
-    /// is unaffected.
+    /// change. Identical to [`Coordinate::display_label`] except for the two
+    /// things that reuse `Coordinate::Command` machinery without being the colon
+    /// command palette: the window-controls palette (`c`), reported as
+    /// "controls", and the insert palette (a second `:` on a live prompt),
+    /// reported as "insert". Both are keyed off state rather than the
+    /// coordinate, so the ordinary palette (`CommandPhase::None`) is unaffected.
+    ///
+    /// This matters more for the insert palette than for controls: the *same*
+    /// key opens it and the ordinary palette depending on what is on screen, so
+    /// without a distinct label there is no way to tell by ear which one
+    /// answered. The header, the window title and the `w` focus announcement all
+    /// route through here, so one branch covers all three.
     pub(crate) fn mode_display_label(&self) -> String {
+        if self.coordinate == Coordinate::Command && self.suspended_input_edit.is_some() {
+            crate::shortcuts::register_translations();
+            let resolved = sicompass_sdk::localize::t("mode-insert-palette");
+            return if resolved == "mode-insert-palette" {
+                "insert mode".to_owned()
+            } else {
+                resolved
+            };
+        }
         if self.coordinate == Coordinate::Command && self.current_command == CommandPhase::Controls
         {
             crate::shortcuts::register_translations();

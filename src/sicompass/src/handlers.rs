@@ -1129,6 +1129,259 @@ pub(crate) fn in_session_view(r: &AppRenderer) -> bool {
             .any(|c| c == VIEW_CMD_BROWSE)
 }
 
+// ---------------------------------------------------------------------------
+// The insert palette: a second `:` that fills the live input slot
+// ---------------------------------------------------------------------------
+//
+// Deliberately provider-agnostic. A provider opts in by the shape of what it
+// serves rather than by name, so a WASM plugin gets this for free:
+//
+//   * the level ends with an `<input>` Obj — a live prompt to fill, and
+//   * `commands()` offers something other than the view swap.
+//
+// The chosen row's `data` is inserted verbatim, so the provider decides the
+// text. The claude provider returns `/name` for a skill; another provider can
+// return whatever it likes. The app never learns what a skill is.
+//
+// The terminal is unaffected: it has a trailing input slot but offers no
+// command beyond `browse`, so the palette stays inert there.
+
+/// The provider's commands minus the view swap — the ones an insert palette can
+/// offer. Empty means the provider has nothing to add and `:` stays inert.
+pub(crate) fn insert_palette_commands(r: &AppRenderer) -> Vec<String> {
+    if !trailing_element_is_input_slot(r) {
+        return Vec::new();
+    }
+    crate::provider::get_commands(r)
+        .into_iter()
+        .filter(|c| c != VIEW_CMD_BROWSE)
+        .collect()
+}
+
+/// Index of this level's trailing `<input>` Obj — a live prompt the palette
+/// could fill — if it has one.
+///
+/// The same shape [`at_session_input_level`] tests, without its provider-name
+/// gate, which is what makes the palette work for a provider the app has never
+/// heard of. A browse listing never produces one (its directories carry no tag)
+/// and recall-history children never are (they are `<button>` Strs).
+///
+/// Deliberately not [`snap_to_trailing_input`]: that one routes through
+/// `is_live_input_slot`, which is keyed to the terminal and claude by name, so
+/// it would refuse a plugin's prompt. Loosening *it* is not an option — it also
+/// decides whether Enter runs a slot or commits an edit, and every `<input>` in
+/// the file browser is a file name.
+fn trailing_input_slot_index(r: &AppRenderer) -> Option<usize> {
+    let arr = sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &r.current_id)?;
+    match arr.last()? {
+        FfonElement::Obj(o) if sicompass_sdk::tags::has_input(&o.key) => Some(arr.len() - 1),
+        _ => None,
+    }
+}
+
+fn trailing_element_is_input_slot(r: &AppRenderer) -> bool {
+    trailing_input_slot_index(r).is_some()
+}
+
+/// True while an insert palette is open, in either of its phases.
+pub(crate) fn in_insert_palette(r: &AppRenderer) -> bool {
+    r.coordinate == Coordinate::Command && r.suspended_input_edit.is_some()
+}
+
+/// True while an insert palette is showing the rows to insert, as opposed to a
+/// first-level list of command names.
+pub(crate) fn in_insert_palette_items(r: &AppRenderer) -> bool {
+    in_insert_palette(r) && r.current_command == CommandPhase::Provider
+}
+
+/// True where `:` should open an insert palette rather than do anything else.
+pub(crate) fn insert_palette_available(r: &AppRenderer) -> bool {
+    !insert_palette_commands(r).is_empty()
+}
+
+/// `:` / `Ctrl+:` on a live prompt — open the provider's insert palette.
+///
+/// With exactly one command on offer the first-level menu would be pure
+/// ceremony, so it jumps straight to that command's rows — the state
+/// `handle_enter_command`'s first phase would have left behind. With several it
+/// shows them as an ordinary command list and the generic two-phase flow takes
+/// over from there.
+pub fn handle_insert_palette(r: &mut AppRenderer) {
+    let cmds = insert_palette_commands(r);
+    if cmds.is_empty() {
+        return;
+    }
+
+    // Park the live edit *first*: Command mode borrows `input_buffer` for its
+    // filter, and the session must not stay live while it does (see
+    // `SuspendedInputEdit`).
+    let from_insert = r.coordinate == Coordinate::Insert;
+    r.suspended_input_edit = Some(crate::app_state::SuspendedInputEdit {
+        buffer: std::mem::take(&mut r.input_buffer),
+        cursor: r.cursor_position,
+        session: r.insert_session.take(),
+        from_insert,
+    });
+
+    r.previous_coordinate = r.coordinate;
+    r.coordinate = Coordinate::Command;
+    r.input_buffer.clear();
+    r.cursor_position = 0;
+    r.selection_anchor = None;
+    r.scroll_offset = 0;
+
+    if cmds.len() == 1 {
+        // Straight to the rows. Scanning happens in the provider's
+        // `handle_command`, which must run before the list is built because
+        // `command_list_items` is `&self` and cannot populate anything.
+        r.provider_command_name = cmds[0].clone();
+        r.current_command = CommandPhase::Provider;
+        let _ = crate::provider::handle_command(r, &cmds[0].clone(), "", 0);
+    } else {
+        r.provider_command_name.clear();
+        r.current_command = CommandPhase::None;
+    }
+
+    list::create_list_current_layer(r);
+
+    // A provider can advertise a command and then have nothing to show — the
+    // claude provider always offers `skills`, but a folder may hold none. An
+    // empty palette announces only its own mode name and is a dead end by ear,
+    // so back out entirely rather than open one.
+    if r.total_list.is_empty() {
+        crate::shortcuts::register_translations();
+        let msg = sicompass_sdk::localize::t("insert-palette-empty");
+        let msg = if msg == "insert-palette-empty" {
+            "nothing to insert".to_owned()
+        } else {
+            msg
+        };
+        handle_escape_insert_palette(r);
+        announce_text(r, &msg);
+        return;
+    }
+
+    let ctx = r
+        .current_list_item()
+        .map(|it| crate::accesskit_sdl::label_to_speech(&it.label));
+    r.speak_mode_change(ctx);
+    r.caret.reset(sdl_ticks());
+    r.needs_redraw = true;
+}
+
+/// Enter in an insert palette — splice the chosen row's payload into the live
+/// prompt and leave. Never submits; the user still presses Enter on the slot.
+pub fn handle_enter_insert_palette(r: &mut AppRenderer) {
+    // `filtered_list_indices` being empty means *either* "no filter typed" or
+    // "the filter matched nothing", and `current_list_item` reads it as the
+    // former — falling back to whatever row the index happens to sit on. Fine
+    // for a palette that executes a named command, wrong here: it would insert
+    // a row the user had just filtered away. Decide it explicitly.
+    let matched_nothing = !r.input_buffer.is_empty() && r.filtered_list_indices.is_empty();
+    // Otherwise filter-aware: `current_list_item` resolves through
+    // `filtered_list_indices`. The payload is the provider's `ListItem::data`,
+    // which `build_command_list` routes into `nav_path`.
+    let text = (!matched_nothing)
+        .then(|| r.current_list_item().and_then(|it| it.nav_path.clone()))
+        .flatten()
+        .filter(|t| !t.is_empty());
+    let Some(text) = text else {
+        // Nothing selectable — an empty list, or a filter matching nothing.
+        // Same as cancelling, and deliberately not the generic `handle_escape`,
+        // which would strand an empty buffer over a restored session.
+        handle_escape_insert_palette(r);
+        return;
+    };
+
+    let Some(parked) = r.suspended_input_edit.take() else {
+        return;
+    };
+    r.current_command = CommandPhase::None;
+    r.provider_command_name.clear();
+    r.input_buffer.clear();
+    r.cursor_position = 0;
+    r.selection_anchor = None;
+    r.scroll_offset = 0;
+
+    if parked.from_insert {
+        // Restore the edit, then splice at the caret it was left at.
+        r.coordinate = Coordinate::Insert;
+        r.previous_coordinate = Coordinate::General;
+        r.insert_session = parked.session;
+        r.input_buffer = parked.buffer;
+        r.cursor_position = parked.cursor.min(r.input_buffer.len());
+    } else {
+        // Opened from General: enter the edit on the slot itself. `:` only
+        // proves the slot is the *last* row of this level, not that the cursor
+        // is on it, so retarget before editing.
+        r.coordinate = Coordinate::General;
+        r.previous_coordinate = Coordinate::General;
+        let Some(idx) = trailing_input_slot_index(r) else {
+            list::create_list_current_layer(r);
+            r.needs_redraw = true;
+            return;
+        };
+        r.current_id.set_last(idx);
+        // Bottom-anchor, so the prompt stays in view like every other path that
+        // lands on it.
+        r.scroll_offset = -1;
+        // `handle_a` repopulates the buffer from the element and opens a clean
+        // session with the caret at the end, so nothing can go stale.
+        handle_a(r);
+    }
+
+    let at = r.cursor_position.min(r.input_buffer.len());
+    r.input_buffer.insert_str(at, &text);
+    r.cursor_position = at + text.len();
+    // The same path every keystroke takes: rewrites the element's `<input>` span
+    // and records a merge-aware TextChunk, so an inserted row is
+    // indistinguishable from typed text and undo behaves.
+    apply_insert_session_chunk(r);
+    // Tell the provider too, so a refetch driven by streaming output rebuilds
+    // the slot with the insertion rather than without it.
+    let value = r.input_buffer.clone();
+    if let Some(p) = crate::provider::get_active_provider(r) {
+        p.set_input_value(&value);
+    }
+    list::create_list_current_layer(r);
+    r.list_index = r.current_id.last().unwrap_or(0);
+    r.caret.reset(sdl_ticks());
+    r.speak_mode_change(Some(value));
+    r.needs_redraw = true;
+}
+
+/// Escape in an insert palette — put everything back exactly as it was.
+///
+/// A dedicated handler rather than the generic Command arm, which clears
+/// `input_buffer` and returns to `previous_coordinate`: that would land in
+/// Insert with an empty buffer over a live session, and the next keystroke
+/// would wipe the element.
+pub fn handle_escape_insert_palette(r: &mut AppRenderer) {
+    let parked = r.suspended_input_edit.take();
+    r.current_command = CommandPhase::None;
+    r.provider_command_name.clear();
+    r.input_buffer.clear();
+    r.cursor_position = 0;
+    r.selection_anchor = None;
+    r.coordinate = r.previous_coordinate;
+    r.previous_coordinate = Coordinate::General;
+    let ctx = match parked {
+        Some(p) if p.from_insert => {
+            r.insert_session = p.session;
+            r.cursor_position = p.cursor.min(p.buffer.len());
+            r.input_buffer = p.buffer;
+            Some(r.input_buffer.clone())
+        }
+        _ => None,
+    };
+    list::create_list_current_layer(r);
+    r.list_index = r.current_id.last().unwrap_or(0);
+    r.scroll_offset = 0;
+    r.caret.reset(sdl_ticks());
+    r.speak_mode_change(ctx);
+    r.needs_redraw = true;
+}
+
 /// True when the cursor has descended *below* the level the session list
 /// occupies — into an assistant message's lines, a tool call, the session
 /// header, or the input slot's recall history.
@@ -3169,6 +3422,17 @@ pub fn handle_escape(r: &mut AppRenderer) {
             r.input_buffer.clear();
             r.cursor_position = 0;
             r.coordinate = Coordinate::General;
+            // Rebuild, because `cancel_insert_session` above may have put a
+            // different element back than the one the rendered row was built
+            // from. Per-keystroke typing never refreshes the row — the caret is
+            // drawn from `input_buffer` while Insert is active — so a plain
+            // cancel used to land on a row that happened to still be correct.
+            // Anything that *does* refresh the row mid-edit (the insert palette)
+            // left the old text on screen after Escape, over an element that had
+            // already been restored. Every other arm here rebuilds; this one was
+            // the exception.
+            list::create_list_current_layer(r);
+            r.list_index = r.current_id.last().unwrap_or(0);
         }
         Coordinate::Command => {
             r.coordinate = r.previous_coordinate;
@@ -4450,9 +4714,24 @@ pub(crate) fn cancel_insert_session(r: &mut AppRenderer) {
         None => return,
     };
     let idx = session.original_id.last().unwrap_or(0);
+    let restored_key = match &session.original_element {
+        FfonElement::Obj(o) => Some(o.key.clone()),
+        FfonElement::Str(s) => Some(s.clone()),
+    };
     if let Some(arr) = crate::state::navigate_to_slice_pub(&mut r.ffon, &session.original_id) {
         if let Some(elem) = arr.get_mut(idx) {
             *elem = session.original_element;
+        }
+    }
+    // A provider that keeps its own copy of the pending input — a live prompt,
+    // where `fetch()` rebuilds the slot from that copy rather than from the FFON
+    // — must be told the edit was abandoned too. Restoring only the FFON leaves
+    // the two disagreeing, and the next refetch quietly resurrects the text the
+    // user just cancelled. Providers without a live prompt no-op here.
+    if let Some(key) = restored_key.filter(|k| sicompass_sdk::tags::has_input(k)) {
+        let restored = sicompass_sdk::tags::extract_input(&key).unwrap_or_default();
+        if let Some(p) = crate::provider::get_active_provider(r) {
+            p.set_input_value(&restored);
         }
     }
     // Truncate timeline back to pre-session length and clear merge state.
@@ -7772,6 +8051,295 @@ mod tests {
         handle_left(&mut r);
         assert!(in_session_view(&r), "Left must not leave the session");
         assert_eq!(r.current_id, before);
+    }
+
+    // ---- Insert palette ---------------------------------------------------
+
+    /// A provider with a live prompt and one non-transition command, i.e. the
+    /// shape that opts into an insert palette. Named like a plugin on purpose:
+    /// the app must key off the shape, not off a known provider name.
+    struct PluginWithPalette;
+    impl sicompass_sdk::provider::Provider for PluginWithPalette {
+        fn name(&self) -> &str {
+            "someplugin"
+        }
+        fn fetch(&mut self) -> Vec<FfonElement> {
+            vec![
+                FfonElement::new_str("a past line"),
+                FfonElement::new_obj("prompt<input></input>"),
+            ]
+        }
+        fn commands(&self) -> Vec<String> {
+            vec!["browse".to_owned(), "snippets".to_owned()]
+        }
+        fn command_list_items(&self, cmd: &str) -> Vec<sicompass_sdk::provider::ListItem> {
+            if cmd != "snippets" {
+                return Vec::new();
+            }
+            vec![sicompass_sdk::provider::ListItem {
+                label: "greet - say hello".to_owned(),
+                data: "/greet".to_owned(),
+            }]
+        }
+    }
+
+    /// Cursor parked on the trailing `+i` slot of a palette-capable provider.
+    fn make_renderer_with_palette() -> AppRenderer {
+        use sicompass_sdk::provider::Provider as _;
+        let mut r = AppRenderer::new();
+        let mut prov = PluginWithPalette;
+        let mut root = FfonElement::new_obj("someplugin");
+        for child in prov.fetch() {
+            root.as_obj_mut().unwrap().push(child);
+        }
+        r.ffon = vec![root];
+        r.current_id = {
+            let mut id = IdArray::new();
+            id.push(0);
+            id.push(1); // the input slot
+            id
+        };
+        r.providers.push(Box::new(prov));
+        list::create_list_current_layer(&mut r);
+        r
+    }
+
+    fn slot_key(r: &AppRenderer) -> String {
+        get_ffon_at_id(&r.ffon, &r.current_id)
+            .and_then(|a| a.get(r.current_id.last().unwrap_or(0)))
+            .map(|e| match e {
+                FfonElement::Obj(o) => o.key.clone(),
+                FfonElement::Str(s) => s.clone(),
+            })
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn the_insert_palette_is_offered_by_shape_not_by_provider_name() {
+        // This provider is not terminal and not claude. It qualifies because its
+        // level ends in an `<input>` Obj and it offers a command beyond the
+        // view swap — which is exactly what a plugin would do.
+        let r = make_renderer_with_palette();
+        assert!(insert_palette_available(&r));
+        assert_eq!(insert_palette_commands(&r), vec!["snippets".to_owned()]);
+    }
+
+    #[test]
+    fn a_provider_offering_only_the_view_swap_gets_no_palette() {
+        // The terminal's shape: a live prompt, but nothing to insert.
+        let mut r = make_renderer_with_terminal();
+        handle_colon(&mut r); // into the shell view
+        assert!(
+            !insert_palette_available(&r),
+            "`browse` alone must not open a palette"
+        );
+    }
+
+    #[test]
+    fn a_folder_listing_gets_no_palette() {
+        let r = make_renderer_with_claude(); // browse view, directory rows
+        assert!(!insert_palette_available(&r));
+    }
+
+    #[test]
+    fn opening_from_general_jumps_straight_to_the_rows() {
+        let mut r = make_renderer_with_palette();
+        r.coordinate = Coordinate::General;
+        handle_insert_palette(&mut r);
+
+        assert_eq!(r.coordinate, Coordinate::Command);
+        assert_eq!(r.current_command, CommandPhase::Provider);
+        assert_eq!(r.provider_command_name, "snippets");
+        assert!(in_insert_palette_items(&r));
+        assert_eq!(r.total_list.len(), 1, "the one snippet");
+    }
+
+    #[test]
+    fn opening_from_insert_parks_the_buffer_and_the_session() {
+        let mut r = make_renderer_with_palette();
+        r.coordinate = Coordinate::General;
+        handle_a(&mut r); // live edit on the prompt
+        assert!(r.insert_session.is_some());
+        r.input_buffer = "explain ".to_owned();
+        r.cursor_position = 8;
+
+        handle_insert_palette(&mut r);
+
+        assert!(r.input_buffer.is_empty(), "the filter starts empty");
+        assert!(
+            r.insert_session.is_none(),
+            "the session must not stay live while Command mode owns the buffer"
+        );
+        let parked = r.suspended_input_edit.as_ref().expect("parked");
+        assert_eq!(parked.buffer, "explain ");
+        assert_eq!(parked.cursor, 8);
+        assert!(parked.from_insert);
+        assert!(parked.session.is_some());
+    }
+
+    #[test]
+    fn backspace_in_the_palette_cannot_touch_the_ffon() {
+        // `handle_backspace` shares one arm across Command and Insert and ends
+        // in `apply_insert_session_chunk`. Parking the session is what stops a
+        // keystroke in the filter from rewriting the element being edited.
+        let mut r = make_renderer_with_palette();
+        r.coordinate = Coordinate::General;
+        handle_a(&mut r);
+        r.input_buffer = "explain ".to_owned();
+        r.cursor_position = 8;
+        apply_insert_session_chunk(&mut r);
+        let before_key = slot_key(&r);
+        let before_len = r.active_timeline_mut().entries.len();
+
+        handle_insert_palette(&mut r);
+        handle_input(&mut r, "gr");
+        handle_backspace(&mut r);
+
+        assert_eq!(slot_key(&r), before_key, "the element must not change");
+        assert_eq!(
+            r.active_timeline_mut().entries.len(),
+            before_len,
+            "and no timeline entry may be recorded"
+        );
+    }
+
+    #[test]
+    fn escape_restores_the_half_typed_message_and_its_session() {
+        let mut r = make_renderer_with_palette();
+        r.coordinate = Coordinate::General;
+        handle_a(&mut r);
+        r.input_buffer = "explain ".to_owned();
+        r.cursor_position = 8;
+
+        handle_insert_palette(&mut r);
+        handle_input(&mut r, "gre");
+        handle_escape_insert_palette(&mut r);
+
+        assert_eq!(r.coordinate, Coordinate::Insert);
+        assert_eq!(r.input_buffer, "explain ");
+        assert_eq!(r.cursor_position, 8);
+        assert!(r.insert_session.is_some(), "the edit is live again");
+        assert!(r.suspended_input_edit.is_none());
+    }
+
+    #[test]
+    fn enter_splices_the_payload_at_the_caret() {
+        let mut r = make_renderer_with_palette();
+        r.coordinate = Coordinate::General;
+        handle_a(&mut r);
+        r.input_buffer = "explain  please".to_owned();
+        r.cursor_position = 8; // between the two spaces
+
+        handle_insert_palette(&mut r);
+        handle_enter_insert_palette(&mut r);
+
+        assert_eq!(r.coordinate, Coordinate::Insert);
+        assert_eq!(r.input_buffer, "explain /greet please");
+        assert_eq!(r.cursor_position, 8 + "/greet".len());
+        assert!(
+            slot_key(&r).contains("<input>explain /greet please</input>"),
+            "got {:?}",
+            slot_key(&r)
+        );
+    }
+
+    #[test]
+    fn enter_from_general_fills_the_prompt_and_lands_in_insert() {
+        let mut r = make_renderer_with_palette();
+        r.coordinate = Coordinate::General;
+        handle_insert_palette(&mut r);
+        handle_enter_insert_palette(&mut r);
+
+        assert_eq!(r.coordinate, Coordinate::Insert);
+        assert_eq!(r.input_buffer, "/greet");
+        assert_eq!(r.cursor_position, "/greet".len());
+        assert!(slot_key(&r).contains("<input>/greet</input>"));
+    }
+
+    #[test]
+    fn enter_from_general_retargets_when_the_cursor_is_not_on_the_prompt() {
+        // `:` only proves the prompt is the last row of this level.
+        let mut r = make_renderer_with_palette();
+        r.current_id.set_last(0); // the scrollback line
+        r.coordinate = Coordinate::General;
+        handle_insert_palette(&mut r);
+        handle_enter_insert_palette(&mut r);
+
+        assert_eq!(r.current_id.last(), Some(1), "moved onto the prompt");
+        assert!(slot_key(&r).contains("<input>/greet</input>"));
+    }
+
+    #[test]
+    fn enter_with_nothing_selectable_behaves_like_escape() {
+        let mut r = make_renderer_with_palette();
+        r.coordinate = Coordinate::General;
+        handle_a(&mut r);
+        r.input_buffer = "explain ".to_owned();
+        r.cursor_position = 8;
+
+        handle_insert_palette(&mut r);
+        handle_input(&mut r, "zzzz"); // matches no row
+        handle_enter_insert_palette(&mut r);
+
+        assert_eq!(r.coordinate, Coordinate::Insert);
+        assert_eq!(r.input_buffer, "explain ", "nothing was inserted");
+        assert!(r.insert_session.is_some());
+    }
+
+    #[test]
+    fn the_palette_announces_itself_apart_from_the_command_palette() {
+        // The same key opens both depending on what is on screen, so the mode
+        // label is the only way to tell by ear which one answered. The header
+        // and the `w` announcement both read from it.
+        let mut r = make_renderer_with_palette();
+        r.coordinate = Coordinate::General;
+        let ordinary = r.mode_display_label();
+
+        handle_insert_palette(&mut r);
+        let palette = r.mode_display_label();
+        assert_ne!(palette, ordinary);
+        assert!(
+            r.header_text().starts_with(&palette),
+            "the header carries it: {:?}",
+            r.header_text()
+        );
+
+        handle_escape_insert_palette(&mut r);
+        assert_ne!(
+            r.mode_display_label(),
+            palette,
+            "and it reverts when the palette closes"
+        );
+    }
+
+    #[test]
+    fn the_palette_advertises_exactly_one_enter() {
+        // `hints_for` filters by availability but dedupes only by label, so two
+        // available Enter rows would announce two different Enter actions.
+        let mut r = make_renderer_with_palette();
+        r.coordinate = Coordinate::General;
+        handle_insert_palette(&mut r);
+        let enters = crate::shortcuts::hints_for(&r)
+            .into_iter()
+            .filter(|h| h.starts_with("Enter"))
+            .count();
+        assert_eq!(enters, 1, "hints: {:?}", crate::shortcuts::hints_for(&r));
+    }
+
+    #[test]
+    fn typing_filters_the_palette_rows() {
+        let mut r = make_renderer_with_palette();
+        r.coordinate = Coordinate::General;
+        handle_insert_palette(&mut r);
+        assert_eq!(r.total_list.len(), 1);
+        handle_input(&mut r, "gre");
+        assert_eq!(
+            r.filtered_list_indices.len(),
+            1,
+            "the fuzzy filter already covers the provider phase"
+        );
+        handle_input(&mut r, "zzz");
+        assert!(r.filtered_list_indices.is_empty());
     }
 
     fn make_renderer_with_terminal() -> AppRenderer {

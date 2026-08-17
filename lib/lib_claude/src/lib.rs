@@ -39,6 +39,9 @@
 mod events;
 mod render;
 mod session;
+mod skills;
+
+pub use skills::_set_test_no_ambient_skills;
 
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
@@ -78,6 +81,14 @@ pub const CMD_SESSION: &str = "session";
 /// Command id: swap from the session back to the folder listing. Idempotent, so
 /// the app can fire it without first asking which view is active.
 pub const CMD_BROWSE: &str = "browse";
+
+/// Command id: list the Claude Code skills the running session can invoke.
+///
+/// Unlike the two above this is *not* a view swap. The app fills the prompt with
+/// `/name` and the session view stays exactly as it was, which is why it needs
+/// no third [`View`] variant — and must not have one, since the app reads
+/// "is this the session view?" as "does `commands()` offer `browse`?".
+pub const CMD_SKILLS: &str = "skills";
 
 /// Which list the provider is currently serving from `fetch()`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -134,6 +145,17 @@ pub struct ClaudeProvider {
     history: Vec<String>,
     /// Value rendered inside the live `<input>` slot on the next `fetch()`.
     pending_input: String,
+    /// Comma-separated built-in skill names, from `claudeBuiltinSkills`.
+    /// They are not discoverable on disk — see `skills::DEFAULT_BUILTIN_SKILLS`.
+    builtin_skills: String,
+    /// Skills found by the last `handle_command(CMD_SKILLS)`.
+    ///
+    /// Cached rather than scanned on demand because `command_list_items` takes
+    /// `&self` and the app rebuilds the palette list on every keystroke of its
+    /// type-to-filter — a `read_dir` there would run twice per character typed.
+    /// Refreshed on every palette open, so a skill added while the app is
+    /// running shows up the next time `:` is pressed.
+    skills: Vec<skills::Skill>,
     /// Last `session_id` seen — used for `--resume` on re-spawn.
     last_session_id: Option<String>,
     error: Option<String>,
@@ -165,6 +187,8 @@ impl ClaudeProvider {
             convo: Conversation::default(),
             history: Vec::new(),
             pending_input: String::new(),
+            builtin_skills: skills::DEFAULT_BUILTIN_SKILLS.to_owned(),
+            skills: Vec::new(),
             last_session_id: None,
             error: None,
         }
@@ -580,10 +604,16 @@ impl Provider for ClaudeProvider {
     // is currently available — that is how the app decides whether `:` should
     // enter or leave the session without querying view state.
 
+    /// `CMD_BROWSE` stays **first** in the session arm. The app reads
+    /// "am I in the session view?" as "does this contain `browse`?", which is
+    /// order-independent, but the one place that reads `.next()` — the `:`
+    /// handler deciding which transition to fire — is only safe because it
+    /// early-returns inside a session. Leading with the view swap costs nothing
+    /// and removes the trap.
     fn commands(&self) -> Vec<String> {
         match self.view {
             View::Browse => vec![CMD_SESSION.to_owned()],
-            View::Session => vec![CMD_BROWSE.to_owned()],
+            View::Session => vec![CMD_BROWSE.to_owned(), CMD_SKILLS.to_owned()],
         }
     }
 
@@ -592,6 +622,7 @@ impl Provider for ClaudeProvider {
         match cmd {
             CMD_SESSION => localize::t("claude-command-session"),
             CMD_BROWSE => localize::t("claude-command-browse"),
+            CMD_SKILLS => localize::t("claude-command-skills"),
             other => other.to_owned(),
         }
     }
@@ -606,11 +637,62 @@ impl Provider for ClaudeProvider {
         match command {
             CMD_SESSION => self.enter_session(),
             CMD_BROWSE => self.leave_session(),
+            CMD_SKILLS => {
+                // Scanned here, in the `&mut self` hook, because
+                // `command_list_items` is `&self` and the app calls it on every
+                // list rebuild.
+                //
+                // `session_path` rather than `browse_path`: `claude` reads
+                // `.claude/skills/` from the directory it was *spawned* in. It
+                // is assigned before the spawn is attempted, so this is right
+                // even when the spawn failed.
+                //
+                // Deliberately never writes `*error`: the caller rebuilds the
+                // list immediately afterwards, and that clears `error_message`,
+                // so anything reported here would vanish. Discovery is
+                // silent-skip by construction, so there is nothing to report.
+                self.skills =
+                    skills::discover(&self.session_path, &self.builtin_skills, &self.program);
+            }
             _ => {}
         }
         // No element to insert and no error: the app treats this as a state
         // toggle and refreshes the current level, which is exactly the view swap.
         None
+    }
+
+    fn command_list_items(&self, command: &str) -> Vec<sicompass_sdk::provider::ListItem> {
+        if command != CMD_SKILLS {
+            return Vec::new();
+        }
+        self.skills
+            .iter()
+            .map(|s| sicompass_sdk::provider::ListItem {
+                // Human text in `label`, payload in `data` — the shape the file
+                // browser's "open file with" uses.
+                //
+                // `data` is the text to insert, not the bare name: the app
+                // splices it into the live input slot verbatim and knows nothing
+                // about skills. The leading `/` belongs here, where the fact
+                // that a skill is invoked as a slash command is known.
+                label: s.label(),
+                data: format!("/{}", s.name),
+            })
+            .collect()
+    }
+
+    fn execute_command(&mut self, command: &str, selection: &str) -> bool {
+        if command != CMD_SKILLS || selection.is_empty() {
+            return false;
+        }
+        // Not on the hot path: the app owns the FFON and splices the selection
+        // into the input slot itself, so the `:` palette never reaches here.
+        // Implemented so the generic command route — the WASM bridge, and any
+        // test driving the provider through the SDK trait — is not a silent
+        // no-op. `selection` is already the full insert text (`/name`), and
+        // appending rather than replacing matches the app-side behaviour.
+        self.pending_input.push_str(selection);
+        true
     }
 
     fn on_setting_change(&mut self, key: &str, value: &str) {
@@ -637,6 +719,11 @@ impl Provider for ClaudeProvider {
             "claudeExtraArgs" => {
                 self.extra_args = value.split_whitespace().map(str::to_owned).collect();
             }
+            "claudeBuiltinSkills" => {
+                // Empty means "list none" and is a legitimate choice, so unlike
+                // the other text settings this does not fall back to a default.
+                self.builtin_skills = value.to_owned();
+            }
             "claudeStreamPartial" => {
                 self.include_partial = matches!(value, "true" | "1" | "on");
             }
@@ -660,6 +747,12 @@ pub fn register() {
         ),
         SettingDecl::text("claude", "model override", "claudeModel", ""),
         SettingDecl::text("claude", "extra CLI args", "claudeExtraArgs", ""),
+        SettingDecl::text(
+            "claude",
+            "built-in skills",
+            "claudeBuiltinSkills",
+            skills::DEFAULT_BUILTIN_SKILLS,
+        ),
         SettingDecl::checkbox(
             "claude",
             "stream responses token-by-token",
@@ -784,6 +877,10 @@ mod tests {
         let mut p = ClaudeProvider::new();
         // Never let a test reach a real `claude`, whatever the machine has.
         p.program = "definitely-not-claude-xyz-9000".to_owned();
+        // Built-ins are a fixed list, not something on disk, so they would pad
+        // every skills assertion with rows the test did not create. The one test
+        // that cares about them sets the field back.
+        p.builtin_skills = String::new();
         p.set_current_path(path.to_str().unwrap());
         p
     }
@@ -1001,13 +1098,142 @@ mod tests {
 
     // ---- View swapping ----------------------------------------------------
 
+    // ---- Skills palette ---------------------------------------------------
+
+    /// Write `<root>/.claude/skills/<name>/SKILL.md`.
+    fn project_skill(root: &std::path::Path, name: &str, contents: &str) {
+        let dir = root.join(".claude").join("skills").join(name);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("SKILL.md"), contents).unwrap();
+    }
+
     #[test]
-    fn commands_offer_exactly_the_available_transition() {
-        // This is how the app reads view state without a trait hook.
+    fn the_session_view_offers_the_view_swap_before_the_skills() {
+        // The app reads "am I in the session view?" as "does this offer
+        // `browse`?", and the one caller that takes the first entry is only
+        // safe because it early-returns in a session. Leading with the swap
+        // keeps that true regardless.
         let mut p = ClaudeProvider::new();
         assert_eq!(p.commands(), vec![CMD_SESSION.to_owned()]);
         p.view = View::Session;
-        assert_eq!(p.commands(), vec![CMD_BROWSE.to_owned()]);
+        assert_eq!(
+            p.commands(),
+            vec![CMD_BROWSE.to_owned(), CMD_SKILLS.to_owned()]
+        );
+        assert_eq!(
+            p.commands().iter().filter(|c| *c == CMD_BROWSE).count(),
+            1,
+            "exactly one `browse`, or the session-view check breaks"
+        );
+    }
+
+    #[test]
+    fn handle_command_skills_fills_the_cache_and_reports_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        project_skill(&root, "review", "---\ndescription: Review the diff\n---\n");
+
+        let mut p = browsing(&root);
+        p.enter_session();
+        let mut err = String::new();
+        let out = p.handle_command(CMD_SKILLS, "", 0, &mut err);
+
+        assert!(out.is_none(), "not an element-insert command");
+        assert!(err.is_empty(), "an error here would be silently discarded");
+        assert_eq!(p.skills.len(), 1);
+        assert_eq!(p.skills[0].name, "review");
+    }
+
+    #[test]
+    fn skills_are_discovered_from_the_folder_the_session_runs_in() {
+        // Not `browse_path`: claude reads `.claude/skills/` from the directory
+        // it was spawned in, and the spawn folder is recorded even when the
+        // spawn itself failed.
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        let inner = root.join("workspace");
+        std::fs::create_dir(&inner).unwrap();
+        project_skill(&inner, "deep", "");
+
+        let mut p = browsing(&root);
+        p.push_path("workspace");
+        p.enter_session();
+        assert!(p.session.is_none(), "the bogus binary cannot spawn");
+        p.handle_command(CMD_SKILLS, "", 0, &mut String::new());
+        assert_eq!(p.skills.len(), 1, "found despite the failed spawn");
+    }
+
+    #[test]
+    fn command_list_items_carry_the_insert_text_in_data() {
+        // `data` is what the app splices into the input slot, verbatim — so the
+        // leading `/` lives here, not in the app.
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        project_skill(&root, "review", "---\ndescription: Review the diff\n---\n");
+
+        let mut p = browsing(&root);
+        p.enter_session();
+        p.handle_command(CMD_SKILLS, "", 0, &mut String::new());
+
+        let items = p.command_list_items(CMD_SKILLS);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].data, "/review");
+        assert_eq!(items[0].label, "review - Review the diff");
+    }
+
+    #[test]
+    fn the_builtin_skills_setting_reaches_the_palette() {
+        // The one source that is not on disk: Claude Code's own skills are not
+        // files anywhere, so they arrive as a setting instead of a scan.
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+
+        let mut p = browsing(&root);
+        p.on_setting_change("claudeBuiltinSkills", "run, init");
+        p.enter_session();
+        p.handle_command(CMD_SKILLS, "", 0, &mut String::new());
+
+        let items = p.command_list_items(CMD_SKILLS);
+        let data: Vec<&str> = items.iter().map(|i| i.data.as_str()).collect();
+        assert_eq!(data, vec!["/init", "/run"]);
+    }
+
+    #[test]
+    fn an_empty_builtin_skills_setting_lists_none() {
+        // Empty is a legitimate choice, not a reason to fall back to the default.
+        let mut p = ClaudeProvider::new();
+        assert!(!p.builtin_skills.is_empty(), "ships with a working default");
+        p.on_setting_change("claudeBuiltinSkills", "");
+        assert!(p.builtin_skills.is_empty());
+    }
+
+    #[test]
+    fn command_list_items_is_empty_for_other_commands() {
+        let mut p = ClaudeProvider::new();
+        p.view = View::Session;
+        assert!(p.command_list_items(CMD_BROWSE).is_empty());
+        assert!(p.command_list_items("nonsense").is_empty());
+    }
+
+    #[test]
+    fn execute_command_appends_the_selection_to_the_prompt() {
+        let mut p = ClaudeProvider::new();
+        p.view = View::Session;
+        p.pending_input = "explain ".to_owned();
+        assert!(p.execute_command(CMD_SKILLS, "/review"));
+        assert_eq!(p.pending_input, "explain /review");
+        // And it reaches the rendered slot.
+        let out = render::build(&p.convo, &p.history, &p.pending_input);
+        let slot = out.last().unwrap().as_obj().unwrap();
+        assert!(slot.key.contains("<input>explain /review</input>"));
+    }
+
+    #[test]
+    fn execute_command_ignores_other_commands_and_empty_selections() {
+        let mut p = ClaudeProvider::new();
+        assert!(!p.execute_command(CMD_BROWSE, "/review"));
+        assert!(!p.execute_command(CMD_SKILLS, ""));
+        assert!(p.pending_input.is_empty());
     }
 
     #[test]

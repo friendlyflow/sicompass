@@ -1093,6 +1093,14 @@ fn update_view(app: &mut AppState) {
             | Coordinate::InputSearch
     ) {
         let (prefix, text) = match app.renderer.coordinate {
+            // The insert palette and the ordinary command palette share the
+            // coordinate and the key that opens them, so the prefix is the
+            // visible half of telling them apart (`mode_display_label` is the
+            // spoken half). Both labels are 8 bytes, so `search_pin_len` below
+            // needs no extra arm.
+            Coordinate::Command if app.renderer.suspended_input_edit.is_some() => {
+                ("insert: ", app.renderer.input_buffer.as_str())
+            }
             Coordinate::Command => ("search: ", app.renderer.input_buffer.as_str()),
             Coordinate::ExtendedSearch => ("ext search: ", app.renderer.input_buffer.as_str()),
             Coordinate::TabSwitcher => ("switch tab: ", app.renderer.input_buffer.as_str()),
@@ -1104,6 +1112,12 @@ fn update_view(app: &mut AppState) {
         // tab switcher shows a tab count. InputSearch counts substring hits
         // inside the element being edited, not list rows.
         let count_suffix = match app.renderer.coordinate {
+            // While filtering an insert palette the match count is the useful
+            // readout, the same as for the search modes. The ordinary command
+            // palette keeps its bare prompt.
+            Coordinate::Command if app.renderer.suspended_input_edit.is_some() => {
+                format!(" [{} items]", list_items.len())
+            }
             Coordinate::SimpleSearch | Coordinate::ExtendedSearch => {
                 format!(" [{} items]", list_items.len())
             }

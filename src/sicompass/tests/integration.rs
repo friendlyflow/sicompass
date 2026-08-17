@@ -30,6 +30,11 @@ fn ensure_builtins() {
     // bare `true`, `cd /tmp/…/elsewhere`) accumulated in the developer's own
     // recall history, one run at a time, interleaved with real commands.
     sicompass_terminal::_set_test_no_history(true);
+    // And for claude: skill discovery reads `~/.claude/skills`, so without this
+    // the palette tests would see whatever skills the developer's machine holds
+    // and their counts would differ per machine. Project skills, written into a
+    // tempdir by each test, are unaffected.
+    sicompass_claude::_set_test_no_ambient_skills(true);
 }
 
 // ---------------------------------------------------------------------------
@@ -11568,6 +11573,9 @@ fn register_claude_rooted_at(renderer: &mut AppRenderer, path: &std::path::Path)
         sicompass_sdk::create_provider_by_name("claude").unwrap(),
     );
     renderer.providers[0].on_setting_change("claudeBinary", "definitely-not-claude-xyz-9000");
+    // Built-ins are a fixed list rather than anything on disk, so leaving them on
+    // would pad every skills assertion with rows the test did not create.
+    renderer.providers[0].on_setting_change("claudeBuiltinSkills", "");
     renderer.providers[0].set_current_path(path.to_str().unwrap());
     let children = renderer.providers[0].fetch();
     renderer.ffon[0].as_obj_mut().unwrap().children = children;
@@ -11757,6 +11765,308 @@ fn claude_escape_returns_to_the_folder_listing() {
         .collect();
     assert_eq!(labels, vec!["+ workspace"], "back on the folders");
     assert_eq!(renderer.providers[0].current_path(), root.to_str().unwrap());
+}
+
+// ---------------------------------------------------------------------------
+// Claude: the second `:` inserts a skill into the prompt
+// ---------------------------------------------------------------------------
+
+/// Write `<root>/.claude/skills/<name>/SKILL.md`.
+fn project_skill(root: &std::path::Path, name: &str, frontmatter: &str) {
+    let dir = root.join(".claude").join("skills").join(name);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("SKILL.md"), frontmatter).unwrap();
+}
+
+/// A claude session rooted at `path`, cursor left on the live prompt.
+///
+/// The bogus `claudeBinary` means the spawn fails, but the session folder is
+/// recorded before the spawn is attempted — and skill discovery only reads the
+/// filesystem, so the palette works regardless of whether a child is running.
+fn register_claude_in_session(renderer: &mut AppRenderer, path: &std::path::Path) {
+    register_claude_rooted_at(renderer, path);
+    press_right(renderer);
+    press_colon(renderer);
+}
+
+fn labels(renderer: &AppRenderer) -> Vec<String> {
+    renderer
+        .total_list
+        .iter()
+        .map(|i| i.label.clone())
+        .collect()
+}
+
+#[test]
+fn claude_second_colon_lists_the_projects_skills() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    project_skill(&root, "review", "---\ndescription: Review the diff\n---\n");
+    project_skill(&root, "deploy", "---\ndescription: Ship it\n---\n");
+
+    ensure_builtins();
+    let mut renderer = AppRenderer::new();
+    register_claude_in_session(&mut renderer, &root);
+
+    press_colon(&mut renderer);
+
+    assert_eq!(
+        labels(&renderer),
+        vec![
+            "deploy - Ship it".to_string(),
+            "review - Review the diff".to_string()
+        ],
+        "natural-sorted, name first so a prefix search finds it",
+    );
+    assert_eq!(
+        renderer.providers[0].process_id(),
+        None,
+        "the palette needs no running child",
+    );
+}
+
+#[test]
+fn claude_second_colon_enter_fills_the_prompt_without_sending() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    project_skill(&root, "review", "---\ndescription: Review the diff\n---\n");
+
+    ensure_builtins();
+    let mut renderer = AppRenderer::new();
+    register_claude_in_session(&mut renderer, &root);
+
+    press_colon(&mut renderer);
+    press_enter(&mut renderer);
+
+    assert_eq!(
+        renderer.coordinate,
+        Coordinate::Insert,
+        "ready to keep typing"
+    );
+    assert_eq!(renderer.input_buffer, "/review");
+    let slot_id = renderer.current_id.clone();
+    assert!(
+        slot_key_at(&renderer, &slot_id).contains("<input>/review</input>"),
+        "got {:?}",
+        slot_key_at(&renderer, &slot_id)
+    );
+}
+
+#[test]
+fn claude_second_colon_escape_leaves_the_prompt_untouched() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    project_skill(&root, "review", "");
+
+    ensure_builtins();
+    let mut renderer = AppRenderer::new();
+    register_claude_in_session(&mut renderer, &root);
+    let before = slot_key_at(&renderer, &renderer.current_id.clone());
+
+    press_colon(&mut renderer);
+    press_escape(&mut renderer);
+
+    assert_eq!(
+        slot_key_at(&renderer, &renderer.current_id.clone()),
+        before,
+        "byte-identical after a cancelled palette",
+    );
+}
+
+#[test]
+fn claude_skills_palette_filters_as_you_type() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    for n in ["review", "deploy", "release"] {
+        project_skill(&root, n, "");
+    }
+
+    ensure_builtins();
+    let mut renderer = AppRenderer::new();
+    register_claude_in_session(&mut renderer, &root);
+
+    press_colon(&mut renderer);
+    assert_eq!(renderer.total_list.len(), 3);
+    type_text(&mut renderer, "rev");
+    assert_eq!(
+        renderer.filtered_list_indices.len(),
+        1,
+        "the app's existing fuzzy filter already covers this list"
+    );
+
+    press_enter(&mut renderer);
+    assert_eq!(renderer.input_buffer, "/review");
+}
+
+#[test]
+fn claude_ctrl_colon_keeps_the_half_typed_message() {
+    // The case Ctrl+: exists for: a bare `:` in the prompt is just a colon.
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    project_skill(&root, "review", "");
+
+    ensure_builtins();
+    let mut renderer = AppRenderer::new();
+    register_claude_in_session(&mut renderer, &root);
+    press(&mut renderer, Keycode::I);
+    type_text(&mut renderer, "explain ");
+
+    press_ctrl_shift(&mut renderer, Keycode::Semicolon);
+    press_enter(&mut renderer);
+
+    assert_eq!(renderer.coordinate, Coordinate::Insert);
+    assert_eq!(
+        renderer.input_buffer, "explain /review",
+        "spliced at the caret"
+    );
+    assert!(
+        slot_key_at(&renderer, &renderer.current_id.clone())
+            .contains("<input>explain /review</input>")
+    );
+}
+
+#[test]
+fn claude_ctrl_colon_escape_keeps_the_half_typed_message() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    project_skill(&root, "review", "");
+
+    ensure_builtins();
+    let mut renderer = AppRenderer::new();
+    register_claude_in_session(&mut renderer, &root);
+    press(&mut renderer, Keycode::I);
+    type_text(&mut renderer, "explain ");
+
+    press_ctrl_shift(&mut renderer, Keycode::Semicolon);
+    type_text(&mut renderer, "rev");
+    press_escape(&mut renderer);
+
+    assert_eq!(renderer.coordinate, Coordinate::Insert);
+    assert_eq!(renderer.input_buffer, "explain ", "the draft survives");
+    assert_eq!(renderer.cursor_position, "explain ".len());
+}
+
+#[test]
+fn claude_escape_after_inserting_a_skill_clears_the_prompt() {
+    // Escape in Insert cancels the whole edit, so the prompt goes back to how it
+    // was before typing started — skill and all. The provider's own copy of the
+    // pending text has to be cancelled with it, or the next `fetch()` rebuilds
+    // the slot from the stale copy and the skill reappears.
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    project_skill(&root, "review", "");
+
+    ensure_builtins();
+    let mut renderer = AppRenderer::new();
+    register_claude_in_session(&mut renderer, &root);
+    press(&mut renderer, Keycode::I);
+    type_text(&mut renderer, "explain ");
+    press_ctrl_shift(&mut renderer, Keycode::Semicolon);
+    press_enter(&mut renderer);
+    assert_eq!(renderer.input_buffer, "explain /review");
+
+    press_escape(&mut renderer);
+
+    let slot_id = renderer.current_id.clone();
+    assert!(
+        slot_key_at(&renderer, &slot_id).contains("<input></input>"),
+        "the element should be back to empty; got {:?}",
+        slot_key_at(&renderer, &slot_id)
+    );
+    // And it must stay empty once the provider re-renders the slot.
+    let refetched = renderer.providers[0].fetch();
+    let key = &refetched.last().unwrap().as_obj().unwrap().key;
+    assert!(
+        key.contains("<input></input>"),
+        "a refetch brought the cancelled text back; got {key:?}"
+    );
+}
+
+#[test]
+fn claude_escape_after_a_skill_clears_the_row_the_user_actually_sees() {
+    // Reported: after Escape the prompt still showed the skill, while pressing
+    // `i` on it gave an empty buffer. That pattern means the FFON is right and
+    // the *rendered* row is stale, so assert on `total_list` — what is on
+    // screen — as well as on the element, and again after a re-entry.
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    project_skill(&root, "review", "");
+
+    ensure_builtins();
+    let mut renderer = AppRenderer::new();
+    register_claude_in_session(&mut renderer, &root);
+    press(&mut renderer, Keycode::I);
+    type_text(&mut renderer, "explain ");
+    press_ctrl_shift(&mut renderer, Keycode::Semicolon);
+    press_enter(&mut renderer);
+
+    press_escape(&mut renderer);
+
+    let shown = |r: &AppRenderer| r.total_list.last().unwrap().label.clone();
+    assert!(
+        !shown(&renderer).contains("/review"),
+        "the row on screen still shows the skill: {:?}",
+        shown(&renderer)
+    );
+
+    // Re-enter and leave again: the second Escape must not resurrect it.
+    press(&mut renderer, Keycode::I);
+    assert_eq!(renderer.input_buffer, "", "nothing left to edit");
+    press_escape(&mut renderer);
+    assert!(
+        !shown(&renderer).contains("/review"),
+        "resurrected on the second escape: {:?}",
+        shown(&renderer)
+    );
+
+    // And a provider-driven refresh, the way streaming output triggers one.
+    sicompass::provider::refresh_current_directory(&mut renderer);
+    assert!(
+        !shown(&renderer).contains("/review"),
+        "a refresh brought it back: {:?}",
+        shown(&renderer)
+    );
+}
+
+#[test]
+fn claude_second_colon_with_no_skills_is_inert() {
+    // No `.claude/skills/` at all: `:` in the session has nothing to offer, and
+    // must not open an empty palette the user cannot get out of by ear.
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+
+    ensure_builtins();
+    let mut renderer = AppRenderer::new();
+    register_claude_in_session(&mut renderer, &root);
+    let before = renderer.coordinate;
+
+    press_colon(&mut renderer);
+
+    assert_eq!(renderer.coordinate, before, "still in the session");
+    assert!(renderer.suspended_input_edit.is_none());
+}
+
+#[test]
+fn terminal_second_colon_stays_inert() {
+    // The terminal has a live prompt too, but offers nothing beyond the view
+    // swap — so the shape-based palette check must not fire for it.
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    std::fs::create_dir(root.join("workspace")).unwrap();
+
+    ensure_builtins();
+    let mut renderer = AppRenderer::new();
+    register_terminal_rooted_at(&mut renderer, &root);
+    press_right(&mut renderer);
+    press_colon(&mut renderer); // into the shell
+
+    press_colon(&mut renderer);
+
+    assert!(
+        renderer.suspended_input_edit.is_none(),
+        "no palette for a provider with nothing to insert"
+    );
+    assert_eq!(renderer.coordinate, Coordinate::General);
 }
 
 #[test]
