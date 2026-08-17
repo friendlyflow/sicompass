@@ -32,7 +32,7 @@ produce the installable Linux package. It reads the version from
   Mesa ICD discovery, `LD_LIBRARY_PATH` and xvfb. Anything added to the shared
   part of the `shellHook` has to hold on both. In particular, never reference a
   Linux-only package (`wayland`, `mesa`, `at-spi2-core`) outside the
-  `lib.optionalString stdenv.isLinux` branch: nixpkgs marks `wayland` bad on
+  `lib.optionalString stdenv.hostPlatform.isLinux` branch: nixpkgs marks `wayland` bad on
   darwin, so a stray reference breaks `nix develop` at *eval* time on macOS,
   before anything is fetched.
 - `x86_64-darwin` builds from a **second** nixpkgs input pinned to
