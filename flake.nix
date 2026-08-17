@@ -104,7 +104,7 @@
               # graphify code-graph CLI is a uv-installed Python tool
               # (PyPI package `graphifyy`); uv bootstraps it in the shellHook.
               uv
-            ] ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
+            ] ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [
               # xvfb-run: lets the web browser provider run headed Chrome on an
               # invisible X11 display. Without it, chrome_via_xvfb() falls back
               # to launching Chrome on the real display and a window pops up.
@@ -150,7 +150,7 @@
               at-spi2-core
               dbus
               accerciser
-            ] ++ pkgs.lib.optionals pkgs.stdenv.isDarwin [
+            ] ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isDarwin [
               # MoltenVK is the only Vulkan driver on macOS: it implements
               # Vulkan on top of Metal, and vulkan-loader enumerates zero ICDs
               # without it. Nothing on the Linux list has a macOS counterpart
@@ -173,7 +173,7 @@
               export PKG_CONFIG_PATH="${sdl3}/lib/pkgconfig:$PKG_CONFIG_PATH";
               export VULKAN_SDK="${vulkan-headers}";
             ''
-            + lib.optionalString stdenv.isLinux ''
+            + lib.optionalString stdenv.hostPlatform.isLinux ''
               export PKG_CONFIG_PATH="${libxkbcommon.dev}/lib/pkgconfig:$PKG_CONFIG_PATH";
               export LIBRARY_PATH="${sdl3}/lib:${libxkbcommon}/lib:${wayland}/lib:$LIBRARY_PATH";
 
@@ -248,7 +248,7 @@
                 unset _icd;
               fi
             ''
-            + lib.optionalString stdenv.isDarwin ''
+            + lib.optionalString stdenv.hostPlatform.isDarwin ''
               export LIBRARY_PATH="${sdl3}/lib:$LIBRARY_PATH";
 
               # dyld, not ld.so. Nix's darwin linker bakes an absolute store
@@ -434,7 +434,7 @@
               cmake
               rustPlatform.bindgenHook
               makeWrapper
-            ] ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
+            ] ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [
               # .desktop files are a freedesktop concept. macOS discovers apps
               # through an .app bundle's Info.plist instead, which is built by
               # the packaging pipeline in docs/releasing.md, not here.
@@ -449,7 +449,7 @@
               freetype
               libwebp
               curl
-            ] ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
+            ] ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [
               # openssl-sys is in the graph on Linux only (lettre and
               # async-native-tls). macOS uses Security.framework.
               openssl
@@ -457,7 +457,7 @@
               wayland
               at-spi2-core
               dbus
-            ] ++ pkgs.lib.optionals pkgs.stdenv.isDarwin [
+            ] ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isDarwin [
               # Vulkan-on-Metal. Same reason as the dev shell: without an ICD
               # the loader enumerates no devices and SDL reports the missing
               # VK_KHR_surface extension.
@@ -478,7 +478,7 @@
               install -Dm644 THIRD-PARTY-LICENSES.html \
                 $out/share/doc/sicompass/THIRD-PARTY-LICENSES.html
             ''
-            + pkgs.lib.optionalString pkgs.stdenv.isLinux ''
+            + pkgs.lib.optionalString pkgs.stdenv.hostPlatform.isLinux ''
               # The hicolor theme is where freedesktop desktops look for an
               # app icon, and it pairs with the .desktop item below. macOS
               # reads the icon out of the .app bundle instead, so this tree
@@ -509,7 +509,7 @@
                   sdl3
                 ])}"
             ''
-            + pkgs.lib.optionalString pkgs.stdenv.isDarwin ''
+            + pkgs.lib.optionalString pkgs.stdenv.hostPlatform.isDarwin ''
               # Same three jobs as the Linux wrapper, minus the one that has no
               # macOS meaning. dyld reads DYLD_FALLBACK_LIBRARY_PATH, not
               # LD_LIBRARY_PATH, and again this is only for what the app
@@ -533,7 +533,7 @@
                 ])}"
             '';
 
-            desktopItems = pkgs.lib.optionals pkgs.stdenv.isLinux [
+            desktopItems = pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [
               (pkgs.makeDesktopItem {
                 name = "sicompass";
                 desktopName = "Sicompass";
