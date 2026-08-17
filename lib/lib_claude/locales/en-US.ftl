@@ -6,3 +6,4 @@ claude-display-name = claude
 # swaps the folder listing for the claude session, `browse` swaps back.
 claude-command-session = session
 claude-command-browse = folders
+claude-command-skills = skills

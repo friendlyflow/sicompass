@@ -119,3 +119,8 @@ speak-tab-change = tab { $idx }/{ $total }: { $label }
 # screen reader switches voice even if the focused control's text is unchanged.
 speak-language-change = Language changed
 hint-c-controls = c      Controls
+hint-insert = :      Insert
+hint-ctrl-insert = Ctrl+: Insert
+hint-enter-insert = Enter  Insert
+insert-palette-empty = nothing to insert
+mode-insert-palette = insert mode

@@ -6,3 +6,4 @@ claude-display-name = claude
 # aufgelistet werden.
 claude-command-session = Sitzung
 claude-command-browse = Ordner
+claude-command-skills = Fähigkeiten

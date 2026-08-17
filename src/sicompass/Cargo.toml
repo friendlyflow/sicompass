@@ -402,6 +402,10 @@ sicompass-webbrowser = { workspace = true }
 # `ensure_builtins`. Without it, every run appends the commands these tests run
 # to the developer's own shell history.
 sicompass-terminal = { workspace = true }
+# Only to switch personal-skill discovery off for the test binary — see
+# `ensure_builtins`. Without it the skills-palette tests would see whatever
+# lives in the developer's own `~/.claude/skills`.
+sicompass-claude = { workspace = true }
 sicompass-chatclient = { workspace = true }
 sicompass-emailclient = { workspace = true }
 sicompass-remote = { workspace = true }

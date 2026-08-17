@@ -4351,6 +4351,7 @@ dependencies = [
  "serde_json",
  "sicompass-builtins",
  "sicompass-chatclient",
+ "sicompass-claude",
  "sicompass-emailclient",
  "sicompass-filebrowser",
  "sicompass-remote",
