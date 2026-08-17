@@ -7942,7 +7942,7 @@ mod tests {
         }
         fn fetch(&mut self) -> Vec<FfonElement> {
             if self.in_session {
-                vec![FfonElement::new_obj("send to claude<input></input>")]
+                vec![FfonElement::new_obj("send to claude: <input></input>")]
             } else {
                 vec![
                     FfonElement::new_obj("workspace"),
