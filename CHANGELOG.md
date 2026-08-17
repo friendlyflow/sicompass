@@ -5,6 +5,34 @@ GitHub Release body, so entries here are what users read on the download page.
 
 ## 0.1.18
 
+### Claude starts in the folder you are standing in
+
+The Claude program used to open straight into a conversation, and that
+conversation ran wherever Sicompass itself had been started from. Which folder
+that was depended on how you launched the app, and from a desktop icon it was
+usually somewhere useless. It mattered more than it sounds, because Claude works
+out what it knows about your project from the folder it runs in: the project's
+CLAUDE.md, its skills, its settings and hooks all come from there. Started in the
+wrong place, it had none of them, and there was no way to tell it otherwise.
+
+Claude now opens on a list of folders instead, rooted at the top of the
+filesystem, the same as the terminal. Walk to a project with the arrow keys, and
+press `:` to start a session in the folder you are standing in, whose contents
+the list is showing. Wanting Claude a level deeper is a Right away. Escape
+returns to the folders with the conversation still running, so you can look
+something up and come straight back to it.
+
+Pressing `:` in a different folder starts a fresh session there. Claude fixes its
+working directory when it starts and cannot be moved afterwards the way a shell
+can be walked around with `cd`, so continuing the old conversation in a new
+project would mean answering questions about a tree it cannot see. The prompts
+you have typed are kept for recall either way.
+
+Two smaller consequences. Opening the program no longer starts Claude at all, so
+enabling it costs nothing until you press `:`. And closing a tab while Claude is
+still working now asks first, the way it already did for a terminal running a
+command, since closing takes the conversation with it.
+
 ### Multilingual sites no longer ask you to pick a language first
 
 0.1.17 could interrupt a page with a list of languages to choose from before it

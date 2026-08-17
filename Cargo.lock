@@ -4411,9 +4411,11 @@ dependencies = [
 name = "sicompass-claude"
 version = "0.1.17"
 dependencies = [
+ "natord",
  "serde",
  "serde_json",
  "sicompass-sdk",
+ "tempfile",
  "tracing",
 ]
 

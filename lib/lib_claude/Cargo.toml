@@ -11,3 +11,8 @@ sicompass-sdk = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tracing = { workspace = true }
+# Natural sort for the directory-browse listing, matching the file browser.
+natord = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
