@@ -356,7 +356,10 @@ pub fn build(convo: &Conversation, history: &[String], pending_input: &str) -> V
     // --- live input slot (a `+i` Obj: an <input> whose children are the
     // recall history as <button> Strs, newest first — Enter on a button
     // fills the input). ---------------------------------------------------
-    let mut slot = FfonElement::new_obj(format!("send to claude<input>{pending_input}</input>"));
+    // The prompt prefix ends in `: ` so the typed text reads as following a
+    // label, the way the terminal's `user@host:~$ ` prompt does, rather than
+    // running straight on from the last word.
+    let mut slot = FfonElement::new_obj(format!("send to claude: <input>{pending_input}</input>"));
     if let Some(obj) = slot.as_obj_mut() {
         for prompt in history.iter().rev() {
             obj.push(FfonElement::new_str(format!(
