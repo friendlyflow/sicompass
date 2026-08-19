@@ -13,7 +13,7 @@
 //! updates itself with every release, descriptions included. See
 //! [`extract_builtin_commands`]. The **skills** have no such structure: they are
 //! bare minified assignments with no descriptions and nothing stable to anchor
-//! on, so they stay a setting. See [`DEFAULT_BUILTIN_SKILLS`].
+//! on, so they are a snapshot kept here. See [`BUILTIN_SKILLS`].
 //!
 //! The parse is hand-rolled rather than pulling in a YAML crate, matching what
 //! the rest of the workspace does for small fixed-shape files (see
@@ -36,10 +36,11 @@ const MAX_DESC_CHARS: usize = 80;
 /// Unlike its slash commands (see [`extract_builtin_commands`]) these cannot be
 /// read out of the CLI: they appear in the bundle only as bare minified
 /// assignments — `rPe="artifact-design",MMo="artifact-diagramming"` — with no
-/// descriptions and no stable anchor to find them by. So they stay a setting,
-/// `claudeBuiltinSkills`, which a release that adds or drops one can be followed
-/// by editing, rather than a hidden list going quietly stale.
-pub const DEFAULT_BUILTIN_SKILLS: &str = "artifact-capabilities, artifact-design, \
+/// descriptions and no stable anchor to find them by. So they are a snapshot,
+/// updated here when a Claude Code release adds or drops one. It was briefly a
+/// setting instead; a list of names nobody would ever edit is not worth a row on
+/// the settings screen.
+const BUILTIN_SKILLS: &str = "artifact-capabilities, artifact-design, \
      artifact-diagramming, artifact-pr-review, claude-api, code-review, code-walkthrough, \
      commit, commit-push-pr, dataviz, fewer-permission-prompts, init, \
      keybindings-help, loop, pr, pr-explainer, prototype, run, schedule, security-review, \
@@ -118,6 +119,10 @@ impl Skill {
 // * This crate's own unit tests get it from `cfg!(test)`. Tests that care about
 //   ordering call `discover_in` directly with tempdirs, and the extractor tests
 //   point at a fabricated bundle, so both are unaffected.
+//
+// The shipped built-ins are covered too. They are not on disk, but they are just
+// as much "whatever this Claude Code has" as the rest, and leaving them on would
+// pad every palette assertion with rows the test did not create.
 // * The app's integration tests are a different binary, where this crate is
 //   compiled *without* `cfg(test)` and the provider is reached as a
 //   `Box<dyn Provider>`. They call `_set_test_no_ambient_skills(true)` once.
@@ -143,17 +148,22 @@ fn no_ambient_skills() -> bool {
 /// 1. `~/.claude/skills/` — personal, available in every project.
 /// 2. `<session folder>/.claude/skills/` — this project's own.
 /// 3. Enabled marketplace plugins, under `~/.claude/plugins/marketplaces/`.
-/// 4. `builtins` — the skills Claude Code ships with, which the caller supplies.
+/// 4. [`BUILTIN_SKILLS`] — the skills Claude Code ships with.
 /// 5. Claude Code's own slash commands, read from the `program` binary.
 ///
 /// Resolves the roots from the home directory; see [`discover_in`] for the
 /// injectable form the tests use.
-pub(crate) fn discover(session_path: &str, builtins: &str, program: &str) -> Vec<Skill> {
+pub(crate) fn discover(session_path: &str, program: &str) -> Vec<Skill> {
     let project = Path::new(session_path).join(".claude").join("skills");
     let home = if no_ambient_skills() {
         None
     } else {
         sicompass_sdk::platform::home_dir()
+    };
+    let builtins = if no_ambient_skills() {
+        ""
+    } else {
+        BUILTIN_SKILLS
     };
     // No home directory is not an error worth surfacing — the project skills are
     // still usable on their own, and an unreadable root is simply "no skills
@@ -472,9 +482,7 @@ fn builtin_commands(program: &str) -> Vec<Skill> {
 /// These are the one source that cannot be discovered. They are not files: the
 /// names live inside the CLI's own bundle, under minified identifiers that
 /// change with every build, so there is nothing stable to read and no CLI
-/// command that enumerates them. Hence a setting with a working default, which
-/// the user can correct when a Claude Code release adds or drops one — visible
-/// and editable, rather than a hardcoded list that rots out of sight.
+/// command that enumerates them. Hence the snapshot in [`BUILTIN_SKILLS`].
 ///
 /// No description is available for the same reason, so these rows show the bare
 /// name.
@@ -868,7 +876,7 @@ mod tests {
         // `discover` joins `.claude/skills` onto the session folder itself.
         skill(&session.path().join(".claude").join("skills"), "only", "");
         assert_eq!(
-            names(&discover(session.path().to_str().unwrap(), "", "claude")),
+            names(&discover(session.path().to_str().unwrap(), "claude")),
             vec!["only"],
             "discover() must see the project skills and nothing else"
         );
@@ -1119,6 +1127,18 @@ mod tests {
             merged.len() > 50,
             "and the snapshot still contributes the rest"
         );
+    }
+
+    #[test]
+    fn the_builtin_skill_list_is_usable_on_its_own() {
+        // The palette's fourth block. No scan feeds it, so this snapshot is all
+        // there is: if it stops parsing, the block silently empties.
+        let builtins = parse_name_list(BUILTIN_SKILLS);
+        assert!(builtins.len() > 10, "got {}", builtins.len());
+        let names: Vec<&str> = builtins.iter().map(|s| s.name.as_str()).collect();
+        for expected in ["code-review", "init", "run", "security-review"] {
+            assert!(names.contains(&expected), "missing {expected}");
+        }
     }
 
     #[test]
