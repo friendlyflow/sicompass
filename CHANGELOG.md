@@ -33,7 +33,7 @@ enabling it costs nothing until you press `:`. And closing a tab while Claude is
 still working now asks first, the way it already did for a terminal running a
 command, since closing takes the conversation with it.
 
-### Multilingual sites no longer ask you to pick a language first
+### Multilingual sites list their languages instead of asking first
 
 0.1.17 could interrupt a page with a list of languages to choose from before it
 would show anything. It was meant for a site that genuinely will not continue
@@ -48,13 +48,26 @@ so anysurfer.be, in Dutch, offered only English and French, with no way to stay
 where you were. On elevenways.be the language markers scattered over ordinary
 content links leaked into the list, so the Dutch entry led to the contact page.
 
-The question is gone. A site's own language links are read as part of the page,
-which is where you would look for them, and the address you asked for is the
-address that loads. The `choose language` command went with it, and if you had
-already answered the question once, `clear cookies` now clears that too. Cookie
-banners are unchanged: those really do sit between you and the page, so they
-are still answered as a step of their own, and nothing is accepted on your
-behalf.
+The question is gone. The address you asked for is the address that loads. The
+`choose language` command went with it, and if you had already answered the
+question once, `clear cookies` now clears that too. Cookie banners are
+unchanged: those really do sit between you and the page, so they are still
+answered as a step of their own, and nothing is accepted on your behalf.
+
+A site's own language links are read as part of the page, which is where you
+would look for them. That turned out not to be enough on its own. On bpost.be
+the only language switcher is a pop-up the site keeps hidden until it decides to
+show it, marked in a way that tells a screen reader to ignore it, and built from
+links that do not actually go anywhere. So it was read as nothing at all, and
+bpost, which offers four languages, ended up offering none.
+
+Every page now ends with a `languages` section listing the versions the site
+declares it has, each one a link you can follow. It is the last thing on the
+page rather than the first, so you meet the page before its language list, and
+it is always in the same place instead of wherever the site chose to put its
+switcher. The language you are reading is listed too, marked as the current one,
+which is what anysurfer.be leaves out. A site that says nothing about other
+languages grows nothing.
 
 ### The address bar remembers where you have been
 

@@ -9,6 +9,12 @@ webbrowser-consent-unrecognised = Deze site toont een cookiemelding en er kon ge
 webbrowser-consent-accept-all = Alle cookies aanvaarden
 webbrowser-consent-reject-all = Alle cookies weigeren
 
+# The language versions a site declares for itself, listed as the last section
+# of the page. Not a question: the page is already there, this is one more part
+# of it. The marker names the language you are reading right now.
+webbrowser-languages = talen
+webbrowser-language-current = huidige
+
 # Bookmarks. The marker is prepended to a bookmarked row's display text, so it
 # is read out before the address; keep it short and keep the brackets.
 webbrowser-bookmark-marker = [bladwijzer]

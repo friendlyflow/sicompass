@@ -4576,6 +4576,7 @@ version = "0.1.17"
 dependencies = [
  "chromiumoxide",
  "futures",
+ "scraper",
  "serde",
  "serde_json",
  "sicompass-sdk",
