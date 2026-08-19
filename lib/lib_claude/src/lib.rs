@@ -145,9 +145,6 @@ pub struct ClaudeProvider {
     history: Vec<String>,
     /// Value rendered inside the live `<input>` slot on the next `fetch()`.
     pending_input: String,
-    /// Comma-separated built-in skill names, from `claudeBuiltinSkills`.
-    /// They are not discoverable on disk — see `skills::DEFAULT_BUILTIN_SKILLS`.
-    builtin_skills: String,
     /// Skills found by the last `handle_command(CMD_SKILLS)`.
     ///
     /// Cached rather than scanned on demand because `command_list_items` takes
@@ -187,7 +184,6 @@ impl ClaudeProvider {
             convo: Conversation::default(),
             history: Vec::new(),
             pending_input: String::new(),
-            builtin_skills: skills::DEFAULT_BUILTIN_SKILLS.to_owned(),
             skills: Vec::new(),
             last_session_id: None,
             error: None,
@@ -651,8 +647,7 @@ impl Provider for ClaudeProvider {
                 // list immediately afterwards, and that clears `error_message`,
                 // so anything reported here would vanish. Discovery is
                 // silent-skip by construction, so there is nothing to report.
-                self.skills =
-                    skills::discover(&self.session_path, &self.builtin_skills, &self.program);
+                self.skills = skills::discover(&self.session_path, &self.program);
             }
             _ => {}
         }
@@ -719,11 +714,6 @@ impl Provider for ClaudeProvider {
             "claudeExtraArgs" => {
                 self.extra_args = value.split_whitespace().map(str::to_owned).collect();
             }
-            "claudeBuiltinSkills" => {
-                // Empty means "list none" and is a legitimate choice, so unlike
-                // the other text settings this does not fall back to a default.
-                self.builtin_skills = value.to_owned();
-            }
             "claudeStreamPartial" => {
                 self.include_partial = matches!(value, "true" | "1" | "on");
             }
@@ -747,12 +737,6 @@ pub fn register() {
         ),
         SettingDecl::text("claude", "model override", "claudeModel", ""),
         SettingDecl::text("claude", "extra CLI args", "claudeExtraArgs", ""),
-        SettingDecl::text(
-            "claude",
-            "built-in skills",
-            "claudeBuiltinSkills",
-            skills::DEFAULT_BUILTIN_SKILLS,
-        ),
         SettingDecl::checkbox(
             "claude",
             "stream responses token-by-token",
@@ -877,10 +861,6 @@ mod tests {
         let mut p = ClaudeProvider::new();
         // Never let a test reach a real `claude`, whatever the machine has.
         p.program = "definitely-not-claude-xyz-9000".to_owned();
-        // Built-ins are a fixed list, not something on disk, so they would pad
-        // every skills assertion with rows the test did not create. The one test
-        // that cares about them sets the field back.
-        p.builtin_skills = String::new();
         p.set_current_path(path.to_str().unwrap());
         p
     }
@@ -1179,32 +1159,6 @@ mod tests {
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].data, "/review");
         assert_eq!(items[0].label, "review - Review the diff");
-    }
-
-    #[test]
-    fn the_builtin_skills_setting_reaches_the_palette() {
-        // The one source that is not on disk: Claude Code's own skills are not
-        // files anywhere, so they arrive as a setting instead of a scan.
-        let dir = tempfile::tempdir().unwrap();
-        let root = dir.path().canonicalize().unwrap();
-
-        let mut p = browsing(&root);
-        p.on_setting_change("claudeBuiltinSkills", "run, init");
-        p.enter_session();
-        p.handle_command(CMD_SKILLS, "", 0, &mut String::new());
-
-        let items = p.command_list_items(CMD_SKILLS);
-        let data: Vec<&str> = items.iter().map(|i| i.data.as_str()).collect();
-        assert_eq!(data, vec!["/init", "/run"]);
-    }
-
-    #[test]
-    fn an_empty_builtin_skills_setting_lists_none() {
-        // Empty is a legitimate choice, not a reason to fall back to the default.
-        let mut p = ClaudeProvider::new();
-        assert!(!p.builtin_skills.is_empty(), "ships with a working default");
-        p.on_setting_change("claudeBuiltinSkills", "");
-        assert!(p.builtin_skills.is_empty());
     }
 
     #[test]

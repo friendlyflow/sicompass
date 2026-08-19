@@ -11573,9 +11573,6 @@ fn register_claude_rooted_at(renderer: &mut AppRenderer, path: &std::path::Path)
         sicompass_sdk::create_provider_by_name("claude").unwrap(),
     );
     renderer.providers[0].on_setting_change("claudeBinary", "definitely-not-claude-xyz-9000");
-    // Built-ins are a fixed list rather than anything on disk, so leaving them on
-    // would pad every skills assertion with rows the test did not create.
-    renderer.providers[0].on_setting_change("claudeBuiltinSkills", "");
     renderer.providers[0].set_current_path(path.to_str().unwrap());
     let children = renderer.providers[0].fetch();
     renderer.ffon[0].as_obj_mut().unwrap().children = children;
