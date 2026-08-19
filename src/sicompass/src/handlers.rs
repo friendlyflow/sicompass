@@ -1220,10 +1220,38 @@ pub(crate) fn insert_palette_commands(r: &AppRenderer) -> Vec<String> {
 /// the file browser is a file name.
 fn trailing_input_slot_index(r: &AppRenderer) -> Option<usize> {
     let arr = sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &r.current_id)?;
-    match arr.last()? {
-        FfonElement::Obj(o) if sicompass_sdk::tags::has_input(&o.key) => Some(arr.len() - 1),
-        _ => None,
+    let is_slot = match arr.last()? {
+        FfonElement::Obj(o) => sicompass_sdk::tags::has_input(&o.key),
+        // A prompt with no recall history to expand into is a `-i` Str, not a
+        // childless `+i` Obj the user can only bounce off.
+        //
+        // This arm alone is keyed by name, unlike the shape-based `Obj` arm
+        // above: an `<input>` Str is a far more common shape — editor file
+        // content, a file-browser file, an email compose field — and treating
+        // every trailing one as a live prompt would hand an insert palette to
+        // listings that are not prompts at all. A plugin adopting the `Obj`
+        // form still needs no change here.
+        //
+        // The `i` placeholder the app seeds into every empty container is an
+        // `<input>` Str too, and it belongs to whichever provider is active,
+        // so the name gate alone does not exclude it.
+        FfonElement::Str(s) => {
+            !sicompass_sdk::placeholders::is_i_placeholder(s) && is_live_input_slot(r, s)
+        }
+    };
+    is_slot.then(|| arr.len() - 1)
+}
+
+/// True when the cursor is standing on the provider's live prompt — the `+i`
+/// Obj, or the `-i` Str it becomes when there is no history under it.
+///
+/// A `Str` only counts as the *last* row of its level. Elsewhere an editable
+/// `Str` is an ordinary field, which Enter must edit rather than run.
+fn cursor_on_live_input_slot(r: &AppRenderer, elem_text: &str, is_obj: bool) -> bool {
+    if !is_live_input_slot(r, elem_text) {
+        return false;
     }
+    is_obj || (trailing_input_slot_index(r) == r.current_id.last())
 }
 
 fn trailing_element_is_input_slot(r: &AppRenderer) -> bool {
@@ -1463,9 +1491,10 @@ pub(crate) fn below_session_level(r: &AppRenderer) -> bool {
 /// The distinction matters for every "back out of the session" path: swapping
 /// the view rebuilds whichever level the cursor is on, so doing it from inside
 /// the history would graft the folder listing over the history list instead.
-/// Detected by the trailing element being an `<input>` Obj, which the browse
+/// Detected by the trailing element carrying `<input>`, which the browse
 /// listing never produces (its directories carry no tag) and the history
-/// children never are (they are `<button>` Strs).
+/// children never do (they are `<button>` Strs). Either element type counts:
+/// the slot is a `+i` Obj with history under it, a `-i` Str without.
 pub(crate) fn at_session_input_level(r: &AppRenderer) -> bool {
     if !in_session_view(r) {
         return false;
@@ -1474,7 +1503,7 @@ pub(crate) fn at_session_input_level(r: &AppRenderer) -> bool {
         .and_then(|arr| arr.last())
         .is_some_and(|e| match e {
             FfonElement::Obj(o) => sicompass_sdk::tags::has_input(&o.key),
-            _ => false,
+            FfonElement::Str(s) => sicompass_sdk::tags::has_input(s),
         })
 }
 
@@ -1943,27 +1972,34 @@ pub fn handle_enter_general(r: &mut AppRenderer) {
         .map(|p| p.name() == "filebrowser")
         .unwrap_or(false);
 
-    if !_is_obj_elem && tags::has_input(&elem_text) && !is_filebrowser {
-        let content = tags::extract_input(&elem_text).unwrap_or_default();
-        crate::provider::commit_edit(r, &content, &content);
-        crate::provider::refresh_current_directory(r);
-        list::create_list_current_layer(r);
-        r.needs_redraw = true;
-        return;
-    }
-
-    // General-mode Enter on the `+i` live input slot itself runs the command —
+    // General-mode Enter on the live input slot itself runs the command —
     // identical to an Insert-mode commit. The <input> may be pre-filled from
     // history, but to the provider it is always the *live* input, so commit
     // with old="". (Right arrow, not Enter, navigates into the history
     // buttons.)
-    if _is_obj_elem && is_live_input_slot(r, &elem_text) {
+    //
+    // Checked *before* the generic `<input>` Str edit below: a slot with no
+    // history is a `-i` Str, and committing it as a field (old == new) is
+    // exactly what the provider's `commit_edit` rejects, so Enter would do
+    // nothing at all.
+    if cursor_on_live_input_slot(r, &elem_text, _is_obj_elem) {
         let content = tags::extract_input(&elem_text).unwrap_or_default();
         crate::provider::commit_edit(r, "", &content);
         crate::provider::refresh_current_directory(r);
         snap_to_trailing_input(r);
         list::create_list_current_layer(r);
         r.list_index = r.current_id.last().unwrap_or(0);
+        r.needs_redraw = true;
+        return;
+    }
+
+    // Activate a plain `<input>` field — commit its existing content, which
+    // triggers the provider's refresh.
+    if !_is_obj_elem && tags::has_input(&elem_text) && !is_filebrowser {
+        let content = tags::extract_input(&elem_text).unwrap_or_default();
+        crate::provider::commit_edit(r, &content, &content);
+        crate::provider::refresh_current_directory(r);
+        list::create_list_current_layer(r);
         r.needs_redraw = true;
         return;
     }
@@ -2526,10 +2562,14 @@ fn try_handle_live_input_search_enter(
     let elem = get_ffon_at_id(&r.ffon, selected_id)
         .and_then(|a| a.get(selected_id.last().unwrap_or(0)))
         .cloned();
-    let elem_is_slot = elem
-        .as_ref()
-        .and_then(|e| e.as_obj())
-        .map_or(false, |o| is_live_input_slot(r, &o.key));
+    let elem_is_slot = match elem.as_ref() {
+        Some(FfonElement::Obj(o)) => is_live_input_slot(r, &o.key),
+        // The `-i` Str form, when the slot has no history under it.
+        Some(FfonElement::Str(s)) => {
+            is_live_input_slot(r, s) && trailing_input_slot_index(r) == selected_id.last()
+        }
+        None => false,
+    };
     let parent_key = if selected_id.depth() >= 2 {
         let mut pid = selected_id.clone();
         let _ = pid.pop();
@@ -2623,7 +2663,7 @@ pub fn handle_enter_insert(r: &mut AppRenderer) {
     // value pre-filled from history, but to the provider it is always the
     // *live* input. Commit with old="" so the provider's `commit_edit` (which
     // rejects a non-empty `old`) accepts it.
-    let is_live_slot = is_obj && is_live_input_slot(r, &elem_text);
+    let is_live_slot = cursor_on_live_input_slot(r, &elem_text, is_obj);
     let old_content = if is_live_slot {
         String::new()
     } else {
@@ -3291,7 +3331,10 @@ fn snap_to_trailing_input(r: &mut AppRenderer) -> bool {
         .and_then(|arr| arr.last().map(|e| (arr.len() - 1, e.clone())));
     let idx = match trailing {
         Some((i, FfonElement::Str(s))) if s.ends_with("<input></input>") => Some(i),
-        // The `+i` live input slot (terminal/claude history input) is an Obj.
+        // The live input slot: a `+i` Obj with recall history under it, a `-i`
+        // Str without. The Str arm above only catches an *empty* one, so a
+        // history-prefilled `-i` slot needs this too.
+        Some((i, FfonElement::Str(s))) if is_live_input_slot(r, &s) => Some(i),
         Some((i, FfonElement::Obj(o))) if is_live_input_slot(r, &o.key) => Some(i),
         _ => None,
     };
