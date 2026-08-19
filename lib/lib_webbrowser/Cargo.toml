@@ -13,6 +13,10 @@ serde = { workspace = true }
 futures = "0.3"
 which = "8"
 tokio = { workspace = true }
+# Reading `<link rel="alternate" hreflang>` out of `<head>`, which the SDK
+# walker skips whole. Same version the SDK already pulls in, so this shares
+# its build rather than adding a second copy.
+scraper = "0.27"
 
 [dev-dependencies]
 tokio = { workspace = true }

@@ -9,6 +9,12 @@ webbrowser-consent-unrecognised = Ce site affiche une page de consentement aux c
 webbrowser-consent-accept-all = Accepter tous les cookies
 webbrowser-consent-reject-all = Refuser tous les cookies
 
+# The language versions a site declares for itself, listed as the last section
+# of the page. Not a question: the page is already there, this is one more part
+# of it. The marker names the language you are reading right now.
+webbrowser-languages = langues
+webbrowser-language-current = actuelle
+
 # Bookmarks. The marker is prepended to a bookmarked row's display text, so it
 # is read out before the address; keep it short and keep the brackets.
 webbrowser-bookmark-marker = [favori]

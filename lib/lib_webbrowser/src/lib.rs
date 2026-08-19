@@ -10,6 +10,14 @@
 //! content is handed over (see the gate section).  Nothing else is: a language
 //! switcher in particular is part of the page, not a question in front of it.
 //!
+//! Being part of the page is not the same as being readable, though, and
+//! assuming it was cost bpost.be its language choice for a release.  A site's
+//! switcher can be an `aria-hidden` modal of href-less anchors, which the prune
+//! drops and the walker could not make a link of anyway.  So the languages are
+//! also read from where a site declares them in machine-readable form,
+//! `<link rel="alternate" hreflang>` in `<head>` — see `declared_languages`,
+//! which appends them as the page's last section.  Still not a question.
+//!
 //! ## FFON tree layout
 //!
 //! ```text
@@ -44,10 +52,8 @@ pub fn register_translations() {
     });
 }
 #[cfg(test)]
-use sicompass_sdk::ffon::html_resolve_href;
-#[cfg(test)]
 use sicompass_sdk::ffon::html_to_ffon;
-use sicompass_sdk::ffon::{html_submit_selector, html_to_ffon_with_forms};
+use sicompass_sdk::ffon::{html_resolve_href, html_submit_selector, html_to_ffon_with_forms};
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
@@ -2869,8 +2875,171 @@ impl PageLoad {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Declared language versions
+// ---------------------------------------------------------------------------
+
+/// Autonyms for the language codes a European site is likely to declare — the
+/// name each language uses for itself, which is what a switcher shows.
+///
+/// This is a table of language codes, not a table of sites: it says nothing
+/// about who is being read, and a code missing from it still lists (as the bare
+/// code), it just reads less kindly.
+const LANGUAGE_NAMES: &[(&str, &str)] = &[
+    ("bg", "Български"),
+    ("cs", "Čeština"),
+    ("da", "Dansk"),
+    ("de", "Deutsch"),
+    ("el", "Ελληνικά"),
+    ("en", "English"),
+    ("es", "Español"),
+    ("et", "Eesti"),
+    ("fi", "Suomi"),
+    ("fr", "Français"),
+    ("ga", "Gaeilge"),
+    ("hr", "Hrvatski"),
+    ("hu", "Magyar"),
+    ("is", "Íslenska"),
+    ("it", "Italiano"),
+    ("lb", "Lëtzebuergesch"),
+    ("lt", "Lietuvių"),
+    ("lv", "Latviešu"),
+    ("mt", "Malti"),
+    ("nl", "Nederlands"),
+    ("no", "Norsk"),
+    ("pl", "Polski"),
+    ("pt", "Português"),
+    ("ro", "Română"),
+    ("ru", "Русский"),
+    ("sk", "Slovenčina"),
+    ("sl", "Slovenščina"),
+    ("sv", "Svenska"),
+    ("tr", "Türkçe"),
+    ("uk", "Українська"),
+];
+
+/// The primary subtag, lowercased: `nl-BE` and `nl` are the same language.
+///
+/// Region matters to the site, not to a reader choosing a language, and a site
+/// that declares both `nl` and `nl-BE` is offering one choice, not two.
+fn primary_subtag(code: &str) -> String {
+    code.trim()
+        .split(['-', '_'])
+        .next()
+        .unwrap_or("")
+        .to_ascii_lowercase()
+}
+
+/// What to call a language code: its autonym, or the bare code upper-cased.
+fn language_label(code: &str) -> String {
+    LANGUAGE_NAMES
+        .iter()
+        .find(|(c, _)| *c == code)
+        .map(|(_, name)| (*name).to_owned())
+        .unwrap_or_else(|| code.to_ascii_uppercase())
+}
+
+/// The language versions this page declares for itself, as `(label, url)`, in
+/// the order the page declares them.
+///
+/// The source is `<link rel="alternate" hreflang="…">` in `<head>`, which is
+/// the standard, machine-readable way a site says "the same page, in that
+/// language", and which reaches us with a real href. It is deliberately *not*
+/// read out of the body: `hreflang` on an ordinary content link only annotates
+/// what that link points at, and reading those is what made the old language
+/// step offer elevenways.be's contact page as its Dutch entry.
+///
+/// `<head>` never reaches FFON on its own — the SDK walker skips it whole — so
+/// none of this is otherwise readable, however the page is laid out. That is
+/// what makes it the answer for a site like bpost, whose only in-page switcher
+/// is an `aria-hidden` modal of href-less anchors that nothing can press.
+///
+/// Empty unless the result is a real choice (two or more languages), so an
+/// ordinary monolingual page grows nothing.
+fn declared_languages(html: &str, url: &str) -> Vec<(String, String)> {
+    // Reachable from the standalone `fetch_url_to_ffon` bridge as well as from
+    // a live provider, so it cannot assume the provider registered the bundles.
+    // Idempotent.
+    register_translations();
+    let doc = scraper::Html::parse_document(html);
+
+    let Ok(sel) = scraper::Selector::parse("link[rel][hreflang][href]") else {
+        return Vec::new();
+    };
+
+    // Insertion-ordered: the site's own ordering is meaningful and is kept.
+    let mut codes: Vec<String> = Vec::new();
+    let mut hrefs: Vec<String> = Vec::new();
+    for el in doc.select(&sel) {
+        // `rel` is a space-separated set, so match the word rather than the
+        // value. `alternate stylesheet` is the one set that carries the word
+        // without meaning a translation: it is the alternate-stylesheet idiom,
+        // and an `hreflang` on it describes the sheet, not a version of the
+        // page.
+        let rel = el.value().attr("rel").unwrap_or("");
+        let mut words = rel.split_whitespace().map(str::to_ascii_lowercase);
+        let mut alternate = false;
+        let mut stylesheet = false;
+        for w in &mut words {
+            alternate |= w == "alternate";
+            stylesheet |= w == "stylesheet";
+        }
+        if !alternate || stylesheet {
+            continue;
+        }
+        let code = primary_subtag(el.value().attr("hreflang").unwrap_or(""));
+        // `x-default` is the fallback for a language nobody asked for. It is a
+        // routing hint, not a language, and it has no name to show.
+        if code.is_empty() || code == "x" {
+            continue;
+        }
+        let href = html_resolve_href(el.value().attr("href").unwrap_or(""), url);
+        if href.is_empty() || codes.contains(&code) {
+            continue;
+        }
+        codes.push(code);
+        hrefs.push(href);
+    }
+
+    // The language you are already reading is routinely missing from the
+    // alternates — anysurfer.be, in Dutch, declares only English and French.
+    // Left as-is that is a list with no way to stay where you are, which is
+    // the complaint that sank the old language step. The page says which one
+    // it is in `<html lang>`, and it is the address already loaded.
+    let current = scraper::Selector::parse("html")
+        .ok()
+        .and_then(|s| doc.select(&s).next())
+        .and_then(|h| h.value().attr("lang"))
+        .map(primary_subtag)
+        .unwrap_or_default();
+    if !current.is_empty() && current != "x" && !codes.contains(&current) {
+        codes.push(current.clone());
+        hrefs.push(url.to_owned());
+    }
+
+    if codes.len() < 2 {
+        return Vec::new();
+    }
+
+    codes
+        .into_iter()
+        .zip(hrefs)
+        .map(|(code, href)| {
+            let mut label = language_label(&code);
+            if code == current {
+                label.push_str(&format!(
+                    " ({})",
+                    localize::t("webbrowser-language-current")
+                ));
+            }
+            (label, href)
+        })
+        .collect()
+}
+
 /// Render a loaded page to FFON, with every notice as a leading line: the ones
-/// the load flow recorded, then whatever the content itself gives away.
+/// the load flow recorded, then whatever the content itself gives away, and the
+/// page's own language versions as a trailing section.
 fn page_to_ffon_with_forms(load: &PageLoad, url: &str) -> (Vec<FfonElement>, FormMap) {
     let (mut elements, form_map) = html_to_ffon_with_forms(&load.html, url);
     let notices: Vec<String> = load
@@ -2882,6 +3051,24 @@ fn page_to_ffon_with_forms(load: &PageLoad, url: &str) -> (Vec<FfonElement>, For
     for (i, notice) in notices.into_iter().enumerate() {
         elements.insert(i, FfonElement::new_str(notice));
     }
+
+    // Last, so the page is read before its language switcher rather than after
+    // it — bpost's front page alone has nineteen top-level entries, and a
+    // reader who wants this knows to go to the end for it.  A question is
+    // still a question: `gate_page_html` builds a bare document with no
+    // `<head>` and no `lang`, so a cookie step declares nothing and grows
+    // nothing, with no special case needed here.
+    let languages = declared_languages(&load.html, url);
+    if !languages.is_empty() {
+        let mut section = FfonElement::new_obj(localize::t("webbrowser-languages"));
+        if let Some(obj) = section.as_obj_mut() {
+            for (label, href) in languages {
+                obj.push(FfonElement::new_obj(format!("{label} <link>{href}</link>")));
+            }
+        }
+        elements.push(section);
+    }
+
     (elements, form_map)
 }
 
@@ -4269,6 +4456,8 @@ fn google_consent_or_fallback(html: &str) -> GoogleConsent {
 // block anything, it is part of the page, and asking about it interrupted every
 // multilingual site with a list the reader had not asked for — see
 // `a_page_with_a_language_switcher_is_just_a_page` and the 0.1.18 CHANGELOG.
+// What the page declares about its own languages is read regardless, as a
+// section at the end rather than a step in front: `declared_languages`.
 //
 // Every choice is a single-button `<form>` whose click forwards to the real
 // control (see `gate_surface_js`).  FFON can only activate a `<button>` inside
@@ -7468,6 +7657,217 @@ mod tests {
         );
     }
 
+    // ---- the languages a page declares ----
+
+    /// bpost.be's `<head>`, which is the whole reason this exists: its only
+    /// in-page switcher is an `aria-hidden` modal of href-less `<a data-lang>`
+    /// anchors, so the prune drops it and the FFON walker would emit nothing
+    /// for it anyway. The four `<link rel=alternate>` lines are the only
+    /// readable statement of what languages the site has.
+    const BPOST_HEAD: &str = r#"<!DOCTYPE html><html lang="nl"><head>
+        <link rel="alternate" hreflang="nl" href="https://www.bpost.be/nl" />
+        <link rel="alternate" hreflang="en" href="https://www.bpost.be/en" />
+        <link rel="alternate" hreflang="fr" href="https://www.bpost.be/fr" />
+        <link rel="alternate" hreflang="de" href="https://www.bpost.be/de" />
+        </head><body>
+        <div aria-hidden="true" class="modal fade pre_homepage_language_modal">
+          <p><a class="choose-lang" data-lang="nl">Ik spreek Nederlands</a></p>
+          <p><a class="choose-lang" data-lang="fr">Je parle Français</a></p>
+        </div>
+        <h1>Welkom bij Bpost</h1>
+        </body></html>"#;
+
+    #[test]
+    fn a_site_declaring_four_languages_offers_all_four() {
+        let langs = declared_languages(BPOST_HEAD, "https://www.bpost.be/nl");
+        let codes: Vec<&str> = langs.iter().map(|(l, _)| l.as_str()).collect();
+        assert_eq!(langs.len(), 4, "expected bpost's four languages: {codes:?}");
+        // Autonyms, in the order the site declares them.
+        assert!(langs[0].0.starts_with("Nederlands"), "{codes:?}");
+        assert_eq!(langs[1].0, "English");
+        assert_eq!(langs[2].0, "Français");
+        assert_eq!(langs[3].0, "Deutsch");
+        // Real hrefs, so following one is ordinary navigation.
+        assert_eq!(langs[3].1, "https://www.bpost.be/de");
+        // The one you are reading is named as such, from <html lang>.
+        assert!(
+            langs[0]
+                .0
+                .contains(&localize::t("webbrowser-language-current")),
+            "the current language is not marked: {codes:?}"
+        );
+        assert_eq!(
+            langs
+                .iter()
+                .filter(|(l, _)| l.contains(&localize::t("webbrowser-language-current")))
+                .count(),
+            1,
+            "exactly one language is the current one: {codes:?}"
+        );
+    }
+
+    #[test]
+    fn the_language_you_are_reading_is_listed_even_when_undeclared() {
+        // anysurfer.be, in Dutch, declares only English and French. Listing
+        // just those is a switcher with no way to stay where you are, which is
+        // the complaint that sank the 0.1.17 language step. <html lang> plus
+        // the loaded address is enough to put Dutch back.
+        let html = r#"<!DOCTYPE html><html lang="nl"><head>
+            <link href="https://www.anysurfer.be/en" rel="alternate" hreflang="en">
+            <link href="https://www.anysurfer.be/fr" rel="alternate" hreflang="fr">
+            </head><body><h1>Toegankelijkheid</h1></body></html>"#;
+        let langs = declared_languages(html, "https://www.anysurfer.be/nl");
+        assert_eq!(langs.len(), 3, "Dutch is missing: {langs:?}");
+        let dutch = langs
+            .iter()
+            .find(|(l, _)| l.starts_with("Nederlands"))
+            .expect("no Dutch entry");
+        assert_eq!(dutch.1, "https://www.anysurfer.be/nl");
+        assert!(
+            dutch
+                .0
+                .contains(&localize::t("webbrowser-language-current"))
+        );
+    }
+
+    #[test]
+    fn a_page_offering_no_real_choice_declares_nothing() {
+        // One language is not a choice, and neither is none. An ordinary
+        // monolingual page must grow nothing at all.
+        for html in [
+            r#"<html lang="nl"><head></head><body><p>Hallo</p></body></html>"#,
+            r#"<html lang="nl"><head>
+               <link rel="alternate" hreflang="nl" href="/nl"></head><body></body></html>"#,
+            // No <html lang> either: nothing to synthesize a current entry from.
+            r#"<html><head><link rel="alternate" hreflang="fr" href="/fr"></head><body></body></html>"#,
+        ] {
+            assert!(
+                declared_languages(html, "https://x.invalid/nl").is_empty(),
+                "a page with no choice offered one: {html}"
+            );
+        }
+    }
+
+    #[test]
+    fn region_variants_and_x_default_are_not_languages() {
+        // `nl-BE` and `nl` are one choice, not two — region is the site's
+        // business, not the reader's. `x-default` is a routing fallback with no
+        // language and no name to show.
+        let html = r#"<!DOCTYPE html><html lang="nl-BE"><head>
+            <link rel="alternate" hreflang="x-default" href="https://x.invalid/">
+            <link rel="alternate" hreflang="nl-BE" href="https://x.invalid/nl-be">
+            <link rel="alternate" hreflang="nl" href="https://x.invalid/nl">
+            <link rel="alternate" hreflang="FR" href="https://x.invalid/fr">
+            </head><body></body></html>"#;
+        let langs = declared_languages(html, "https://x.invalid/nl-be");
+        assert_eq!(
+            langs.len(),
+            2,
+            "expected one Dutch and one French: {langs:?}"
+        );
+        // First declaration wins, so the region-specific URL is the one kept.
+        assert_eq!(langs[0].1, "https://x.invalid/nl-be");
+        assert!(langs[0].0.starts_with("Nederlands"));
+        // hreflang is case-insensitive.
+        assert_eq!(langs[1].0, "Français");
+    }
+
+    #[test]
+    fn only_head_alternates_count_as_a_language_version() {
+        // `hreflang` on an ordinary content link says what that link points at,
+        // not that the page has a version in that language. Reading those is
+        // exactly how the old step came to offer elevenways.be's contact page
+        // as its Dutch entry. `rel="alternate"` is also a set, and `alternate
+        // stylesheet` is not a translation.
+        let html = r#"<!DOCTYPE html><html lang="nl"><head>
+            <link rel="alternate stylesheet" hreflang="de" href="/print.css">
+            <link rel="alternate" hreflang="fr" href="/fr">
+            </head><body>
+            <a hreflang="en" href="/nl/contact">CONTACT</a>
+            </body></html>"#;
+        let langs = declared_languages(html, "https://x.invalid/nl");
+        let labels: Vec<&str> = langs.iter().map(|(l, _)| l.as_str()).collect();
+        assert_eq!(langs.len(), 2, "expected only Dutch and French: {labels:?}");
+        assert!(
+            !labels.iter().any(|l| l.starts_with("English")),
+            "{labels:?}"
+        );
+        assert!(
+            !labels.iter().any(|l| l.starts_with("Deutsch")),
+            "{labels:?}"
+        );
+    }
+
+    #[test]
+    fn relative_alternates_resolve_against_the_page() {
+        let html = r#"<html lang="nl"><head>
+            <link rel="alternate" hreflang="fr" href="/fr/thuis">
+            </head><body></body></html>"#;
+        let langs = declared_languages(html, "https://x.invalid/nl/thuis");
+        let french = langs
+            .iter()
+            .find(|(l, _)| l == "Français")
+            .expect("no French");
+        assert_eq!(french.1, "https://x.invalid/fr/thuis");
+    }
+
+    #[test]
+    fn an_unknown_language_code_still_lists() {
+        // The autonym table is a courtesy, not a gate: a code it has never
+        // heard of is still a language the site offers.
+        let html = r#"<html lang="nl"><head>
+            <link rel="alternate" hreflang="fy" href="/fy"></head><body></body></html>"#;
+        let langs = declared_languages(html, "https://x.invalid/nl");
+        assert_eq!(langs.len(), 2, "{langs:?}");
+        assert!(langs.iter().any(|(l, _)| l == "FY"), "{langs:?}");
+    }
+
+    #[test]
+    fn a_cookie_step_is_still_only_a_question() {
+        // The gate replaces the page with a bare document that has no <head>
+        // and no lang, so it declares nothing and grows nothing. This is what
+        // keeps "answer the cookies first" from turning back into a page with
+        // two unrelated lists on it — no special case needed to get there.
+        let html = gate_page_html(
+            &["Alles weigeren".to_owned(), "Alles aanvaarden".to_owned()],
+            &["sic-consent-0".to_owned(), "sic-consent-1".to_owned()],
+        );
+        assert!(declared_languages(&html, "https://www.bpost.be/nl").is_empty());
+    }
+
+    #[test]
+    fn the_language_section_is_the_last_thing_on_the_page() {
+        // Content first: a reader meets the page before its switcher, and the
+        // switcher is always in the same place rather than wherever the site
+        // happened to put it.
+        let (elements, _) = page_to_ffon_with_forms(
+            &PageLoad::plain(BPOST_HEAD.to_owned()),
+            "https://www.bpost.be/nl",
+        );
+        let last = elements.last().expect("no elements");
+        let obj = last.as_obj().expect("the language section is a section");
+        assert_eq!(obj.key, localize::t("webbrowser-languages"));
+        assert_eq!(obj.children.len(), 4, "{:?}", obj.children);
+        // Each entry is an ordinary link, read and followed like any other.
+        let rendered = format!("{:?}", obj.children);
+        assert!(
+            rendered.contains("Deutsch <link>https://www.bpost.be/de</link>"),
+            "{rendered}"
+        );
+        // The content is still there, and still ahead of the section.
+        let all = format!("{elements:?}");
+        assert!(all.contains("Welkom bij Bpost"), "{all}");
+        // And the modal contributed no choice. Chrome's prune drops it outright
+        // for being aria-hidden, but that runs in the page and not here, so
+        // this fixture still carries its text — as bare strings. Href-less
+        // anchors never become links, so even surviving it offers nothing to
+        // press. The head is what spoke.
+        assert!(
+            !all.contains("Ik spreek Nederlands <link>"),
+            "an href-less anchor became a link: {all}"
+        );
+    }
+
     // ---- the leftover language preference ----
 
     #[test]
@@ -8168,7 +8568,10 @@ mod tests {
             "a language switcher is not a question: {:?}",
             load.notices
         );
-        let (elems, _) = html_to_ffon_with_forms(&load.html, "https://x.invalid/nl");
+        // Through the provider's own renderer, not the SDK walker directly:
+        // the language section is added here, and calling past it is how this
+        // test used to pass while bpost had nothing at all.
+        let (elems, _) = page_to_ffon_with_forms(&load, "https://x.invalid/nl");
         let rendered = format!("{elems:?}");
         for want in ["ARTICLE-HEADING", "ARTICLE-BODY", "CONTACT-LINK"] {
             assert!(
@@ -8184,6 +8587,37 @@ mod tests {
                 "the switcher lost {lang}: {rendered}"
             );
         }
+
+        // And the page's own declaration is read too, as a trailing section.
+        // On a page like this it restates a switcher that was already legible;
+        // on bpost it is the only thing there is. The Dutch entry comes from
+        // <html lang>, since the page declares alternates for the other two
+        // only — the same shape as anysurfer.be.
+        let section = elems
+            .last()
+            .and_then(|e| e.as_obj())
+            .filter(|o| o.key == localize::t("webbrowser-languages"))
+            .unwrap_or_else(|| panic!("no language section: {rendered}"));
+        assert_eq!(section.children.len(), 3, "{:?}", section.children);
+        let listed = format!("{:?}", section.children);
+        assert!(
+            listed.contains("English <link>https://x.invalid/en</link>"),
+            "{listed}"
+        );
+        assert!(
+            listed.contains("Français <link>https://x.invalid/fr</link>"),
+            "{listed}"
+        );
+        // The content link's stray hreflang="nl" must not become the Dutch
+        // entry — that exact leak is what sent the old step to /nl/contact.
+        assert!(
+            listed.contains("<link>https://x.invalid/nl</link>"),
+            "Dutch should be the page you are on, not a content link: {listed}"
+        );
+        assert!(
+            !listed.contains("contact"),
+            "a content link leaked in: {listed}"
+        );
     }
 
     /// A provider that shuts its Chrome down when the test ends, panic or not.
@@ -8360,7 +8794,9 @@ mod tests {
         let _guard = launch_flag_guard(false);
         let mut p = TestProvider::new();
         // The language is pinned by the address, which is how a reader gets a
-        // language now that nothing asks: bpost's own switcher is in the page.
+        // language now that nothing asks. Where the choice itself comes from is
+        // asserted at the end: not from bpost's own switcher, which is an
+        // aria-hidden modal of href-less anchors and unreachable either way.
         p.load_url("https://www.bpost.be/nl");
         assert!(pump(&mut p), "bpost never finished loading");
 
@@ -8495,7 +8931,9 @@ mod tests {
             "the skip-link target is empty — it must contain the content, not sit next to it"
         );
         // What should still be gone: the answered steps and the vendor's parked
-        // preference centre.
+        // preference centre. "Ik spreek Nederlands" is the modal's own wording;
+        // the section asserted below lists autonyms, so this stays a real check
+        // that the aria-hidden modal is not what is being read.
         for gone in [
             "Ik spreek Nederlands",
             "Alles afwijzen",
@@ -8506,6 +8944,35 @@ mod tests {
                 "{gone:?} should not be in the content"
             );
         }
+
+        // ---- step 3: the languages ----------------------------------------
+        // The regression this test now guards. bpost offers four languages and
+        // its only in-page switcher is unreachable, so before this the site had
+        // no language choice at all. They come from the four
+        // <link rel="alternate" hreflang> lines in its <head>.
+        let section = p
+            .cached_page
+            .as_ref()
+            .unwrap()
+            .elements
+            .last()
+            .and_then(|e| e.as_obj())
+            .filter(|o| o.key == localize::t("webbrowser-languages"))
+            .unwrap_or_else(|| panic!("no language section at the end of the page: {content}"));
+        let listed = format!("{:?}", section.children);
+        for (name, href) in [
+            ("Nederlands", "https://www.bpost.be/nl"),
+            ("Français", "https://www.bpost.be/fr"),
+            ("English", "https://www.bpost.be/en"),
+            ("Deutsch", "https://www.bpost.be/de"),
+        ] {
+            assert!(
+                listed.contains(&format!("<link>{href}</link>")),
+                "{name} is not offered: {listed}"
+            );
+        }
+        // Followable, not just readable: every entry is a real link.
+        assert_eq!(section.children.len(), 4, "{listed}");
     }
 }
 
