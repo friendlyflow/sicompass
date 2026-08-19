@@ -341,6 +341,9 @@ pub fn dispatch_key(r: &mut AppRenderer, keycode: Option<Keycode>, keymod: Mod) 
         ?keycode,
         ?keymod,
         mode = r.coordinate.as_str(),
+        // `as_str` cannot separate Command from SessionCommand (same name, by
+        // design), so log the variant too.
+        coord = ?r.coordinate,
         "dispatch_key"
     );
 
@@ -443,13 +446,15 @@ pub fn apply_dashboard_requests(
         }
         match req {
             sicompass_sdk::DashboardRequest::Enter if r.coordinate != Coordinate::Dashboard => {
-                // Reset the baseline to General before entering. The user typed
-                // a command at the input slot (likely in Insert mode); without
-                // this, auto-leave restores Insert and `i`/`a` would type
-                // literally instead of re-entering Insert. Bypass the
+                // Reset the baseline to the at-rest mode before entering. The
+                // user typed a command at the input slot (likely in Insert
+                // mode); without this, auto-leave restores Insert and `i`/`a`
+                // would type literally instead of re-entering Insert. A
+                // dashboard is always launched from a session, so the baseline
+                // is that session's own label, not General. Bypass the
                 // manual-entry guard — the provider asked for this directly via
                 // take_dashboard_request.
-                r.coordinate = Coordinate::General;
+                r.coordinate = crate::handlers::rest_coordinate(r);
                 r.input_buffer.clear();
                 r.cursor_position = 0;
                 handlers::enter_dashboard_for_active(r);

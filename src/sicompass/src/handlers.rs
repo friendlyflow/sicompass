@@ -22,7 +22,7 @@ use sicompass_sdk::tags;
 /// search coordinates do — the raw `current_id ± 1` arithmetic in
 /// `state::update_ids` would land the cursor on hidden entries.
 fn open_flow_list_nav(r: &AppRenderer) -> bool {
-    r.pending_file_browser_open && r.coordinate == Coordinate::General
+    r.pending_file_browser_open && r.coordinate.is_general()
 }
 
 /// Move selection up in the current list.
@@ -36,7 +36,7 @@ pub fn handle_up(r: &mut AppRenderer) {
         r.needs_redraw = true;
         return;
     }
-    match r.coordinate {
+    match r.coordinate.base() {
         Coordinate::ScrollSearch | Coordinate::ScrollPrefixSearch => {
             if r.scroll_search_match_count > 0 {
                 if r.scroll_search_current_match > 0 {
@@ -64,7 +64,10 @@ pub fn handle_up(r: &mut AppRenderer) {
             r.error_message.clear();
             if r.list_index > 0 {
                 r.list_index -= 1;
-                if r.coordinate != Coordinate::Command
+                // `base()`, matching the arm above: these lists are built by
+                // the app, not read off the FFON level, so the cursor id must
+                // not follow the row. The second colon layer is one of them.
+                if r.coordinate.base() != Coordinate::Command
                     && r.coordinate != Coordinate::Meta
                     && r.coordinate != Coordinate::TimelineView
                     && r.coordinate != Coordinate::ConfirmCloseTab
@@ -97,7 +100,7 @@ pub fn handle_down(r: &mut AppRenderer) {
         r.needs_redraw = true;
         return;
     }
-    match r.coordinate {
+    match r.coordinate.base() {
         Coordinate::ScrollSearch | Coordinate::ScrollPrefixSearch => {
             if r.scroll_search_match_count > 0 {
                 if r.scroll_search_current_match < r.scroll_search_match_count - 1 {
@@ -131,7 +134,10 @@ pub fn handle_down(r: &mut AppRenderer) {
             };
             if r.list_index < max_index {
                 r.list_index += 1;
-                if r.coordinate != Coordinate::Command
+                // `base()`, matching the arm above: these lists are built by
+                // the app, not read off the FFON level, so the cursor id must
+                // not follow the row. The second colon layer is one of them.
+                if r.coordinate.base() != Coordinate::Command
                     && r.coordinate != Coordinate::Meta
                     && r.coordinate != Coordinate::TimelineView
                     && r.coordinate != Coordinate::ConfirmCloseTab
@@ -742,7 +748,7 @@ fn step_forward_by_lines(line_counts: &[usize], cur: usize, max_id: usize, budge
 
 /// Page up (scroll a full screen up).
 pub fn handle_page_up(r: &mut AppRenderer) {
-    match r.coordinate {
+    match r.coordinate.base() {
         Coordinate::Insert => return,
         _ => {}
     }
@@ -750,7 +756,7 @@ pub fn handle_page_up(r: &mut AppRenderer) {
     let line_height = r.cached_line_height.max(1);
     let page_size = ((r.window_height / line_height) - 3).max(1) as usize;
 
-    match r.coordinate {
+    match r.coordinate.base() {
         Coordinate::Scroll | Coordinate::ScrollSearch | Coordinate::ScrollPrefixSearch => {
             let viewport_h = r.text_scroll_viewport_h;
             r.text_scroll_offset = (r.text_scroll_offset - viewport_h).max(0);
@@ -798,7 +804,7 @@ pub fn handle_page_up(r: &mut AppRenderer) {
 
 /// Page down (scroll a full screen down).
 pub fn handle_page_down(r: &mut AppRenderer) {
-    match r.coordinate {
+    match r.coordinate.base() {
         Coordinate::Insert => return,
         _ => {}
     }
@@ -806,7 +812,7 @@ pub fn handle_page_down(r: &mut AppRenderer) {
     let line_height = r.cached_line_height.max(1);
     let page_size = ((r.window_height / line_height) - 3).max(1) as usize;
 
-    match r.coordinate {
+    match r.coordinate.base() {
         Coordinate::Scroll | Coordinate::ScrollSearch | Coordinate::ScrollPrefixSearch => {
             let viewport_h = r.text_scroll_viewport_h;
             let max_offset = (r.text_scroll_total_height - viewport_h).max(0);
@@ -891,15 +897,14 @@ pub fn handle_ctrl_end(r: &mut AppRenderer) {
 
 /// Enter insert mode (cursor at start) on the current item.
 pub fn handle_i(r: &mut AppRenderer) {
-    if !matches!(r.coordinate, Coordinate::General) {
+    if !r.coordinate.is_general() {
         return;
     }
+    // Stashed rather than assumed to be General: inside a terminal shell or a
+    // claude session the at-rest coordinate is one of the colon-command
+    // relabellings, and Escape has to land back on the one we came from.
     r.previous_coordinate = r.coordinate;
-    r.coordinate = if r.coordinate == Coordinate::General {
-        Coordinate::Insert
-    } else {
-        Coordinate::Insert
-    };
+    r.coordinate = Coordinate::Insert;
     populate_input_buffer(r);
     // Detect permanent `*` placeholder elements (e.g. from email compose body).
     // `populate_input_buffer` sets input_prefix to the text before the `<input>` tag.
@@ -917,15 +922,14 @@ pub fn handle_i(r: &mut AppRenderer) {
 
 /// Enter append mode (cursor at end) on the current item.
 pub fn handle_a(r: &mut AppRenderer) {
-    if !matches!(r.coordinate, Coordinate::General) {
+    if !r.coordinate.is_general() {
         return;
     }
+    // Stashed rather than assumed to be General: inside a terminal shell or a
+    // claude session the at-rest coordinate is one of the colon-command
+    // relabellings, and Escape has to land back on the one we came from.
     r.previous_coordinate = r.coordinate;
-    r.coordinate = if r.coordinate == Coordinate::General {
-        Coordinate::Insert
-    } else {
-        Coordinate::Insert
-    };
+    r.coordinate = Coordinate::Insert;
     populate_input_buffer(r);
     // Detect permanent `*` placeholder elements (e.g. from email compose body).
     if r.input_prefix.trim() == "i" {
@@ -942,7 +946,7 @@ pub fn handle_a(r: &mut AppRenderer) {
 
 /// Enter scroll mode (S key in General).
 pub fn handle_s(r: &mut AppRenderer) {
-    if r.coordinate != Coordinate::General {
+    if !r.coordinate.is_general() {
         return;
     }
     r.previous_coordinate = r.coordinate;
@@ -967,7 +971,7 @@ pub fn handle_enter_scroll(r: &mut AppRenderer) {
         return;
     }
     let target = r.total_list.get(r.list_index).map(|it| it.id.clone());
-    r.coordinate = Coordinate::General;
+    r.coordinate = rest_coordinate(r);
     r.text_scroll_offset = 0;
     r.text_scroll_total_height = 0;
     r.scroll_search_match_count = 0;
@@ -989,7 +993,7 @@ pub fn handle_enter_scroll(r: &mut AppRenderer) {
 
 /// Navigate into the meta hint screen. M is only bound in General mode.
 pub fn handle_meta(r: &mut AppRenderer) {
-    if r.coordinate != Coordinate::General {
+    if !r.coordinate.is_general() {
         return;
     }
     r.previous_coordinate = r.coordinate;
@@ -1002,7 +1006,7 @@ pub fn handle_meta(r: &mut AppRenderer) {
 
 /// Open the per-tab Timeline inspection view (Z key in General).
 pub fn handle_z(r: &mut AppRenderer) {
-    if r.coordinate != Coordinate::General {
+    if !r.coordinate.is_general() {
         return;
     }
     r.previous_coordinate = r.coordinate;
@@ -1016,7 +1020,7 @@ pub fn handle_z(r: &mut AppRenderer) {
 /// Announce the position of the focus (header + breadcrumb path) via the
 /// screen reader. The `w` (whereami) key is only bound in General mode.
 pub fn handle_speak_position(r: &mut AppRenderer) {
-    if r.coordinate != Coordinate::General {
+    if !r.coordinate.is_general() {
         return;
     }
     r.speak_focus_position();
@@ -1025,7 +1029,7 @@ pub fn handle_speak_position(r: &mut AppRenderer) {
 
 /// Enter Tab search mode.
 pub fn handle_tab(r: &mut AppRenderer) {
-    match r.coordinate {
+    match r.coordinate.base() {
         Coordinate::Scroll => {
             // Open the prefix-search layout: search the `layer: X list: Y/Z`
             // extended prefixes. `previous_coordinate` is left as-is (General)
@@ -1129,6 +1133,39 @@ pub(crate) fn in_session_view(r: &AppRenderer) -> bool {
             .any(|c| c == VIEW_CMD_BROWSE)
 }
 
+/// The coordinate the app is *at rest* in right now: [`Coordinate::General`], or
+/// the session view's own name.
+///
+/// The single place the colon-command labels for the session views are decided,
+/// so every entry, every exit and every return from a sub-mode agrees. A shell
+/// used to call itself "general mode", which is what this fixes.
+///
+/// Which of the two session names applies is read off `commands()` rather than
+/// the provider's identity: a provider offering something beyond the view swap
+/// has a second colon layer, so it is the *first* of two. Deliberately not
+/// [`insert_palette_available`], which also requires the cursor to be sitting on
+/// the trailing input slot — the label must not change when the user arrows up
+/// into the scrollback.
+///
+/// The promise is about the layer being advertised, not about it having content:
+/// claude always offers `skills`, so a session in a folder with none still says
+/// "first command mode" and the second `:` answers "nothing to insert".
+pub(crate) fn rest_coordinate(r: &AppRenderer) -> Coordinate {
+    if !is_browse_then_session_provider(r) {
+        return Coordinate::General;
+    }
+    let cmds = crate::provider::get_commands(r);
+    // No `browse` on offer means the folder listing is up, not the session.
+    if !cmds.iter().any(|c| c == VIEW_CMD_BROWSE) {
+        return Coordinate::General;
+    }
+    if cmds.iter().any(|c| c != VIEW_CMD_BROWSE) {
+        Coordinate::SessionFirstCommand
+    } else {
+        Coordinate::SessionCommand
+    }
+}
+
 // ---------------------------------------------------------------------------
 // The insert palette: a second `:` that fills the live input slot
 // ---------------------------------------------------------------------------
@@ -1149,6 +1186,16 @@ pub(crate) fn in_session_view(r: &AppRenderer) -> bool {
 /// The provider's commands minus the view swap — the ones an insert palette can
 /// offer. Empty means the provider has nothing to add and `:` stays inert.
 pub(crate) fn insert_palette_commands(r: &AppRenderer) -> Vec<String> {
+    // The file browser wraps *every* entry in `<input>` — its rows are editable
+    // file names — so a listing whose last row is a subdirectory ends in an
+    // `<input>` Obj that looks exactly like a live prompt and is not one. Without
+    // this the `:      Insert` row wins over `:      Command` there and the
+    // original colon palette is unreachable, which is the same reason
+    // `is_live_input_slot` is keyed by name. Excluded here rather than in
+    // `trailing_input_slot_index` so the shape test keeps describing a shape.
+    if active_provider_is_filebrowser(r) {
+        return Vec::new();
+    }
     if !trailing_element_is_input_slot(r) {
         return Vec::new();
     }
@@ -1184,8 +1231,13 @@ fn trailing_element_is_input_slot(r: &AppRenderer) -> bool {
 }
 
 /// True while an insert palette is open, in either of its phases.
+///
+/// The coordinate alone answers it: `Coordinate::SecondCommand` exists precisely
+/// to mark this layer, and `handle_insert_palette` is the only thing that sets
+/// it. `suspended_input_edit` is still the parked live edit and is still taken
+/// back by the two exits, but it is no longer what identifies the state.
 pub(crate) fn in_insert_palette(r: &AppRenderer) -> bool {
-    r.coordinate == Coordinate::Command && r.suspended_input_edit.is_some()
+    r.coordinate == Coordinate::SecondCommand
 }
 
 /// True while an insert palette is showing the rows to insert, as opposed to a
@@ -1224,7 +1276,7 @@ pub fn handle_insert_palette(r: &mut AppRenderer) {
     });
 
     r.previous_coordinate = r.coordinate;
-    r.coordinate = Coordinate::Command;
+    r.coordinate = Coordinate::SecondCommand;
     r.input_buffer.clear();
     r.cursor_position = 0;
     r.selection_anchor = None;
@@ -1314,7 +1366,7 @@ pub fn handle_enter_insert_palette(r: &mut AppRenderer) {
         // Opened from General: enter the edit on the slot itself. `:` only
         // proves the slot is the *last* row of this level, not that the cursor
         // is on it, so retarget before editing.
-        r.coordinate = Coordinate::General;
+        r.coordinate = rest_coordinate(r);
         r.previous_coordinate = Coordinate::General;
         let Some(idx) = trailing_input_slot_index(r) else {
             list::create_list_current_layer(r);
@@ -1467,6 +1519,12 @@ pub(crate) fn open_session_view(r: &mut AppRenderer) {
 fn apply_view_command(r: &mut AppRenderer, cmd: &str) {
     crate::provider::handle_command(r, cmd, "", 0);
 
+    // The mode name follows the swap on its own: both exits below go through
+    // `list::create_list_current_layer`, which reconciles the at-rest coordinate
+    // against `rest_coordinate`. So entering the session relabels General to the
+    // session's own name and leaving puts it back, and the announcements at the
+    // end of each branch already read the new label.
+
     // Leaving the session: the provider has just pointed `current_path()` at the
     // folder the session actually ended in, which a `cd` typed at a shell prompt
     // may have moved. Rebuild the tree down to it, so the current level lists
@@ -1480,7 +1538,7 @@ fn apply_view_command(r: &mut AppRenderer, cmd: &str) {
             r.scroll_offset = 0;
             list::create_list_current_layer(r);
             r.list_index = r.current_id.last().unwrap_or(0);
-            r.speak_current_element();
+            speak_view_swap(r);
             r.needs_redraw = true;
             return;
         }
@@ -1496,8 +1554,21 @@ fn apply_view_command(r: &mut AppRenderer, cmd: &str) {
     }
     list::create_list_current_layer(r);
     r.list_index = r.current_id.last().unwrap_or(0);
-    r.speak_current_element();
+    speak_view_swap(r);
     r.needs_redraw = true;
+}
+
+/// Announce a browse-then-session view swap the way every other mode entry is
+/// announced: the mode name, then the row the cursor landed on.
+///
+/// Deliberately not a bare `speak_current_element`. `:` into a shell used to
+/// speak the prompt row and nothing else, so the view you had just entered never
+/// named itself and the header was the only place the name appeared.
+fn speak_view_swap(r: &mut AppRenderer) {
+    let ctx = r
+        .current_list_item()
+        .map(|it| crate::accesskit_sdl::label_to_speech(&it.label));
+    r.speak_mode_change(ctx);
 }
 
 /// Move the cursor back to the row `saved` was on, but only if the rebuilt
@@ -1660,7 +1731,7 @@ pub fn handle_enter_command(r: &mut AppRenderer) {
                     });
                 }
                 r.current_command = CommandPhase::None;
-                r.coordinate = Coordinate::General;
+                r.coordinate = rest_coordinate(r);
                 list::create_list_current_layer(r);
                 r.list_index = r.current_id.last().unwrap_or(0);
                 r.scroll_offset = 0;
@@ -1669,7 +1740,7 @@ pub fn handle_enter_command(r: &mut AppRenderer) {
             } else if !r.error_message.is_empty() {
                 // Provider set an error
                 r.current_command = CommandPhase::None;
-                r.coordinate = Coordinate::General;
+                r.coordinate = rest_coordinate(r);
                 r.speak_mode_change(None);
                 list::create_list_current_layer(r);
                 r.needs_redraw = true;
@@ -3359,11 +3430,11 @@ pub fn handle_escape(r: &mut AppRenderer) {
     // shell itself keeps running, so `:` resumes the same session with its
     // scrollback intact. Only General mode — inside Insert, Escape still means
     // "cancel this edit".
-    if r.coordinate == Coordinate::General && at_session_input_level(r) {
+    if r.coordinate.is_general() && at_session_input_level(r) {
         apply_view_command(r, VIEW_CMD_BROWSE);
         return;
     }
-    match r.coordinate {
+    match r.coordinate.base() {
         Coordinate::Insert => {
             // Discard any per-keystroke `<input>` edit session: restore the
             // FFON snapshot and drop the TextChunks recorded during typing.
@@ -3414,14 +3485,14 @@ pub fn handle_escape(r: &mut AppRenderer) {
                 r.needs_redraw = true;
                 return;
             }
-            if try_cancel_inserted_placeholder(r, Coordinate::General) {
+            if try_cancel_inserted_placeholder(r, rest_coordinate(r)) {
                 return;
             }
             // Discard the input buffer (Esc cancels) and return to General.
             r.placeholder_insert_mode = false;
             r.input_buffer.clear();
             r.cursor_position = 0;
-            r.coordinate = Coordinate::General;
+            r.coordinate = rest_coordinate(r);
             // Rebuild, because `cancel_insert_session` above may have put a
             // different element back than the one the rendered row was built
             // from. Per-keystroke typing never refreshes the row — the caret is
@@ -3581,7 +3652,7 @@ pub fn handle_escape(r: &mut AppRenderer) {
             }
             // Fallback for any remaining mode (Scroll/Search/etc. were handled above):
             // return to General.
-            r.coordinate = Coordinate::General;
+            r.coordinate = rest_coordinate(r);
         }
     }
     r.speak_mode_change(None);
@@ -3613,7 +3684,7 @@ pub fn handle_input(r: &mut AppRenderer, text: &str) {
     // When entering Command mode via handle_colon, SDL fires both a key event and
     // a text input event for the ':' key. Ignore the text event so the colon is
     // not inserted into the command buffer.
-    if r.coordinate == Coordinate::Command && r.input_buffer.is_empty() && text == ":" {
+    if r.coordinate.base() == Coordinate::Command && r.input_buffer.is_empty() && text == ":" {
         return;
     }
 
@@ -3623,7 +3694,7 @@ pub fn handle_input(r: &mut AppRenderer, text: &str) {
         return;
     }
 
-    match r.coordinate {
+    match r.coordinate.base() {
         Coordinate::SimpleSearch => {
             let pos = r.cursor_position.min(r.search_string.len());
             r.search_string.insert_str(pos, text);
@@ -3726,7 +3797,7 @@ pub fn handle_input(r: &mut AppRenderer, text: &str) {
 
 /// Handle Backspace in editing modes.
 pub fn handle_backspace(r: &mut AppRenderer) {
-    match r.coordinate {
+    match r.coordinate.base() {
         Coordinate::SimpleSearch => {
             if r.cursor_position > 0 {
                 // Remove char before cursor_position (UTF-8 aware)
@@ -4958,7 +5029,7 @@ pub fn handle_shift_right(r: &mut AppRenderer) {
 
 /// Home — go to first list item (General/General) or line start (insert/search).
 pub fn handle_home(r: &mut AppRenderer) {
-    match r.coordinate {
+    match r.coordinate.base() {
         Coordinate::Scroll => {
             r.text_scroll_offset = 0;
             r.needs_redraw = true;
@@ -4997,7 +5068,7 @@ pub fn handle_home(r: &mut AppRenderer) {
 
 /// End — go to last list item (General/General) or line end (insert/search).
 pub fn handle_end(r: &mut AppRenderer) {
-    match r.coordinate {
+    match r.coordinate.base() {
         Coordinate::Scroll => {
             let max_offset = (r.text_scroll_total_height - r.text_scroll_viewport_h).max(0);
             r.text_scroll_offset = max_offset;
@@ -5149,9 +5220,9 @@ pub fn handle_delete_forward(r: &mut AppRenderer) {
 
 /// Re-filter the list when editing in search/command modes.
 fn maybe_update_search(r: &mut AppRenderer) {
-    match r.coordinate {
+    match r.coordinate.base() {
         Coordinate::SimpleSearch | Coordinate::Command | Coordinate::TabSwitcher => {
-            let s = match r.coordinate {
+            let s = match r.coordinate.base() {
                 Coordinate::SimpleSearch => r.search_string.clone(),
                 // Command + TabSwitcher both filter from `input_buffer`.
                 _ => r.input_buffer.clone(),
@@ -5384,7 +5455,7 @@ fn image_path_to_png(value: &str) -> Result<Vec<u8>, String> {
 
 pub(crate) fn is_text_edit_mode(r: &AppRenderer) -> bool {
     matches!(
-        r.coordinate,
+        r.coordinate.base(),
         Coordinate::Insert
             | Coordinate::SimpleSearch
             | Coordinate::ExtendedSearch
@@ -5434,7 +5505,7 @@ fn editor_slice_has_src(r: &AppRenderer) -> bool {
 /// Press `i` in the editor provider — enter Insert so Enter calls
 /// `commit_edit`, which writes changes to disk.
 pub fn handle_editor_provider_i(r: &mut AppRenderer) {
-    if !matches!(r.coordinate, Coordinate::General) {
+    if !r.coordinate.is_general() {
         return;
     }
     r.previous_coordinate = r.coordinate;
@@ -5453,7 +5524,7 @@ pub fn handle_editor_provider_i(r: &mut AppRenderer) {
 
 /// Press `a` in the editor provider — enter Insert with cursor at end.
 pub fn handle_editor_provider_a(r: &mut AppRenderer) {
-    if !matches!(r.coordinate, Coordinate::General) {
+    if !r.coordinate.is_general() {
         return;
     }
     r.previous_coordinate = r.coordinate;
@@ -5662,12 +5733,12 @@ pub fn handle_ctrl_x(r: &mut AppRenderer) {
         return;
     }
     // File browser: filesystem cut
-    if r.coordinate == Coordinate::General && active_provider_is_filebrowser(r) {
+    if r.coordinate.is_general() && active_provider_is_filebrowser(r) {
         handle_file_cut(r);
         return;
     }
     // Compose body: copy element to internal clipboard then delete via provider
-    if r.coordinate == Coordinate::General && crate::provider::is_in_email_compose_body(r) {
+    if r.coordinate.is_general() && crate::provider::is_in_email_compose_body(r) {
         let idx = r.current_id.last().unwrap_or(0);
         if let Some(slice) = get_ffon_at_id(&r.ffon, &r.current_id) {
             r.clipboard = slice.get(idx).cloned();
@@ -5675,7 +5746,7 @@ pub fn handle_ctrl_x(r: &mut AppRenderer) {
         handle_delete_body_element(r);
         return;
     }
-    if matches!(r.coordinate, Coordinate::General) {
+    if r.coordinate.is_general() {
         // Cut FFON element into internal clipboard
         if let Some(item) = r.current_list_item().cloned() {
             if let Some(slice) = get_ffon_at_id(&r.ffon, &item.id) {
@@ -5748,7 +5819,7 @@ pub fn handle_ctrl_c(r: &mut AppRenderer) {
         r.needs_redraw = true;
         return;
     }
-    if !matches!(r.coordinate, Coordinate::General) {
+    if !r.coordinate.is_general() {
         return;
     }
 
@@ -5815,7 +5886,7 @@ pub fn handle_ctrl_c(r: &mut AppRenderer) {
 /// Ctrl+Shift+C — copy the focused element's underlying value (link URL, image
 /// path, input value) to the system clipboard; falls back to display text.
 pub fn handle_ctrl_shift_c(r: &mut AppRenderer) {
-    if !matches!(r.coordinate, Coordinate::General) {
+    if !r.coordinate.is_general() {
         return;
     }
     let Some(raw) = focused_element_raw(r) else {
@@ -5847,12 +5918,12 @@ pub fn handle_ctrl_v(r: &mut AppRenderer) {
         return;
     }
     // File browser: paste file from clipboard
-    if r.coordinate == Coordinate::General && active_provider_is_filebrowser(r) {
+    if r.coordinate.is_general() && active_provider_is_filebrowser(r) {
         handle_file_paste(r);
         return;
     }
     // Compose body: paste internal clipboard element via commit_edit
-    if r.coordinate == Coordinate::General && crate::provider::is_in_email_compose_body(r) {
+    if r.coordinate.is_general() && crate::provider::is_in_email_compose_body(r) {
         use sicompass_sdk::ffon::FfonElement;
         use sicompass_sdk::tags;
         let elem = r.clipboard.clone();
@@ -5874,7 +5945,7 @@ pub fn handle_ctrl_v(r: &mut AppRenderer) {
         }
         return;
     }
-    if matches!(r.coordinate, Coordinate::General) {
+    if r.coordinate.is_general() {
         crate::state::update_state(r, Task::Paste, History::None);
         r.needs_redraw = true;
     }
@@ -6007,7 +6078,7 @@ pub fn handle_enter_input_search(r: &mut AppRenderer) {
 const DELTA_MS: u64 = 400;
 
 pub fn handle_ctrl_f(r: &mut AppRenderer) {
-    match r.coordinate {
+    match r.coordinate.base() {
         Coordinate::Scroll => {
             r.coordinate = Coordinate::ScrollSearch;
             r.speak_mode_change(None);
@@ -7122,7 +7193,7 @@ fn open_tab_switcher(r: &mut AppRenderer, held: bool, start_index: usize) {
 /// `t` (general mode) — open the sticky MRU tab switcher. Highlight starts on
 /// the current tab (`tab_mru[0]`); Enter confirms, Escape cancels.
 pub fn handle_t_tab_switcher(r: &mut AppRenderer) {
-    if r.coordinate != Coordinate::General || r.tabs.len() < 2 {
+    if !r.coordinate.is_general() || r.tabs.len() < 2 {
         return;
     }
     open_tab_switcher(r, false, 0);
@@ -8000,8 +8071,9 @@ mod tests {
         handle_colon(&mut r);
         assert_eq!(
             r.coordinate,
-            Coordinate::General,
-            "`:` must not open the command palette"
+            Coordinate::SessionCommand,
+            "`:` must not open the command palette, it enters the session — \
+             which then names itself rather than staying `general mode`"
         );
         assert!(in_session_view(&r));
     }
@@ -8039,7 +8111,7 @@ mod tests {
         assert!(in_session_view(&r));
         handle_colon(&mut r);
         assert!(in_session_view(&r), "still in the session");
-        assert_eq!(r.coordinate, Coordinate::General);
+        assert_eq!(r.coordinate, Coordinate::SessionCommand);
     }
 
     #[test]
@@ -8147,7 +8219,7 @@ mod tests {
         r.coordinate = Coordinate::General;
         handle_insert_palette(&mut r);
 
-        assert_eq!(r.coordinate, Coordinate::Command);
+        assert_eq!(r.coordinate, Coordinate::SecondCommand);
         assert_eq!(r.current_command, CommandPhase::Provider);
         assert_eq!(r.provider_command_name, "snippets");
         assert!(in_insert_palette_items(&r));
@@ -8298,16 +8370,32 @@ mod tests {
         handle_insert_palette(&mut r);
         let palette = r.mode_display_label();
         assert_ne!(palette, ordinary);
+        // It used to be named `mode-insert-palette`, whose value was byte-identical
+        // to `mode-insert` in all four bundles — so "apart from the command
+        // palette" held while "apart from real Insert mode" did not. Pin both.
+        assert_eq!(palette, Coordinate::SecondCommand.display_label());
+        assert_ne!(
+            palette,
+            Coordinate::Insert.display_label(),
+            "and apart from real Insert mode, which it used to be a homophone of"
+        );
+        assert_ne!(palette, Coordinate::Command.display_label());
         assert!(
             r.header_text().starts_with(&palette),
             "the header carries it: {:?}",
             r.header_text()
         );
+        r.speak_focus_position();
+        let ann = r.pending_announcement.take().expect("ann set");
+        assert!(
+            ann.trim_end_matches('\u{200B}').starts_with(&palette),
+            "and so does the whereami announcement: {ann:?}"
+        );
 
         handle_escape_insert_palette(&mut r);
-        assert_ne!(
+        assert_eq!(
             r.mode_display_label(),
-            palette,
+            ordinary,
             "and it reverts when the palette closes"
         );
     }
@@ -8369,7 +8457,11 @@ mod tests {
 
         handle_colon(&mut r);
 
-        assert_eq!(r.coordinate, Coordinate::General, "no command palette here");
+        assert_eq!(
+            r.coordinate,
+            Coordinate::SessionCommand,
+            "no command palette here, the shell comes up and names itself"
+        );
         assert_eq!(r.current_command, CommandPhase::None);
         assert!(in_session_view(&r));
         // The list swapped in place, and the cursor landed on the input slot.
@@ -11516,5 +11608,245 @@ mod tests {
         // Both must decode back to the same dimensions.
         assert_eq!(::image::load_from_memory(&png).unwrap().width(), 4);
         assert_eq!(::image::load_from_memory(&bmp).unwrap().height(), 4);
+    }
+
+    // -----------------------------------------------------------------------
+    // The colon-command family: rest_coordinate, the reconcile, and the labels
+    // -----------------------------------------------------------------------
+    //
+    // These assert against `Coordinate::display_label()` rather than English
+    // literals: the exact wording is pinned in `app_state`'s tests, which hold a
+    // lock while they swap the active locale, and this binary shares that global.
+
+    /// The real claude contract: two commands in the session, so it advertises a
+    /// second colon layer. [`ClaudeStub`] only offers `browse`, which is what
+    /// makes it the *one*-layer case.
+    struct SessionWithSecondLayer {
+        in_session: bool,
+    }
+    impl sicompass_sdk::provider::Provider for SessionWithSecondLayer {
+        fn name(&self) -> &str {
+            "claude"
+        }
+        fn fetch(&mut self) -> Vec<FfonElement> {
+            if self.in_session {
+                vec![
+                    FfonElement::new_str("an earlier message"),
+                    FfonElement::new_obj("send to claude: <input></input>"),
+                ]
+            } else {
+                vec![FfonElement::new_obj("workspace")]
+            }
+        }
+        fn commands(&self) -> Vec<String> {
+            if self.in_session {
+                // Two beyond the view swap, so the palette opens on its command
+                // list (`CommandPhase::None`) instead of jumping to one
+                // command's rows.
+                vec![
+                    "browse".to_owned(),
+                    "skills".to_owned(),
+                    "snippets".to_owned(),
+                ]
+            } else {
+                vec!["session".to_owned()]
+            }
+        }
+        fn command_list_items(&self, cmd: &str) -> Vec<sicompass_sdk::provider::ListItem> {
+            if cmd != "skills" {
+                return Vec::new();
+            }
+            vec![sicompass_sdk::provider::ListItem {
+                label: "greet - say hello".to_owned(),
+                data: "/greet".to_owned(),
+            }]
+        }
+        fn handle_command(
+            &mut self,
+            cmd: &str,
+            _k: &str,
+            _t: i32,
+            _e: &mut String,
+        ) -> Option<FfonElement> {
+            match cmd {
+                "session" => self.in_session = true,
+                "browse" => self.in_session = false,
+                _ => {}
+            }
+            None
+        }
+    }
+
+    fn make_renderer_with_second_layer() -> AppRenderer {
+        use sicompass_sdk::provider::Provider as _;
+        let mut r = AppRenderer::new();
+        let mut prov = SessionWithSecondLayer { in_session: false };
+        let mut root = FfonElement::new_obj("claude");
+        for child in prov.fetch() {
+            root.as_obj_mut().unwrap().push(child);
+        }
+        r.ffon = vec![root];
+        r.current_id = {
+            let mut id = IdArray::new();
+            id.push(0);
+            id.push(0);
+            id
+        };
+        r.providers.push(Box::new(prov));
+        list::create_list_current_layer(&mut r);
+        r
+    }
+
+    #[test]
+    fn rest_coordinate_follows_the_view_not_the_key() {
+        let mut r = make_renderer_with_terminal();
+        r.coordinate = Coordinate::General;
+        assert_eq!(
+            rest_coordinate(&r),
+            Coordinate::General,
+            "the folder listing is plain General"
+        );
+
+        handle_colon(&mut r);
+        assert!(in_session_view(&r));
+        assert_eq!(
+            rest_coordinate(&r),
+            Coordinate::SessionCommand,
+            "one layer on offer, so no ordinal in the name"
+        );
+
+        apply_view_command(&mut r, VIEW_CMD_BROWSE);
+        assert_eq!(
+            rest_coordinate(&r),
+            Coordinate::General,
+            "and back to General on the way out"
+        );
+    }
+
+    #[test]
+    fn a_provider_advertising_a_second_layer_is_the_first_of_two() {
+        let mut r = make_renderer_with_second_layer();
+        r.coordinate = Coordinate::General;
+        handle_colon(&mut r);
+        assert!(in_session_view(&r));
+        // Read off `commands()`, not the provider's name: the terminal and this
+        // one are the same provider name in one case and differ only in what
+        // they offer.
+        assert_eq!(r.coordinate, Coordinate::SessionFirstCommand);
+        assert!(
+            r.header_text()
+                .starts_with(&Coordinate::SessionFirstCommand.display_label())
+        );
+    }
+
+    #[test]
+    fn the_at_rest_label_is_repaired_when_the_list_is_rebuilt() {
+        // Nothing hunts down every path that can move the cursor into or out of
+        // a session, so `create_list_current_layer` reconciles instead.
+        let mut r = make_renderer_with_terminal();
+        r.coordinate = Coordinate::General;
+        handle_colon(&mut r);
+        assert_eq!(r.coordinate, Coordinate::SessionCommand);
+
+        r.coordinate = Coordinate::General;
+        list::create_list_current_layer(&mut r);
+        assert_eq!(
+            r.coordinate,
+            Coordinate::SessionCommand,
+            "a stale General inside a session is repaired"
+        );
+    }
+
+    #[test]
+    fn a_deliberate_mode_survives_the_reconcile() {
+        // Only the at-rest family is reconciled — Insert, a search or a palette
+        // must never be silently swapped out from under the user.
+        let mut r = make_renderer_with_terminal();
+        r.coordinate = Coordinate::General;
+        handle_colon(&mut r);
+        for c in [
+            Coordinate::Insert,
+            Coordinate::SimpleSearch,
+            Coordinate::Command,
+            Coordinate::SecondCommand,
+            Coordinate::Meta,
+        ] {
+            r.coordinate = c;
+            list::create_list_current_layer(&mut r);
+            assert_eq!(r.coordinate, c, "{c:?} was clobbered");
+        }
+    }
+
+    #[test]
+    fn the_second_layers_command_list_reads_second_command_mode() {
+        let mut r = make_renderer_with_second_layer();
+        r.coordinate = Coordinate::General;
+        handle_colon(&mut r);
+        // Park on the prompt, which is where the second `:` is offered.
+        assert!(snap_to_trailing_input(&mut r));
+        assert!(insert_palette_available(&r));
+
+        handle_insert_palette(&mut r);
+
+        assert_eq!(r.coordinate, Coordinate::SecondCommand);
+        assert_eq!(
+            r.current_command,
+            CommandPhase::None,
+            "two commands on offer, so this is the command list phase"
+        );
+        let label = Coordinate::SecondCommand.display_label();
+        assert!(
+            r.header_text().starts_with(&label),
+            "header: {:?}",
+            r.header_text()
+        );
+        r.speak_focus_position();
+        let ann = r.pending_announcement.take().expect("ann set");
+        assert!(
+            ann.trim_end_matches('\u{200B}').starts_with(&label),
+            "whereami: {ann:?}"
+        );
+    }
+
+    #[test]
+    fn arrowing_the_second_layer_moves_the_row_but_not_the_cursor_id() {
+        // The palette list is built by the app, not read off the FFON level, so
+        // `sync_current_id_from_list` must stay out of it. `handle_up`/`down`
+        // route on `base()` but then re-check the raw coordinate, which is easy
+        // to get wrong: syncing here would walk `current_id` through the
+        // session's rows as the user browses commands.
+        let mut r = make_renderer_with_second_layer();
+        r.coordinate = Coordinate::General;
+        handle_colon(&mut r);
+        assert!(snap_to_trailing_input(&mut r));
+        handle_insert_palette(&mut r);
+        assert_eq!(r.coordinate, Coordinate::SecondCommand);
+        assert!(r.total_list.len() >= 2, "need two rows to move between");
+
+        let id_before = r.current_id.clone();
+        handle_down(&mut r);
+        assert_eq!(r.list_index, 1, "the highlighted row moved");
+        assert_eq!(r.current_id, id_before, "but the cursor id did not");
+
+        handle_up(&mut r);
+        assert_eq!(r.list_index, 0);
+        assert_eq!(r.current_id, id_before);
+    }
+
+    #[test]
+    fn escaping_the_second_layer_lands_back_in_the_sessions_own_mode() {
+        let mut r = make_renderer_with_second_layer();
+        r.coordinate = Coordinate::General;
+        handle_colon(&mut r);
+        assert!(snap_to_trailing_input(&mut r));
+        handle_insert_palette(&mut r);
+        assert_eq!(r.coordinate, Coordinate::SecondCommand);
+
+        handle_escape_insert_palette(&mut r);
+        assert_eq!(
+            r.coordinate,
+            Coordinate::SessionFirstCommand,
+            "not General: the session is still up"
+        );
     }
 }

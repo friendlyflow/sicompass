@@ -76,6 +76,29 @@ default 50000 addresses. Bookmarks are exempt from it. Trimming the list to fit
 drops old addresses, never a bookmarked one, so a bookmark is the way to say
 that an address should outlive your ordinary browsing.
 
+### The colon commands now say which one you are in
+
+Pressing `:` opens a command mode, and until now only the file browser said so.
+In the terminal and in Claude, `:` turns the folder list into a live shell or
+session, and the header went on reading "general mode" the whole time you were in
+there. Claude's second `:`, the one that lists the project's skills, called itself
+"insert mode", which is the name of a completely different mode and sounded
+identical to it in every language.
+
+Each colon layer now has its own name, in the header and in the `w` "where am I"
+announcement, which always agree. The file browser's palette is `command mode`, as
+before. The terminal's shell is `command mode` too, because that is the only layer
+it has. Claude's session is `first command mode`, which is how you know a second
+`:` is waiting, and the skills list it opens is `second command mode`. Entering and
+leaving a shell or a session now speaks the new mode name as well, instead of only
+reading out the row you landed on.
+
+One thing this uncovered: in the file browser, `:` had been opening Claude's
+insert palette rather than the command palette whenever the last row of a folder
+was a subfolder. The commands still ran, so it went unnoticed, but the palette
+announced the wrong name and showed the wrong prompt. It opens the command palette
+now, always.
+
 ### The tutorial caught up with the app
 
 The in-app tutorial had drifted since the browser, the file browser and the
