@@ -243,14 +243,18 @@ fn register_terminal_in_shell(renderer: &mut AppRenderer) -> sicompass_sdk::ffon
 }
 
 /// Read the live input slot's key (the synthesized prompt plus its `<input>`).
+///
+/// Either element type: a `+i` Obj when the slot has recall history under it,
+/// a `-i` Str when it has nothing to expand into.
 fn slot_key_at(renderer: &AppRenderer, slot_id: &sicompass_sdk::ffon::IdArray) -> String {
     let idx = slot_id.last().unwrap();
-    sicompass_sdk::ffon::get_ffon_at_id(&renderer.ffon, slot_id)
+    let elem = sicompass_sdk::ffon::get_ffon_at_id(&renderer.ffon, slot_id)
         .and_then(|arr| arr.get(idx))
-        .and_then(|e| e.as_obj())
-        .expect("slot id should resolve to the +i Obj")
-        .key
-        .clone()
+        .expect("slot id should resolve to an element");
+    match elem {
+        sicompass_sdk::ffon::FfonElement::Obj(o) => o.key.clone(),
+        sicompass_sdk::ffon::FfonElement::Str(t) => t.clone(),
+    }
 }
 
 /// Replace the live input slot's children (the real on-disk recall history is
@@ -11663,7 +11667,7 @@ fn claude_colon_starts_a_session_in_the_folder_being_listed() {
         "the session runs in the listed folder, not the focused one",
     );
     assert!(
-        renderer.total_list.last().unwrap().label.starts_with("+i "),
+        renderer.total_list.last().unwrap().label.starts_with("-i "),
         "the session view ends with the live input slot",
     );
 }
@@ -11977,7 +11981,7 @@ fn claude_escape_after_inserting_a_skill_clears_the_prompt() {
     );
     // And it must stay empty once the provider re-renders the slot.
     let refetched = renderer.providers[0].fetch();
-    let key = &refetched.last().unwrap().as_obj().unwrap().key;
+    let key = refetched.last().unwrap().as_str().unwrap();
     assert!(
         key.contains("<input></input>"),
         "a refetch brought the cancelled text back; got {key:?}"
@@ -12074,9 +12078,13 @@ fn terminal_second_colon_stays_inert() {
 #[test]
 fn claude_right_in_the_session_never_grafts_a_copy_of_the_conversation() {
     // The session view's `fetch()` returns the *whole* conversation, whatever
-    // the cursor's depth. Right on a childless Obj there (an input slot with no
-    // recall history yet) used to lazy-fetch and graft that whole list in as the
-    // slot's children, so the same rows appeared again one level down.
+    // the cursor's depth. Right on the input slot used to lazy-fetch and graft
+    // that whole list in as the slot's children, so the same rows appeared
+    // again one level down.
+    //
+    // The slot with no recall history is a `-i` Str now, which cannot hold
+    // children at all — so this also pins that it is never *replaced* by an Obj
+    // to hang them off.
     let tmp = TempDir::new().unwrap();
     let root = tmp.path().canonicalize().unwrap();
     std::fs::create_dir(root.join("workspace")).unwrap();
@@ -12087,10 +12095,10 @@ fn claude_right_in_the_session_never_grafts_a_copy_of_the_conversation() {
     press_right(&mut renderer);
     press_colon(&mut renderer);
 
-    // The cursor lands on the `+i` slot, which has no recall history yet.
+    // The cursor lands on the `-i` slot, which has no recall history yet.
     let slot_id = renderer.current_id.clone();
     assert!(
-        renderer.total_list.last().unwrap().label.starts_with("+i "),
+        renderer.total_list.last().unwrap().label.starts_with("-i "),
         "expected to be standing on the input slot",
     );
 
@@ -12101,12 +12109,11 @@ fn claude_right_in_the_session_never_grafts_a_copy_of_the_conversation() {
         renderer.current_id, slot_id,
         "Right must not descend into an empty input slot",
     );
-    let slot_children = sicompass_sdk::ffon::get_ffon_at_id(&renderer.ffon, &renderer.current_id)
+    let slot = sicompass_sdk::ffon::get_ffon_at_id(&renderer.ffon, &renderer.current_id)
         .and_then(|arr| arr.get(renderer.current_id.last().unwrap()).cloned())
-        .and_then(|e| e.as_obj().map(|o| o.children.len()))
-        .unwrap_or(0);
-    assert_eq!(
-        slot_children, 0,
+        .expect("the slot is still there");
+    assert!(
+        slot.as_str().is_some(),
         "the conversation must not be grafted in as the slot's children",
     );
 }

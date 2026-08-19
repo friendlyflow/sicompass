@@ -359,7 +359,7 @@ impl ClaudeProvider {
     /// happened is the last thing read out before the prompt.
     fn fetch_session(&mut self) -> Vec<FfonElement> {
         self.pump();
-        let mut out = render::build(&self.convo, &self.history, &self.pending_input);
+        let mut out = render::build(&self.convo, &self.pending_input);
         if let Some(msg) = &self.spawn_error {
             let at = out.len().saturating_sub(1);
             out.insert(at, FfonElement::new_str(msg.clone()));
@@ -757,16 +757,26 @@ mod tests {
         assert_eq!(p.display_name(), "claude");
     }
 
+    /// The trailing input slot's key, whatever element type it is: a `Str`
+    /// (`-i`) while there is no recall history to expand into, an `Obj` (`+i`)
+    /// once history gives it children.
+    fn slot_key(out: &[FfonElement]) -> &str {
+        let last = out.last().expect("an input slot");
+        last.as_str()
+            .or_else(|| last.as_obj().map(|o| o.key.as_str()))
+            .expect("the slot carries a key")
+    }
+
     #[test]
     fn set_input_value_prefills_input_slot() {
         let mut p = ClaudeProvider::new();
         p.set_input_value("half-typed prompt");
         // Build directly to avoid spawning a real child.
-        let out = render::build(&p.convo, &p.history, &p.pending_input);
-        let slot = out.last().unwrap().as_obj().unwrap();
-        // A plain `+i` slot — an <input> with no <radio> wrapper.
-        assert!(slot.key.contains("<input>half-typed prompt</input>"));
-        assert!(!slot.key.contains("<radio>"));
+        let out = render::build(&p.convo, &p.pending_input);
+        let key = slot_key(&out);
+        // A plain editable slot — an <input> with no <radio> wrapper.
+        assert!(key.contains("<input>half-typed prompt</input>"));
+        assert!(!key.contains("<radio>"));
     }
 
     #[test]
@@ -843,14 +853,7 @@ mod tests {
         p.program = "definitely-not-claude-xyz-9000".to_owned();
         p.view = View::Session;
         let out = p.fetch();
-        assert!(
-            out.last()
-                .unwrap()
-                .as_obj()
-                .unwrap()
-                .key
-                .contains("<input>")
-        );
+        assert!(slot_key(&out).contains("<input>"));
     }
 
     // ---- Directory browse view -------------------------------------------
@@ -1177,9 +1180,8 @@ mod tests {
         assert!(p.execute_command(CMD_SKILLS, "/review"));
         assert_eq!(p.pending_input, "explain /review");
         // And it reaches the rendered slot.
-        let out = render::build(&p.convo, &p.history, &p.pending_input);
-        let slot = out.last().unwrap().as_obj().unwrap();
-        assert!(slot.key.contains("<input>explain /review</input>"));
+        let out = render::build(&p.convo, &p.pending_input);
+        assert!(slot_key(&out).contains("<input>explain /review</input>"));
     }
 
     #[test]
@@ -1329,12 +1331,7 @@ mod tests {
             "the failing directory must be named: {msg}"
         );
         assert!(
-            out.last()
-                .unwrap()
-                .as_obj()
-                .unwrap()
-                .key
-                .contains("<input>"),
+            slot_key(&out).contains("<input>"),
             "the input slot stays last"
         );
     }
