@@ -1063,6 +1063,45 @@ mod tests {
     }
 
     #[test]
+    fn speak_mode_change_names_each_colon_layer() {
+        // One name per colon layer, so the screen reader says which one answered.
+        // The terminal's shell and claude's session are the same *state* and
+        // differ only in whether a further layer is on offer.
+        for (coord, want) in [
+            (crate::app_state::Coordinate::SessionCommand, "command mode"),
+            (
+                crate::app_state::Coordinate::SessionFirstCommand,
+                "first command mode",
+            ),
+            (
+                crate::app_state::Coordinate::SecondCommand,
+                "second command mode",
+            ),
+        ] {
+            let mut r = AppRenderer::new();
+            r.coordinate = coord;
+            r.speak_mode_change(Some(String::new()));
+            assert_eq!(announced_text(&r).as_deref(), Some(want), "{coord:?}");
+        }
+    }
+
+    #[test]
+    fn the_second_layer_is_no_longer_a_homophone_of_insert_mode() {
+        // It used to announce through `mode-insert-palette`, whose value was
+        // byte-identical to `mode-insert` in every bundle — so by ear the skills
+        // palette and real Insert mode were the same mode.
+        let mut r = AppRenderer::new();
+        r.coordinate = crate::app_state::Coordinate::SecondCommand;
+        r.speak_mode_change(None);
+        let second = announced_text(&r);
+
+        let mut r = AppRenderer::new();
+        r.coordinate = crate::app_state::Coordinate::Insert;
+        r.speak_mode_change(None);
+        assert_ne!(second, announced_text(&r));
+    }
+
+    #[test]
     fn speak_mode_change_general() {
         let mut r = AppRenderer::new(); // default is General
         r.speak_mode_change(None);

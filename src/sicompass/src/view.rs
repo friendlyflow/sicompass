@@ -16,7 +16,7 @@ use tracing;
 // Modes where the caret blinks and we need continuous redraw
 pub(crate) fn is_insert_mode(c: Coordinate) -> bool {
     matches!(
-        c,
+        c.base(),
         Coordinate::Insert
             | Coordinate::Normal
             | Coordinate::Visual
@@ -132,6 +132,7 @@ pub fn main_loop(app: &mut AppState) {
                         ?keycode,
                         ?keymod,
                         mode = app.renderer.coordinate.as_str(),
+                        coord = ?app.renderer.coordinate,
                         "keydown"
                     );
                     handle_keydown(app, keycode, keymod);
@@ -224,6 +225,7 @@ pub fn main_loop(app: &mut AppState) {
                     tracing::debug!(
                         text = %text,
                         mode = app.renderer.coordinate.as_str(),
+                        coord = ?app.renderer.coordinate,
                         "text_input"
                     );
                     handlers::handle_input(&mut app.renderer, &text);
@@ -678,7 +680,7 @@ fn update_view(app: &mut AppState) {
     let is_flat_list = matches!(
         app.renderer.coordinate,
         Coordinate::Meta | Coordinate::TimelineView
-    ) || (app.renderer.coordinate == Coordinate::Command
+    ) || (app.renderer.coordinate.base() == Coordinate::Command
         && app.renderer.current_command == CommandPhase::Provider);
 
     // Compute indent and max prefix width before centering so the full visual
@@ -1089,18 +1091,20 @@ fn update_view(app: &mut AppState) {
         Coordinate::SimpleSearch
             | Coordinate::ExtendedSearch
             | Coordinate::Command
+            | Coordinate::SecondCommand
             | Coordinate::TabSwitcher
             | Coordinate::InputSearch
     ) {
         let (prefix, text) = match app.renderer.coordinate {
-            // The insert palette and the ordinary command palette share the
-            // coordinate and the key that opens them, so the prefix is the
-            // visible half of telling them apart (`mode_display_label` is the
-            // spoken half). Both labels are 8 bytes, so `search_pin_len` below
-            // needs no extra arm.
-            Coordinate::Command if app.renderer.suspended_input_edit.is_some() => {
-                ("insert: ", app.renderer.input_buffer.as_str())
-            }
+            // The second colon layer and the ordinary command palette are
+            // opened by the same key, so the prefix is the visible half of
+            // telling them apart. The spoken half is `mode_display_label`,
+            // which says "second command mode" — the two deliberately differ:
+            // the prefix names what the palette *does* (its rows are spliced
+            // into the live prompt), the mode name says which layer you are on.
+            // Both labels are 8 bytes, so `search_pin_len` below needs only an
+            // extra arm, not a new width.
+            Coordinate::SecondCommand => ("insert: ", app.renderer.input_buffer.as_str()),
             Coordinate::Command => ("search: ", app.renderer.input_buffer.as_str()),
             Coordinate::ExtendedSearch => ("ext search: ", app.renderer.input_buffer.as_str()),
             Coordinate::TabSwitcher => ("switch tab: ", app.renderer.input_buffer.as_str()),
@@ -1112,12 +1116,10 @@ fn update_view(app: &mut AppState) {
         // tab switcher shows a tab count. InputSearch counts substring hits
         // inside the element being edited, not list rows.
         let count_suffix = match app.renderer.coordinate {
-            // While filtering an insert palette the match count is the useful
+            // While filtering the second layer the match count is the useful
             // readout, the same as for the search modes. The ordinary command
             // palette keeps its bare prompt.
-            Coordinate::Command if app.renderer.suspended_input_edit.is_some() => {
-                format!(" [{} items]", list_items.len())
-            }
+            Coordinate::SecondCommand => format!(" [{} items]", list_items.len()),
             Coordinate::SimpleSearch | Coordinate::ExtendedSearch => {
                 format!(" [{} items]", list_items.len())
             }
@@ -1134,9 +1136,11 @@ fn update_view(app: &mut AppState) {
     // The `search: ` / `ext search: ` label is pinned: it stays visible while
     // an overlong query elides from the front. Byte length of that label.
     let search_pin_len = match app.renderer.coordinate {
-        Coordinate::Command | Coordinate::SimpleSearch | Coordinate::InputSearch => {
-            "search: ".len()
-        }
+        // `"insert: "` (SecondCommand) is the same 8 bytes as `"search: "`.
+        Coordinate::Command
+        | Coordinate::SecondCommand
+        | Coordinate::SimpleSearch
+        | Coordinate::InputSearch => "search: ".len(),
         Coordinate::ExtendedSearch => "ext search: ".len(),
         Coordinate::TabSwitcher => "switch tab: ".len(),
         // No editable query (e.g. the ConfirmCloseTab prompt): pin nothing.
@@ -2345,7 +2349,9 @@ fn update_view(app: &mut AppState) {
             } else {
                 let prefix = match app.renderer.coordinate {
                     Coordinate::ExtendedSearch => "ext search: ",
-                    Coordinate::Command => "search: ",
+                    // Must match the prefix actually drawn on the search line
+                    // above, or the selection rect sits a prefix-width off.
+                    Coordinate::SecondCommand => "insert: ",
                     _ => "search: ",
                 };
                 let pfx_w = app
@@ -2479,6 +2485,7 @@ fn update_view(app: &mut AppState) {
             Coordinate::SimpleSearch
                 | Coordinate::ExtendedSearch
                 | Coordinate::Command
+                | Coordinate::SecondCommand
                 | Coordinate::ScrollSearch
                 | Coordinate::InputSearch
                 | Coordinate::TabSwitcher

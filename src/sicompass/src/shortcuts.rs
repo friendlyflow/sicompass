@@ -2212,7 +2212,7 @@ pub fn dispatch_key(r: &mut AppRenderer, keycode: Option<Keycode>, keymod: Mod) 
     // During the file-browser-open dialog restrict General/General
     // to navigation + selection only (same semantics as the original pre-filter).
     if r.pending_file_browser_open {
-        match r.coordinate {
+        match r.coordinate.base() {
             Coordinate::General => {
                 const ALLOWED: &[Keycode] = &[
                     Keycode::Up,
@@ -2258,7 +2258,11 @@ pub fn dispatch_key(r: &mut AppRenderer, keycode: Option<Keycode>, keymod: Mod) 
         if s.key != k && s.key2 != Some(k) {
             continue;
         }
-        if !s.modes.contains(&r.coordinate) {
+        // `base()`, not the raw coordinate: the colon-command family are
+        // relabelled views of General and Command, so every row of this table
+        // keeps working in them without needing an entry of its own. A new mode
+        // *name* must never be able to change a keymap.
+        if !s.modes.contains(&r.coordinate.base()) {
             continue;
         }
         if !(s.is_available)(r) {
@@ -2335,7 +2339,10 @@ pub fn hints_for(r: &AppRenderer) -> Vec<String> {
         r.previous_coordinate
     } else {
         r.coordinate
-    };
+    }
+    // After the pick, not before: `previous_coordinate` can itself hold one of
+    // the colon-command relabellings.
+    .base();
 
     // Collect entries: skip dispatch-only (empty label) and deduplicate by label.
     let mut seen_labels = std::collections::HashSet::new();
@@ -2454,6 +2461,76 @@ mod tests {
     }
     fn shift() -> Mod {
         Mod::LSHIFTMOD
+    }
+
+    // --- The colon-command family dispatches as its base mode ---
+    //
+    // The regression these guard against is *silence*: a relabelled mode that
+    // stops matching a `modes: &[...]` row makes that key do nothing at all, and
+    // only inside a terminal shell or a claude session. Nothing else in the
+    // build catches it.
+
+    /// The labels of every SHORTCUTS row that passes the *mode* filter for
+    /// `coord` — the one thing `Coordinate::base()` affects. Deliberately
+    /// ignores `is_available`, which is a separate and deliberate axis.
+    fn rows_matching_mode(coord: Coordinate) -> Vec<&'static str> {
+        SHORTCUTS
+            .iter()
+            .filter(|s| s.modes.contains(&coord.base()))
+            .map(|s| {
+                if s.label.is_empty() {
+                    "<dispatch-only>"
+                } else {
+                    s.label
+                }
+            })
+            .collect()
+    }
+
+    #[test]
+    fn the_session_views_match_exactly_the_same_rows_as_general() {
+        let general = rows_matching_mode(Coordinate::General);
+        assert!(!general.is_empty(), "sanity: General matches some rows");
+        assert_eq!(rows_matching_mode(Coordinate::SessionCommand), general);
+        assert_eq!(rows_matching_mode(Coordinate::SessionFirstCommand), general);
+    }
+
+    #[test]
+    fn the_second_layer_matches_exactly_the_same_rows_as_the_command_palette() {
+        let command = rows_matching_mode(Coordinate::Command);
+        assert!(!command.is_empty(), "sanity: Command matches some rows");
+        assert_eq!(rows_matching_mode(Coordinate::SecondCommand), command);
+    }
+
+    #[test]
+    fn hints_are_byte_identical_in_general_and_the_session_views() {
+        // Stronger than the row test above: this also runs every
+        // `is_available` predicate. None of them may read the mode *name*.
+        register_translations();
+        let mut r = AppRenderer::new();
+        r.current_id.push(0);
+        r.current_id.push(0);
+
+        r.coordinate = Coordinate::General;
+        let want = hints_for(&r);
+        assert!(!want.is_empty(), "sanity: General produces hints");
+
+        for c in [Coordinate::SessionCommand, Coordinate::SessionFirstCommand] {
+            r.coordinate = c;
+            assert_eq!(hints_for(&r), want, "{c:?} hints diverged from General");
+        }
+    }
+
+    #[test]
+    fn every_mode_can_dispatch_something() {
+        // A variant added without a `modes:` entry anywhere would be a mode the
+        // user can reach and then be stuck in with a dead keyboard.
+        for c in Coordinate::ALL {
+            assert!(
+                !rows_matching_mode(c).is_empty(),
+                "{c:?} matches no shortcut row at all"
+            );
+        }
     }
 
     // --- key derivation ---

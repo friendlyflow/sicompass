@@ -132,17 +132,107 @@ pub enum Coordinate {
     /// key (sticky: Enter confirms, Escape cancels) or by held Ctrl+Tab /
     /// Ctrl+Shift+Tab (releasing Ctrl commits, see `tab_switcher_held`).
     TabSwitcher,
+    // ---- The colon-command family ----------------------------------------
+    //
+    // Three relabelled views of two base modes. They exist so each colon layer
+    // can name itself: the header line and the `w` announcement both read
+    // `mode_display_label`, and before these variants a shell called itself
+    // "general mode" and claude's skills palette called itself "insert mode".
+    // Behaviour is unchanged from the base mode in every case — see
+    // [`Coordinate::base`], which is what key dispatch and every mode gate read.
+    /// A browse-then-session provider's session view (the terminal's shell) for
+    /// a provider that offers nothing to layer on top of it. Behaves exactly
+    /// like [`Coordinate::General`]; it just says that `:` is what got you here.
+    /// Set only by `handlers::rest_coordinate`, never assigned literally.
+    SessionCommand,
+    /// The same session view (claude's session) for a provider that *does* offer
+    /// a second colon layer. Distinct from [`Coordinate::SessionCommand`] purely
+    /// so the two are distinguishable by ear: "first command mode" says another
+    /// `:` is available, "command mode" says this is the only layer.
+    SessionFirstCommand,
+    /// The second colon layer over a live prompt — claude's skills list, what
+    /// the code still calls the insert palette. Behaves exactly like
+    /// [`Coordinate::Command`].
+    ///
+    /// Not session-specific, and deliberately so: `insert_palette_available`
+    /// keys off the shape of what a provider serves (a level ending in an
+    /// `<input>` Obj, plus a command beyond the view swap), so a WASM plugin
+    /// gets the layer for free. Such a plugin can open it straight out of
+    /// General and will then report "second command mode" with no "first"
+    /// before it. That is the honest reading of "second colon layer" and is
+    /// unreachable for the providers that ship.
+    SecondCommand,
 }
 
 impl Coordinate {
+    /// True in list-navigation mode, whatever that mode calls itself — General
+    /// and the two session-view relabellings of it. Every gate that means "the
+    /// user is browsing a list, not editing text" wants this, not a bare
+    /// `== Coordinate::General`.
     pub fn is_general(self) -> bool {
-        matches!(self, Coordinate::General)
+        self.base() == Coordinate::General
     }
+
+    /// The mode whose *behaviour* this coordinate has.
+    ///
+    /// The colon-command family are relabelled views of two base modes, so key
+    /// dispatch (`shortcuts::dispatch_key`), the hint screen (`hints_for`), the
+    /// list builder and every mode gate read `base()`. That is what guarantees
+    /// a new label can never change a keymap: the `SHORTCUTS` table still names
+    /// only the base modes and needs no entry for the relabellings.
+    pub fn base(self) -> Coordinate {
+        match self {
+            Coordinate::SessionCommand | Coordinate::SessionFirstCommand => Coordinate::General,
+            Coordinate::SecondCommand => Coordinate::Command,
+            other => other,
+        }
+    }
+
+    /// True in a browse-then-session provider's session view, under either of
+    /// its two labels.
+    pub fn is_session_view(self) -> bool {
+        matches!(
+            self,
+            Coordinate::SessionCommand | Coordinate::SessionFirstCommand
+        )
+    }
+
+    /// Every variant. Exists so the locale-coverage test can assert that each
+    /// mode resolves in all four bundles without a hand-maintained list that
+    /// silently misses a new variant.
+    pub const ALL: [Coordinate; 19] = [
+        Coordinate::General,
+        Coordinate::Insert,
+        Coordinate::Normal,
+        Coordinate::Visual,
+        Coordinate::SimpleSearch,
+        Coordinate::ExtendedSearch,
+        Coordinate::Command,
+        Coordinate::Scroll,
+        Coordinate::ScrollSearch,
+        Coordinate::ScrollPrefixSearch,
+        Coordinate::InputSearch,
+        Coordinate::Dashboard,
+        Coordinate::Meta,
+        Coordinate::TimelineView,
+        Coordinate::ConfirmCloseTab,
+        Coordinate::TabSwitcher,
+        Coordinate::SessionCommand,
+        Coordinate::SessionFirstCommand,
+        Coordinate::SecondCommand,
+    ];
 
     /// Stable English identifier — used in logs (`tracing::debug!`) and
     /// internal tracing where translation would hurt grep-ability. For
     /// user-facing UI (screen-reader announcements, header status line,
     /// window title) use [`Coordinate::display_label`] instead.
+    ///
+    /// The literals stay label-shaped because this is `display_label`'s
+    /// fallback when no bundle is registered, which means `Command` and
+    /// `SessionCommand` share one — they are the same mode *name* over
+    /// different behaviour. They are therefore indistinguishable in this
+    /// string by design; the `tracing::` call sites that need to tell them
+    /// apart log the `Debug` form of the coordinate alongside it.
     pub fn as_str(self) -> &'static str {
         match self {
             Coordinate::General => "general mode",
@@ -161,6 +251,9 @@ impl Coordinate {
             Coordinate::TimelineView => "timeline mode",
             Coordinate::ConfirmCloseTab => "confirm close tab mode",
             Coordinate::TabSwitcher => "tab switcher mode",
+            Coordinate::SessionCommand => "command mode",
+            Coordinate::SessionFirstCommand => "first command mode",
+            Coordinate::SecondCommand => "second command mode",
         }
     }
 
@@ -187,6 +280,11 @@ impl Coordinate {
             Coordinate::TimelineView => "mode-timeline",
             Coordinate::ConfirmCloseTab => "mode-confirm-close-tab",
             Coordinate::TabSwitcher => "mode-tab-switcher",
+            // Shares `mode-command` with `Coordinate::Command`: same name, and
+            // the point of the variant is the behaviour, not the wording.
+            Coordinate::SessionCommand => "mode-command",
+            Coordinate::SessionFirstCommand => "mode-first-command",
+            Coordinate::SecondCommand => "mode-second-command",
         };
         let resolved = sicompass_sdk::localize::t(key);
         if resolved == key {
@@ -1410,28 +1508,19 @@ impl AppRenderer {
     }
 
     /// User-facing mode label for the header, window title, and spoken mode
-    /// change. Identical to [`Coordinate::display_label`] except for the two
-    /// things that reuse `Coordinate::Command` machinery without being the colon
+    /// change. Identical to [`Coordinate::display_label`] except for the one
+    /// thing that reuses `Coordinate::Command` machinery without being a colon
     /// command palette: the window-controls palette (`c`), reported as
-    /// "controls", and the insert palette (a second `:` on a live prompt),
-    /// reported as "insert". Both are keyed off state rather than the
-    /// coordinate, so the ordinary palette (`CommandPhase::None`) is unaffected.
+    /// "controls". It is keyed off `CommandPhase` rather than the coordinate, so
+    /// the ordinary palette (`CommandPhase::None`) is unaffected.
     ///
-    /// This matters more for the insert palette than for controls: the *same*
-    /// key opens it and the ordinary palette depending on what is on screen, so
-    /// without a distinct label there is no way to tell by ear which one
-    /// answered. The header, the window title and the `w` focus announcement all
-    /// route through here, so one branch covers all three.
+    /// The second colon layer used to need a branch here too, for the same
+    /// reason — the *same* key opens it and the ordinary palette depending on
+    /// what is on screen, so without a distinct label there is no way to tell by
+    /// ear which one answered. It now has its own coordinate
+    /// (`Coordinate::SecondCommand`) and so needs no special case. The header,
+    /// the window title and the `w` focus announcement all route through here.
     pub(crate) fn mode_display_label(&self) -> String {
-        if self.coordinate == Coordinate::Command && self.suspended_input_edit.is_some() {
-            crate::shortcuts::register_translations();
-            let resolved = sicompass_sdk::localize::t("mode-insert-palette");
-            return if resolved == "mode-insert-palette" {
-                "insert mode".to_owned()
-            } else {
-                resolved
-            };
-        }
         if self.coordinate == Coordinate::Command && self.current_command == CommandPhase::Controls
         {
             crate::shortcuts::register_translations();
@@ -1448,7 +1537,11 @@ impl AppRenderer {
     /// The header status line: spoken mode name, layer depth, and 1-based
     /// position within the active list. Shared by the renderer
     /// (`view::build_header_text`) and `speak_focus_position`.
-    pub(crate) fn header_text(&self) -> String {
+    ///
+    /// Public for the same reason `speak_focus_position` is: it is one of the two
+    /// surfaces that report the current mode, and the integration tests assert
+    /// that the two agree.
+    pub fn header_text(&self) -> String {
         let mode = self.mode_display_label();
         let depth = self.current_id.depth().saturating_sub(1);
         let last_id = self.current_id.last().unwrap_or(0);
@@ -1859,6 +1952,187 @@ mod tests {
         sicompass_sdk::localize::set_locale("en-US");
     }
 
+    // --- The colon-command family: base(), gates, labels ---
+
+    #[test]
+    fn base_maps_every_relabelled_coordinate_and_leaves_the_rest_alone() {
+        assert_eq!(Coordinate::SessionCommand.base(), Coordinate::General);
+        assert_eq!(Coordinate::SessionFirstCommand.base(), Coordinate::General);
+        assert_eq!(Coordinate::SecondCommand.base(), Coordinate::Command);
+        // Every other variant is its own base, so `base()` can be applied at a
+        // dispatch site without changing what any existing mode matches.
+        for c in Coordinate::ALL {
+            if matches!(
+                c,
+                Coordinate::SessionCommand
+                    | Coordinate::SessionFirstCommand
+                    | Coordinate::SecondCommand
+            ) {
+                continue;
+            }
+            assert_eq!(c.base(), c, "{c:?} must be its own base");
+        }
+        // base() is idempotent, so applying it twice cannot drift.
+        for c in Coordinate::ALL {
+            assert_eq!(c.base().base(), c.base(), "{c:?}");
+        }
+    }
+
+    #[test]
+    fn is_general_covers_the_session_views_and_nothing_else() {
+        for c in Coordinate::ALL {
+            let want = matches!(
+                c,
+                Coordinate::General | Coordinate::SessionCommand | Coordinate::SessionFirstCommand
+            );
+            assert_eq!(c.is_general(), want, "{c:?}");
+        }
+    }
+
+    #[test]
+    fn is_session_view_is_the_two_session_labels() {
+        for c in Coordinate::ALL {
+            let want = matches!(
+                c,
+                Coordinate::SessionCommand | Coordinate::SessionFirstCommand
+            );
+            assert_eq!(c.is_session_view(), want, "{c:?}");
+        }
+    }
+
+    #[test]
+    fn all_lists_every_variant_exactly_once() {
+        // A new variant that never reaches `ALL` would slip past the
+        // locale-coverage and base() tests below without failing anything.
+        // By variant, not by label: `Command` and `SessionCommand` share a
+        // label on purpose.
+        let mut seen: Vec<Coordinate> = Vec::new();
+        for c in Coordinate::ALL {
+            assert!(!seen.contains(&c), "{c:?} listed twice");
+            seen.push(c);
+        }
+        assert_eq!(Coordinate::ALL.len(), 19);
+    }
+
+    #[test]
+    fn every_mode_has_a_translation_in_every_bundle() {
+        let _g = locale_test_lock();
+        crate::shortcuts::register_translations();
+        for locale in ["en-US", "nl-BE", "fr-BE", "de-BE"] {
+            sicompass_sdk::localize::set_locale(locale);
+            for c in Coordinate::ALL {
+                let label = c.display_label();
+                // `display_label` falls back to the English `as_str` literal
+                // when the key is missing, so compare against the fallback: a
+                // non-English bundle that still returns it has no entry.
+                if locale != "en-US" {
+                    assert_ne!(
+                        label,
+                        c.as_str(),
+                        "{c:?} has no {locale} translation (add the mode-* key \
+                         to all four bundles)"
+                    );
+                }
+                assert!(!label.is_empty(), "{c:?} in {locale}");
+            }
+        }
+        sicompass_sdk::localize::set_locale("en-US");
+    }
+
+    #[test]
+    fn the_colon_command_family_names_itself_in_english() {
+        let _g = locale_test_lock();
+        sicompass_sdk::localize::set_locale("en-US");
+        // The whole point of the family: one name per colon layer.
+        assert_eq!(Coordinate::Command.display_label(), "command mode");
+        assert_eq!(Coordinate::SessionCommand.display_label(), "command mode");
+        assert_eq!(
+            Coordinate::SessionFirstCommand.display_label(),
+            "first command mode"
+        );
+        assert_eq!(
+            Coordinate::SecondCommand.display_label(),
+            "second command mode"
+        );
+        sicompass_sdk::localize::set_locale("en-US");
+    }
+
+    #[test]
+    fn the_command_palette_still_reads_command_mode_in_both_phases() {
+        let _g = locale_test_lock();
+        sicompass_sdk::localize::set_locale("en-US");
+        let mut r = AppRenderer::new();
+        r.coordinate = Coordinate::Command;
+
+        for phase in [CommandPhase::None, CommandPhase::Provider] {
+            r.current_command = phase;
+            assert!(
+                r.header_text().starts_with("command mode, layer:"),
+                "{phase:?}: {}",
+                r.header_text()
+            );
+            r.speak_focus_position();
+            let ann = r.pending_announcement.take().expect("ann set");
+            assert!(
+                ann.trim_end_matches('\u{200B}')
+                    .starts_with("command mode, layer:"),
+                "{phase:?}: {ann:?}"
+            );
+        }
+
+        // The `c` palette borrows the same coordinate and must keep its own name.
+        r.current_command = CommandPhase::Controls;
+        assert!(r.header_text().starts_with("controls mode, layer:"));
+        sicompass_sdk::localize::set_locale("en-US");
+    }
+
+    #[test]
+    fn the_second_layer_reads_second_command_mode_in_both_phases() {
+        let _g = locale_test_lock();
+        sicompass_sdk::localize::set_locale("en-US");
+        let mut r = AppRenderer::new();
+        r.coordinate = Coordinate::SecondCommand;
+        // The parked live edit no longer decides the label — the coordinate does.
+        for phase in [CommandPhase::None, CommandPhase::Provider] {
+            r.current_command = phase;
+            assert!(
+                r.header_text().starts_with("second command mode, layer:"),
+                "{phase:?}: {}",
+                r.header_text()
+            );
+            r.speak_focus_position();
+            let ann = r.pending_announcement.take().expect("ann set");
+            assert!(
+                ann.trim_end_matches('\u{200B}')
+                    .starts_with("second command mode, layer:"),
+                "{phase:?}: {ann:?}"
+            );
+        }
+        sicompass_sdk::localize::set_locale("en-US");
+    }
+
+    #[test]
+    fn the_header_and_the_whereami_announcement_report_the_same_mode() {
+        // The reported complaint was these two disagreeing. They share
+        // `mode_display_label`, and this pins that they keep sharing it.
+        let _g = locale_test_lock();
+        sicompass_sdk::localize::set_locale("en-US");
+        let mut r = AppRenderer::new();
+        for c in Coordinate::ALL {
+            r.coordinate = c;
+            r.current_command = CommandPhase::None;
+            let header = r.header_text();
+            r.speak_focus_position();
+            let ann = r.pending_announcement.take().expect("ann set");
+            let ann = ann.trim_end_matches('\u{200B}');
+            assert!(
+                ann.starts_with(&header),
+                "{c:?}: header {header:?} is not the head of {ann:?}"
+            );
+        }
+        sicompass_sdk::localize::set_locale("en-US");
+    }
+
     // --- Coordinate::as_str ---
 
     #[test]
@@ -1894,6 +2168,18 @@ mod tests {
     #[test]
     fn coordinate_as_str_command() {
         assert_eq!(Coordinate::Command.as_str(), "command mode");
+    }
+
+    #[test]
+    fn coordinate_as_str_colon_command_family() {
+        // `SessionCommand` shares the literal with `Command`: same mode name
+        // over different behaviour. Logs tell them apart by the Debug form.
+        assert_eq!(Coordinate::SessionCommand.as_str(), "command mode");
+        assert_eq!(
+            Coordinate::SessionFirstCommand.as_str(),
+            "first command mode"
+        );
+        assert_eq!(Coordinate::SecondCommand.as_str(), "second command mode");
     }
 
     #[test]

@@ -203,7 +203,26 @@ pub fn create_list_current_layer(renderer: &mut AppRenderer) {
     renderer.filtered_list_indices.clear();
     renderer.error_message.clear();
 
-    match renderer.coordinate {
+    // Keep the at-rest mode name honest. Which of General / SessionCommand /
+    // SessionFirstCommand applies is a function of the view the active provider
+    // is showing, and the cursor can leave or enter a session's level without
+    // any handler noticing (Ctrl+Home, a Home double-tap, Ctrl+F into another
+    // provider, a tab switch). Every one of those paths ends here, so this is
+    // the one place that can repair all of them.
+    //
+    // Only the at-rest family is touched, so a mode the user deliberately
+    // entered — Insert, a search, a palette — is never clobbered.
+    if matches!(
+        renderer.coordinate,
+        Coordinate::General | Coordinate::SessionCommand | Coordinate::SessionFirstCommand
+    ) {
+        renderer.coordinate = crate::handlers::rest_coordinate(renderer);
+    }
+
+    // `base()`: the colon-command family are relabelled views of General and
+    // Command, and the `_` arm below zeroes `list_index` without building
+    // anything — so without this a second-layer palette would come up empty.
+    match renderer.coordinate.base() {
         Coordinate::General | Coordinate::Insert | Coordinate::SimpleSearch => {}
         Coordinate::ExtendedSearch => {
             create_list_extended_search(renderer);

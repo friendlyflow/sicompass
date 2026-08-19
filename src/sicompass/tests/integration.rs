@@ -10850,7 +10850,7 @@ fn terminal_auto_enters_and_leaves_dashboard_on_alt_screen() {
 
 #[cfg(unix)]
 #[test]
-fn auto_leave_lands_in_general_mode_even_if_user_was_in_insert() {
+fn auto_leave_lands_back_in_the_shells_own_mode_even_if_user_was_in_insert() {
     // Repro: user is on the input slot in Insert mode typing `btop`. They
     // press Enter; auto-launch fires; they Ctrl+C btop; auto-leave fires.
     // They must land in General mode — otherwise pressing `i`/`a` to
@@ -10904,13 +10904,13 @@ fn auto_leave_lands_in_general_mode_even_if_user_was_in_insert() {
     );
 
     // The fix: regardless of what mode the user was in before auto-launch,
-    // auto-leave returns them to a clean General mode with no stale Insert
-    // state. Otherwise `i`/`a` would type literally instead of switching
-    // back into Insert.
+    // auto-leave returns them to the shell's own clean at-rest mode with no
+    // stale Insert state. Otherwise `i`/`a` would type literally instead of
+    // switching back into Insert.
     assert_eq!(
         renderer.coordinate,
-        Coordinate::General,
-        "auto-leave must land in General mode, not the pre-launch Insert mode"
+        Coordinate::SessionCommand,
+        "auto-leave must land in the shell's own mode, not the pre-launch Insert mode"
     );
     assert!(
         renderer.input_buffer.is_empty(),
@@ -11077,8 +11077,9 @@ fn terminal_colon_opens_a_shell_in_the_folder_being_listed() {
 
     press_colon(&mut renderer);
 
-    // `:` is a view swap, never the command palette, for this provider.
-    assert_eq!(renderer.coordinate, Coordinate::General);
+    // `:` is a view swap, never the command palette, for this provider — and the
+    // shell it opens names itself rather than staying `general mode`.
+    assert_eq!(renderer.coordinate, Coordinate::SessionCommand);
     assert_eq!(
         renderer.providers[0].current_path(),
         root.to_str().unwrap(),
@@ -11200,6 +11201,10 @@ fn terminal_restart_with_a_shell_open_lands_inside_the_shells_folder() {
         ws.to_str().unwrap(),
         "path in step with the cursor",
     );
+    // A folder listing, so plain General — not one of the session labels. If the
+    // restore policy ever does bring a session back, this is what has to change
+    // with it.
+    assert_eq!(restarted.coordinate, Coordinate::General);
 
     // And `:` reopens the shell where it was, not in its parent.
     let mut restarted = restarted;
@@ -12063,7 +12068,7 @@ fn terminal_second_colon_stays_inert() {
         renderer.suspended_input_edit.is_none(),
         "no palette for a provider with nothing to insert"
     );
-    assert_eq!(renderer.coordinate, Coordinate::General);
+    assert_eq!(renderer.coordinate, Coordinate::SessionCommand);
 }
 
 #[test]
@@ -12186,9 +12191,9 @@ fn enter_on_history_button_fills_input() {
 
     sicompass::handlers::handle_enter_general(&mut renderer);
 
-    // Focus moved back onto the `+i` slot itself, still General mode.
+    // Focus moved back onto the `+i` slot itself, still the shell's at-rest mode.
     assert_eq!(renderer.current_id, slot_id);
-    assert_eq!(renderer.coordinate, Coordinate::General);
+    assert_eq!(renderer.coordinate, Coordinate::SessionCommand);
     let slot_key = slot_key_at(&renderer, &slot_id);
     assert!(
         slot_key.contains("<input>git status</input>"),
@@ -12250,7 +12255,7 @@ fn search_enter_on_history_button_fills_input() {
 
     assert_eq!(
         renderer.coordinate,
-        Coordinate::General,
+        Coordinate::SessionCommand,
         "search mode should exit"
     );
     assert_eq!(renderer.current_id, slot_id, "focus moved onto the +i slot");
@@ -16688,4 +16693,190 @@ fn controls_palette_maximize_label_tracks_state() {
         "got {:?}",
         r.total_list[1].label
     );
+}
+
+// ---------------------------------------------------------------------------
+// The colon-command labels, end to end through the real providers
+// ---------------------------------------------------------------------------
+//
+// One test per row of the label map. Each checks the header line *and* the `w`
+// announcement, because the reported complaint was those two disagreeing about
+// which mode you were in.
+
+#[test]
+fn the_shell_view_says_command_mode_in_the_header_and_on_w() {
+    ensure_builtins();
+    let mut renderer = AppRenderer::new();
+    register_terminal_in_shell(&mut renderer);
+
+    // One colon layer on offer, so the name carries no ordinal.
+    assert_eq!(renderer.coordinate, Coordinate::SessionCommand);
+    assert!(
+        renderer.header_text().starts_with("command mode, layer:"),
+        "header: {:?}",
+        renderer.header_text()
+    );
+
+    press(&mut renderer, Keycode::W);
+    let spoken = announced_text(&renderer).expect("w should still work in the shell");
+    assert!(
+        spoken.starts_with("command mode, layer:"),
+        "whereami: {spoken:?}"
+    );
+}
+
+#[test]
+fn entering_and_leaving_the_shell_announces_the_mode() {
+    // `:` into the shell used to speak only the prompt row, so the view you had
+    // just entered never named itself.
+    ensure_builtins();
+    let mut renderer = AppRenderer::new();
+    register_terminal_in_shell(&mut renderer);
+
+    let entered = announced_text(&renderer).expect("entering the shell announces");
+    assert!(entered.starts_with("command mode"), "entering: {entered:?}");
+
+    press_escape(&mut renderer);
+    assert_eq!(renderer.coordinate, Coordinate::General);
+    let left = announced_text(&renderer).expect("leaving the shell announces");
+    assert!(left.starts_with("general mode"), "leaving: {left:?}");
+}
+
+#[test]
+fn the_claude_session_says_first_command_mode() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    project_skill(&root, "review", "---\ndescription: Review the diff\n---\n");
+
+    ensure_builtins();
+    let mut renderer = AppRenderer::new();
+    register_claude_in_session(&mut renderer, &root);
+
+    // claude offers `skills` on top of the view swap, so this is the first of two.
+    assert_eq!(renderer.coordinate, Coordinate::SessionFirstCommand);
+    assert!(
+        renderer
+            .header_text()
+            .starts_with("first command mode, layer:"),
+        "header: {:?}",
+        renderer.header_text()
+    );
+
+    press(&mut renderer, Keycode::W);
+    let spoken = announced_text(&renderer).expect("w should still work in the session");
+    assert!(
+        spoken.starts_with("first command mode, layer:"),
+        "whereami: {spoken:?}"
+    );
+}
+
+#[test]
+fn the_claude_skills_palette_says_second_command_mode() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    project_skill(&root, "review", "---\ndescription: Review the diff\n---\n");
+
+    ensure_builtins();
+    let mut renderer = AppRenderer::new();
+    register_claude_in_session(&mut renderer, &root);
+
+    press_colon(&mut renderer);
+
+    assert_eq!(renderer.coordinate, Coordinate::SecondCommand);
+    assert!(
+        renderer
+            .header_text()
+            .starts_with("second command mode, layer:"),
+        "header: {:?}",
+        renderer.header_text()
+    );
+    // `w` is a filter character in a palette, so ask the announcement builder
+    // directly — it is the same one the `w` key drives.
+    renderer.speak_focus_position();
+    let spoken = announced_text(&renderer).expect("ann set");
+    assert!(
+        spoken.starts_with("second command mode, layer:"),
+        "whereami: {spoken:?}"
+    );
+
+    // It used to announce "insert mode", indistinguishable from real Insert.
+    assert!(!spoken.starts_with("insert mode"));
+}
+
+#[test]
+fn the_file_browser_palette_still_says_command_mode() {
+    // The original colon palette. Every file browser row is wrapped in
+    // `<input>`, so a listing ending in a subdirectory looks exactly like a live
+    // prompt — which used to send `:` to the insert palette instead of here.
+    ensure_builtins();
+    let mut renderer = AppRenderer::new();
+    register(
+        &mut renderer,
+        sicompass_sdk::create_provider_by_name("filebrowser").unwrap(),
+    );
+    sicompass::list::create_list_current_layer(&mut renderer);
+    press_right(&mut renderer);
+
+    press_colon(&mut renderer);
+
+    assert_eq!(renderer.coordinate, Coordinate::Command);
+    assert!(
+        renderer.suspended_input_edit.is_none(),
+        "the file browser has no live prompt to park"
+    );
+    assert!(
+        renderer.header_text().starts_with("command mode, layer:"),
+        "header: {:?}",
+        renderer.header_text()
+    );
+    renderer.speak_focus_position();
+    let spoken = announced_text(&renderer).expect("ann set");
+    assert!(
+        spoken.starts_with("command mode, layer:"),
+        "whereami: {spoken:?}"
+    );
+}
+
+#[test]
+fn no_general_mode_key_goes_silent_inside_a_shell() {
+    // The relabelled session views behave as General. A mode gate that was not
+    // widened makes its key inert *only here*, which is silent rather than loud,
+    // so check the keys that matter one by one.
+    ensure_builtins();
+    let mut renderer = AppRenderer::new();
+    register_terminal_in_shell(&mut renderer);
+    let at_rest = Coordinate::SessionCommand;
+    assert_eq!(renderer.coordinate, at_rest);
+
+    // M: the hint screen, and Escape back.
+    press(&mut renderer, Keycode::M);
+    assert_eq!(renderer.coordinate, Coordinate::Meta, "M");
+    press_escape(&mut renderer);
+    assert_eq!(renderer.coordinate, at_rest, "Escape out of Meta");
+
+    // Z: the timeline, and Escape back.
+    press(&mut renderer, Keycode::Z);
+    assert_eq!(renderer.coordinate, Coordinate::TimelineView, "Z");
+    press_escape(&mut renderer);
+    assert_eq!(renderer.coordinate, at_rest, "Escape out of the timeline");
+
+    // i: edit the prompt, and Escape back to the session's own mode.
+    press(&mut renderer, Keycode::I);
+    assert_eq!(renderer.coordinate, Coordinate::Insert, "i");
+    press_escape(&mut renderer);
+    assert_eq!(
+        renderer.coordinate, at_rest,
+        "Escape out of Insert must not land in plain General"
+    );
+
+    // Tab: type-to-search the list.
+    press_tab(&mut renderer);
+    assert_eq!(renderer.coordinate, Coordinate::SimpleSearch, "Tab");
+    press_escape(&mut renderer);
+    assert_eq!(renderer.coordinate, at_rest, "Escape out of search");
+
+    // w: still announces.
+    renderer.pending_announcement = None;
+    press(&mut renderer, Keycode::W);
+    assert!(announced_text(&renderer).is_some(), "w");
 }
