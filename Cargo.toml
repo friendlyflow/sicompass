@@ -81,10 +81,10 @@ image = { version = "0.25", features = ["jpeg", "png", "webp"] }
 sdl3 = "0.18"
 
 # Accessibility
-accesskit = "0.24"
-accesskit_unix = "0.22"
-accesskit_windows = "0.34"
-accesskit_macos = "0.26"
+accesskit = "0.25"
+accesskit_unix = "0.23"
+accesskit_windows = "0.35"
+accesskit_macos = "0.27"
 # `Win32_System_Com` + `Win32_UI_Shell` are for `start_menu.rs`, which builds
 # the Start Menu `.lnk` through IShellLink. Every installer except the MSI
 # leaves the app with no Start Menu entry, so the app makes its own.
@@ -130,12 +130,12 @@ rusqlite = { version = "0.40", features = ["bundled"] }
 
 # Plugin validation. `wasmparser` checks a staged plugin is a well-formed
 # component without compiling it, which is all the updater needs to know.
-wasmparser = "0.255"
+wasmparser = "0.258"
 
 # WASM plugin host. No compiler backend is selected here: the `sicompass` crate's
 # `jit-wasm` (default) and `no-jit-wasm` features pick `cranelift` or `pulley`, so
 # an App Store / iOS build can be built with no runtime code generation at all.
-wasmtime = { version = "47", default-features = false, features = [
+wasmtime = { version = "48", default-features = false, features = [
     "runtime",
     "component-model",
     "std",

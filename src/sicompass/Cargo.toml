@@ -414,6 +414,6 @@ tempfile = { workspace = true }
 # The integration test injects its own `ImapBackend` stubs, which the trait
 # requires to be `#[async_trait]`.
 async-trait = { workspace = true }
-wit-parser = "0.255.0"
-wit-component = "0.255.0"
+wit-parser = "0.258.0"
+wit-component = "0.258.0"
 wiremock.workspace = true

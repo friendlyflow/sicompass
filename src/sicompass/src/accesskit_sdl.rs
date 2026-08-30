@@ -19,7 +19,7 @@
 //!   technology is actually listening (zero overhead otherwise).
 
 use crate::app_state::AppRenderer;
-use accesskit::{Live, Node, NodeId, Role, Tree, TreeId, TreeUpdate};
+use accesskit::{Live, Node, NodeId, Role, TreeId, TreeInfo, TreeUpdate};
 
 // ---------------------------------------------------------------------------
 // Node-ID convention
@@ -566,7 +566,7 @@ fn build_tree(renderer: &AppRenderer) -> TreeUpdate {
 
     TreeUpdate {
         nodes,
-        tree: Some(Tree::new(ROOT_ID)),
+        tree: Some(TreeInfo::new(ROOT_ID)),
         tree_id: TreeId::ROOT,
         focus,
     }
@@ -642,7 +642,7 @@ fn build_tree_macos(renderer: &AppRenderer, spoken: &str, spoken_lang: &str) -> 
     // nothing to engage with when the list is empty.
     TreeUpdate {
         nodes,
-        tree: Some(Tree::new(ROOT_ID)),
+        tree: Some(TreeInfo::new(ROOT_ID)),
         tree_id: TreeId::ROOT,
         focus: ELEMENT_ID,
     }
