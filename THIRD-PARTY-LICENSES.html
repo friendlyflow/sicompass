@@ -53,7 +53,7 @@ PERFORMANCE OF THIS SOFTWARE.
 </div>
 <div class="dep">
 <h2>Apache License 2.0</h2>
-<p class="meta">Used by: cranelift-bforest 0.134.3, cranelift-codegen-shared 0.134.3, cranelift-codegen 0.134.3, cranelift-control 0.134.3, cranelift-entity 0.134.3, cranelift-frontend 0.134.3, cranelift-native 0.134.3, regalloc2 0.15.2, target-lexicon 0.13.5, wasmtime-environ 47.0.3, wasmtime-internal-cache 47.0.3, wasmtime-internal-cranelift 47.0.3, wasmtime-internal-unwinder 47.0.3, wasmtime 47.0.3</p>
+<p class="meta">Used by: cranelift-bforest 0.135.1, cranelift-codegen-shared 0.135.1, cranelift-codegen 0.135.1, cranelift-control 0.135.1, cranelift-entity 0.135.1, cranelift-frontend 0.135.1, cranelift-native 0.135.1, regalloc2 0.15.2, target-lexicon 0.13.5, wasmtime-environ 48.0.1, wasmtime-internal-cache 48.0.1, wasmtime-internal-cranelift 48.0.1, wasmtime-internal-unwinder 48.0.1, wasmtime 48.0.1</p>
 <pre>
                                  Apache License
                            Version 2.0, January 2004
@@ -484,7 +484,7 @@ Software.
 </div>
 <div class="dep">
 <h2>Apache License 2.0</h2>
-<p class="meta">Used by: imgref 1.12.2, self_cell 1.3.0</p>
+<p class="meta">Used by: imgref 1.12.3, self_cell 1.3.0</p>
 <pre>                                 Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -897,7 +897,7 @@ Software.
 </div>
 <div class="dep">
 <h2>Apache License 2.0</h2>
-<p class="meta">Used by: aws-lc-sys 0.43.0, cranelift-assembler-x64 0.134.3, cranelift-bitset 0.134.3, pulley-interpreter 47.0.3, pulley-macros 47.0.3, ryu 1.0.23, serial2 0.2.38, sync_wrapper 1.0.2, wasmtime-internal-component-macro 47.0.3, wasmtime-internal-component-util 47.0.3, wasmtime-internal-core 47.0.3, wasmtime-internal-jit-icache-coherence 47.0.3, wasmtime-internal-versioned-export-macros 47.0.3, wasmtime-internal-wit-bindgen 47.0.3</p>
+<p class="meta">Used by: aws-lc-sys 0.44.0, cranelift-assembler-x64 0.135.1, cranelift-bitset 0.135.1, pulley-interpreter 48.0.1, pulley-macros 48.0.1, ryu 1.0.23, serial2 0.2.38, sync_wrapper 1.0.2, wasmtime-internal-component-macro 48.0.1, wasmtime-internal-component-util 48.0.1, wasmtime-internal-core 48.0.1, wasmtime-internal-jit-icache-coherence 48.0.1, wasmtime-internal-versioned-export-macros 48.0.1, wasmtime-internal-wit-bindgen 48.0.1</p>
 <pre>Apache License
 Version 2.0, January 2004
 http://www.apache.org/licenses/
@@ -971,6 +971,57 @@ distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
+</pre>
+</div>
+<div class="dep">
+<h2>BSD 2-Clause &quot;Simplified&quot; License</h2>
+<p class="meta">Used by: rav1e 0.8.1</p>
+<pre>; Copyright © 2019-2022, VideoLAN and dav1d authors
+; Copyright © 2019-2022, Two Orioles, LLC
+; All rights reserved.
+;
+; Redistribution and use in source and binary forms, with or without
+; modification, are permitted provided that the following conditions are met:
+;
+; 1. Redistributions of source code must retain the above copyright notice, this
+;    list of conditions and the following disclaimer.
+;
+; 2. Redistributions in binary form must reproduce the above copyright notice,
+;    this list of conditions and the following disclaimer in the documentation
+;    and/or other materials provided with the distribution.
+;
+; THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS &quot;AS IS&quot; AND
+; ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+; WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+; DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR
+; ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+; (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+; ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+; (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+; SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+struc FGData
+    .seed:                      resd 1
+    .num_y_points:              resd 1
+    .y_points:                  resb 14 * 2
+    .chroma_scaling_from_luma:  resd 1
+    .num_uv_points:             resd 2
+    .uv_points:                 resb 2 * 10 * 2
+    .scaling_shift:             resd 1
+    .ar_coeff_lag:              resd 1
+    .ar_coeffs_y:               resb 24
+    .ar_coeffs_uv:              resb 2 * 28 ; includes padding
+    .ar_coeff_shift:            resq 1
+    .grain_scale_shift:         resd 1
+    .uv_mult:                   resd 2
+    .uv_luma_mult:              resd 2
+    .uv_offset:                 resd 2
+    .overlap_flag:              resd 1
+    .clip_to_restricted_range:  resd 1
+endstruc
+
+cextern gaussian_sequence
 </pre>
 </div>
 <div class="dep">
@@ -1061,6 +1112,65 @@ SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
 CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
 OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+</pre>
+</div>
+<div class="dep">
+<h2>BSD 3-Clause &quot;New&quot; or &quot;Revised&quot; License</h2>
+<p class="meta">Used by: encoding_rs 0.8.35</p>
+<pre>// Copyright © WHATWG (Apple, Google, Mozilla, Microsoft).
+//
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions are met:
+//
+// 1. Redistributions of source code must retain the above copyright notice, this
+//    list of conditions and the following disclaimer.
+//
+// 2. Redistributions in binary form must reproduce the above copyright notice,
+//    this list of conditions and the following disclaimer in the documentation
+//    and/or other materials provided with the distribution.
+//
+// 3. Neither the name of the copyright holder nor the names of its
+//    contributors may be used to endorse or promote products derived from
+//    this software without specific prior written permission.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS &quot;AS IS&quot;
+// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+/// The PUA code points special-cased in the GB18030 encoder.
+pub(crate) static GB18030_2022_OVERRIDE_PUA: [u16; 18] &#x3D; [
+    0xE78D, 0xE78E, 0xE78F, 0xE790, 0xE791, 0xE792, 0xE793, 0xE794, 0xE795, 0xE796, 0xE81E, 0xE826,
+    0xE82B, 0xE82C, 0xE832, 0xE843, 0xE854, 0xE864,
+];
+
+/// The bytes corresponding to the PUA code points special-cased in the GB18030 encoder.
+pub(crate) static GB18030_2022_OVERRIDE_BYTES: [[u8; 2]; 18] &#x3D; [
+    [0xA6, 0xD9],
+    [0xA6, 0xDA],
+    [0xA6, 0xDB],
+    [0xA6, 0xDC],
+    [0xA6, 0xDD],
+    [0xA6, 0xDE],
+    [0xA6, 0xDF],
+    [0xA6, 0xEC],
+    [0xA6, 0xED],
+    [0xA6, 0xF3],
+    [0xFE, 0x59],
+    [0xFE, 0x61],
+    [0xFE, 0x66],
+    [0xFE, 0x67],
+    [0xFE, 0x6D],
+    [0xFE, 0x7E],
+    [0xFE, 0x90],
+    [0xFE, 0xA0],
+];
 </pre>
 </div>
 <div class="dep">
@@ -1265,7 +1375,7 @@ USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 </div>
 <div class="dep">
 <h2>BSD 3-Clause &quot;New&quot; or &quot;Revised&quot; License</h2>
-<p class="meta">Used by: aws-lc-sys 0.43.0, exr 1.74.2</p>
+<p class="meta">Used by: aws-lc-sys 0.44.0, exr 1.74.2</p>
 <pre>Copyright (c) &lt;year&gt; &lt;owner&gt;. 
 
 Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met:
@@ -1623,7 +1733,7 @@ OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 </div>
 <div class="dep">
 <h2>ISC License</h2>
-<p class="meta">Used by: rustls-webpki 0.103.13</p>
+<p class="meta">Used by: rustls-webpki 0.103.15</p>
 <pre>Except as otherwise noted, this project is licensed under the following
 (ISC-style) terms:
 
@@ -1647,7 +1757,7 @@ third-party/chromium/LICENSE.
 </div>
 <div class="dep">
 <h2>ISC License</h2>
-<p class="meta">Used by: aws-lc-rs 1.17.3, aws-lc-sys 0.43.0</p>
+<p class="meta">Used by: aws-lc-rs 1.18.0, aws-lc-sys 0.44.0</p>
 <pre>ISC License:
 
 Copyright (c) 2004-2010 by Internet Systems Consortium, Inc. (&quot;ISC&quot;)
@@ -1708,6 +1818,554 @@ THE SOFTWARE IS PROVIDED &quot;AS IS&quot; AND ISC DISCLAIMS ALL WARRANTIES WITH
     LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
     SOFTWARE
+</pre>
+</div>
+<div class="dep">
+<h2>MIT License</h2>
+<p class="meta">Used by: freetype-sys 0.20.1</p>
+<pre>#
+# FreeType 2 BDF module definition
+#
+
+# Copyright 2001, 2002, 2006 by
+# Francesco Zappa Nardelli
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the &quot;Software&quot;), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED &quot;AS IS&quot;, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+
+
+FTMODULE_H_COMMANDS +&#x3D; BDF_DRIVER
+
+define BDF_DRIVER
+$(OPEN_DRIVER) FT_Driver_ClassRec, bdf_driver_class $(CLOSE_DRIVER)
+$(ECHO_DRIVER)bdf       $(ECHO_DRIVER_DESC)bdf bitmap fonts$(ECHO_DRIVER_DONE)
+endef
+
+# EOF
+</pre>
+</div>
+<div class="dep">
+<h2>MIT License</h2>
+<p class="meta">Used by: freetype-sys 0.20.1</p>
+<pre>#
+# FreeType 2 PCF module definition
+#
+
+# Copyright 2000, 2006 by
+# Francesco Zappa Nardelli
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the &quot;Software&quot;), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED &quot;AS IS&quot;, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+
+
+FTMODULE_H_COMMANDS +&#x3D; PCF_DRIVER
+
+define PCF_DRIVER
+$(OPEN_DRIVER) FT_Driver_ClassRec, pcf_driver_class $(CLOSE_DRIVER)
+$(ECHO_DRIVER)pcf       $(ECHO_DRIVER_DESC)pcf bitmap fonts$(ECHO_DRIVER_DONE)
+endef
+
+# EOF
+</pre>
+</div>
+<div class="dep">
+<h2>MIT License</h2>
+<p class="meta">Used by: qoi 0.4.1</p>
+<pre>/*
+
+clang fuzzing harness for qoi_decode
+
+Compile and run with: 
+	clang -fsanitize&#x3D;address,fuzzer -g -O0 qoifuzz.c &amp;&amp; ./a.out
+
+Dominic Szablewski - https://phoboslab.org
+
+
+-- LICENSE: The MIT License(MIT)
+
+Copyright(c) 2021 Dominic Szablewski
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+this software and associated documentation files(the &quot;Software&quot;), to deal in
+the Software without restriction, including without limitation the rights to
+use, copy, modify, merge, publish, distribute, sublicense, and / or sell copies
+of the Software, and to permit persons to whom the Software is furnished to do
+so, subject to the following conditions :
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+THE SOFTWARE IS PROVIDED &quot;AS IS&quot;, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+*/
+
+
+#define QOI_IMPLEMENTATION
+#include &quot;qoi.h&quot;
+#include &lt;stddef.h&gt;
+#include &lt;stdint.h&gt;
+
+int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
+	int w, h;
+	if (size &lt; 4) {
+		return 0;
+	}
+
+	qoi_desc desc;
+	void* decoded &#x3D; qoi_decode((void*)(data + 4), (int)(size - 4), &amp;desc, *((int *)data));
+	if (decoded !&#x3D; NULL) {
+		free(decoded);
+	}
+	return 0;
+}
+</pre>
+</div>
+<div class="dep">
+<h2>MIT License</h2>
+<p class="meta">Used by: freetype-sys 0.20.1</p>
+<pre>/*
+ * Copyright 2001, 2002, 2012 Francesco Zappa Nardelli
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the &quot;Software&quot;),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED &quot;AS IS&quot;, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+ * THE COMPUTING RESEARCH LAB OR NEW MEXICO STATE UNIVERSITY BE LIABLE FOR ANY
+ * CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT
+ * OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR
+ * THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ */
+
+  /**************************************************************************
+   *
+   * This file is used to define the BDF error enumeration constants.
+   *
+   */
+
+#ifndef BDFERROR_H_
+#define BDFERROR_H_
+
+#include &lt;freetype/ftmoderr.h&gt;
+
+#undef FTERRORS_H_
+
+#undef  FT_ERR_PREFIX
+#define FT_ERR_PREFIX  BDF_Err_
+#define FT_ERR_BASE    FT_Mod_Err_BDF
+
+#include &lt;freetype/fterrors.h&gt;
+
+#endif /* BDFERROR_H_ */
+
+
+/* END */
+</pre>
+</div>
+<div class="dep">
+<h2>MIT License</h2>
+<p class="meta">Used by: freetype-sys 0.20.1</p>
+<pre>/*  bdf.c
+
+    FreeType font driver for bdf files
+
+    Copyright (C) 2001, 2002 by
+    Francesco Zappa Nardelli
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the &quot;Software&quot;), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED &quot;AS IS&quot;, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+*/
+
+
+#define FT_MAKE_OPTION_SINGLE_OBJECT
+
+#include &quot;bdflib.c&quot;
+#include &quot;bdfdrivr.c&quot;
+
+
+/* END */
+</pre>
+</div>
+<div class="dep">
+<h2>MIT License</h2>
+<p class="meta">Used by: freetype-sys 0.20.1</p>
+<pre>/*  bdfdrivr.h
+
+    FreeType font driver for bdf fonts
+
+  Copyright (C) 2001, 2002, 2003, 2004 by
+  Francesco Zappa Nardelli
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the &quot;Software&quot;), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED &quot;AS IS&quot;, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+*/
+
+
+#ifndef BDFDRIVR_H_
+#define BDFDRIVR_H_
+
+#include &lt;freetype/internal/ftdrv.h&gt;
+
+#include &quot;bdf.h&quot;
+
+
+FT_BEGIN_HEADER
+
+
+  typedef struct  BDF_encoding_el_
+  {
+    FT_ULong   enc;
+    FT_UShort  glyph;
+
+  } BDF_encoding_el;
+
+
+  typedef struct  BDF_FaceRec_
+  {
+    FT_FaceRec        root;
+
+    char*             charset_encoding;
+    char*             charset_registry;
+
+    bdf_font_t*       bdffont;
+
+    BDF_encoding_el*  en_table;
+
+    FT_UInt           default_glyph;
+
+  } BDF_FaceRec, *BDF_Face;
+
+
+  FT_EXPORT_VAR( const FT_Driver_ClassRec )  bdf_driver_class;
+
+
+FT_END_HEADER
+
+
+#endif /* BDFDRIVR_H_ */
+
+
+/* END */
+</pre>
+</div>
+<div class="dep">
+<h2>MIT License</h2>
+<p class="meta">Used by: freetype-sys 0.20.1</p>
+<pre>/*  pcf.c
+
+    FreeType font driver for pcf fonts
+
+  Copyright 2000-2001, 2003 by
+  Francesco Zappa Nardelli
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the &quot;Software&quot;), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED &quot;AS IS&quot;, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+*/
+
+
+#define FT_MAKE_OPTION_SINGLE_OBJECT
+
+#include &quot;pcfdrivr.c&quot;
+#include &quot;pcfread.c&quot;
+#include &quot;pcfutil.c&quot;
+
+
+/* END */
+</pre>
+</div>
+<div class="dep">
+<h2>MIT License</h2>
+<p class="meta">Used by: freetype-sys 0.20.1</p>
+<pre>/*  pcfdrivr.h
+
+    FreeType font driver for pcf fonts
+
+  Copyright 2000-2001, 2002 by
+  Francesco Zappa Nardelli
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the &quot;Software&quot;), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED &quot;AS IS&quot;, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+*/
+
+
+#ifndef PCFDRIVR_H_
+#define PCFDRIVR_H_
+
+#include &lt;freetype/internal/ftdrv.h&gt;
+
+
+FT_BEGIN_HEADER
+
+  FT_EXPORT_VAR( const FT_Driver_ClassRec )  pcf_driver_class;
+
+FT_END_HEADER
+
+
+#endif /* PCFDRIVR_H_ */
+
+
+/* END */
+</pre>
+</div>
+<div class="dep">
+<h2>MIT License</h2>
+<p class="meta">Used by: freetype-sys 0.20.1</p>
+<pre>/*  pcfread.h
+
+    FreeType font driver for pcf fonts
+
+  Copyright 2003 by
+  Francesco Zappa Nardelli
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the &quot;Software&quot;), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED &quot;AS IS&quot;, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+*/
+
+
+#ifndef PCFREAD_H_
+#define PCFREAD_H_
+
+
+
+FT_BEGIN_HEADER
+
+  FT_LOCAL( PCF_Property )
+  pcf_find_property( PCF_Face          face,
+                     const FT_String*  prop );
+
+FT_END_HEADER
+
+#endif /* PCFREAD_H_ */
+
+
+/* END */
+</pre>
+</div>
+<div class="dep">
+<h2>MIT License</h2>
+<p class="meta">Used by: freetype-sys 0.20.1</p>
+<pre>/*  pcfutil.h
+
+    FreeType font driver for pcf fonts
+
+  Copyright 2000, 2001, 2004 by
+  Francesco Zappa Nardelli
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the &quot;Software&quot;), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED &quot;AS IS&quot;, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+*/
+
+
+#ifndef PCFUTIL_H_
+#define PCFUTIL_H_
+
+
+#include &lt;ft2build.h&gt;
+#include FT_CONFIG_CONFIG_H
+#include &lt;freetype/internal/compiler-macros.h&gt;
+
+FT_BEGIN_HEADER
+
+  FT_LOCAL( void )
+  BitOrderInvert( unsigned char*  buf,
+                  size_t          nbytes );
+
+  FT_LOCAL( void )
+  TwoByteSwap( unsigned char*  buf,
+               size_t          nbytes );
+
+  FT_LOCAL( void )
+  FourByteSwap( unsigned char*  buf,
+                size_t          nbytes );
+
+FT_END_HEADER
+
+#endif /* PCFUTIL_H_ */
+
+
+/* END */
+</pre>
+</div>
+<div class="dep">
+<h2>MIT License</h2>
+<p class="meta">Used by: atomic-waker 1.1.2, futures-lite 2.6.1</p>
+<pre>&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;
+
+Copyright (c) 2016 Alex Crichton
+Copyright (c) 2017 The Tokio Authors
+
+Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+	http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
+&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;&#x3D;
+
+Copyright (c) 2016 Alex Crichton
+Copyright (c) 2017 The Tokio Authors
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the &quot;Software&quot;), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED &quot;AS IS&quot;, WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
 </pre>
 </div>
 <div class="dep">
@@ -2028,7 +2686,7 @@ THE SOFTWARE.
 </div>
 <div class="dep">
 <h2>MIT License</h2>
-<p class="meta">Used by: bitflags 1.3.2, bitflags 2.13.1, getopts 0.2.24, log 0.4.33, num-bigint 0.4.8, num-complex 0.4.6, num-derive 0.4.2, num-integer 0.1.46, num-rational 0.4.2, num-traits 0.2.19, regex-automata 0.4.18, regex-syntax 0.8.11, regex 1.13.1, xdg 3.0.0</p>
+<p class="meta">Used by: bitflags 1.3.2, bitflags 2.13.1, getopts 0.2.24, log 0.4.34, num-bigint 0.4.8, num-complex 0.4.6, num-derive 0.4.2, num-integer 0.1.47, num-rational 0.4.2, num-traits 0.2.19, regex-automata 0.4.18, regex-syntax 0.8.11, regex 1.13.1, xdg 3.0.0</p>
 <pre>Copyright (c) 2014 The Rust Project Developers
 
 Permission is hereby granted, free of charge, to any
@@ -2058,7 +2716,7 @@ DEALINGS IN THE SOFTWARE.
 </div>
 <div class="dep">
 <h2>MIT License</h2>
-<p class="meta">Used by: uuid 1.24.0</p>
+<p class="meta">Used by: uuid 1.26.0</p>
 <pre>Copyright (c) 2014 The Rust Project Developers
 Copyright (c) 2018 Ashley Mannix, Christopher Armstrong, Dylan DPC, Hunar Roop Kahlon
 
@@ -2089,7 +2747,7 @@ DEALINGS IN THE SOFTWARE.
 </div>
 <div class="dep">
 <h2>MIT License</h2>
-<p class="meta">Used by: html5ever 0.39.0, markup5ever 0.39.0, web_atoms 0.2.5</p>
+<p class="meta">Used by: html5ever 0.39.0, markup5ever 0.39.0, web_atoms 0.2.6</p>
 <pre>Copyright (c) 2014 The html5ever Project Developers
 
 Permission is hereby granted, free of charge, to any
@@ -2119,7 +2777,7 @@ DEALINGS IN THE SOFTWARE.
 </div>
 <div class="dep">
 <h2>MIT License</h2>
-<p class="meta">Used by: libsqlite3-sys 0.38.1, rusqlite 0.40.1</p>
+<p class="meta">Used by: libsqlite3-sys 0.38.2, rusqlite 0.40.2</p>
 <pre>Copyright (c) 2014 The rusqlite developers
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -2200,7 +2858,7 @@ DEALINGS IN THE SOFTWARE.
 </div>
 <div class="dep">
 <h2>MIT License</h2>
-<p class="meta">Used by: flate2 1.1.9</p>
+<p class="meta">Used by: flate2 1.1.10</p>
 <pre>Copyright (c) 2014-2026 Alex Crichton
 
 Permission is hereby granted, free of charge, to any
@@ -2230,7 +2888,7 @@ DEALINGS IN THE SOFTWARE.
 </div>
 <div class="dep">
 <h2>MIT License</h2>
-<p class="meta">Used by: hyper 1.11.0</p>
+<p class="meta">Used by: hyper 1.11.1</p>
 <pre>Copyright (c) 2014-2026 Sean McArthur
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -2254,7 +2912,7 @@ THE SOFTWARE.
 </div>
 <div class="dep">
 <h2>MIT License</h2>
-<p class="meta">Used by: either 1.17.0, itertools 0.14.0</p>
+<p class="meta">Used by: either 1.18.0, itertools 0.14.0</p>
 <pre>Copyright (c) 2015
 
 Permission is hereby granted, free of charge, to any
@@ -2530,7 +3188,7 @@ SOFTWARE.
 </div>
 <div class="dep">
 <h2>MIT License</h2>
-<p class="meta">Used by: which 8.0.5</p>
+<p class="meta">Used by: which 8.0.6</p>
 <pre>Copyright (c) 2015 fangyuanziti
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -2675,7 +3333,7 @@ DEALINGS IN THE SOFTWARE.
 </div>
 <div class="dep">
 <h2>MIT License</h2>
-<p class="meta">Used by: futures-channel 0.3.33, futures-core 0.3.33, futures-executor 0.3.33, futures-io 0.3.33, futures-macro 0.3.33, futures-sink 0.3.33, futures-task 0.3.33, futures-util 0.3.33, futures 0.3.33</p>
+<p class="meta">Used by: futures-channel 0.3.34, futures-core 0.3.34, futures-executor 0.3.34, futures-io 0.3.34, futures-macro 0.3.34, futures-sink 0.3.34, futures-task 0.3.34, futures-util 0.3.34, futures 0.3.34</p>
 <pre>Copyright (c) 2016 Alex Crichton
 Copyright (c) 2017 The Tokio Authors
 
@@ -2958,7 +3616,7 @@ DEALINGS IN THE SOFTWARE.
 </div>
 <div class="dep">
 <h2>MIT License</h2>
-<p class="meta">Used by: indexmap 2.14.0</p>
+<p class="meta">Used by: indexmap 2.14.1</p>
 <pre>Copyright (c) 2016--2017
 
 Permission is hereby granted, free of charge, to any
@@ -3388,7 +4046,7 @@ DEALINGS IN THE SOFTWARE.</pre>
 </div>
 <div class="dep">
 <h2>MIT License</h2>
-<p class="meta">Used by: cookie 0.18.1</p>
+<p class="meta">Used by: cookie 0.18.2</p>
 <pre>Copyright (c) 2017 Sergio Benitez
 Copyright (c) 2014 Alex Crichton
 
@@ -3443,7 +4101,7 @@ SOFTWARE.
 </div>
 <div class="dep">
 <h2>MIT License</h2>
-<p class="meta">Used by: h2 0.4.15</p>
+<p class="meta">Used by: h2 0.4.19</p>
 <pre>Copyright (c) 2017 h2 authors
 
 Permission is hereby granted, free of charge, to any
@@ -4368,7 +5026,7 @@ DEALINGS IN THE SOFTWARE.
 </div>
 <div class="dep">
 <h2>MIT License</h2>
-<p class="meta">Used by: http-body-util 0.1.4, http-body 1.1.0</p>
+<p class="meta">Used by: http-body-util 0.1.5, http-body 1.1.0</p>
 <pre>Copyright (c) 2019-2026 Sean McArthur &amp; Hyper Contributors
 
 Permission is hereby granted, free of charge, to any
@@ -4536,7 +5194,7 @@ SOFTWARE.
 </div>
 <div class="dep">
 <h2>MIT License</h2>
-<p class="meta">Used by: cpufeatures 0.2.17, cpufeatures 0.3.0</p>
+<p class="meta">Used by: cpufeatures 0.2.17</p>
 <pre>Copyright (c) 2020-2025 The RustCrypto Project Developers
 
 Permission is hereby granted, free of charge, to any
@@ -4566,7 +5224,7 @@ DEALINGS IN THE SOFTWARE.
 </div>
 <div class="dep">
 <h2>MIT License</h2>
-<p class="meta">Used by: const-oid 0.10.2</p>
+<p class="meta">Used by: const-oid 0.10.2, cpufeatures 0.3.1</p>
 <pre>Copyright (c) 2020-2026 The RustCrypto Project Developers
 
 Permission is hereby granted, free of charge, to any
@@ -4896,8 +5554,38 @@ DEALINGS IN THE SOFTWARE.
 </div>
 <div class="dep">
 <h2>MIT License</h2>
-<p class="meta">Used by: zbus 5.18.0, zbus_macros 5.18.0, zbus_names 4.3.4, zbus_xml 5.2.1, zvariant 5.13.1, zvariant_derive 5.13.1</p>
+<p class="meta">Used by: zbus 5.19.0, zbus_macros 5.19.0, zbus_names 4.3.4, zbus_xml 5.2.1, zvariant 5.15.0, zvariant_derive 5.15.0</p>
 <pre>Copyright (c) 2024 Zeeshan Ali Khan &amp; zbus contributors
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the &quot;Software&quot;), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED &quot;AS IS&quot;, WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+</pre>
+</div>
+<div class="dep">
+<h2>MIT License</h2>
+<p class="meta">Used by: zcheapstr 1.1.0</p>
+<pre>Copyright (c) 2026 Zeeshan Ali Khan &amp; zcheapstr contributors
 
 Permission is hereby granted, free of charge, to any
 person obtaining a copy of this software and associated
@@ -5188,7 +5876,7 @@ OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWA
 </div>
 <div class="dep">
 <h2>MIT License</h2>
-<p class="meta">Used by: zerocopy-derive 0.8.55, zerocopy 0.8.55</p>
+<p class="meta">Used by: zerocopy-derive 0.8.56, zerocopy 0.8.56</p>
 <pre>Copyright 2023 The Fuchsia Authors
 
 Permission is hereby granted, free of charge, to any
@@ -5438,7 +6126,7 @@ SOFTWARE.
 </div>
 <div class="dep">
 <h2>MIT License</h2>
-<p class="meta">Used by: crc32fast 1.5.0</p>
+<p class="meta">Used by: crc32fast 1.5.1</p>
 <pre>MIT License
 
 Copyright (c) 2018 Sam Rijs, Alex Crichton and contributors
@@ -5900,7 +6588,7 @@ SOFTWARE.</pre>
 </div>
 <div class="dep">
 <h2>MIT License</h2>
-<p class="meta">Used by: accesskit 0.24.1, accesskit_atspi_common 0.19.1, accesskit_consumer 0.38.0, accesskit_macos 0.26.3, accesskit_unix 0.22.1, accesskit_windows 0.34.0, chrono 0.4.45, fluent-langneg 0.13.1, fluent-langneg 0.14.2, imap-proto 0.16.7, intl_pluralrules 7.0.2, libm 0.2.16, objc-sys 0.3.5, objc2-app-kit 0.2.2, objc2-encode 4.1.0, objc2-foundation 0.2.2, objc2-foundation 0.3.2, objc2 0.5.2, objc2 0.6.4, profiling-procmacros 1.0.18, profiling 1.0.18, pulp-wasm-simd-flag 0.1.1, simd_helpers 0.1.0, siphasher 1.0.3, stop-token 0.7.0, type-map 0.5.1, whatlang 0.18.0, windows-collections 0.3.2, windows-core 0.56.0, windows-core 0.62.2, windows-future 0.3.2, windows-implement 0.56.0, windows-implement 0.60.2, windows-interface 0.56.0, windows-interface 0.59.3, windows-link 0.2.1, windows-numerics 0.3.1, windows-registry 0.6.1, windows-result 0.1.2, windows-result 0.4.1, windows-strings 0.5.1, windows-sys 0.61.2, windows-targets 0.52.6, windows-threading 0.2.1, windows 0.56.0, windows 0.62.2, windows_x86_64_gnu 0.52.6, windows_x86_64_msvc 0.52.6, zune-inflate 0.2.54</p>
+<p class="meta">Used by: accesskit 0.25.0, accesskit_atspi_common 0.20.0, accesskit_consumer 0.39.0, accesskit_macos 0.27.0, accesskit_unix 0.23.0, accesskit_windows 0.35.0, chrono 0.4.45, fluent-langneg 0.13.1, fluent-langneg 0.14.2, imap-proto 0.16.7, intl_pluralrules 7.0.2, libm 0.2.16, objc-sys 0.3.5, objc2-app-kit 0.2.2, objc2-encode 4.1.0, objc2-foundation 0.2.2, objc2-foundation 0.3.2, objc2 0.5.2, objc2 0.6.4, profiling-procmacros 1.0.18, profiling 1.0.18, pulp-wasm-simd-flag 0.1.1, simd_helpers 0.1.0, siphasher 1.0.3, stop-token 0.7.0, type-map 0.5.1, whatlang 0.18.0, windows-collections 0.3.2, windows-core 0.56.0, windows-core 0.62.2, windows-future 0.3.2, windows-implement 0.56.0, windows-implement 0.60.2, windows-interface 0.56.0, windows-interface 0.59.3, windows-link 0.2.1, windows-numerics 0.3.1, windows-registry 0.6.1, windows-result 0.1.2, windows-result 0.4.1, windows-strings 0.5.1, windows-sys 0.61.2, windows-targets 0.52.6, windows-threading 0.2.1, windows 0.56.0, windows 0.62.2, windows_x86_64_gnu 0.52.6, windows_x86_64_msvc 0.52.6, zune-inflate 0.2.54</p>
 <pre>MIT License
 
 Copyright (c) &lt;year&gt; &lt;copyright holders&gt;
@@ -5975,7 +6663,7 @@ SOFTWARE.
 </div>
 <div class="dep">
 <h2>MIT License</h2>
-<p class="meta">Used by: zune-core 0.5.1, zune-jpeg 0.5.15</p>
+<p class="meta">Used by: zune-core 0.5.3, zune-jpeg 0.5.15</p>
 <pre>MIT License
 
 Copyright (c) zune-image developers
@@ -6001,7 +6689,7 @@ SOFTWARE.
 </div>
 <div class="dep">
 <h2>MIT License</h2>
-<p class="meta">Used by: miniz_oxide 0.8.9</p>
+<p class="meta">Used by: miniz_oxide 0.8.9, miniz_oxide 0.9.1</p>
 <pre>MIT License
 
 Copyright 2013-2014 RAD Game Tools and Valve Software
@@ -6169,7 +6857,7 @@ DEALINGS IN THE SOFTWARE.</pre>
 </div>
 <div class="dep">
 <h2>MIT License</h2>
-<p class="meta">Used by: adler2 2.0.1, anyhow 1.0.104, async-channel 1.9.0, async-channel 2.5.0, async-executor 1.14.0, async-io 2.6.0, async-lock 3.4.2, async-native-tls 0.5.0, async-process 2.5.0, async-signal 0.2.14, async-task 4.7.1, async-trait 0.1.91, atomic-waker 1.1.2, blocking 1.6.2, concurrent-queue 2.5.0, curve25519-dalek-derive 0.1.1, displaydoc 0.2.7, dtoa 1.0.11, endi 1.1.1, event-listener-strategy 0.5.4, event-listener 2.5.3, event-listener 5.4.2, fastrand 2.5.0, futures-lite 2.6.1, glam 0.33.3, itoa 1.0.18, leb128fmt 0.1.0, linux-raw-sys 0.12.1, minimal-lexical 0.2.1, once_cell 1.21.4, ordered-stream 0.2.0, parking 2.2.1, paste 1.0.15, pastey 0.1.1, pin-project-internal 1.1.13, pin-project-lite 0.2.17, pin-project 1.1.13, piper 0.2.5, polling 3.11.0, proc-macro-crate 3.5.0, proc-macro2 1.0.107, quote 1.0.47, rustix 1.1.4, semver 1.0.28, serde 1.0.229, serde_core 1.0.229, serde_derive 1.0.229, serde_json 1.0.151, serde_repr 0.1.21, servo_arc 0.4.3, syn 2.0.119, syn 3.0.3, thiserror-impl 1.0.69, thiserror-impl 2.0.19, thiserror 1.0.69, thiserror 2.0.19, unic-langid-impl 0.9.6, unic-langid 0.9.6, unicode-ident 1.0.24, utf-8 0.7.6, wasm-encoder 0.252.0, wasmparser 0.252.0, wasmparser 0.254.0, wasmprinter 0.252.0, wit-parser 0.252.0, zbus-lockstep-macros 0.5.2, zbus-lockstep 0.5.2, zmij 1.0.23, zvariant_utils 3.5.0</p>
+<p class="meta">Used by: adler2 2.0.1, anyhow 1.0.104, async-channel 1.9.0, async-channel 2.5.0, async-executor 1.14.0, async-io 2.6.0, async-lock 3.4.2, async-native-tls 0.6.0, async-process 2.5.0, async-signal 0.2.14, async-task 4.7.1, async-trait 0.1.92, atomic-waker 1.1.2, blocking 1.7.0, concurrent-queue 2.5.0, curve25519-dalek-derive 0.1.1, displaydoc 0.2.7, dtoa 1.0.11, endi 1.1.1, event-listener-strategy 0.5.4, event-listener 2.5.3, event-listener 5.4.2, fastrand 2.5.0, futures-lite 2.6.1, glam 0.33.6, itoa 1.0.18, leb128fmt 0.1.0, linux-raw-sys 0.12.1, minimal-lexical 0.2.1, once_cell 1.21.4, ordered-stream 0.2.0, parking 2.2.1, paste 1.0.15, pastey 0.1.1, pin-project-internal 1.1.13, pin-project-lite 0.2.17, pin-project 1.1.13, piper 0.2.5, polling 3.11.0, proc-macro-crate 3.5.0, proc-macro2 1.0.107, quote 1.0.47, rustix 1.1.4, semver 1.0.28, serde 1.0.229, serde_core 1.0.229, serde_derive 1.0.229, serde_json 1.0.151, serde_repr 0.1.21, servo_arc 0.4.3, syn 2.0.119, syn 3.0.4, thiserror-impl 1.0.69, thiserror-impl 2.0.20, thiserror 1.0.69, thiserror 2.0.20, unic-langid-impl 0.9.6, unic-langid 0.9.6, unicode-ident 1.0.24, utf-8 0.7.6, wasm-encoder 0.254.0, wasm-metadata 0.254.0, wasmparser 0.254.0, wasmparser 0.258.0, wasmprinter 0.254.0, wit-component 0.254.0, wit-parser 0.254.0, zbus-lockstep-macros 0.5.2, zbus-lockstep 0.5.2, zmij 1.0.23, zvariant_utils 4.2.0</p>
 <pre>Permission is hereby granted, free of charge, to any
 person obtaining a copy of this software and associated
 documentation files (the &quot;Software&quot;), to deal in the
@@ -6283,6 +6971,32 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 </div>
 <div class="dep">
 <h2>MIT License</h2>
+<p class="meta">Used by: tracing-core 0.1.36</p>
+<pre>The MIT License (MIT)
+
+Copyright (c) 2014 Mathijs van de Nes
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the &quot;Software&quot;), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED &quot;AS IS&quot;, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+</pre>
+</div>
+<div class="dep">
+<h2>MIT License</h2>
 <p class="meta">Used by: typenum 1.20.1</p>
 <pre>The MIT License (MIT)
 
@@ -6362,7 +7076,7 @@ THE SOFTWARE.
 </div>
 <div class="dep">
 <h2>MIT License</h2>
-<p class="meta">Used by: phf 0.13.1, phf_generator 0.13.1, phf_macros 0.13.1, phf_shared 0.13.1</p>
+<p class="meta">Used by: phf 0.13.1, phf 0.14.0, phf_generator 0.13.1, phf_generator 0.14.0, phf_macros 0.13.1, phf_macros 0.14.0, phf_shared 0.13.1, phf_shared 0.14.0</p>
 <pre>The MIT License (MIT)
 
 Copyright (c) 2014-2022 Steven Fackler, Yuki Okushi
@@ -6595,7 +7309,7 @@ SOFTWARE.
 </div>
 <div class="dep">
 <h2>MIT License</h2>
-<p class="meta">Used by: aws-lc-sys 0.43.0</p>
+<p class="meta">Used by: aws-lc-sys 0.44.0</p>
 <pre>The MIT License (MIT)
 
 Copyright (c) 2015-2020 the fiat-crypto authors (see
@@ -6832,6 +7546,33 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
+</pre>
+</div>
+<div class="dep">
+<h2>MIT License</h2>
+<p class="meta">Used by: rustybuzz 0.20.1</p>
+<pre>The MIT License (MIT)
+
+Copyright (c) HarfBuzz developers
+Copyright (c) 2020 Yevhenii Reizner
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the &quot;Software&quot;), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED &quot;AS IS&quot;, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 </pre>
 </div>
 <div class="dep">
@@ -8194,7 +8935,7 @@ authorization of the copyright holder.
 </div>
 <div class="dep">
 <h2>Unicode License v3</h2>
-<p class="meta">Used by: icu_collections 2.2.0, icu_locale_core 2.2.0, icu_locid 1.5.0, icu_normalizer 2.2.0, icu_normalizer_data 2.2.0, icu_properties 2.2.0, icu_properties_data 2.2.0, icu_provider 2.2.0, litemap 0.7.5, litemap 0.8.2, potential_utf 0.1.5, tinystr 0.7.6, tinystr 0.8.3, writeable 0.5.5, writeable 0.6.3, yoke-derive 0.8.2, yoke 0.8.3, zerofrom-derive 0.1.7, zerofrom 0.1.8, zerotrie 0.2.4, zerovec-derive 0.11.3, zerovec 0.11.6</p>
+<p class="meta">Used by: icu_collections 2.3.0, icu_locale_core 2.3.0, icu_locid 1.5.0, icu_normalizer 2.3.0, icu_normalizer_data 2.3.0, icu_properties 2.3.0, icu_properties_data 2.3.0, icu_provider 2.3.1, litemap 0.7.5, litemap 0.8.3, potential_utf 0.1.6, tinystr 0.7.6, tinystr 0.8.4, writeable 0.5.5, writeable 0.6.4, yoke-derive 0.8.2, yoke 0.8.3, zerofrom-derive 0.1.7, zerofrom 0.1.8, zerotrie 0.2.5, zerovec-derive 0.11.6, zerovec 0.11.8</p>
 <pre>UNICODE LICENSE V3
 
 COPYRIGHT AND PERMISSION NOTICE
@@ -8293,3 +9034,4 @@ freely, subject to the following restrictions:
 
 </body>
 </html>
+
