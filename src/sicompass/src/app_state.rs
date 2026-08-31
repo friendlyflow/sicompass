@@ -145,10 +145,16 @@ pub enum Coordinate {
     /// like [`Coordinate::General`]; it just says that `:` is what got you here.
     /// Set only by `handlers::rest_coordinate`, never assigned literally.
     SessionCommand,
-    /// The same session view (claude's session) for a provider that *does* offer
-    /// a second colon layer. Distinct from [`Coordinate::SessionCommand`] purely
-    /// so the two are distinguishable by ear: "first command mode" says another
-    /// `:` is available, "command mode" says this is the only layer.
+    /// A view reached by pressing `:` that has another `:` available on top of
+    /// it: claude's session, and the git client's opened repository. Distinct
+    /// from [`Coordinate::SessionCommand`] purely so the two are
+    /// distinguishable by ear: "first command mode" says another `:` is
+    /// available, "command mode" says this is the only layer.
+    ///
+    /// What that second `:` opens differs, and names itself accordingly:
+    /// claude's is the insert palette ([`Coordinate::SecondCommand`], "second
+    /// command mode", which types into a live prompt), the git client's is the
+    /// ordinary command palette ([`Coordinate::Command`], "command mode").
     SessionFirstCommand,
     /// The second colon layer over a live prompt — claude's skills list, what
     /// the code still calls the insert palette. Behaves exactly like

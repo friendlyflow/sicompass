@@ -1077,8 +1077,24 @@ pub fn handle_colon(r: &mut AppRenderer) {
         open_session_view(r);
         return;
     }
+    // The same "a one-item palette would be pure ceremony" argument, for a
+    // provider whose opened view *does* have a palette. Guarded on the command
+    // being on offer, which is true only in the folder listing.
+    if browse_then_view_is_browsing(r) {
+        apply_view_command(r, VIEW_CMD_OPEN);
+        return;
+    }
     r.previous_coordinate = r.coordinate;
-    r.coordinate = Coordinate::Command;
+    // A browse-then-view provider's palette is the second colon layer: the
+    // first one opened the view it belongs to. Naming it apart from an ordinary
+    // palette is the only thing that tells the two layers apart by ear, and the
+    // header reads "second command mode" to match the "first command mode" it
+    // was opened from. Behaviour is identical — `base()` is `Command`.
+    r.coordinate = if browse_then_view_is_open(r) {
+        Coordinate::SecondCommand
+    } else {
+        Coordinate::Command
+    };
     r.current_command = CommandPhase::None;
     r.provider_command_name.clear();
     r.input_buffer.clear();
@@ -1122,6 +1138,55 @@ pub(crate) fn is_browse_then_session_provider(r: &AppRenderer) -> bool {
         .is_some_and(|p| is_browse_then_session_name(p.name()))
 }
 
+/// Command id a browse-then-view provider offers while its folder listing is up.
+pub(crate) const VIEW_CMD_OPEN: &str = "open repository";
+
+/// Providers laid out as "browse a folder tree, then `:` opens a *view* on the
+/// folder being listed", where that view is an ordinary tree with a command
+/// palette of its own: the git client.
+///
+/// The browse half behaves exactly like [`is_browse_then_session_name`] — one
+/// command on offer, so `:` fires it rather than showing a one-item palette.
+/// The difference is what `:` means afterwards. A session has no palette and
+/// `:` swaps back out of it; a repository has a palette full of git commands,
+/// so joining the pair above would make every one of them unreachable.
+///
+/// Matched by name for the same reason as the pair above: `sicompass-sdk` is
+/// consumed from crates.io at a pinned version, so a new `Provider` hook would
+/// need a publish round-trip.
+pub(crate) fn is_browse_then_view_name(name: &str) -> bool {
+    matches!(name, "gitclient")
+}
+
+/// Command id that takes a browse-then-view provider back to its folder
+/// listing, from any depth inside it.
+///
+/// Dispatched by name and deliberately **not** advertised in `commands()`:
+/// Escape is the way out, and a palette entry doing the same thing would be a
+/// second name for one action. `handle_command` matches the id whether or not
+/// it is listed, the same way `"delete"` and `"toggle bookmark"` are reached.
+pub(crate) const VIEW_CMD_CLOSE: &str = "close repository";
+
+/// [`is_browse_then_view_name`] for the active provider, and only while it is
+/// still in its folder listing. The opened view never offers `open repository`,
+/// so `:` there falls through to the ordinary palette.
+pub(crate) fn browse_then_view_is_browsing(r: &AppRenderer) -> bool {
+    crate::provider::get_active_provider_ref(r).is_some_and(|p| is_browse_then_view_name(p.name()))
+        && crate::provider::get_commands(r)
+            .iter()
+            .any(|c| c == VIEW_CMD_OPEN)
+}
+
+/// True in a browse-then-view provider's opened view: the git client with a
+/// repository open, at any depth inside it.
+///
+/// Read off the provider's identity plus the absence of `open repository`,
+/// which is exactly how `in_session_view` reads its own state.
+pub(crate) fn browse_then_view_is_open(r: &AppRenderer) -> bool {
+    crate::provider::get_active_provider_ref(r).is_some_and(|p| is_browse_then_view_name(p.name()))
+        && !browse_then_view_is_browsing(r)
+}
+
 /// True when the provider is currently showing its session rather than folders.
 ///
 /// Read off `commands()`: the provider offers `browse` only while the session is
@@ -1151,6 +1216,25 @@ pub(crate) fn in_session_view(r: &AppRenderer) -> bool {
 /// claude always offers `skills`, so a session in a folder with none still says
 /// "first command mode" and the second `:` answers "nothing to insert".
 pub(crate) fn rest_coordinate(r: &AppRenderer) -> Coordinate {
+    // A browse-then-view provider's opened view is reached by pressing `:` and
+    // has a palette of its own, so it names itself rather than calling itself
+    // "general mode" like the folder listing it came from — the exact problem
+    // this family of labels exists to fix.
+    //
+    // `SessionFirstCommand` ("first command mode") rather than
+    // `SessionCommand`, by the same rule the session views use below: the view
+    // offers commands beyond the swap that got you here, so another `:` is
+    // available and this is the *first* of two. The ladder then reads general
+    // mode, first command mode, command mode.
+    if crate::provider::get_active_provider_ref(r)
+        .is_some_and(|p| is_browse_then_view_name(p.name()))
+    {
+        return if browse_then_view_is_browsing(r) {
+            Coordinate::General
+        } else {
+            Coordinate::SessionFirstCommand
+        };
+    }
     if !is_browse_then_session_provider(r) {
         return Coordinate::General;
     }
@@ -1548,6 +1632,19 @@ pub(crate) fn open_session_view(r: &mut AppRenderer) {
 fn apply_view_command(r: &mut AppRenderer, cmd: &str) {
     crate::provider::handle_command(r, cmd, "", 0);
 
+    // A view-swap command can refuse: the git client's `:` on a folder that is
+    // not a repository has nothing to open. Every exit below rebuilds the list,
+    // and `create_list_current_layer` clears `error_message`, so the reason has
+    // to be carried across it or it is silently thrown away and `:` looks like
+    // it did nothing at all.
+    let refused = std::mem::take(&mut r.error_message);
+    if !refused.is_empty() {
+        list::create_list_current_layer(r);
+        r.error_message = refused;
+        r.needs_redraw = true;
+        return;
+    }
+
     // The mode name follows the swap on its own: both exits below go through
     // `list::create_list_current_layer`, which reconciles the at-rest coordinate
     // against `rest_coordinate`. So entering the session relabels General to the
@@ -1559,7 +1656,19 @@ fn apply_view_command(r: &mut AppRenderer, cmd: &str) {
     // may have moved. Rebuild the tree down to it, so the current level lists
     // that folder's own contents — the level the session was covering — and the
     // breadcrumb above describes where the user really is.
-    if cmd == VIEW_CMD_BROWSE {
+    // Also rebuild when the swap left the provider at its own root while the
+    // cursor is deeper: every level the cursor is sitting in is a listing of the
+    // view being left, so re-fetching them in place would graft the new view's
+    // content into stale levels. That is the git client opening the repository
+    // it was standing several folders inside.
+    let now_at_root = r.current_id.depth() > 2
+        && crate::provider::get_active_provider_ref(r).is_some_and(|p| p.at_root());
+    // `close repository` takes the same path for the same reason `browse` does:
+    // the folder listing it lands on has to have its ancestors above it, or
+    // Left from there leaves the provider entirely instead of walking up the
+    // directory tree. `refresh_current_directory` replaces one level and builds
+    // no ancestors, which is what left the restored tab stranded.
+    if cmd == VIEW_CMD_BROWSE || cmd == VIEW_CMD_CLOSE || now_at_root {
         // Consumed either way: a remembered row that outlives one swap is stale.
         let origin = r.session_view_return_id.take();
         if crate::provider::rebuild_path_from_root(r) {
@@ -3475,6 +3584,19 @@ pub fn handle_escape(r: &mut AppRenderer) {
     // "cancel this edit".
     if r.coordinate.is_general() && at_session_input_level(r) {
         apply_view_command(r, VIEW_CMD_BROWSE);
+        return;
+    }
+    // Git client: Escape leaves the repository from any depth inside it, the
+    // same way it leaves a shell.
+    //
+    // Escape unwinds *modes*, Left unwinds levels — that split is what the rest
+    // of the app does, and the repository is a mode the user pressed `:` to
+    // enter. Stepping out one level at a time here would make Escape a second
+    // Left in this one provider and nowhere else. `apply_view_command` rebuilds
+    // the folder tree from its root afterwards, so the depth being left makes
+    // no difference to what is landed on.
+    if r.coordinate.is_general() && browse_then_view_is_open(r) {
+        apply_view_command(r, VIEW_CMD_CLOSE);
         return;
     }
     match r.coordinate.base() {

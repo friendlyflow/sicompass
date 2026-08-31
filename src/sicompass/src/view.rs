@@ -1104,7 +1104,19 @@ fn update_view(app: &mut AppState) {
             // into the live prompt), the mode name says which layer you are on.
             // Both labels are 8 bytes, so `search_pin_len` below needs only an
             // extra arm, not a new width.
-            Coordinate::SecondCommand => ("insert: ", app.renderer.input_buffer.as_str()),
+            // Both palettes are the second colon layer and both are
+            // `SecondCommand`, so the prefix is chosen by which one is open,
+            // not by the coordinate: claude's splices its rows into the live
+            // prompt, the git client's runs a command. Both labels are 8 bytes,
+            // so `search_pin_len` below needs no new arm.
+            Coordinate::SecondCommand => {
+                let prefix = if handlers::in_insert_palette(&app.renderer) {
+                    "insert: "
+                } else {
+                    "search: "
+                };
+                (prefix, app.renderer.input_buffer.as_str())
+            }
             Coordinate::Command => ("search: ", app.renderer.input_buffer.as_str()),
             Coordinate::ExtendedSearch => ("ext search: ", app.renderer.input_buffer.as_str()),
             Coordinate::TabSwitcher => ("switch tab: ", app.renderer.input_buffer.as_str()),
@@ -1119,7 +1131,9 @@ fn update_view(app: &mut AppState) {
             // While filtering the second layer the match count is the useful
             // readout, the same as for the search modes. The ordinary command
             // palette keeps its bare prompt.
-            Coordinate::SecondCommand => format!(" [{} items]", list_items.len()),
+            Coordinate::SecondCommand if handlers::in_insert_palette(&app.renderer) => {
+                format!(" [{} items]", list_items.len())
+            }
             Coordinate::SimpleSearch | Coordinate::ExtendedSearch => {
                 format!(" [{} items]", list_items.len())
             }
