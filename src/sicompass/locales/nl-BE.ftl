@@ -63,6 +63,7 @@ hint-s-scroll = S      Scrollen
 hint-command = :      Commando
 hint-shell = :      Shell
 hint-claude = :      Claude
+hint-repository = :      Repository
 
 hint-ctrl-a-insert-after = Ctrl+A Voeg na in
 hint-ctrl-a-select-all = Ctrl+A Sel. alles

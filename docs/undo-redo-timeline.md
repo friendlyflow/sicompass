@@ -74,6 +74,17 @@ Document these in new features.
   rather than corrupting state.
 - Matrix `PostMessage` undo is **redact**, not retraction: recipients see
   "message deleted" rather than the message vanishing.
+- Git client: `stage`, `unstage`, `stash`, `create branch` and `commit` are on
+  the timeline. `commit` undoes as `git reset --soft` back to the recorded
+  parent, so the work returns to the index exactly as it was; undoing the
+  *first* commit of a repository is `git update-ref -d HEAD`, because there is
+  no parent to reset to.
+- Git client, not on the timeline at all, and deliberately: `push`, `pull` and
+  `fetch` (undoing a push means force-pushing over someone else's work),
+  `discard changes` (the content is gone, which is why it asks first),
+  `commit --amend` (the commit it replaced is unreachable by name afterwards),
+  and `revert`, `cherry-pick`, `merge` and `rebase` (each produces its own
+  commits, and git's own `revert` or `reflog` is the honest way back).
 
 ## Migration state
 

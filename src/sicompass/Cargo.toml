@@ -406,6 +406,10 @@ sicompass-terminal = { workspace = true }
 # `ensure_builtins`. Without it the skills-palette tests would see whatever
 # lives in the developer's own `~/.claude/skills`.
 sicompass-claude = { workspace = true }
+# Only to switch network access off for the test binary — see
+# `ensure_builtins`. Without it a fixture repository with a remote configured
+# would have these tests contacting it.
+sicompass-gitclient = { workspace = true }
 sicompass-chatclient = { workspace = true }
 sicompass-emailclient = { workspace = true }
 sicompass-remote = { workspace = true }

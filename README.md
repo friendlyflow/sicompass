@@ -101,6 +101,15 @@ what a website expects to see. Without it Chrome runs headless instead, which a
 few sites detect and block. If a page refuses to load, install `xvfb` with
 `sudo apt install xvfb` or `sudo dnf install xorg-x11-server-Xvfb`.
 
+### The git client
+
+The git client runs the `git` you already have, so install it if you want to use
+that provider. Most systems have it. If yours does not, `sudo apt install git` or
+`sudo dnf install git` is all it needs. It uses your own git config, your own ssh
+agent and your own credential helpers, exactly as your shell would, so a
+repository you can push from a terminal is one you can push from here. Nothing is
+fetched in the background unless you ask for it in Settings.
+
 ### Checking that it worked
 
 ```bash
@@ -142,8 +151,8 @@ toolchain. Rerun that script if you change anything under `shaders/`, and
 ## Built-in providers
 
 Each provider turns a different data source into the same keyboard-navigable
-tree: File Browser, Text Editor, Email, Chat, Web Browser, Terminal, Plugin
-Store, and Settings.
+tree: File Browser, Text Editor, Email, Chat, Web Browser, Terminal, Git Client,
+Plugin Store, and Settings.
 
 ## Community
 

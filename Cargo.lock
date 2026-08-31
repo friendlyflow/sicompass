@@ -4408,6 +4408,7 @@ dependencies = [
  "sicompass-claude",
  "sicompass-emailclient",
  "sicompass-filebrowser",
+ "sicompass-gitclient",
  "sicompass-remote",
  "sicompass-sdk",
  "sicompass-settings",
@@ -4438,6 +4439,7 @@ dependencies = [
  "sicompass-claude",
  "sicompass-emailclient",
  "sicompass-filebrowser",
+ "sicompass-gitclient",
  "sicompass-remote",
  "sicompass-sales-demo",
  "sicompass-sdk",
@@ -4505,6 +4507,16 @@ dependencies = [
  "sicompass-sdk",
  "tempfile",
  "trash",
+]
+
+[[package]]
+name = "sicompass-gitclient"
+version = "0.1.17"
+dependencies = [
+ "async-trait",
+ "natord",
+ "sicompass-sdk",
+ "tempfile",
 ]
 
 [[package]]

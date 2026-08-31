@@ -172,11 +172,25 @@ fn left_goes_back(r: &AppRenderer) -> bool {
     not_at_root(r) && !handlers::at_session_input_level(r)
 }
 
-/// True for every provider that actually has a command palette. The
-/// browse-then-session providers do not: their `:` opens a session instead, and
-/// leaving this true for them would advertise two conflicting `:` hints at once.
+/// True in the git client's folder-browse view, where `:` opens the repository
+/// that folder is in.
+fn git_browsing(r: &AppRenderer) -> bool {
+    handlers::browse_then_view_is_browsing(r)
+}
+
+/// True anywhere inside an open repository, where Escape closes it and goes
+/// back to the folder listing — the same shape as `in_session_view` for a
+/// shell.
+fn git_can_close(r: &AppRenderer) -> bool {
+    handlers::browse_then_view_is_open(r)
+}
+
+/// True for every provider that actually has a command palette *right now*. The
+/// browse-then-session providers never do: their `:` opens a session instead,
+/// and leaving this true for them would advertise two conflicting `:` hints at
+/// once. The git client does, but not while it is still picking a repository.
 fn has_command_palette(r: &AppRenderer) -> bool {
-    !handlers::is_browse_then_session_provider(r)
+    !handlers::is_browse_then_session_provider(r) && !git_browsing(r)
 }
 
 /// True where `:` opens an insert palette: standing on a level that ends in a
@@ -494,6 +508,16 @@ pub static SHORTCUTS: &[Shortcut] = &[
         modes: &[Coordinate::General],
         label: "Esc    Folders",
         is_available: in_session_view,
+        handle: handlers::handle_escape,
+    },
+    Shortcut {
+        key: Keycode::Escape,
+        key2: None,
+        ctrl: false,
+        shift: false,
+        modes: &[Coordinate::General],
+        label: "Esc    Folders",
+        is_available: git_can_close,
         handle: handlers::handle_escape,
     },
     Shortcut {
@@ -1331,6 +1355,16 @@ pub static SHORTCUTS: &[Shortcut] = &[
         ctrl: false,
         shift: true,
         modes: &[Coordinate::General],
+        label: ":      Repository",
+        is_available: git_browsing,
+        handle: handlers::handle_colon,
+    },
+    Shortcut {
+        key: Keycode::Semicolon,
+        key2: None,
+        ctrl: false,
+        shift: true,
+        modes: &[Coordinate::General],
         label: ":      Command",
         is_available: has_command_palette,
         handle: handlers::handle_colon,
@@ -1353,6 +1387,16 @@ pub static SHORTCUTS: &[Shortcut] = &[
         modes: &[Coordinate::General],
         label: ":      Claude",
         is_available: claude_browsing,
+        handle: handlers::handle_colon,
+    },
+    Shortcut {
+        key: Keycode::Colon,
+        key2: None,
+        ctrl: false,
+        shift: false,
+        modes: &[Coordinate::General],
+        label: ":      Repository",
+        is_available: git_browsing,
         handle: handlers::handle_colon,
     },
     Shortcut {

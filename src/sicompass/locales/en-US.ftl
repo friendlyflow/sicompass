@@ -65,6 +65,7 @@ hint-s-scroll = S      Scroll
 hint-command = :      Command
 hint-shell = :      Shell
 hint-claude = :      Claude
+hint-repository = :      Repository
 
 hint-ctrl-a-insert-after = Ctrl+A Insert after
 hint-ctrl-a-select-all = Ctrl+A Select all

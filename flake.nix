@@ -68,6 +68,13 @@
               # are no WASI imports to adapt.
               wasm-tools
 
+              # git: the sicompass-gitclient provider shells out to it rather
+              # than linking libgit2, so it is a runtime dependency of that
+              # provider and a test dependency of its crate. Pinned here so
+              # `nix develop -c cargo test` does not silently depend on
+              # whatever git happens to be on the contributor's PATH.
+              git
+
               # Native libs required by Rust crates
               pkg-config
               sdl3

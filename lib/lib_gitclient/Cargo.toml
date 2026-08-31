@@ -1,0 +1,18 @@
+[package]
+publish = false  # internal crate, never published to crates.io
+name = "sicompass-gitclient"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Sicompass git client provider (shells out to the git binary)"
+
+[dependencies]
+sicompass-sdk = { workspace = true }
+# `undo` / `redo` are `#[async_trait]` methods, so overriding them needs the
+# macro even though nothing here awaits.
+async-trait = { workspace = true }
+# Natural sort for the directory-browse listing, matching the terminal.
+natord = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

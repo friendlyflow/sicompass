@@ -35,6 +35,12 @@ fn ensure_builtins() {
     // and their counts would differ per machine. Project skills, written into a
     // tempdir by each test, are unaffected.
     sicompass_claude::_set_test_no_ambient_skills(true);
+    // And for the git client: `push`, `pull` and `fetch` contact a real
+    // remote, so without this a fixture repository that happens to have one
+    // configured would have the tests talking to it, hanging on a credential
+    // prompt, or failing differently depending on whether the machine is
+    // online.
+    sicompass_gitclient::_set_test_no_network(true);
 }
 
 // ---------------------------------------------------------------------------
@@ -16886,4 +16892,602 @@ fn no_general_mode_key_goes_silent_inside_a_shell() {
     renderer.pending_announcement = None;
     press(&mut renderer, Keycode::W);
     assert!(announced_text(&renderer).is_some(), "w");
+}
+
+// ---------------------------------------------------------------------------
+// Git client
+//
+// These guard the app-side edits the provider needed: `:` firing the repository
+// open directly in the folder listing, the palette coming back once it is open,
+// and the cursor being rebuilt from the provider root across that swap.
+// ---------------------------------------------------------------------------
+
+/// A repository built from nothing, isolated from the developer's own git
+/// config so their hooks, signing key and identity play no part.
+fn git_fixture(root: &Path) {
+    let run = |args: &[&str]| {
+        let out = std::process::Command::new("git")
+            .arg("-C")
+            .arg(root)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("HOME", root)
+            .env("LC_ALL", "C")
+            .args([
+                "-c",
+                "user.name=Test",
+                "-c",
+                "user.email=test@example.invalid",
+                "-c",
+                "commit.gpgsign=false",
+                "-c",
+                "init.defaultBranch=main",
+                "-c",
+                "core.hooksPath=",
+            ])
+            .args(args)
+            .output()
+            .expect("git should be on PATH");
+        assert!(
+            out.status.success(),
+            "git {args:?} failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    };
+    run(&["init", "-q"]);
+    std::fs::write(root.join("tracked.txt"), "one\n").unwrap();
+    run(&["add", "-A"]);
+    run(&["commit", "-q", "-m", "first"]);
+}
+
+fn register_gitclient_rooted_at(renderer: &mut AppRenderer, path: &Path) {
+    register(
+        renderer,
+        sicompass_sdk::create_provider_by_name("gitclient").unwrap(),
+    );
+    renderer.providers[0].set_current_path(path.to_str().unwrap());
+    let children = renderer.providers[0].fetch();
+    renderer.ffon[0].as_obj_mut().unwrap().children = children;
+    sicompass::list::create_list_current_layer(renderer);
+}
+
+fn row_labels(r: &AppRenderer) -> Vec<String> {
+    r.total_list.iter().map(|i| i.label.clone()).collect()
+}
+
+/// Move the cursor down to the row whose label contains `needle`.
+///
+/// By label rather than by a count of key presses: the listings here are
+/// natural-sorted and a fixture that grows a file would silently move the
+/// cursor somewhere else.
+fn move_to_row(r: &mut AppRenderer, needle: &str) {
+    let at = row_labels(r)
+        .iter()
+        .position(|l| l.contains(needle))
+        .unwrap_or_else(|| panic!("no row containing {needle:?} in {:?}", row_labels(r)));
+    while r.list_index < at {
+        press(r, Keycode::Down);
+    }
+    while r.list_index > at {
+        press(r, Keycode::Up);
+    }
+}
+
+#[test]
+fn gitclient_colon_opens_the_repository_without_entering_command_mode() {
+    // The browse view offers exactly one command, so `:` fires it rather than
+    // showing a one-item palette — the same treatment the terminal gets.
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    git_fixture(&root);
+
+    ensure_builtins();
+    let mut renderer = AppRenderer::new();
+    register_gitclient_rooted_at(&mut renderer, &root);
+    press_right(&mut renderer);
+    press_colon(&mut renderer);
+
+    assert_ne!(
+        renderer.coordinate,
+        sicompass::app_state::Coordinate::Command,
+        "`:` in the folder listing opens the repository, it does not open a palette"
+    );
+    let labels = row_labels(&renderer);
+    assert!(
+        labels.iter().any(|l| l.contains("changes")),
+        "expected the repository sections, got {labels:?}"
+    );
+}
+
+#[test]
+fn gitclient_colon_inside_the_repository_opens_the_command_palette() {
+    // The whole reason the git client is not one of the browse-then-session
+    // providers: once the repository is open, `:` has to be the git commands.
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    git_fixture(&root);
+
+    ensure_builtins();
+    let mut renderer = AppRenderer::new();
+    register_gitclient_rooted_at(&mut renderer, &root);
+    press_right(&mut renderer);
+    press_colon(&mut renderer); // opens the repository
+    press_colon(&mut renderer); // and now the palette
+
+    assert_eq!(
+        renderer.coordinate.base(),
+        sicompass::app_state::Coordinate::Command,
+        "the second `:` opens the palette"
+    );
+    let labels = row_labels(&renderer);
+    assert!(
+        labels.iter().any(|l| l.contains("refresh")),
+        "expected git commands, got {labels:?}"
+    );
+}
+
+#[test]
+fn gitclient_colon_on_a_folder_that_is_not_a_repository_says_so() {
+    // Rather than dropping the user into an empty command mode they then have
+    // to press Escape to leave, which is the common case while looking for a
+    // repository.
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    std::fs::create_dir(root.join("plain")).unwrap();
+
+    ensure_builtins();
+    let mut renderer = AppRenderer::new();
+    register_gitclient_rooted_at(&mut renderer, &root);
+    press_right(&mut renderer);
+    let before = row_labels(&renderer);
+    press_colon(&mut renderer);
+
+    assert_eq!(row_labels(&renderer), before, "the view does not change");
+    assert_ne!(
+        renderer.coordinate,
+        sicompass::app_state::Coordinate::Command,
+        "and no empty palette is opened"
+    );
+    assert!(
+        !renderer.error_message.is_empty(),
+        "the reason is spoken instead"
+    );
+}
+
+#[test]
+fn gitclient_lists_the_git_folder_like_any_other() {
+    // The folder being there is what tells the user this is a repository:
+    // there is no indicator row, and `.git` is searchable by name.
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    git_fixture(&root);
+
+    ensure_builtins();
+    let mut renderer = AppRenderer::new();
+    register_gitclient_rooted_at(&mut renderer, &root);
+    press_right(&mut renderer);
+    let labels = row_labels(&renderer);
+    assert!(
+        labels.iter().any(|l| l.trim_start_matches("+ ") == ".git"),
+        "got {labels:?}"
+    );
+}
+
+#[test]
+fn gitclient_opening_from_a_deep_folder_lands_at_the_repository_root() {
+    // The levels the cursor was sitting in are folder listings. Re-fetching
+    // them in place would graft repository content into them, so the app
+    // rebuilds the provider's subtree from its root instead.
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    git_fixture(&root);
+    std::fs::create_dir_all(root.join("a/b")).unwrap();
+
+    ensure_builtins();
+    let mut renderer = AppRenderer::new();
+    register_gitclient_rooted_at(&mut renderer, &root);
+    press_right(&mut renderer); // into the provider
+    move_to_row(&mut renderer, "a");
+    press_right(&mut renderer); // into `a`
+    move_to_row(&mut renderer, "b");
+    press_right(&mut renderer); // into `b`
+    assert!(renderer.current_id.depth() > 2, "browsed deep first");
+
+    press_colon(&mut renderer);
+
+    assert_eq!(
+        renderer.current_id.depth(),
+        2,
+        "the cursor comes back to the provider root"
+    );
+    assert!(
+        renderer.providers[0]
+            .current_path()
+            .starts_with(root.to_str().unwrap()),
+        "rooted at the repository's own folder, so a restart finds it: {:?}",
+        renderer.providers[0].current_path()
+    );
+    let labels = row_labels(&renderer);
+    assert!(
+        labels.iter().any(|l| l.contains("graph")),
+        "the level shows the repository, got {labels:?}"
+    );
+    assert!(
+        !labels.iter().any(|l| l.trim_start_matches("+ ") == "a"),
+        "no folder rows are left behind, got {labels:?}"
+    );
+}
+
+#[test]
+fn gitclient_changes_leads_with_the_message_row_and_the_commit_buttons() {
+    // The screen-reader contract: the prefixes are what is announced, so this
+    // pins `-i` for the message and `-b` for each button.
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    git_fixture(&root);
+    std::fs::write(root.join("tracked.txt"), "two\n").unwrap();
+
+    ensure_builtins();
+    let mut renderer = AppRenderer::new();
+    register_gitclient_rooted_at(&mut renderer, &root);
+    press_right(&mut renderer);
+    press_colon(&mut renderer);
+
+    move_to_row(&mut renderer, "changes");
+    press_right(&mut renderer);
+
+    let labels = row_labels(&renderer);
+    assert!(labels[0].starts_with("-i "), "got {:?}", labels[0]);
+    for (index, expected) in ["commit", "commit", "commit", "commit"].iter().enumerate() {
+        let row = &labels[index + 1];
+        assert!(row.starts_with("-b "), "row {index} was {row:?}");
+        assert!(row.contains(expected), "row {index} was {row:?}");
+    }
+    assert!(
+        labels.iter().any(|l| l.contains("tracked.txt")),
+        "the changed file is listed, got {labels:?}"
+    );
+}
+
+#[test]
+fn gitclient_a_diff_line_that_looks_like_markup_stays_a_plain_row() {
+    // End to end: an unescaped `<input>` in someone's HTML would render as a
+    // live editable field the user could type into.
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    git_fixture(&root);
+    std::fs::write(root.join("page.html"), "<input type=\"text\">\n").unwrap();
+
+    ensure_builtins();
+    let mut renderer = AppRenderer::new();
+    register_gitclient_rooted_at(&mut renderer, &root);
+    press_right(&mut renderer);
+    press_colon(&mut renderer);
+
+    move_to_row(&mut renderer, "changes");
+    press_right(&mut renderer);
+    move_to_row(&mut renderer, "page.html");
+    press_right(&mut renderer);
+
+    let labels = row_labels(&renderer);
+    let markup_row = labels
+        .iter()
+        .find(|l| l.contains("<input"))
+        .unwrap_or_else(|| panic!("the line should be shown, got {labels:?}"));
+    assert!(
+        markup_row.starts_with("- "),
+        "a diff line must be a plain row, not an input: {markup_row:?}"
+    );
+}
+
+#[test]
+fn terminal_still_swaps_views_on_colon_from_a_deep_folder() {
+    // Guards the `apply_view_command` change: entering a shell from several
+    // folders down must keep using the in-place refresh, not the rebuild.
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    std::fs::create_dir_all(root.join("a/b")).unwrap();
+
+    ensure_builtins();
+    let mut renderer = AppRenderer::new();
+    register_terminal_rooted_at(&mut renderer, &root);
+    press_right(&mut renderer);
+    press_right(&mut renderer);
+    let depth_before = renderer.current_id.depth();
+    press_colon(&mut renderer);
+
+    assert_eq!(
+        renderer.current_id.depth(),
+        depth_before,
+        "the shell replaces the level it was opened from"
+    );
+    assert_eq!(
+        renderer.providers[0].current_path(),
+        root.join("a").to_str().unwrap(),
+        "and runs in the folder that was being listed"
+    );
+}
+
+#[test]
+fn gitclient_the_mode_names_itself_once_the_repository_is_open() {
+    // Landing somewhere new that still calls itself "general mode" gives the
+    // user nothing to tell them `:` did anything, which is the whole reason
+    // the relabelled colon modes exist.
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    git_fixture(&root);
+
+    ensure_builtins();
+    let mut renderer = AppRenderer::new();
+    register_gitclient_rooted_at(&mut renderer, &root);
+    press_right(&mut renderer);
+    assert_eq!(
+        renderer.coordinate,
+        sicompass::app_state::Coordinate::General,
+        "the folder listing is ordinary general mode"
+    );
+
+    press_colon(&mut renderer);
+    assert_eq!(
+        renderer.coordinate,
+        sicompass::app_state::Coordinate::SessionFirstCommand,
+        "the repository names itself, and says another `:` is available"
+    );
+    // And it is only a label: every general-mode key still dispatches here.
+    assert_eq!(
+        renderer.coordinate.base(),
+        sicompass::app_state::Coordinate::General
+    );
+}
+
+#[test]
+fn gitclient_a_restored_tab_comes_back_in_the_repository_folder() {
+    // What the app persists is `current_path()`, handed back on restart as a
+    // filesystem path. A synthetic path made that "/", so a tab saved inside a
+    // repository reopened at the filesystem root.
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    git_fixture(&root);
+
+    ensure_builtins();
+    let mut renderer = AppRenderer::new();
+    register_gitclient_rooted_at(&mut renderer, &root);
+    // Exactly the reported case: `:` in the repository's folder, then quit.
+    press_right(&mut renderer);
+    press_colon(&mut renderer);
+    let saved = renderer.providers[0].current_path().to_owned();
+    assert!(
+        saved.starts_with(root.to_str().unwrap()),
+        "the saved path names the repository: {saved:?}"
+    );
+
+    // A fresh app: a new provider, handed the saved path.
+    let mut restarted = AppRenderer::new();
+    register(
+        &mut restarted,
+        sicompass_sdk::create_provider_by_name("gitclient").unwrap(),
+    );
+    restarted.providers[0].set_current_path(&saved);
+    let children = restarted.providers[0].fetch();
+    restarted.ffon[0].as_obj_mut().unwrap().children = children;
+    sicompass::list::create_list_current_layer(&mut restarted);
+    press_right(&mut restarted);
+
+    let labels = row_labels(&restarted);
+    assert!(
+        labels.iter().any(|l| l.contains("graph")),
+        "back inside the repository, not in a folder: {labels:?}"
+    );
+    assert_eq!(
+        restarted.coordinate,
+        sicompass::app_state::Coordinate::SessionFirstCommand,
+        "and the mode says so"
+    );
+}
+
+#[test]
+fn gitclient_leaving_a_repository_can_still_be_browsed_up_out_of() {
+    // The folder listing it lands on needs its ancestors above it, or Left
+    // from there leaves the provider entirely instead of walking up the
+    // directory tree.
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    let repo = root.join("project");
+    std::fs::create_dir(&repo).unwrap();
+    git_fixture(&repo);
+
+    ensure_builtins();
+    let mut renderer = AppRenderer::new();
+    register_gitclient_rooted_at(&mut renderer, &repo);
+    press_right(&mut renderer);
+    press_colon(&mut renderer);
+    assert!(row_labels(&renderer).iter().any(|l| l.contains("graph")));
+
+    press_escape(&mut renderer);
+    assert!(
+        row_labels(&renderer).iter().any(|l| l.contains(".git")),
+        "back in the repository's folder: {:?}",
+        row_labels(&renderer)
+    );
+
+    press_left(&mut renderer);
+    assert!(
+        renderer.current_id.depth() >= 2,
+        "still inside the provider, not thrown out of it"
+    );
+    assert!(
+        row_labels(&renderer)
+            .iter()
+            .any(|l| l.trim_start_matches("+ ") == "project"),
+        "walked up to the folder above the repository: {:?}",
+        row_labels(&renderer)
+    );
+}
+
+#[test]
+fn gitclient_the_three_colon_layers_each_name_themselves() {
+    // The ladder the user hears: general mode in the folder listing, first
+    // command mode once the repository is open (saying another `:` follows),
+    // command mode in the palette that second `:` opens. Nothing in it repeats
+    // a name, which is the whole point of the relabelled coordinates.
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    git_fixture(&root);
+
+    ensure_builtins();
+    let mut renderer = AppRenderer::new();
+    register_gitclient_rooted_at(&mut renderer, &root);
+    press_right(&mut renderer);
+
+    assert_eq!(
+        renderer.coordinate,
+        sicompass::app_state::Coordinate::General
+    );
+    press_colon(&mut renderer);
+    assert_eq!(
+        renderer.coordinate,
+        sicompass::app_state::Coordinate::SessionFirstCommand,
+        "first command mode: another `:` is available here"
+    );
+    press_colon(&mut renderer);
+    assert_eq!(
+        renderer.coordinate,
+        sicompass::app_state::Coordinate::SecondCommand,
+        "second command mode: this is the layer that `:` opened"
+    );
+
+    // Three names, none of them repeated.
+    let names = [
+        sicompass::app_state::Coordinate::General.display_label(),
+        sicompass::app_state::Coordinate::SessionFirstCommand.display_label(),
+        sicompass::app_state::Coordinate::SecondCommand.display_label(),
+    ];
+    assert_ne!(names[0], names[1]);
+    assert_ne!(names[1], names[2]);
+    assert_ne!(names[0], names[2]);
+
+    // And it is only a label: the palette dispatches as an ordinary one.
+    assert_eq!(
+        renderer.coordinate.base(),
+        sicompass::app_state::Coordinate::Command
+    );
+}
+
+#[test]
+fn gitclient_escape_unwinds_the_colon_layers_one_at_a_time() {
+    // Second command, first command, general — the reverse of how they were
+    // entered, so the way back is the way in.
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    git_fixture(&root);
+
+    ensure_builtins();
+    let mut renderer = AppRenderer::new();
+    register_gitclient_rooted_at(&mut renderer, &root);
+    press_right(&mut renderer);
+    press_colon(&mut renderer);
+    press_colon(&mut renderer);
+    assert_eq!(
+        renderer.coordinate,
+        sicompass::app_state::Coordinate::SecondCommand
+    );
+
+    press_escape(&mut renderer);
+    assert_eq!(
+        renderer.coordinate,
+        sicompass::app_state::Coordinate::SessionFirstCommand,
+        "back to the repository, not all the way out"
+    );
+    assert!(
+        row_labels(&renderer).iter().any(|l| l.contains("graph")),
+        "and the repository is what is listed: {:?}",
+        row_labels(&renderer)
+    );
+
+    // And the palette does not also offer a command that does this, which
+    // would be a second name for one action.
+    assert!(
+        !row_labels(&renderer)
+            .iter()
+            .any(|l| l.contains("close repository")),
+        "got {:?}",
+        row_labels(&renderer)
+    );
+
+    press_escape(&mut renderer);
+    assert_eq!(
+        renderer.coordinate,
+        sicompass::app_state::Coordinate::General,
+        "and now out to the folder listing"
+    );
+    assert!(
+        row_labels(&renderer).iter().any(|l| l.contains(".git")),
+        "got {:?}",
+        row_labels(&renderer)
+    );
+}
+
+#[test]
+fn gitclient_escape_leaves_the_repository_from_any_depth_inside_it() {
+    // Escape unwinds modes, Left unwinds levels. Making Escape step out one
+    // level at a time here would give this one provider a second Left key and
+    // no way to leave a deep descent in one go.
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    git_fixture(&root);
+    std::fs::write(root.join("tracked.txt"), "two\n").unwrap();
+
+    ensure_builtins();
+    let mut renderer = AppRenderer::new();
+    register_gitclient_rooted_at(&mut renderer, &root);
+    press_right(&mut renderer);
+    press_colon(&mut renderer);
+    move_to_row(&mut renderer, "changes");
+    press_right(&mut renderer);
+    assert!(renderer.current_id.depth() > 2, "inside changes");
+    assert_eq!(
+        renderer.coordinate,
+        sicompass::app_state::Coordinate::SessionFirstCommand
+    );
+
+    press_escape(&mut renderer);
+    assert_eq!(
+        renderer.coordinate,
+        sicompass::app_state::Coordinate::General,
+        "straight out to the folder listing"
+    );
+    assert!(
+        row_labels(&renderer).iter().any(|l| l.contains(".git")),
+        "got {:?}",
+        row_labels(&renderer)
+    );
+}
+
+#[test]
+fn gitclient_left_still_steps_one_level_at_a_time_inside_the_repository() {
+    // The other half of the split: Escape leaves, Left walks back up.
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    git_fixture(&root);
+    std::fs::write(root.join("tracked.txt"), "two\n").unwrap();
+
+    ensure_builtins();
+    let mut renderer = AppRenderer::new();
+    register_gitclient_rooted_at(&mut renderer, &root);
+    press_right(&mut renderer);
+    press_colon(&mut renderer);
+    move_to_row(&mut renderer, "changes");
+    press_right(&mut renderer);
+    move_to_row(&mut renderer, "tracked.txt");
+    press_right(&mut renderer);
+    let deep = renderer.current_id.depth();
+
+    press_left(&mut renderer);
+    assert_eq!(renderer.current_id.depth(), deep - 1, "one level out");
+    assert_eq!(
+        renderer.coordinate,
+        sicompass::app_state::Coordinate::SessionFirstCommand,
+        "and still in the repository"
+    );
 }
