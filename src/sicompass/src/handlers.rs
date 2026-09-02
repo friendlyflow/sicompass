@@ -7108,23 +7108,33 @@ pub struct RestorableNav {
 /// jump clean across the filesystem. Rebuilding from the root locates it by name
 /// at every level, which a simple "pop one level off the saved cursor" could not.
 ///
+/// A browse-then-view provider's opened view goes the same way, for the same
+/// two reasons. The git client does not restore an open repository either (it
+/// would start the app in a colon mode the user never entered this session, see
+/// its `set_current_path`), so what comes back is the repository's own folder,
+/// and `:` opens the repository of the folder being *listed* — land on it
+/// instead of inside it and the next `:` tries the parent directory.
+///
 /// Everything else is passed through untouched.
 pub fn restorable_nav(
     providers: &[Box<dyn sicompass_sdk::provider::Provider>],
     current_id: &IdArray,
     provider_path: &str,
 ) -> RestorableNav {
-    let in_session = current_id
-        .get(0)
-        .and_then(|i| providers.get(i))
-        .is_some_and(|p| {
-            is_browse_then_session_name(p.name())
-                && p.commands().iter().any(|c| c == VIEW_CMD_BROWSE)
-        });
+    let active = current_id.get(0).and_then(|i| providers.get(i));
+    let in_session = active.is_some_and(|p| {
+        is_browse_then_session_name(p.name()) && p.commands().iter().any(|c| c == VIEW_CMD_BROWSE)
+    });
+    // The opened view, read off `commands()` exactly as `browse_then_view_is_open`
+    // reads it from the renderer: `open repository` is on offer only while the
+    // folder listing is up.
+    let in_view = active.is_some_and(|p| {
+        is_browse_then_view_name(p.name()) && !p.commands().iter().any(|c| c == VIEW_CMD_OPEN)
+    });
     RestorableNav {
         current_id: current_id.clone(),
         path: provider_path.to_owned(),
-        on_path: in_session && current_id.depth() >= 2,
+        on_path: (in_session || in_view) && current_id.depth() >= 2,
     }
 }
 
@@ -8209,6 +8219,60 @@ mod tests {
         }
     }
 
+    /// Stands in for the git client: browse a folder tree, then `open
+    /// repository` swaps in a view with a palette of its own. The palette is
+    /// what separates it from the two stubs above, and it is what
+    /// `restorable_nav` has to look past — the repository is no more restorable
+    /// than a shell is.
+    struct RepoStub {
+        open: bool,
+    }
+    impl sicompass_sdk::provider::Provider for RepoStub {
+        fn name(&self) -> &str {
+            "gitclient"
+        }
+        fn fetch(&mut self) -> Vec<FfonElement> {
+            if self.open {
+                vec![
+                    FfonElement::new_obj("changes"),
+                    FfonElement::new_obj("graph"),
+                ]
+            } else {
+                vec![FfonElement::new_obj("project")]
+            }
+        }
+        fn commands(&self) -> Vec<String> {
+            if self.open {
+                vec!["refresh".to_owned(), "fetch".to_owned()]
+            } else {
+                vec![VIEW_CMD_OPEN.to_owned()]
+            }
+        }
+        fn path_is_filesystem(&self) -> bool {
+            true
+        }
+    }
+
+    fn make_renderer_with_gitclient(open: bool) -> AppRenderer {
+        use sicompass_sdk::provider::Provider as _;
+        let mut r = AppRenderer::new();
+        let mut prov = RepoStub { open };
+        let mut root = FfonElement::new_obj("gitclient");
+        for child in prov.fetch() {
+            root.as_obj_mut().unwrap().push(child);
+        }
+        r.ffon = vec![root];
+        r.current_id = {
+            let mut id = IdArray::new();
+            id.push(0);
+            id.push(0);
+            id
+        };
+        r.providers.push(Box::new(prov));
+        list::create_list_current_layer(&mut r);
+        r
+    }
+
     fn make_renderer_with_claude() -> AppRenderer {
         use sicompass_sdk::provider::Provider as _;
         let mut r = AppRenderer::new();
@@ -8728,6 +8792,32 @@ mod tests {
         let nav = restorable_nav(&r.providers, &r.current_id, "/home/nico");
         assert!(!nav.on_path, "browsing restores the ordinary way");
         assert_eq!(nav.current_id, r.current_id);
+        assert_eq!(nav.path, "/home/nico");
+    }
+
+    #[test]
+    fn restorable_nav_asks_to_land_inside_the_repositorys_folder() {
+        // The repository view is not restored either (see the git client's
+        // `set_current_path`), so the tab comes back on the folder listing —
+        // and it has to be the listing *of* that folder, because `:` opens the
+        // repository of the folder being listed.
+        let r = make_renderer_with_gitclient(true);
+
+        let nav = restorable_nav(&r.providers, &r.current_id, "/home/nico/project");
+
+        assert!(
+            nav.on_path,
+            "restore must locate the folder from the root and land inside it"
+        );
+        assert_eq!(nav.path, "/home/nico/project");
+        assert_eq!(nav.current_id, r.current_id);
+    }
+
+    #[test]
+    fn restorable_nav_passes_the_repository_browse_view_through_untouched() {
+        let r = make_renderer_with_gitclient(false);
+        let nav = restorable_nav(&r.providers, &r.current_id, "/home/nico");
+        assert!(!nav.on_path, "browsing restores the ordinary way");
         assert_eq!(nav.path, "/home/nico");
     }
 

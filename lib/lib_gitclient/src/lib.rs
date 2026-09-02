@@ -302,9 +302,13 @@ fn unescape_token(s: &str) -> String {
 /// `current_path()`.
 ///
 /// A unit separator, because it has to be something no directory is ever
-/// called: the app hands `current_path()` back on restart as a filesystem path,
-/// and this is what tells the folder view "that was a repository, reopen it"
-/// rather than "browse to that folder".
+/// called: `current_path()` is handed back to the provider as a filesystem
+/// path, and this is what tells the two views apart in it.
+///
+/// Within a session that means "keep the repository open, this tail is the
+/// cursor's level". Across a restart it means only "that string named a
+/// repository, so browse its folder" — the repository view is not restored,
+/// see `Provider::set_current_path`.
 const REPO_MARKER: &str = "\u{1f}";
 
 /// Split a repository path into the repository's directory and the tokens
@@ -453,11 +457,9 @@ impl GitClientProvider {
     ///
     /// Rooting it at a real directory rather than at a synthetic `"/"` is what
     /// makes a restart land somewhere useful. The app writes `current_path()`
-    /// out when a tab closes and feeds it back as a filesystem path on restart,
-    /// through `deep_rebuild_provider_tree`, which splits off the navigated
-    /// segments with `PathBuf::pop` and re-fetches at what is left. A synthetic
-    /// path made that prefix `"/"`, so the tab came back at the filesystem
-    /// root; this way it comes back in the repository's own folder, one `:`
+    /// out when a tab closes and feeds it back to a freshly built provider on
+    /// restart. A synthetic path brought the tab back at the filesystem root;
+    /// this way it comes back browsing the repository's own folder, one `:`
     /// from where it was. That is the same degradation the terminal has, which
     /// does not persist its shell either.
     fn sync_rendered_path(&mut self) {
@@ -2202,25 +2204,36 @@ impl Provider for GitClientProvider {
     }
 
     fn set_current_path(&mut self, path: &str) {
-        // A path carrying the marker names a repository, whichever view we are
-        // in. That is how a restart comes back where it left off: the app
-        // writes `current_path()` out when the tab closes and hands it to a
-        // freshly built provider, which starts in the folder view.
+        // A path carrying the marker names a repository. The app hands one back
+        // in two very different situations, and they end in different views.
         if let Some((anchor, rest)) = split_repo_path(path) {
             let already_open = self
                 .repo_anchor()
                 .is_some_and(|a| a.to_string_lossy() == anchor);
             if !already_open {
+                // A path saved by the last run, handed to a freshly built
+                // provider. The repository view is deliberately *not* restored:
+                // the user has not pressed `:` in this session, so coming back
+                // inside the repository would start the app in a colon mode
+                // they never entered ("first command mode"). Browsing the
+                // repository's own folder is one `:` from where they were, and
+                // is the same degradation the terminal has for its shell.
+                //
+                // The token tail is dropped with it — it names levels that only
+                // exist inside the opened repository. `browse_children` walks
+                // up from the anchor if the repository has been deleted or
+                // moved since, so a repository that is gone needs no special
+                // case here.
+                self.view = View::Browse;
+                self.repo = None;
+                self.segments.clear();
                 self.browse_path = PathBuf::from(anchor);
-                if !self.open_repository() {
-                    // The repository is gone. Browsing where it was is the
-                    // nearest real place, and `browse_children` walks up from
-                    // there if even that has been deleted.
-                    self.view = View::Browse;
-                    self.sync_rendered_path();
-                    return;
-                }
+                self.sync_rendered_path();
+                return;
             }
+            // The repository we already have open: an in-session round-trip
+            // (a tab switch, the re-fetch after a colon command), where the
+            // tail is the cursor's level and has to come back.
             self.segments = parse_tokens(rest);
             self.sync_rendered_path();
             return;
@@ -3081,12 +3094,13 @@ mod tests {
     }
 
     #[test]
-    fn a_restart_comes_back_inside_the_repository() {
+    fn a_restart_comes_back_browsing_the_repositorys_folder() {
         // The app writes `current_path()` out when a tab closes and hands it
         // back on restart, to a provider that starts in the folder view. The
-        // marker is what tells that provider the string was a repository, so
-        // the tab reopens where it was rather than in a folder the user then
-        // has to press `:` in again.
+        // marker says the string named a repository, and that is all it does
+        // here: the repository view is not reopened, because the user has not
+        // pressed `:` in the new session and the app would come up announcing
+        // a colon mode they never entered. Its own folder is one `:` away.
         let f = Fixture::new();
         let mut p = opened(&f);
         p.fetch();
@@ -3094,17 +3108,31 @@ mod tests {
 
         let mut restored = GitClientProvider::new();
         restored.set_current_path(&saved);
-        assert_eq!(restored.view, View::Repo);
-        assert_eq!(restored.repo.as_ref().unwrap().root, f.path());
+        assert_eq!(restored.view, View::Browse);
+        assert!(restored.repo.is_none(), "no repository is held open");
+        assert_eq!(restored.browse_path, f.path());
+        assert!(
+            !restored.current_path().contains(REPO_MARKER),
+            "the marker does not escape a restore: {:?}",
+            restored.current_path()
+        );
+
         let rows = labels(&restored.fetch());
         assert!(
-            rows.contains(&localize::t("gitclient-section-changes")),
-            "{rows:?}"
+            rows.iter().any(|r| r == ".git"),
+            "the repository's folder, listed like any other: {rows:?}"
+        );
+        assert!(
+            !rows.contains(&localize::t("gitclient-section-changes")),
+            "not the repository itself: {rows:?}"
         );
     }
 
     #[test]
-    fn a_restart_from_inside_the_repository_comes_back_to_the_same_level() {
+    fn a_restart_from_inside_the_repository_comes_back_to_the_same_folder() {
+        // The tokens below the marker name levels that only exist inside the
+        // opened repository, so they go with it. What must survive is the
+        // folder, so the `:` that reopens the repository is the only step back.
         let f = Fixture::new();
         f.write("a.txt", "one\n");
         let mut p = opened(&f);
@@ -3117,9 +3145,34 @@ mod tests {
 
         let mut restored = GitClientProvider::new();
         restored.set_current_path(&saved);
-        assert_eq!(restored.view, View::Repo);
-        assert_eq!(restored.segments, p.segments, "back in the same diff");
-        assert!(labels(&restored.fetch()).iter().any(|r| r == "+one"));
+        assert_eq!(restored.view, View::Browse);
+        assert!(restored.segments.is_empty(), "{:?}", restored.segments);
+        assert_eq!(restored.browse_path, f.path(), "not one level up");
+        assert_eq!(restored.current_path(), f.path().to_string_lossy());
+    }
+
+    #[test]
+    fn the_same_repository_reopened_mid_session_keeps_its_level() {
+        // The other side of the marker: a path handed back while that very
+        // repository is open is an in-session round-trip (a tab switch, the
+        // re-fetch after a colon command), and the tail is the cursor's level.
+        // Only a *different* repository, or none, means a restore.
+        let f = Fixture::new();
+        f.write("a.txt", "one\n");
+        let mut p = opened(&f);
+        p.segments = vec![
+            Segment::Section(Section::Changes),
+            Segment::File(Group::Unstaged, b"a.txt".to_vec()),
+        ];
+        p.sync_rendered_path();
+        let saved = p.current_path().to_owned();
+
+        p.set_current_path("/");
+        assert!(p.segments.is_empty());
+        p.set_current_path(&saved);
+        assert_eq!(p.view, View::Repo, "still the same open repository");
+        assert_eq!(p.segments.len(), 2, "back in the same diff");
+        assert!(labels(&p.fetch()).iter().any(|r| r == "+one"));
     }
 
     #[test]
