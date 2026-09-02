@@ -4935,11 +4935,9 @@ mod tests {
         }
     }
 
-    // With a helper present, Chrome runs headed behind a wrapper script that
-    // owns the invisible display.
+    // Both launch paths must agree on the screen size.
     #[test]
     #[cfg(target_os = "linux")]
-    #[test]
     fn both_xvfb_paths_use_the_same_desktop_screen_size() {
         let screen = format!("-screen 0 {VIEWPORT_W}x{VIEWPORT_H}x24");
         for helper in [XvfbHelper::Run, XvfbHelper::Bare] {
@@ -4953,6 +4951,10 @@ mod tests {
         assert!(VIEWPORT_W >= 1200, "must clear the usual xl breakpoint");
     }
 
+    // With a helper present, Chrome runs headed behind a wrapper script that
+    // owns the invisible display.
+    #[test]
+    #[cfg(target_os = "linux")]
     fn xvfb_present_runs_headed_behind_a_wrapper() {
         for helper in [XvfbHelper::Run, XvfbHelper::Bare] {
             let launch = linux_chrome_launch_with(
