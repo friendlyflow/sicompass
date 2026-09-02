@@ -1,0 +1,21 @@
+[package]
+publish = false  # internal crate, never published to crates.io
+name = "sicompass-notes"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Sicompass notes provider (a hashed tree of the user's own writing)"
+
+[dependencies]
+sicompass-sdk = { workspace = true }
+# `undo` / `redo` are `#[async_trait]` methods, so overriding them needs the
+# macro even though nothing here awaits.
+async-trait = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+# Content hashing for the Merkle tree. Already a workspace dependency, so this
+# adds nothing to the lock file.
+sha2 = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

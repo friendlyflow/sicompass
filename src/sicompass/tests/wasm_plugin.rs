@@ -868,6 +868,59 @@ fn wit_vendor_matches_host_tables() {
     );
 }
 
+/// The `descriptor` record is the guest's whole self-declaration, and the host
+/// builds one field-by-field in `default_descriptor`. A record is structural in
+/// the component model, so a field added on one side and not the other does not
+/// fail to compile and does not fail the import guard above — it fails when a
+/// real plugin is instantiated, on a user's machine. Pin the field list.
+#[test]
+fn wit_vendor_descriptor_fields_match_the_host() {
+    let wit = std::fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("wit/sicompass-plugin.wit"),
+    )
+    .expect("vendored WIT should exist");
+
+    let mut resolve = wit_parser::Resolve::default();
+    resolve
+        .push_str("sicompass-plugin.wit", &wit)
+        .expect("vendored WIT must parse");
+
+    let fields = resolve
+        .types
+        .iter()
+        .find_map(|(_, ty)| match (&ty.name, &ty.kind) {
+            (Some(n), wit_parser::TypeDefKind::Record(r)) if n == "descriptor" => Some(
+                r.fields
+                    .iter()
+                    .map(|f| f.name.clone())
+                    .collect::<Vec<String>>(),
+            ),
+            _ => None,
+        })
+        .expect("vendored WIT must define `record descriptor`");
+
+    assert_eq!(
+        fields,
+        vec![
+            "name",
+            "display-name",
+            "version",
+            "supports-config-files",
+            "no-cache",
+            "path-is-filesystem",
+            "stable-root-key",
+            "has-editor-semantics",
+            "supports-structural-edit",
+            "manual-dashboard-entry-allowed",
+            "dashboard-kind",
+        ],
+        "the vendored WIT's `descriptor` drifted from the host. Re-copy \
+         sicompass-plugin.wit from the SDK repo, update `default_descriptor` and \
+         the `Provider` forwarder in src/wasm_host/provider.rs, and rebuild the \
+         .wasm fixtures in tests/fixtures/wasm/"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // The capability audit, against a plugin that really does use the network
 // ---------------------------------------------------------------------------

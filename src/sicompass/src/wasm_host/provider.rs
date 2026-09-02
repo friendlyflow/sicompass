@@ -336,6 +336,7 @@ fn default_descriptor(name: &str) -> wit_types::Descriptor {
         path_is_filesystem: false,
         stable_root_key: false,
         has_editor_semantics: false,
+        supports_structural_edit: false,
         manual_dashboard_entry_allowed: true,
         dashboard_kind: wit_types::DashboardKind::None,
     }
@@ -815,6 +816,10 @@ impl Provider for WasmProvider {
         self.descriptor.has_editor_semantics
     }
 
+    fn supports_structural_edit(&self) -> bool {
+        self.descriptor.supports_structural_edit
+    }
+
     // ---- Persistent config -------------------------------------------------
     //
     // The host owns the file; the guest only ever sees bytes.
@@ -972,6 +977,7 @@ mod tests {
         assert!(!d.supports_config_files);
         assert!(!d.no_cache);
         assert!(!d.has_editor_semantics);
+        assert!(!d.supports_structural_edit);
     }
 
     #[test]

@@ -410,6 +410,7 @@ sicompass-claude = { workspace = true }
 # `ensure_builtins`. Without it a fixture repository with a remote configured
 # would have these tests contacting it.
 sicompass-gitclient = { workspace = true }
+sicompass-notes = { workspace = true }
 sicompass-chatclient = { workspace = true }
 sicompass-emailclient = { workspace = true }
 sicompass-remote = { workspace = true }

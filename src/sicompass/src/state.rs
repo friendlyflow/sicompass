@@ -76,6 +76,7 @@ pub fn update_state(r: &mut AppRenderer, task: Task, history: History) {
     } else {
         r.current_id.clone()
     };
+    let record_id_for_sync = record_id.clone();
 
     // Dual-write a TimelineEntry for Task::Input / Append / Insert / Delete /
     // Cut / Paste. The unified `record_entry` runs alongside the legacy
@@ -138,6 +139,17 @@ pub fn update_state(r: &mut AppRenderer, task: Task, history: History) {
 
     if let Some(entry) = timeline_payload {
         record_entry(r, entry);
+    }
+
+    // Forward path. The undo and redo arms have always told the provider what
+    // the list now holds; the keypress that caused the change never did, so a
+    // provider that persists its tree would save only when the user pressed
+    // ctrl-Z. `record_id` is the element the mutation targeted, so its
+    // containing list is what the provider is told about.
+    if history == History::None && matches!(task, Task::Delete | Task::Cut) {
+        let target = record_id_for_sync;
+        upgrade_body_bare_placeholder(r, &target);
+        sync_provider_children(r, &target);
     }
 
     list::create_list_current_layer(r);
@@ -392,7 +404,8 @@ pub fn update_ffon(r: &mut AppRenderer, line: &str, is_key: bool, task: Task, hi
             replace_at(&mut r.ffon, &prev_id, prev_idx, FfonElement::new_str(line));
         }
     } else if matches!(task, Task::Delete | Task::Cut) {
-        // Non-editor delete/cut (e.g. file browser in General)
+        // Non-editor delete/cut (compose body, createElement providers, and any
+        // provider that declared `supports_structural_edit`).
         remove_at(&mut r.ffon, &prev_id, prev_idx);
         let new_len = get_parent_len(&r.ffon, &prev_id);
         if new_len == 0 {
@@ -400,9 +413,20 @@ pub fn update_ffon(r: &mut AppRenderer, line: &str, is_key: bool, task: Task, hi
             let placeholder = FfonElement::new_str("<input></input>");
             insert_at(&mut r.ffon, &prev_id, 0, placeholder);
             r.current_id.set_last(0);
-        } else if r.current_id.last().unwrap_or(0) > 0 {
-            let cur = r.current_id.last().unwrap_or(1);
-            r.current_id.set_last(cur - 1);
+        } else {
+            // Hold the index rather than stepping back: the row that followed
+            // the deleted one has moved up into it, and that is what the user
+            // is looking at. Only a deleted *last* row leaves nothing there, and
+            // then the clamp takes the cursor to the new end.
+            //
+            // This is what `handle_file_delete` already does for the file
+            // browser, and the two paths used to disagree — deleting a row in
+            // the middle of a list walked the cursor backwards past rows that
+            // were still there.
+            let cur = r.current_id.last().unwrap_or(0);
+            if cur >= new_len {
+                r.current_id.set_last(new_len - 1);
+            }
         }
     }
 }
@@ -646,7 +670,7 @@ fn apply_undo(r: &mut AppRenderer, entry: &TimelineEntry) {
                 r.current_id = id.clone();
                 crate::handlers::handle_delete(r, History::Undo);
                 upgrade_body_bare_placeholder(r, id);
-                sync_compose_body_if_body_element(r, id);
+                sync_provider_children(r, id);
                 if r.current_id.last().unwrap_or(0) > 0 {
                     let cur = r.current_id.last().unwrap_or(1);
                     r.current_id.set_last(cur - 1);
@@ -654,7 +678,7 @@ fn apply_undo(r: &mut AppRenderer, entry: &TimelineEntry) {
             } else {
                 replace_element_at_id(r, id, before.clone());
                 r.current_id = id.clone();
-                sync_compose_body_if_body_element(r, id);
+                sync_provider_children(r, id);
             }
         }
         TimelineEntry::Structural { id, op, payload } => match (op, payload) {
@@ -662,7 +686,7 @@ fn apply_undo(r: &mut AppRenderer, entry: &TimelineEntry) {
                 r.current_id = id.clone();
                 crate::handlers::handle_delete(r, History::Undo);
                 upgrade_body_bare_placeholder(r, id);
-                sync_compose_body_if_body_element(r, id);
+                sync_provider_children(r, id);
                 if r.current_id.last().unwrap_or(0) > 0 {
                     let cur = r.current_id.last().unwrap_or(1);
                     r.current_id.set_last(cur - 1);
@@ -672,15 +696,17 @@ fn apply_undo(r: &mut AppRenderer, entry: &TimelineEntry) {
                 clear_sole_i_placeholder_if_body_element(r, id);
                 insert_element_at_id(r, id, elem.clone());
                 r.current_id = id.clone();
-                sync_compose_body_if_body_element(r, id);
+                sync_provider_children(r, id);
             }
             (StructuralOp::Paste, StructuralPayload::Pasted { before, .. }) => {
                 replace_element_at_id(r, id, before.clone());
                 r.current_id = id.clone();
+                sync_provider_children(r, id);
             }
             (StructuralOp::Replace, StructuralPayload::Replaced { before, .. }) => {
                 replace_element_at_id(r, id, before.clone());
                 r.current_id = cursor_inside_radio(id, before);
+                sync_provider_children(r, id);
             }
             _ => {}
         },
@@ -731,11 +757,11 @@ fn apply_redo(r: &mut AppRenderer, entry: &TimelineEntry) {
                 clear_sole_i_placeholder_if_body_element(r, id);
                 insert_element_at_id(r, id, after.clone());
                 r.current_id = id.clone();
-                sync_compose_body_if_body_element(r, id);
+                sync_provider_children(r, id);
             } else {
                 replace_element_at_id(r, id, after.clone());
                 r.current_id = id.clone();
-                sync_compose_body_if_body_element(r, id);
+                sync_provider_children(r, id);
             }
         }
         TimelineEntry::Structural { id, op, payload } => match (op, payload) {
@@ -743,13 +769,13 @@ fn apply_redo(r: &mut AppRenderer, entry: &TimelineEntry) {
                 clear_sole_i_placeholder_if_body_element(r, id);
                 insert_element_at_id(r, id, elem.clone());
                 r.current_id = id.clone();
-                sync_compose_body_if_body_element(r, id);
+                sync_provider_children(r, id);
             }
             (StructuralOp::Delete | StructuralOp::Cut, _) => {
                 r.current_id = id.clone();
                 crate::handlers::handle_delete(r, History::Redo);
                 upgrade_body_bare_placeholder(r, id);
-                sync_compose_body_if_body_element(r, id);
+                sync_provider_children(r, id);
                 let count = get_parent_len(&r.ffon, id);
                 if let Some(idx) = r.current_id.last() {
                     if idx >= count && count > 0 {
@@ -760,10 +786,12 @@ fn apply_redo(r: &mut AppRenderer, entry: &TimelineEntry) {
             (StructuralOp::Paste, StructuralPayload::Pasted { after, .. }) => {
                 replace_element_at_id(r, id, after.clone());
                 r.current_id = id.clone();
+                sync_provider_children(r, id);
             }
             (StructuralOp::Replace, StructuralPayload::Replaced { after, .. }) => {
                 replace_element_at_id(r, id, after.clone());
                 r.current_id = cursor_inside_radio(id, after);
+                sync_provider_children(r, id);
             }
             _ => {}
         },
@@ -1263,6 +1291,44 @@ fn rekey_obj_at(ffon: &mut Vec<FfonElement>, parent_id: &IdArray, idx: usize, ne
 }
 
 /// Insert a cloned element at `id` (used by undo/redo).
+/// Ctrl+V for a provider that declared `supports_structural_edit()`: insert the
+/// internal clipboard element *after* the cursor.
+///
+/// The generic `Task::Paste` replaces the focused element
+/// (`update_ffon`'s paste arm calls `replace_at`), which is right for a form
+/// field and destructive on a tree — pasting a copied row onto a sibling would
+/// silently delete that sibling. The email compose body already sidesteps it by
+/// routing Ctrl+V through `commit_edit`; this is the same intent for providers
+/// that hold a tree.
+///
+/// Records `Structural::Insert`, so ctrl-Z removes what was pasted rather than
+/// restoring something the user never lost. Returns `false` when the clipboard
+/// is empty, so the caller can fall through.
+pub fn paste_structural_element(r: &mut AppRenderer) -> bool {
+    let Some(elem) = r.clipboard.clone() else {
+        return false;
+    };
+    let mut id = r.current_id.clone();
+    let len = sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &id)
+        .map(|a| a.len())
+        .unwrap_or(0);
+    let at = (id.last().unwrap_or(0) + 1).min(len);
+    id.set_last(at);
+
+    insert_at(&mut r.ffon, &id, at, elem.clone());
+    r.current_id = id.clone();
+    r.active_timeline_mut().coalesce_break = true;
+    record_entry(
+        r,
+        TimelineEntry::Structural {
+            id,
+            op: StructuralOp::Insert,
+            payload: StructuralPayload::Inserted(elem),
+        },
+    );
+    true
+}
+
 fn insert_element_at_id(r: &mut AppRenderer, id: &IdArray, elem: FfonElement) {
     let insert_idx = id.last().unwrap_or(0);
     insert_at(&mut r.ffon, id, insert_idx, elem);
@@ -1396,10 +1462,20 @@ fn clear_sole_i_placeholder_if_body_element(
 /// After a delete leaves a bare `"<input></input>"` as the sole body child, upgrade it
 /// to `I_PLACEHOLDER` so the user sees "i" (inviting typed insertion) rather than "-i ".
 ///
-/// Must be called BEFORE `sync_compose_body_if_body_element` so the upgraded placeholder
-/// propagates into `compose.draft.body` via the subsequent sync.
+/// Must be called BEFORE `sync_provider_children` so the upgraded placeholder
+/// propagates into the provider via the subsequent sync.
+///
+/// Depth >= 3 is the email compose body's shape. A provider that declared
+/// `supports_structural_edit()` gets the same repair from depth 2, because its
+/// own top level is a list the user empties like any other.
 fn upgrade_body_bare_placeholder(r: &mut AppRenderer, id: &sicompass_sdk::ffon::IdArray) {
-    if id.depth() < 3 {
+    let declared = id
+        .get(0)
+        .and_then(|i| r.providers.get(i))
+        .map(|p| p.supports_structural_edit())
+        .unwrap_or(false);
+    let min_depth = if declared { 2 } else { 3 };
+    if id.depth() < min_depth {
         return;
     }
     let is_bare = sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, id)
@@ -1413,6 +1489,64 @@ fn upgrade_body_bare_placeholder(r: &mut AppRenderer, id: &sicompass_sdk::ffon::
             sicompass_sdk::placeholders::I_PLACEHOLDER.to_owned(),
         );
     }
+}
+
+/// Tell the provider that owns `id` what the list holding it now contains.
+///
+/// This is how an app-level FFON mutation becomes a write. The app edits its own
+/// tree from a keypress, records the `Structural` entry that makes it undoable,
+/// and then hands the resulting children back so a provider that persists
+/// anything can save them.
+///
+/// Two callers, one shape:
+///
+/// **The provider works out which list this is, not the app.** That is not a
+/// simplification, it is the only thing that can work: a provider's path is not
+/// in step with FFON depth. The mail client sits at `/compose/Body:` while its
+/// compose fields hang directly off the provider root, so deriving a path from
+/// the ancestor labels produces `/Body:` and points the provider at nothing.
+/// A provider that owns a tree identifies the list from the rows themselves —
+/// notes tag each row with its node id, so the parent is a lookup.
+///
+/// Both callers therefore get children and nothing else; the split is only
+/// about which depths count.
+pub fn sync_provider_children(r: &mut AppRenderer, id: &sicompass_sdk::ffon::IdArray) {
+    // Depth 1 is the provider list itself; handing that to a provider as "your
+    // children" would be nonsense.
+    if id.depth() < 2 {
+        return;
+    }
+    let Some(provider_idx) = id.get(0) else {
+        return;
+    };
+    let declared = r
+        .providers
+        .get(provider_idx)
+        .map(|p| p.supports_structural_edit())
+        .unwrap_or(false);
+    if !declared {
+        sync_compose_body_if_body_element(r, id);
+        return;
+    }
+
+    // `get_ffon_at_id` returns the array *containing* the element at `id` — the
+    // list, which is what the provider is being told about.
+    let children = sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, id).map(|a| a.to_vec());
+
+    if let Some(children) = children {
+        if let Some(p) = r.providers.get_mut(provider_idx) {
+            p.sync_ffon_body_children(&children);
+        }
+    }
+
+    // Every rendered level of this provider is now stale, not just the one that
+    // changed. A provider that hashes its tree chains each list's digest into
+    // its parent's, so adding a line three levels down changes what every
+    // ancestor should be showing — and `Left` does not re-fetch, it walks the
+    // levels the app already has in memory. Without this the user reads a
+    // parent's hash that stopped being true several edits ago, which is the
+    // difference between a Merkle tree and a decoration.
+    crate::provider::refresh_visible_path(r);
 }
 
 /// Notify the active provider that body children changed after a FFON-level delete/insert.

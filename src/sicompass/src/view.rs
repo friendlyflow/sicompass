@@ -632,6 +632,34 @@ fn draw_window_controls(app: &mut AppState) {
     }
 }
 
+/// Display form of `input_prefix` / `input_suffix` on the insert line.
+///
+/// `strip_tags` drops the tag *tokens* and keeps what sits between them, which
+/// is right for a dangling `<input>` but wrong for a metadata tag: a provider
+/// that identifies its rows with `<id>7</id>` would have the bare `7` show up in
+/// front of the text while the user types. An id is bookkeeping, never display
+/// text — `strip_display` already drops the tag and its content, and this does
+/// the same for the one place that cannot use it (a prefix holds half a tag
+/// pair, which `strip_display` is not built to read).
+fn strip_for_insert_line(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len());
+    let mut rest = raw;
+    while let Some(open) = rest.find("<id>") {
+        out.push_str(&rest[..open]);
+        match rest[open..].find("</id>") {
+            Some(close) => rest = &rest[open + close + "</id>".len()..],
+            // Unterminated: drop the opening token and keep the rest, so a
+            // stray `<id>` cannot swallow the line.
+            None => {
+                rest = &rest[open + "<id>".len()..];
+                break;
+            }
+        }
+    }
+    out.push_str(rest);
+    sicompass_sdk::tags::strip_tags(&out)
+}
+
 fn update_view(app: &mut AppState) {
     // Speak any error that reached the header since the last frame. Done once
     // here, before the header is drawn, so every error path is covered.
@@ -1080,8 +1108,8 @@ fn update_view(app: &mut AppState) {
     // `input_prefix`/`input_suffix` are kept raw (they reconstruct the FFON
     // key on commit), but an input slot puts a dangling `<input>` in the
     // prefix and `</input>` in the suffix — strip all tag tokens for display.
-    let insert_prefix = sicompass_sdk::tags::strip_tags(&app.renderer.input_prefix);
-    let insert_suffix = sicompass_sdk::tags::strip_tags(&app.renderer.input_suffix);
+    let insert_prefix = strip_for_insert_line(&app.renderer.input_prefix);
+    let insert_suffix = strip_for_insert_line(&app.renderer.input_suffix);
     let caret_visible = app.renderer.caret.visible;
     let search_str = if app.renderer.coordinate == Coordinate::ConfirmCloseTab {
         // Modal prompt above the two `-b` button options.
@@ -3666,6 +3694,34 @@ struct ImageLayout {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A provider that carries a row id in the prefix must not show the number
+    /// to the user while they type. `strip_tags` alone keeps whatever sits
+    /// between the tokens, so `<id>7</id>` would render as a bare `7`.
+    #[test]
+    fn the_insert_line_never_shows_a_row_id() {
+        assert_eq!(strip_for_insert_line("<id>7</id>"), "");
+        assert_eq!(strip_for_insert_line("<id>4711</id>"), "");
+        // The dangling half of an input slot still goes, as before.
+        assert_eq!(strip_for_insert_line("<id>7</id><input>"), "");
+    }
+
+    /// Ordinary prefixes are untouched: a field label, a shell prompt.
+    #[test]
+    fn the_insert_line_keeps_real_prefix_text() {
+        assert_eq!(strip_for_insert_line("Body: "), "Body: ");
+        assert_eq!(
+            strip_for_insert_line("nico@host:~$ <input>"),
+            "nico@host:~$ "
+        );
+        assert_eq!(strip_for_insert_line(""), "");
+    }
+
+    /// A stray opening tag must not swallow the rest of the line.
+    #[test]
+    fn an_unterminated_id_tag_does_not_eat_the_prefix() {
+        assert_eq!(strip_for_insert_line("<id>oops"), "oops");
+    }
 
     // `find_matches_ci` moved to handlers.rs (shared with InputSearch); its
     // tests moved with it.

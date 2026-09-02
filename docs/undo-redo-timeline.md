@@ -86,6 +86,66 @@ Document these in new features.
   and `revert`, `cherry-pick`, `merge` and `rebase` (each produces its own
   commits, and git's own `revert` or `reflog` is the honest way back).
 
+## The structural-edit capability
+
+A provider that returns `true` from `supports_structural_edit()` opts into the
+generic editing keymap (Ctrl+I / Ctrl+A insert, Ctrl+D / Delete remove,
+Ctrl+X / Ctrl+C / Ctrl+V cut, copy and paste). Undo comes free, and the provider
+implements no `undo`/`redo` at all: the app mutates its own FFON tree, records
+the `Structural` entry, and reports the result back through
+`sync_ffon_body_children`, which is the provider's single write path — for the
+keypress, and for the ctrl-Z that reverses it.
+
+Two things about that contract are easy to get wrong:
+
+- **The provider works out which list it was handed, not the app.** A provider's
+  path is not in step with FFON depth (the mail client sits at `/compose/Body:`
+  while its compose fields hang off the provider root), so the app cannot derive
+  it. The notes provider tags each row with an `<id>` and looks up the parent.
+- **A provider whose `sync_ffon_body_children` means one specific thing must not
+  declare the capability.** The mail client's implementation means "this is the
+  draft body"; handed a list from two levels deeper it would overwrite the draft
+  with a fragment of itself. It keeps its own path check in `shortcuts.rs`.
+
+`delete_item` is asked before a row is removed, and `false` cancels it — the
+only veto on the FFON delete path. A provider that declares the capability must
+implement it, because the trait default returns `false`, which reads as "always
+refuse".
+
+## Notes
+
+Every list opens with a `list meta:` row carrying that list's SHA-256, the root
+included — so the first row of the notes provider is the tree's root hash, and a
+glance at it says whether anything anywhere below has changed. The hashes are
+recomputed from the tree on demand, never cached, so any text change, insert,
+delete or reorder moves the affected node's hash and every ancestor's up to the
+root. Visibility is excluded, deliberately: publishing a note changes its
+audience, not its content.
+
+Propagating the hash through the *tree* is not enough on its own, and the gap is
+easy to miss because every unit test passes without it: the app keeps parent
+levels in its own FFON tree and `Left` walks back through them without
+re-fetching, so an ancestor's `sha256:` row goes on showing a digest that stopped
+being true several edits ago. `sync_provider_children` therefore calls
+`refresh_visible_path` for a capability provider — every rendered level of a tree
+that just changed is stale, not only the one that changed.
+
+Every edit is reversible: writing a note, deleting one, cutting, pasting,
+renaming, and flipping a note between private and public. All of it rides the
+`Structural` entries the app records, so there is one undo model rather than a
+provider-specific one.
+
+Not reversible, and worth stating:
+
+- A note deleted **outside** the app. Undo restores the app's tree and writes it
+  back, so the file returns only if the tree still held it.
+- A `.listmeta` rewritten by another process, or by a future sync. The provider
+  reconciles the directory against its tree on every save; it does not merge.
+- Reading the store can fail (a note that is not valid UTF-8, a permission
+  error). That is **not** treated as an empty tree: nothing is written at all
+  until the store can be read, because reconciling against a tree that failed to
+  load would delete the notes that failed to read.
+
 ## Migration state
 
 Legacy `UndoEntry` + `ProviderUndoDescriptor` stacks coexist with the unified

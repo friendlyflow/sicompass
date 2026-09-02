@@ -13,6 +13,7 @@ members = [
     "lib/lib_terminal",
     "lib/lib_claude",
     "lib/lib_gitclient",
+    "lib/lib_notes",
     "lib/lib_builtins",
     "lib/lib_updater",
     "src/sicompass",
@@ -47,6 +48,7 @@ sicompass-shell = { path = "lib/lib_shell" }
 sicompass-terminal = { path = "lib/lib_terminal" }
 sicompass-claude = { path = "lib/lib_claude" }
 sicompass-gitclient = { path = "lib/lib_gitclient" }
+sicompass-notes = { path = "lib/lib_notes" }
 sicompass-builtins = { path = "lib/lib_builtins" }
 sicompass-updater = { path = "lib/lib_updater" }
 

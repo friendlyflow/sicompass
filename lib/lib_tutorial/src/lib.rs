@@ -221,6 +221,7 @@ static SECTIONS: &[Node] = &[
             Leaf("tutorial-prog-intro"),
             Leaf("tutorial-prog-filebrowser"),
             Leaf("tutorial-prog-texteditor"),
+            Leaf("tutorial-prog-notes"),
             Leaf("tutorial-prog-web"),
             Leaf("tutorial-prog-web-history"),
             Leaf("tutorial-prog-web-bookmark"),
