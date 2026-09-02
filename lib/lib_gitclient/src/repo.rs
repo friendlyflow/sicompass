@@ -110,6 +110,22 @@ pub(crate) mod fixture {
             let dir = TempDir::new().unwrap();
             let f = Fixture { dir };
             f.run(["init", "-q"]);
+            // Write the identity into the repository's *own* config, not just
+            // into `run`'s `-c` flags.
+            //
+            // `run` covers git invoked by the tests. It does not cover git
+            // invoked by the provider, which is the code under test: it shells
+            // out on its own, with none of these flags and none of this
+            // environment. On a developer's machine that silently picks up
+            // their global `user.name`, so every commit test passes and quietly
+            // records their real name. On a machine that has never configured
+            // one it fails with "Author identity unknown", which is what every
+            // commit test did the first time CI ever ran this crate.
+            //
+            // Local config belongs to the repository, so both callers get it.
+            f.run(["config", "user.name", "Test"]);
+            f.run(["config", "user.email", "test@example.invalid"]);
+            f.run(["config", "commit.gpgsign", "false"]);
             f
         }
 
