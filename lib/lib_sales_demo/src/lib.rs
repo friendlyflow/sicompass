@@ -391,6 +391,26 @@ impl Provider for SalesDemoProvider {
         }
     }
 
+    /// Structural editing is available exactly where the "Add element:"
+    /// section is, which is the level whose entries the user configures.
+    ///
+    /// The app used to work this out by looking for an `Obj` keyed
+    /// "Add element:" among the cursor's siblings. That reads a *shape* to
+    /// infer an *intent*, and any provider that happened to render a section
+    /// with that key inherited a keymap it never asked for. Answering here says
+    /// the same thing directly, and from the side that built the section.
+    fn supports_structural_edit(&self) -> bool {
+        let parts = self.path_parts();
+        raw_at_path(&self.root, &parts)
+            .filter(|node| node.as_array().is_none())
+            .map(|node| {
+                build_display_children(node)
+                    .iter()
+                    .any(|e| matches!(e, FfonElement::Obj(o) if o.key == "Add element:"))
+            })
+            .unwrap_or(false)
+    }
+
     fn current_path(&self) -> &str {
         &self.path
     }

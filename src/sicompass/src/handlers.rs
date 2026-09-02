@@ -1277,7 +1277,7 @@ pub(crate) fn insert_palette_commands(r: &AppRenderer) -> Vec<String> {
     // original colon palette is unreachable, which is the same reason
     // `is_live_input_slot` is keyed by name. Excluded here rather than in
     // `trailing_input_slot_index` so the shape test keeps describing a shape.
-    if active_provider_is_filebrowser(r) {
+    if provider_declared_structural_edit(r) {
         return Vec::new();
     }
     if !trailing_element_is_input_slot(r) {
@@ -2080,6 +2080,10 @@ pub fn handle_enter_general(r: &mut AppRenderer) {
     let is_filebrowser = crate::provider::get_active_provider_ref(r)
         .map(|p| p.name() == "filebrowser")
         .unwrap_or(false);
+    // A provider that owns its row editing renders every row as an `<input>` so
+    // `i`/`a` can rename in place. That must not turn Enter into a no-op commit:
+    // on a tree, Enter opens the row. Used to be a filebrowser name check.
+    let row_editing_is_provider_owned = provider_declared_structural_edit(r);
 
     // General-mode Enter on the live input slot itself runs the command —
     // identical to an Insert-mode commit. The <input> may be pre-filled from
@@ -2104,7 +2108,7 @@ pub fn handle_enter_general(r: &mut AppRenderer) {
 
     // Activate a plain `<input>` field — commit its existing content, which
     // triggers the provider's refresh.
-    if !_is_obj_elem && tags::has_input(&elem_text) && !is_filebrowser {
+    if !_is_obj_elem && tags::has_input(&elem_text) && !row_editing_is_provider_owned {
         let content = tags::extract_input(&elem_text).unwrap_or_default();
         crate::provider::commit_edit(r, &content, &content);
         crate::provider::refresh_current_directory(r);
@@ -2797,6 +2801,14 @@ pub fn handle_enter_insert(r: &mut AppRenderer) {
                 let undo_id = r.current_id.clone();
                 let tl_before = r.active_timeline().entries.len();
                 let committed = crate::provider::commit_edit(r, &old_content, &name);
+                // A provider that owns its tree hears about the new row here,
+                // before the refresh below re-fetches from it and would
+                // otherwise render away what the user just typed. The
+                // placeholder branch returns early, so the sync on the ordinary
+                // commit path further down is never reached from here.
+                if provider_declared_structural_edit(r) {
+                    crate::state::sync_provider_children(r, &r.current_id.clone());
+                }
                 // When the provider recorded its own timeline entry during the
                 // commit (e.g. the text editor writing the first line of an
                 // empty file — a content edit, not a file creation), that entry
@@ -2835,6 +2847,16 @@ pub fn handle_enter_insert(r: &mut AppRenderer) {
                         };
                         if let Some(star_idx) = new_star_idx {
                             r.current_id.set_last(star_idx);
+                        } else if provider_declared_structural_edit(r) {
+                            // A provider that owns its tree re-rendered the whole
+                            // level, and its row count need not match the one the
+                            // placeholder went into: an empty level shows a
+                            // "nothing here yet" line that disappears the moment it
+                            // holds something, so every row below shifts up by one.
+                            // The index the placeholder was inserted at is stale, so
+                            // the cursor is put back on the row by what the user
+                            // typed rather than by where they typed it.
+                            reposition_after_placeholder_commit(r, &name);
                         }
                         // Retarget the per-keystroke TextChunks onto the committed
                         // Str. The I_PLACEHOLDER seeded for this edit collapses away
@@ -2901,6 +2923,14 @@ pub fn handle_enter_insert(r: &mut AppRenderer) {
                 let undo_id = r.current_id.clone();
                 let tl_before = r.active_timeline().entries.len();
                 let committed = crate::provider::commit_edit(r, &old_content, &format!("{key}:"));
+                // A provider that owns its tree hears about the new row here,
+                // before the refresh below re-fetches from it and would
+                // otherwise render away what the user just typed. The
+                // placeholder branch returns early, so the sync on the ordinary
+                // commit path further down is never reached from here.
+                if provider_declared_structural_edit(r) {
+                    crate::state::sync_provider_children(r, &r.current_id.clone());
+                }
                 // See the `PlaceholderKind::Str` arm: a provider-recorded entry
                 // (e.g. a `header:` typed as the first line of an empty file)
                 // owns the undo step, so skip the `FsOp::Create`.
@@ -2933,6 +2963,9 @@ pub fn handle_enter_insert(r: &mut AppRenderer) {
                         };
                         if let Some(star_idx) = new_star_idx {
                             r.current_id.set_last(star_idx);
+                        } else if provider_declared_structural_edit(r) {
+                            // See the `PlaceholderKind::Str` arm.
+                            reposition_after_placeholder_commit(r, &key);
                         }
                         // Retarget the per-keystroke TextChunks onto the committed
                         // Obj (see the PlaceholderKind::Str arm above).
@@ -3262,6 +3295,11 @@ pub fn handle_enter_insert(r: &mut AppRenderer) {
     // Capture prev element before commit (for FsRename undo).
     // Track filebrowser renames AND editor edits/renames (but not structural inserts).
     let is_filebrowser_rename = active_provider_is_filebrowser(r) && !old_content.is_empty();
+    // Same "a rename must not descend into its target" rule, for providers that
+    // own their row editing through the capability. Kept separate from
+    // `is_filebrowser_rename` because that one also drives FsRename undo, which
+    // a non-filesystem provider must not get.
+    let is_structural_rename = provider_declared_structural_edit(r) && !old_content.is_empty();
     // Editor: track undo for line edits and directory renames, but NOT for structural inserts
     // (<srcins=N> placeholders). Structural inserts get undo via Task::Insert instead.
     let is_editor_commit = active_provider_is_editor(r)
@@ -3345,6 +3383,19 @@ pub fn handle_enter_insert(r: &mut AppRenderer) {
     }
 
     if committed {
+        // Providers that own their tree learn about the typed text the same way
+        // they learn about every other edit: the list, with each row's `<id>`
+        // still attached. That has to happen *before* the refresh below, which
+        // re-fetches from the provider and would otherwise overwrite what the
+        // user just typed with the provider's stale copy.
+        //
+        // It also makes `commit_edit`'s ambiguous `old` argument non-load-bearing.
+        // `old` is only the previous display text, so two identically titled
+        // siblings are indistinguishable through it; the id-carrying list is not.
+        if is_structural_rename || provider_declared_structural_edit(r) {
+            crate::state::sync_provider_children(r, &r.current_id.clone());
+        }
+
         // The placeholder (if any) has been replaced by the committed value;
         // clearing `placeholder_cancel` prevents the trailing `handle_escape`
         // from treating commit as cancellation and stripping the new element
@@ -3365,7 +3416,7 @@ pub fn handle_enter_insert(r: &mut AppRenderer) {
         // Skip the `+i` live input slot too — its children are recall history;
         // the cursor belongs on the fresh trailing input slot, set by
         // `snap_to_trailing_input`.
-        if !is_filebrowser_rename && !is_editor_commit && !is_live_slot {
+        if !is_filebrowser_rename && !is_editor_commit && !is_live_slot && !is_structural_rename {
             navigate_right_raw(r);
         }
 
@@ -4073,6 +4124,46 @@ pub fn handle_backspace(r: &mut AppRenderer) {
 pub fn handle_delete(r: &mut AppRenderer, history: crate::app_state::History) {
     crate::state::update_state(r, crate::app_state::Task::Delete, history);
     r.needs_redraw = true;
+}
+
+/// Ctrl+D / Delete for a provider that declared `supports_structural_edit()`.
+///
+/// The generic FFON delete has no veto — `Task::Delete` removes the row and
+/// there is nothing a provider can say about it. That is fine for a compose
+/// body, where every row is the user's own text, and wrong for a tree that
+/// renders rows the user must not remove (a metadata header, a computed
+/// summary). So the provider is asked first, through the same `delete_item`
+/// channel the file browser already uses, and `false` cancels the delete with
+/// whatever error the provider set.
+///
+/// A provider that declares the capability therefore has to implement
+/// `delete_item`; the trait default returns `false`, which reads as "always
+/// refuse". Providers that reach the generic row without the capability (the
+/// compose body, createElement providers) skip the ask entirely and keep their
+/// existing unconditional behaviour.
+pub fn handle_structural_delete(r: &mut AppRenderer) {
+    if provider_declared_structural_edit(r) {
+        // Tags intact, so a provider can decode whatever it encoded into the
+        // row (an `<id>`, a `<src=N>`) rather than matching on display text.
+        let raw = focused_element_raw(r).unwrap_or_default();
+        if !crate::provider::delete_item_by_name(r, &raw) {
+            if r.error_message.is_empty() {
+                r.error_message = "cannot delete this element".to_owned();
+            }
+            r.needs_redraw = true;
+            return;
+        }
+    }
+    handle_delete(r, crate::app_state::History::None);
+}
+
+/// Whether the active provider opted into the generic structural-edit keymap.
+pub fn provider_declared_structural_edit(r: &AppRenderer) -> bool {
+    r.current_id
+        .get(0)
+        .and_then(|i| r.providers.get(i))
+        .map(|p| p.supports_structural_edit())
+        .unwrap_or(false)
 }
 
 /// Delete via active provider (file browser delete — mirrors C's `handleFileDelete`).
@@ -6105,6 +6196,16 @@ pub fn handle_ctrl_v(r: &mut AppRenderer) {
             if !crate::provider::refresh_subtree_parent(r) {
                 crate::provider::refresh_current_directory(r);
             }
+            list::create_list_current_layer(r);
+            r.needs_redraw = true;
+        }
+        return;
+    }
+    // Providers that own a tree: insert after the cursor rather than replacing
+    // it. Must come before the generic `Task::Paste` below, which replaces.
+    if r.coordinate.is_general() && provider_declared_structural_edit(r) {
+        if crate::state::paste_structural_element(r) {
+            crate::state::sync_provider_children(r, &r.current_id.clone());
             list::create_list_current_layer(r);
             r.needs_redraw = true;
         }

@@ -151,8 +151,8 @@ toolchain. Rerun that script if you change anything under `shaders/`, and
 ## Built-in providers
 
 Each provider turns a different data source into the same keyboard-navigable
-tree: File Browser, Text Editor, Email, Chat, Web Browser, Terminal, Git Client,
-Plugin Store, and Settings.
+tree: File Browser, Text Editor, Notes, Email, Chat, Web Browser, Terminal, Git
+Client, Plugin Store, and Settings.
 
 ## Community
 

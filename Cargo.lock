@@ -4409,6 +4409,7 @@ dependencies = [
  "sicompass-emailclient",
  "sicompass-filebrowser",
  "sicompass-gitclient",
+ "sicompass-notes",
  "sicompass-remote",
  "sicompass-sdk",
  "sicompass-settings",
@@ -4440,6 +4441,7 @@ dependencies = [
  "sicompass-emailclient",
  "sicompass-filebrowser",
  "sicompass-gitclient",
+ "sicompass-notes",
  "sicompass-remote",
  "sicompass-sales-demo",
  "sicompass-sdk",
@@ -4515,6 +4517,18 @@ version = "0.1.17"
 dependencies = [
  "async-trait",
  "natord",
+ "sicompass-sdk",
+ "tempfile",
+]
+
+[[package]]
+name = "sicompass-notes"
+version = "0.1.17"
+dependencies = [
+ "async-trait",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
  "sicompass-sdk",
  "tempfile",
 ]

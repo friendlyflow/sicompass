@@ -202,6 +202,12 @@ interface types {
     /// Behaves like a text editor: leaving Insert commits via `commit-edit`, and
     /// the meta/scroll hint screens are suppressed.
     has-editor-semantics: bool,
+    /// Opt in to the generic structural-edit keymap: Ctrl+I / Ctrl+A insert,
+    /// Ctrl+D / Delete remove, Ctrl+X / Ctrl+C / Ctrl+V cut, copy and paste.
+    /// The host owns the mutation and reports the result back through
+    /// `sync-ffon-body-children`; `delete-item` and `commit-edit` keep their
+    /// veto. Weaker than `has-editor-semantics`, which also remaps Enter.
+    supports-structural-edit: bool,
     /// Whether pressing `d` may enter the dashboard. When false the dashboard can
     /// still be entered via a `dashboard-request`.
     manual-dashboard-entry-allowed: bool,

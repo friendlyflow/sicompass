@@ -41,6 +41,12 @@ fn ensure_builtins() {
     // prompt, or failing differently depending on whether the machine is
     // online.
     sicompass_gitclient::_set_test_no_network(true);
+    // Integration tests compile lib crates *without* `cfg(test)`, so the
+    // crate's own compile-time guard does not apply here. Without this the
+    // notes provider would reconcile the developer's real notes directory
+    // against whatever tree a test built — which does not add notes, it
+    // deletes the ones that are not in it.
+    sicompass_notes::_set_test_no_persist(true);
 }
 
 // ---------------------------------------------------------------------------
@@ -3496,6 +3502,14 @@ impl Provider for ButtonTestProvider {
     }
     fn display_name(&self) -> String {
         "Button Test".to_owned()
+    }
+
+    /// A createElement provider opts into the structural-edit keymap the same
+    /// way any other provider does. The app used to infer it from the presence
+    /// of an "Add element:" row, which meant any provider that happened to name
+    /// a section that way inherited a keymap it never asked for.
+    fn supports_structural_edit(&self) -> bool {
+        true
     }
 
     fn fetch(&mut self) -> Vec<FfonElement> {
@@ -17565,4 +17579,502 @@ fn gitclient_left_still_steps_one_level_at_a_time_inside_the_repository() {
         sicompass::app_state::Coordinate::SessionFirstCommand,
         "and still in the repository"
     );
+}
+
+// ---------------------------------------------------------------------------
+// Notes provider — the structural-edit capability, end to end
+// ---------------------------------------------------------------------------
+
+/// An app with only the notes provider, storing into a tempdir.
+///
+/// The tempdir is not belt-and-braces: `save_tree` reconciles a directory
+/// against a tree, so a test that writes to the real notes directory would not
+/// add notes to it, it would delete every note not in the test's tree.
+fn harness_with_notes() -> (AppRenderer, TempDir) {
+    ensure_builtins();
+    let tmp = TempDir::new().expect("tempdir");
+    let mut renderer = AppRenderer::new();
+    let mut notes = sicompass_sdk::create_provider_by_name("notes").expect("notes provider");
+    notes.set_config_path(tmp.path().join("notes"));
+    register(&mut renderer, notes);
+    renderer.current_id = IdArray::new();
+    renderer.current_id.push(0);
+    sicompass::list::create_list_current_layer(&mut renderer);
+    (renderer, tmp)
+}
+
+/// The display text of every row currently on screen.
+fn screen(r: &AppRenderer) -> Vec<String> {
+    r.total_list.iter().map(|i| i.label.clone()).collect()
+}
+
+/// Ctrl+A, type, Enter — the way a user actually adds a note.
+fn add_note(r: &mut AppRenderer, text: &str) {
+    press_ctrl(r, Keycode::A);
+    type_text(r, text);
+    press_enter(r);
+    sicompass::list::create_list_current_layer(r);
+}
+
+#[test]
+fn notes_declares_the_structural_edit_capability() {
+    ensure_builtins();
+    let p = sicompass_sdk::create_provider_by_name("notes").unwrap();
+    assert!(
+        p.supports_structural_edit(),
+        "without this the editing keys never reach it"
+    );
+    assert!(
+        !p.has_editor_semantics(),
+        "a tree opens on Enter; an editor appends on Enter"
+    );
+}
+
+#[test]
+fn ctrl_a_writes_a_note_to_disk() {
+    let (mut r, tmp) = harness_with_notes();
+    press_right(&mut r); // into the provider
+
+    add_note(&mut r, "Groceries");
+
+    assert!(
+        screen(&r).iter().any(|l| l.contains("Groceries")),
+        "the note is on screen: {:?}",
+        screen(&r)
+    );
+    assert_eq!(
+        std::fs::read_to_string(tmp.path().join("notes").join("0001")).unwrap(),
+        "Groceries",
+        "and on disk"
+    );
+}
+
+#[test]
+fn ctrl_d_deletes_a_note_and_ctrl_z_brings_it_back() {
+    let (mut r, tmp) = harness_with_notes();
+    press_right(&mut r);
+    add_note(&mut r, "Groceries");
+    let root = tmp.path().join("notes");
+    assert!(root.join("0001").exists());
+
+    // Land on the note, then delete it.
+    focus_row(&mut r, "Groceries");
+    press_ctrl(&mut r, Keycode::D);
+    sicompass::list::create_list_current_layer(&mut r);
+    assert!(
+        !root.join("0001").exists(),
+        "the delete reached the disk, not just the screen"
+    );
+
+    press_ctrl(&mut r, Keycode::Z);
+    sicompass::list::create_list_current_layer(&mut r);
+    assert_eq!(
+        std::fs::read_to_string(root.join("0001")).unwrap(),
+        "Groceries",
+        "undo restored it on disk too"
+    );
+}
+
+#[test]
+fn the_delete_key_works_as_well_as_ctrl_d() {
+    let (mut r, tmp) = harness_with_notes();
+    press_right(&mut r);
+    add_note(&mut r, "Groceries");
+    focus_row(&mut r, "Groceries");
+
+    press(&mut r, Keycode::Delete);
+    sicompass::list::create_list_current_layer(&mut r);
+    assert!(
+        !tmp.path().join("notes").join("0001").exists(),
+        "Delete had no row of its own before this change, only Ctrl+D did"
+    );
+}
+
+#[test]
+fn pasting_a_note_onto_another_does_not_destroy_it() {
+    let (mut r, tmp) = harness_with_notes();
+    press_right(&mut r);
+    add_note(&mut r, "Groceries");
+    add_note(&mut r, "Ideas");
+
+    // Copy the first, move to the second, paste.
+    focus_row(&mut r, "Groceries");
+    press_ctrl(&mut r, Keycode::C);
+    focus_row(&mut r, "Ideas");
+    press_ctrl(&mut r, Keycode::V);
+    sicompass::list::create_list_current_layer(&mut r);
+
+    let root = tmp.path().join("notes");
+    let stored: Vec<String> = (1..=3)
+        .filter_map(|n| std::fs::read_to_string(root.join(format!("{n:04}"))).ok())
+        .collect();
+    assert!(
+        stored.contains(&"Ideas".to_owned()),
+        "the paste target survived: {stored:?}"
+    );
+    assert_eq!(stored.len(), 3, "and the copy was inserted: {stored:?}");
+}
+
+#[test]
+fn the_list_meta_row_cannot_be_deleted() {
+    let (mut r, _tmp) = harness_with_notes();
+    press_right(&mut r);
+    // A note with children, so it can be entered.
+    press_ctrl(&mut r, Keycode::A);
+    type_text(&mut r, "Groceries:");
+    press_enter(&mut r);
+    sicompass::list::create_list_current_layer(&mut r);
+
+    // Move into it; the meta row is the first thing there.
+    let idx = r
+        .total_list
+        .iter()
+        .position(|i| i.label.contains("Groceries"))
+        .expect("the note is on screen");
+    r.current_id = r.total_list[idx].id.clone();
+    press_right(&mut r);
+    sicompass::list::create_list_current_layer(&mut r);
+    let before = screen(&r);
+    assert!(
+        before
+            .first()
+            .map(|l| l.contains("list meta"))
+            .unwrap_or(false),
+        "meta row leads the level: {before:?}"
+    );
+
+    r.current_id.set_last(0);
+    press_ctrl(&mut r, Keycode::D);
+    // Checked before the list is rebuilt: `create_list_current_layer` clears
+    // `error_message`, and in the app the announcement happens first.
+    assert!(
+        !r.error_message.is_empty(),
+        "the user was told why rather than seeing nothing happen"
+    );
+
+    sicompass::list::create_list_current_layer(&mut r);
+    assert!(
+        screen(&r)
+            .first()
+            .map(|l| l.contains("list meta"))
+            .unwrap_or(false),
+        "and the meta row is still there: {:?}",
+        screen(&r)
+    );
+}
+
+#[test]
+fn ctrl_d_in_the_file_browser_still_deletes_the_file() {
+    // The file browser now declares the same capability notes does, and the
+    // generic FFON delete row sits above its file-delete row. If the predicate
+    // stopped excluding providers that route delete to disk, Ctrl+D here would
+    // drop the row and leave the file.
+    ensure_builtins();
+    let tmp = TempDir::new().unwrap();
+    std::fs::write(tmp.path().join("doomed.txt"), "x").unwrap();
+
+    let mut r = AppRenderer::new();
+    let fb = sicompass_sdk::create_provider_by_name("filebrowser").unwrap();
+    register(&mut r, fb);
+    // After `register`, because it runs `init()`, which resets the path.
+    r.providers[0].set_current_path(tmp.path().to_str().unwrap());
+    {
+        let children = r.providers[0].fetch();
+        let dn = r.providers[0].display_name().to_owned();
+        let mut root_elem = FfonElement::new_obj(&dn);
+        for child in children {
+            root_elem.as_obj_mut().unwrap().push(child);
+        }
+        r.ffon[0] = root_elem;
+    }
+    r.current_id = IdArray::new();
+    r.current_id.push(0);
+    // The root list has to be rendered before Right can move through it, the
+    // same way the app renders every level before the user acts on it.
+    sicompass::list::create_list_current_layer(&mut r);
+    press_right(&mut r);
+    sicompass::list::create_list_current_layer(&mut r);
+    let idx = r
+        .total_list
+        .iter()
+        .position(|i| i.label.contains("doomed.txt"))
+        .expect("the file is listed");
+    r.current_id = r.total_list[idx].id.clone();
+    press_ctrl(&mut r, Keycode::D);
+
+    assert!(
+        !tmp.path().join("doomed.txt").exists(),
+        "Ctrl+D in the file browser deletes the file, not just the row"
+    );
+}
+
+/// Put the cursor on the row whose label contains `needle`.
+///
+/// By label rather than by index on purpose: every list opens with its
+/// `list meta:` header, so index 0 is never the first note, and a test that
+/// counted rows would silently start asserting about the header.
+fn focus_row(r: &mut AppRenderer, needle: &str) {
+    let idx = r
+        .total_list
+        .iter()
+        .position(|i| i.label.contains(needle))
+        .unwrap_or_else(|| panic!("no row matching {needle:?} in {:?}", screen(r)));
+    r.current_id = r.total_list[idx].id.clone();
+    r.list_index = idx;
+}
+
+/// The note rows on screen, without the `list meta:` header.
+fn notes_on_screen(r: &AppRenderer) -> Vec<String> {
+    screen(r)
+        .into_iter()
+        .filter(|l| !l.contains("list meta"))
+        .collect()
+}
+
+/// The row the cursor is on, as it reads on screen.
+fn focused_row(r: &AppRenderer) -> String {
+    let idx = r.current_id.last().unwrap_or(0);
+    r.total_list
+        .get(idx)
+        .map(|i| i.label.clone())
+        .unwrap_or_else(|| format!("<no row at index {idx} of {}>", r.total_list.len()))
+}
+
+/// Writing the very first note must leave the cursor on it.
+///
+/// The regression this guards: an empty level renders a "no notes yet" line,
+/// Ctrl+A puts the placeholder *after* it at index 1, and the line disappears
+/// as soon as the level holds a note — so the note ends up at index 0 while the
+/// cursor still points at 1, which is past the end of the list.
+#[test]
+fn the_first_note_keeps_the_cursor_after_ctrl_a() {
+    let (mut r, _tmp) = harness_with_notes();
+    press_right(&mut r);
+    add_note(&mut r, "first");
+
+    assert_eq!(notes_on_screen(&r), vec!["-i first"], "{:?}", screen(&r));
+    assert_eq!(focused_row(&r), "-i first");
+}
+
+#[test]
+fn ctrl_a_leaves_the_cursor_on_the_appended_note() {
+    let (mut r, _tmp) = harness_with_notes();
+    press_right(&mut r);
+    add_note(&mut r, "first");
+
+    focus_row(&mut r, "first");
+    add_note(&mut r, "second");
+
+    assert_eq!(notes_on_screen(&r), vec!["-i first", "-i second"]);
+    assert_eq!(
+        focused_row(&r),
+        "-i second",
+        "Ctrl+A appends after the cursor"
+    );
+}
+
+#[test]
+fn ctrl_i_leaves_the_cursor_on_the_inserted_note() {
+    let (mut r, _tmp) = harness_with_notes();
+    press_right(&mut r);
+    add_note(&mut r, "first");
+
+    focus_row(&mut r, "first");
+    press_ctrl(&mut r, Keycode::I);
+    type_text(&mut r, "zeroth");
+    press_enter(&mut r);
+    sicompass::list::create_list_current_layer(&mut r);
+
+    assert_eq!(notes_on_screen(&r), vec!["-i zeroth", "-i first"]);
+    assert_eq!(
+        focused_row(&r),
+        "-i zeroth",
+        "Ctrl+I inserts before the cursor"
+    );
+}
+
+/// The same, one level down, where the list also opens with its meta row — so
+/// the index the placeholder went in at is offset by the header too.
+#[test]
+fn ctrl_a_inside_a_note_lands_on_the_new_line() {
+    let (mut r, _tmp) = harness_with_notes();
+    press_right(&mut r);
+    press_ctrl(&mut r, Keycode::A);
+    type_text(&mut r, "Groceries:");
+    press_enter(&mut r);
+    sicompass::list::create_list_current_layer(&mut r);
+
+    let idx = r
+        .total_list
+        .iter()
+        .position(|i| i.label.contains("Groceries"))
+        .expect("the note is on screen");
+    r.current_id = r.total_list[idx].id.clone();
+    press_right(&mut r);
+    sicompass::list::create_list_current_layer(&mut r);
+
+    add_note(&mut r, "milk");
+    assert_eq!(focused_row(&r), "-i milk", "{:?}", screen(&r));
+}
+
+/// The sha256 the `list meta:` row of the current level is showing.
+fn shown_hash(r: &mut AppRenderer) -> String {
+    focus_row(r, "list meta");
+    press_right(r);
+    sicompass::list::create_list_current_layer(r);
+    let hash = screen(r)
+        .into_iter()
+        .find(|l| l.contains("sha256"))
+        .and_then(|l| l.split_whitespace().last().map(|s| s.to_owned()))
+        .unwrap_or_else(|| panic!("no sha256 row in {:?}", screen(r)));
+    press(r, Keycode::Left);
+    sicompass::list::create_list_current_layer(r);
+    hash
+}
+
+/// The whole point of chaining the hashes: a line added deep in the tree has to
+/// move the hash every level above it, *as displayed*.
+///
+/// The tree and the files were always right; the screen was not. The app keeps
+/// parent levels in memory and `Left` walks back through them without
+/// re-fetching, so a parent's `sha256:` row kept showing a digest that had
+/// stopped being true. A hash you cannot trust is worse than no hash.
+#[test]
+fn adding_a_line_inside_a_note_moves_the_root_hash_on_screen() {
+    let (mut r, _tmp) = harness_with_notes();
+    press_right(&mut r);
+    press_ctrl(&mut r, Keycode::A);
+    type_text(&mut r, "Groceries:");
+    press_enter(&mut r);
+    sicompass::list::create_list_current_layer(&mut r);
+
+    let root_before = shown_hash(&mut r);
+
+    // Two levels down: into the note, add a line.
+    focus_row(&mut r, "Groceries");
+    press_right(&mut r);
+    sicompass::list::create_list_current_layer(&mut r);
+    let note_before = shown_hash(&mut r);
+    add_note(&mut r, "milk");
+    let note_after = shown_hash(&mut r);
+    assert_ne!(note_before, note_after, "the note's own hash moved");
+
+    // Back out to the root and read its meta again.
+    press(&mut r, Keycode::Left);
+    sicompass::list::create_list_current_layer(&mut r);
+    let root_after = shown_hash(&mut r);
+
+    assert_ne!(
+        root_before, root_after,
+        "the root hash must follow a change made two levels below it"
+    );
+}
+
+/// And it is a hash of content, not of history: undo the line and the displayed
+/// root hash has to come back to exactly what it was.
+#[test]
+fn undoing_the_line_brings_the_shown_root_hash_back() {
+    let (mut r, _tmp) = harness_with_notes();
+    press_right(&mut r);
+    press_ctrl(&mut r, Keycode::A);
+    type_text(&mut r, "Groceries:");
+    press_enter(&mut r);
+    sicompass::list::create_list_current_layer(&mut r);
+    let root_before = shown_hash(&mut r);
+
+    focus_row(&mut r, "Groceries");
+    press_right(&mut r);
+    sicompass::list::create_list_current_layer(&mut r);
+    add_note(&mut r, "milk");
+    focus_row(&mut r, "milk");
+    press_ctrl(&mut r, Keycode::D);
+    sicompass::list::create_list_current_layer(&mut r);
+
+    press(&mut r, Keycode::Left);
+    sicompass::list::create_list_current_layer(&mut r);
+    assert_eq!(
+        shown_hash(&mut r),
+        root_before,
+        "same content, same hash — the digest is of the tree, not of what happened to it"
+    );
+}
+
+/// Deleting a row leaves the cursor on the row that took its place, not on the
+/// one before it.
+///
+/// This is the file browser's behaviour — `handle_file_delete` clamps the index
+/// into the shortened list rather than stepping back — and the generic FFON
+/// delete path used to disagree, walking the cursor backwards even when there
+/// were rows left below.
+#[test]
+fn deleting_a_note_lands_on_the_one_below_it() {
+    let (mut r, _tmp) = harness_with_notes();
+    press_right(&mut r);
+    add_note(&mut r, "one");
+    add_note(&mut r, "two");
+    add_note(&mut r, "three");
+    assert_eq!(notes_on_screen(&r), vec!["-i one", "-i two", "-i three"]);
+
+    focus_row(&mut r, "two");
+    press_ctrl(&mut r, Keycode::D);
+    sicompass::list::create_list_current_layer(&mut r);
+
+    assert_eq!(notes_on_screen(&r), vec!["-i one", "-i three"]);
+    assert_eq!(
+        focused_row(&r),
+        "-i three",
+        "the cursor holds its place, so it lands on what moved up into it"
+    );
+}
+
+/// Deleting the last row is the one case with nothing below: the cursor steps
+/// back, because there is nowhere else for it to go.
+#[test]
+fn deleting_the_last_note_steps_the_cursor_back() {
+    let (mut r, _tmp) = harness_with_notes();
+    press_right(&mut r);
+    add_note(&mut r, "one");
+    add_note(&mut r, "two");
+
+    focus_row(&mut r, "two");
+    press_ctrl(&mut r, Keycode::D);
+    sicompass::list::create_list_current_layer(&mut r);
+
+    assert_eq!(notes_on_screen(&r), vec!["-i one"]);
+    assert_eq!(focused_row(&r), "-i one");
+}
+
+/// The same rule, checked against the provider it was taken from.
+#[test]
+fn deleting_a_file_lands_on_the_one_below_it() {
+    ensure_builtins();
+    let tmp = TempDir::new().unwrap();
+    for n in ["a.txt", "b.txt", "c.txt"] {
+        std::fs::write(tmp.path().join(n), "x").unwrap();
+    }
+
+    let mut r = AppRenderer::new();
+    let fb = sicompass_sdk::create_provider_by_name("filebrowser").unwrap();
+    register(&mut r, fb);
+    r.providers[0].set_current_path(tmp.path().to_str().unwrap());
+    {
+        let children = r.providers[0].fetch();
+        let dn = r.providers[0].display_name().to_owned();
+        let mut root_elem = FfonElement::new_obj(&dn);
+        for child in children {
+            root_elem.as_obj_mut().unwrap().push(child);
+        }
+        r.ffon[0] = root_elem;
+    }
+    r.current_id = IdArray::new();
+    r.current_id.push(0);
+    sicompass::list::create_list_current_layer(&mut r);
+    press_right(&mut r);
+    sicompass::list::create_list_current_layer(&mut r);
+
+    focus_row(&mut r, "b.txt");
+    press_ctrl(&mut r, Keycode::D);
+    sicompass::list::create_list_current_layer(&mut r);
+
+    assert_eq!(focused_row(&r), "-i c.txt", "{:?}", screen(&r));
 }

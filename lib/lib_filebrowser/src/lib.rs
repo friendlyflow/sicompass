@@ -222,6 +222,16 @@ impl Provider for FilebrowserProvider {
         false
     }
 
+    /// The file browser is where the generic structural-edit keymap was first
+    /// wired, back when the app recognised it by name. It declares the
+    /// capability so those checks can be about what a provider *does* rather
+    /// than what it is called. Behaviour is unchanged: Ctrl+D and Delete still
+    /// reach `handle_file_delete` (`avail_ffon_delete` excludes providers that
+    /// route delete to disk), and Ctrl+X/Ctrl+V still reach the file clipboard.
+    fn supports_structural_edit(&self) -> bool {
+        true
+    }
+
     fn path_is_filesystem(&self) -> bool {
         true
     }

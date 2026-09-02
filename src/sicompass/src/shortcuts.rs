@@ -233,6 +233,19 @@ fn is_editor(r: &AppRenderer) -> bool {
         .unwrap_or(false)
 }
 
+/// True when the active provider declared `supports_structural_edit()`.
+///
+/// The published way to ask for the generic editing keymap. Providers used to
+/// be recognised here by name; this is what replaced that, so a WASM plugin can
+/// opt in the same way a built-in does.
+fn provider_supports_structural_edit(r: &AppRenderer) -> bool {
+    r.current_id
+        .get(0)
+        .and_then(|i| r.providers.get(i))
+        .map(|p| p.supports_structural_edit())
+        .unwrap_or(false)
+}
+
 fn has_dashboard(r: &AppRenderer) -> bool {
     r.current_id
         .get(0)
@@ -366,36 +379,39 @@ fn in_email_compose(r: &AppRenderer) -> bool {
     has_compose && not_at_root(r)
 }
 
-/// True when the current parent container has an "Add element:" sibling
-/// (createElement provider pattern).
-fn has_add_element_sibling(r: &AppRenderer) -> bool {
-    use sicompass_sdk::ffon::FfonElement;
-    let siblings: &[FfonElement] = if r.current_id.depth() <= 1 {
-        &r.ffon
-    } else {
-        let Some(s) = get_ffon_at_id(&r.ffon, &r.current_id) else {
-            return false;
-        };
-        s
-    };
-    siblings
-        .iter()
-        .any(|e| matches!(e, FfonElement::Obj(o) if o.key == "Add element:"))
-}
-
-/// Structural editing is available for filebrowser, email compose body,
-/// or createElement providers. The editor provider has dedicated rows
-/// (avail_editor_edit) — keeping it out of this predicate stops the
-/// generic general-mode handlers from racing the editor-specific ones
-/// now that editor providers share the general coordinate.
+/// Structural editing is available wherever the active provider says it is.
+///
+/// This used to be three unrelated tests: a provider *name* (the file browser),
+/// a *shape* (an "Add element:" sibling) and a *path* (the email compose body).
+/// The first two are gone: `supports_structural_edit()` is asked of the
+/// provider, may vary with its current path, and can be answered by a plugin.
+///
+/// The compose body stays a special case, and deliberately. The capability's
+/// contract is that a provider will be handed *any* of its lists, at any depth,
+/// through `sync_ffon_body_children` and must cope. The mail client's
+/// implementation of that hook means one specific thing — "this is the draft
+/// body" — so handing it a list from two levels deeper overwrites the draft
+/// with a fragment of itself. Declaring a capability it cannot honour would buy
+/// a tidier predicate and a corrupted draft.
+///
+/// The editor provider stays out: it has dedicated rows (`avail_editor_edit`),
+/// and keeping it out stops the generic general-mode handlers from racing the
+/// editor-specific ones now that editor providers share the general coordinate.
 fn avail_structural_edit(r: &AppRenderer) -> bool {
-    not_at_root(r) && (is_filebrowser(r) || in_email_compose_body(r) || has_add_element_sibling(r))
+    not_at_root(r) && (provider_supports_structural_edit(r) || in_email_compose_body(r))
 }
 
-/// FFON-tree delete is only meaningful in compose body and createElement
-/// providers — filebrowser/editor route Ctrl+D to file/disk delete.
+/// FFON-tree delete: a provider that declared the capability *and* does not
+/// route delete to disk.
+///
+/// The exclusion is load-bearing. `SHORTCUTS` is first-match-wins, and the
+/// file-delete rows sit below the generic one, so without it a file browser
+/// (which declares the capability, for Ctrl+I/A/X/V) would have Ctrl+D remove
+/// the row instead of the file.
 fn avail_ffon_delete(r: &AppRenderer) -> bool {
-    not_at_root(r) && (in_email_compose_body(r) || has_add_element_sibling(r))
+    not_at_root(r)
+        && ((provider_supports_structural_edit(r) && !avail_file_delete(r))
+            || in_email_compose_body(r))
 }
 
 /// Predicates for keys that are general-only after the coordinate collapse —
@@ -470,10 +486,6 @@ fn avail_editor_edit(r: &AppRenderer) -> bool {
 // ---------------------------------------------------------------------------
 // Handler wrappers (for History param or mode-specific disambiguation)
 // ---------------------------------------------------------------------------
-
-fn delete_editor(r: &mut AppRenderer) {
-    handlers::handle_delete(r, crate::app_state::History::None);
-}
 
 // ---------------------------------------------------------------------------
 // SHORTCUTS table
@@ -1658,7 +1670,7 @@ pub static SHORTCUTS: &[Shortcut] = &[
     },
     // ---- Ctrl+D / Delete in General for editor provider -----------
     // Routes to handle_file_delete so the provider's delete_item is called (writes to disk).
-    // Must precede the generic delete_editor rows so editor provider wins.
+    // Must precede the generic structural-delete rows so editor provider wins.
     Shortcut {
         key: Keycode::D,
         key2: None,
@@ -1679,9 +1691,13 @@ pub static SHORTCUTS: &[Shortcut] = &[
         is_available: avail_editor_edit,
         handle: handlers::handle_file_delete,
     },
-    // ---- Ctrl+D (delete FFON element in General) ------------------
-    // Only fires for compose body / has_add_element_sibling providers.
+    // ---- Ctrl+D / Delete (delete FFON element in General) ---------
+    // Fires for the compose body, and for any provider that declared
+    // `supports_structural_edit()` and does not route delete to disk.
     // Filebrowser/editor have dedicated file-delete rows above.
+    //
+    // Both keys are bound: the Delete key had no `avail_ffon_delete` row at all,
+    // so a provider on this path could only delete with Ctrl+D.
     Shortcut {
         key: Keycode::D,
         key2: None,
@@ -1690,7 +1706,17 @@ pub static SHORTCUTS: &[Shortcut] = &[
         modes: &[Coordinate::General],
         label: "Ctrl+D Delete",
         is_available: avail_ffon_delete,
-        handle: delete_editor,
+        handle: handlers::handle_structural_delete,
+    },
+    Shortcut {
+        key: Keycode::Delete,
+        key2: None,
+        ctrl: false,
+        shift: false,
+        modes: &[Coordinate::General],
+        label: "Del    Delete",
+        is_available: avail_ffon_delete,
+        handle: handlers::handle_structural_delete,
     },
     // General Ctrl+D → compose body element delete (before filebrowser entry)
     Shortcut {

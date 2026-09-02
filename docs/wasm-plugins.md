@@ -299,6 +299,22 @@ instance isolation, allowlist enforcement, robots.txt, redirect re-checking, ass
 confinement against a real directory, and a component refused for reaching past its
 manifest.
 
+## Structural editing
+
+`descriptor.supports-structural-edit` opts a guest into the generic editing
+keymap (Ctrl+I / Ctrl+A insert, Ctrl+D / Delete remove, Ctrl+X / Ctrl+C / Ctrl+V
+cut, copy and paste). The host owns the mutation and reports the result back
+through `sync-ffon-body-children`; `delete-item` and `commit-edit` keep their
+veto. It may vary with the guest's current path, so a plugin whose tree is
+editable in one place and fixed in another answers per level.
+
+This field was added in the 0.5 WIT. A component-model record is structural, so
+**a guest compiled against 0.4 has to be rebuilt** — it will not instantiate
+otherwise. The vendored WIT and the host's `default_descriptor` are pinned
+against each other by `wit_vendor_descriptor_fields_match_the_host` in
+`tests/wasm_plugin.rs`, because neither the import guard nor the export-list
+contract notices a new record field.
+
 ## Known limits
 
 - **The allowlist is by name, so this is not full SSRF protection.** A hostname
