@@ -21,7 +21,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.1.17"
+version = "0.1.18"
 edition = "2024"
 license = "GPL-3.0-only"
 
@@ -31,10 +31,12 @@ license = "GPL-3.0-only"
 # override in [patch.crates-io] below so edits in ../sicompass-plugin-sdk are
 # picked up without a publish round-trip.
 #
-# 0.4.0 is a hard floor, not a preference: it is the release that added the
-# provider-scoped asset registry (`assets::register_bytes` / `resolve`) and the
-# `read-asset` host import, both of which the app uses unconditionally.
-sicompass-sdk = "0.4.0"
+# 0.5.0 is a hard floor, not a preference: it is the release that added the
+# `supports_structural_edit` capability and `platform::data_home`, both used
+# unconditionally by lib_notes, lib_filebrowser and lib_sales_demo. (Also
+# carries forward the provider-scoped asset registry and `read-asset` host
+# import from 0.4.0, likewise required unconditionally.)
+sicompass-sdk = "0.5.0"
 sicompass-tutorial = { path = "lib/lib_tutorial" }
 sicompass-settings = { path = "lib/lib_settings" }
 sicompass-filebrowser = { path = "lib/lib_filebrowser" }

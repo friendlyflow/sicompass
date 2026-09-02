@@ -123,6 +123,27 @@ simply wrong. Plugins are WASM components, not TypeScript scripts or compiled C
 libraries, and the terminal's `:` opens a shell in the folder you are reading
 rather than the one under the cursor.
 
+### A notes provider, and the editing keys it needed to exist
+
+Sicompass gains a place for your own writing: press ctrl+a on the notes
+provider to write a note, Right to open it, and ctrl+a again inside to add a
+line, nested as deep as you like. Every list opens with a line reading
+`list meta:`, and inside it a hash of everything the list holds — the root
+one covers the whole tree, so a glance at the first line of the provider says
+whether anything anywhere below has changed. A note is private by default,
+and each one can be switched to public from its own `list meta:`.
+
+That took finishing something the app only half had. The editing keys
+(ctrl+i, ctrl+a, ctrl+d, Delete, ctrl+x, ctrl+c, ctrl+v) used to work in the
+file browser and nowhere a plugin could ask for, because the app recognized
+them by name rather than by anything a provider could declare. Along the way:
+Delete had no row of its own, only ctrl+d did; pasting a copied line onto
+another one used to destroy it, rather than inserting; and deleting a line in
+the middle of a list moved the cursor backwards past lines that were still
+there, instead of landing on the one that took its place — both now match
+what the file browser already did. A `list meta:` line refuses to be deleted
+or typed over, and says why when you try.
+
 ## 0.1.17
 
 ### Web pages read in the order you see them, grouped into regions
