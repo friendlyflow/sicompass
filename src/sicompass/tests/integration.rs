@@ -17241,11 +17241,35 @@ fn gitclient_the_mode_names_itself_once_the_repository_is_open() {
     );
 }
 
+/// Close and cold-start: map the live navigation through the real persistence
+/// rules, then replay it against a freshly constructed provider set.
+fn restart_gitclient(renderer: &AppRenderer) -> AppRenderer {
+    let nav = sicompass::handlers::restorable_nav(
+        &renderer.providers,
+        &renderer.current_id,
+        renderer.providers[0].current_path(),
+    );
+    let mut restarted = AppRenderer::new();
+    register(
+        &mut restarted,
+        sicompass_sdk::create_provider_by_name("gitclient").unwrap(),
+    );
+    if nav.on_path {
+        restarted.rebuild_on_path(&nav.path, nav.current_id);
+    } else {
+        restarted.rebuild_and_clamp(&nav.path, nav.current_id);
+    }
+    sicompass::list::create_list_current_layer(&mut restarted);
+    restarted
+}
+
 #[test]
 fn gitclient_a_restored_tab_comes_back_in_the_repository_folder() {
     // What the app persists is `current_path()`, handed back on restart as a
-    // filesystem path. A synthetic path made that "/", so a tab saved inside a
-    // repository reopened at the filesystem root.
+    // filesystem path. The repository view is not restored with it: the user
+    // has not pressed `:` in this session, so coming back inside the repository
+    // would start the app announcing a colon mode they never entered. The
+    // repository's own folder is where they land, in general mode.
     let tmp = TempDir::new().unwrap();
     let root = tmp.path().canonicalize().unwrap();
     git_fixture(&root);
@@ -17256,33 +17280,84 @@ fn gitclient_a_restored_tab_comes_back_in_the_repository_folder() {
     // Exactly the reported case: `:` in the repository's folder, then quit.
     press_right(&mut renderer);
     press_colon(&mut renderer);
+    assert_eq!(
+        renderer.coordinate,
+        sicompass::app_state::Coordinate::SessionFirstCommand,
+        "the run that gets closed is in first command mode"
+    );
     let saved = renderer.providers[0].current_path().to_owned();
     assert!(
         saved.starts_with(root.to_str().unwrap()),
         "the saved path names the repository: {saved:?}"
     );
 
-    // A fresh app: a new provider, handed the saved path.
-    let mut restarted = AppRenderer::new();
-    register(
-        &mut restarted,
-        sicompass_sdk::create_provider_by_name("gitclient").unwrap(),
-    );
-    restarted.providers[0].set_current_path(&saved);
-    let children = restarted.providers[0].fetch();
-    restarted.ffon[0].as_obj_mut().unwrap().children = children;
-    sicompass::list::create_list_current_layer(&mut restarted);
-    press_right(&mut restarted);
+    let restarted = restart_gitclient(&renderer);
 
+    assert_eq!(
+        restarted.coordinate,
+        sicompass::app_state::Coordinate::General,
+        "a restart is general mode, whatever the last run was in"
+    );
+    assert_eq!(
+        restarted.providers[0].current_path(),
+        root.to_str().unwrap(),
+        "browsing the repository's own folder"
+    );
     let labels = row_labels(&restarted);
     assert!(
-        labels.iter().any(|l| l.contains("graph")),
-        "back inside the repository, not in a folder: {labels:?}"
+        labels.iter().any(|l| l.contains(".git")),
+        "the folder listing, not the repository: {labels:?}"
+    );
+}
+
+#[test]
+fn gitclient_one_colon_after_a_restart_reopens_the_same_repository() {
+    // The cursor has to come back *inside* the repository's folder: `:` opens
+    // the repository of the folder being listed, so landing on it within its
+    // parent would make the first `:` after a restart try the parent instead.
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    let repo = root.join("project");
+    std::fs::create_dir(&repo).unwrap();
+    git_fixture(&repo);
+
+    ensure_builtins();
+    let mut renderer = AppRenderer::new();
+    register_gitclient_rooted_at(&mut renderer, &root);
+    press_right(&mut renderer); // into the provider
+    press_right(&mut renderer); // into `project`
+    press_colon(&mut renderer);
+    // The open repository, marker and all, is what the tab would be saved with.
+    assert!(
+        renderer.providers[0]
+            .current_path()
+            .starts_with(repo.to_str().unwrap()),
+        "{:?}",
+        renderer.providers[0].current_path()
+    );
+
+    let mut restarted = restart_gitclient(&renderer);
+    assert_eq!(
+        restarted.providers[0].current_path(),
+        repo.to_str().unwrap(),
+        "back on the repository's folder, not its parent"
     );
     assert_eq!(
         restarted.coordinate,
+        sicompass::app_state::Coordinate::General
+    );
+
+    press_colon(&mut restarted);
+
+    assert_eq!(
+        restarted.coordinate,
         sicompass::app_state::Coordinate::SessionFirstCommand,
-        "and the mode says so"
+        "one `:` is the whole way back"
+    );
+    let labels = row_labels(&restarted);
+    assert!(
+        labels.iter().any(|l| l.contains("graph")),
+        "and it is the same repository: {labels:?}"
     );
 }
 
