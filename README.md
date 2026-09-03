@@ -19,9 +19,9 @@ binary, so there is nothing to install alongside it.
 | Windows | [sicompass-x86_64-pc-windows-msvc.msi](https://github.com/friendlyflow/sicompass/releases/latest/download/sicompass-x86_64-pc-windows-msvc.msi) |
 | macOS, Apple Silicon | [sicompass-aarch64-apple-darwin.dmg](https://github.com/friendlyflow/sicompass/releases/latest/download/sicompass-aarch64-apple-darwin.dmg) |
 | macOS, Intel | [sicompass-x86_64-apple-darwin.dmg](https://github.com/friendlyflow/sicompass/releases/latest/download/sicompass-x86_64-apple-darwin.dmg) |
-| Debian, Ubuntu, Mint | [sicompass_0.1.18_amd64.deb](https://github.com/friendlyflow/sicompass/releases/latest/download/sicompass_0.1.18_amd64.deb) |
-| Fedora, RHEL, openSUSE | [sicompass-0.1.18-1.x86_64.rpm](https://github.com/friendlyflow/sicompass/releases/latest/download/sicompass-0.1.18-1.x86_64.rpm) |
-| Any Linux, no root | [sicompass_0.1.18_x86_64.AppImage](https://github.com/friendlyflow/sicompass/releases/latest/download/sicompass_0.1.18_x86_64.AppImage) |
+| Debian, Ubuntu, Mint | [sicompass_0.1.19_amd64.deb](https://github.com/friendlyflow/sicompass/releases/latest/download/sicompass_0.1.19_amd64.deb) |
+| Fedora, RHEL, openSUSE | [sicompass-0.1.19-1.x86_64.rpm](https://github.com/friendlyflow/sicompass/releases/latest/download/sicompass-0.1.19-1.x86_64.rpm) |
+| Any Linux, no root | [sicompass_0.1.19_x86_64.AppImage](https://github.com/friendlyflow/sicompass/releases/latest/download/sicompass_0.1.19_x86_64.AppImage) |
 | Nix, NixOS | `nix run github:friendlyflow/sicompass` |
 
 Portable archives, if you would rather unpack a binary yourself:
@@ -71,15 +71,15 @@ Install the downloaded package with your package manager, so it pulls in what it
 needs:
 
 ```bash
-sudo apt install ./sicompass_0.1.18_amd64.deb      # Debian, Ubuntu, Mint
-sudo dnf install ./sicompass-0.1.18-1.x86_64.rpm   # Fedora, RHEL, openSUSE
+sudo apt install ./sicompass_0.1.19_amd64.deb      # Debian, Ubuntu, Mint
+sudo dnf install ./sicompass-0.1.19-1.x86_64.rpm   # Fedora, RHEL, openSUSE
 ```
 
 The AppImage needs no root. Make it executable and run it:
 
 ```bash
-chmod +x sicompass_0.1.18_x86_64.AppImage
-./sicompass_0.1.18_x86_64.AppImage
+chmod +x sicompass_0.1.19_x86_64.AppImage
+./sicompass_0.1.19_x86_64.AppImage
 ```
 
 You need a working Vulkan driver, which most desktop distributions already have.
