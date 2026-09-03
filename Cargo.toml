@@ -194,8 +194,8 @@ wiremock = "0.6"
 # above. Uncommenting is a local convenience, never how a release resolves the
 # dependency.
 #
-[patch.crates-io]
-sicompass-sdk = { path = "../sicompass-plugin-sdk" }
+# [patch.crates-io]
+# sicompass-sdk = { path = "../sicompass-plugin-sdk" }
 
 # Optimize heavy third-party deps even in debug builds — html5ever and the
 # TLS/HTTP stack are 10-50x slower without optimizations.
