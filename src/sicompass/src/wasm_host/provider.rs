@@ -349,6 +349,7 @@ fn default_poll() -> wit_types::PollResult {
         is_busy: false,
         at_root: true,
         error: None,
+        announcement: None,
         dashboard_request: None,
         navigation_request: None,
     }
@@ -466,6 +467,14 @@ fn to_sdk_frame(f: wit_types::Frame) -> Option<DashboardFrame> {
         rows: f.rows,
         cells,
         cursor,
+        // Not carried across the WIT. A selection is drawn as the host's own
+        // rounded, inset highlight, so letting a guest name one would let it
+        // borrow the app's selection furniture for an arbitrary span. The plain
+        // per-cell fills a guest returns are what its colours should look like.
+        selection: None,
+        half_gap_rows: Vec::new(),
+        // Guests draw grids, and a grid's cursor is a cell.
+        cursor_style: sicompass_sdk::DashboardCursor::Block,
     })
 }
 
@@ -569,6 +578,17 @@ impl Provider for WasmProvider {
     fn take_error(&mut self) -> Option<String> {
         self.inner.borrow_mut().pending_error.take()
     }
+
+    fn take_announcement(&mut self) -> Option<String> {
+        // `take`, not read: the trait requires a second call to return None.
+        self.polled.announcement.take()
+    }
+
+    // `dashboard_uses_app_undo` is deliberately not forwarded to the guest. It
+    // decides whether Ctrl+Z reaches the app instead of the provider, and a
+    // sandboxed plugin does not get to choose which keys it intercepts — the
+    // same reasoning that keeps a dashboard exit key out of a guest's reach.
+    // The trait's `false` default stands.
 
     fn take_navigation_request(&mut self) -> Option<NavigationRequest> {
         // `take`, not read: the trait requires a second call to return None.

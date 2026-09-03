@@ -584,7 +584,7 @@ pub fn walk_back(r: &mut AppRenderer) {
         return;
     }
 
-    crate::handlers::handle_escape(r);
+    settle_before_history(r);
 
     let entry = {
         let tl = r.active_timeline_mut();
@@ -603,6 +603,26 @@ pub fn walk_back(r: &mut AppRenderer) {
     list::create_list_current_layer(r);
     r.list_index = r.current_id.last().unwrap_or(0);
     r.scroll_offset = 0;
+}
+
+/// Close whatever transient mode the user is in before applying a history step.
+///
+/// `handle_escape` is the right thing for an insert session, a search, or a
+/// command palette: undo should land on a settled view, not half-way through a
+/// keystroke. It is the wrong thing for an interactive dashboard, which is not a
+/// transient mode but the surface the undo was *asked for from* — escaping it
+/// throws the user out of the board on their first Ctrl+Z, which is the opposite
+/// of what they pressed it for.
+///
+/// `Coordinate::Dashboard` is not in `UNDO_MODES_ALL`, so the early return below
+/// is reachable only through the dashboard fast-path in
+/// `shortcuts::dispatch_key`, which itself only fires for a provider declaring
+/// `dashboard_uses_app_undo()`. No pre-existing path changes behaviour.
+fn settle_before_history(r: &mut AppRenderer) {
+    if r.coordinate == Coordinate::Dashboard {
+        return;
+    }
+    crate::handlers::handle_escape(r);
 }
 
 /// Drain (and throw away) any TimelineEntry that providers emitted as a side
@@ -624,7 +644,7 @@ pub fn walk_forward(r: &mut AppRenderer) {
         return;
     }
 
-    crate::handlers::handle_escape(r);
+    settle_before_history(r);
 
     let entry = {
         let tl = r.active_timeline_mut();
@@ -1091,6 +1111,40 @@ fn spawn_provider_op(
     {
         return;
     }
+    // In a dashboard, run it here and now rather than on a task.
+    //
+    // The async path below checks the provider out and leaves a
+    // `PlaceholderProvider` in its slot until `drain_pending_provider_ops` puts
+    // it back a frame or more later. The placeholder does not override
+    // `dashboard_kind()`, so for those frames it reports `DashboardKind::None`:
+    // `active_dashboard_is_interactive` goes false, key routing falls through to
+    // the SHORTCUTS table, and the render path takes the image branch with no
+    // image — the user is thrown out of the board mid-edit. A provider that
+    // handles its own dashboard undo does in-memory work plus a disk write and
+    // awaits nothing, so the task buys nothing here either.
+    let in_dashboard = r.coordinate == Coordinate::Dashboard
+        && r.current_id.get(0) == Some(provider_idx)
+        && r.providers
+            .get(provider_idx)
+            .map(|p| p.dashboard_uses_app_undo())
+            .unwrap_or(false);
+    if in_dashboard {
+        let entry = entry.clone();
+        let mut error = String::new();
+        if let Some(p) = r.providers.get_mut(provider_idx) {
+            if is_undo {
+                sicompass_sdk::block_on(p.undo(&entry, &mut error));
+            } else {
+                sicompass_sdk::block_on(p.redo(&entry, &mut error));
+            }
+        }
+        if !error.is_empty() {
+            r.error_message = error;
+        }
+        r.needs_redraw = true;
+        return;
+    }
+
     let Some(slot) = r.providers.get_mut(provider_idx) else {
         return;
     };

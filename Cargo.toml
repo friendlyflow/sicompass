@@ -14,6 +14,7 @@ members = [
     "lib/lib_claude",
     "lib/lib_gitclient",
     "lib/lib_notes",
+    "lib/lib_project_management",
     "lib/lib_builtins",
     "lib/lib_updater",
     "src/sicompass",
@@ -31,12 +32,15 @@ license = "GPL-3.0-only"
 # override in [patch.crates-io] below so edits in ../sicompass-plugin-sdk are
 # picked up without a publish round-trip.
 #
-# 0.5.0 is a hard floor, not a preference: it is the release that added the
-# `supports_structural_edit` capability and `platform::data_home`, both used
-# unconditionally by lib_notes, lib_filebrowser and lib_sales_demo. (Also
-# carries forward the provider-scoped asset registry and `read-asset` host
-# import from 0.4.0, likewise required unconditionally.)
-sicompass-sdk = "0.5.0"
+# 0.6.0 is a hard floor, not a preference: it is the release that added
+# `take_announcement` and `dashboard_uses_app_undo`, both used unconditionally by
+# lib_project_management's kanban dashboard, and the app's own announcement drain
+# calls the first on every provider. (Also carries forward the
+# `supports_structural_edit` capability and `platform::data_home` from 0.5.0 —
+# used unconditionally by lib_notes, lib_filebrowser, lib_sales_demo and
+# lib_project_management — and the provider-scoped asset registry and
+# `read-asset` host import from 0.4.0, likewise required unconditionally.)
+sicompass-sdk = "0.6.0"
 sicompass-tutorial = { path = "lib/lib_tutorial" }
 sicompass-settings = { path = "lib/lib_settings" }
 sicompass-filebrowser = { path = "lib/lib_filebrowser" }
@@ -51,6 +55,7 @@ sicompass-terminal = { path = "lib/lib_terminal" }
 sicompass-claude = { path = "lib/lib_claude" }
 sicompass-gitclient = { path = "lib/lib_gitclient" }
 sicompass-notes = { path = "lib/lib_notes" }
+sicompass-project-management = { path = "lib/lib_project_management" }
 sicompass-builtins = { path = "lib/lib_builtins" }
 sicompass-updater = { path = "lib/lib_updater" }
 
@@ -189,8 +194,8 @@ wiremock = "0.6"
 # above. Uncommenting is a local convenience, never how a release resolves the
 # dependency.
 #
-# [patch.crates-io]
-# sicompass-sdk = { path = "../sicompass-plugin-sdk" }
+[patch.crates-io]
+sicompass-sdk = { path = "../sicompass-plugin-sdk" }
 
 # Optimize heavy third-party deps even in debug builds — html5ever and the
 # TLS/HTTP stack are 10-50x slower without optimizations.

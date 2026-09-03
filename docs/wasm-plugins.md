@@ -325,4 +325,25 @@ contract notices a new record field.
 - Plugins cannot claim a dashboard exit key. The host forwards every key to an
   interactive dashboard so a terminal emulator can receive Escape, so
   `dashboard-key`'s return value means *"redraw"*, not *"consumed"*, and leaving is
-  the host's double-Ctrl+C.
+  the host's double-Ctrl+C. (The two presses must be **consecutive**; any other key
+  between them cancels the gesture, which is what lets a dashboard bind Ctrl+C to
+  something of its own without the user being thrown out.)
+- Plugins cannot claim Ctrl+Z either. `Provider::dashboard_uses_app_undo` routes
+  Ctrl+Z and Ctrl+Y in a dashboard to the host's timeline instead of forwarding
+  them, and it is deliberately **absent from the WIT descriptor**: it decides which
+  keys a provider intercepts, which is the same authority the exit key sits behind.
+  A guest keeps the `false` default and the host never asks it. Built-in providers
+  can opt in; `lib_project_management` is the one that does.
+- A plugin's dashboard cursor is always a filled cell. `cursor_style` is set by
+  the host bridge, not carried across the WIT: the bar is the app's own
+  insert-mode caret, and a guest drawing a grid wants a grid's cursor.
+- A plugin does not receive the host palette. `Provider::set_dashboard_palette`
+  is host-side only, like `dashboard_uses_app_undo`. Nothing stops a guest
+  choosing its own colours in the frame it returns; it simply is not handed the
+  app's, so it cannot follow the user's theme. Worth mirroring into the WIT if a
+  plugin ever wants app-shaped furniture.
+- A plugin can still announce. `take-announcement` is mirrored in `poll-result`,
+  because saying what the cursor is on is not authority over anything, and an
+  interactive dashboard is otherwise silent to a screen reader. The host speaks
+  only the **active** provider's line, so a background plugin cannot talk over the
+  view the user is reading.

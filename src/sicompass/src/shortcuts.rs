@@ -2262,6 +2262,32 @@ pub fn dispatch_key(r: &mut AppRenderer, keycode: Option<Keycode>, keymod: Mod) 
             }
             r.dashboard_last_ctrl_c = now;
             // Fall through: forward this first Ctrl+C to the program as 0x03.
+        } else {
+            // The two presses must be *consecutive*. Without this, any two Ctrl+C
+            // within the window exit however many keystrokes fall between them,
+            // which makes Ctrl+C unusable as a copy key: copy a card, move, copy
+            // another, and the board vanishes. The escape hatch is untouched —
+            // two presses in a row still leave — so a provider never has to ask
+            // for a safety mechanism to be switched off.
+            r.dashboard_last_ctrl_c = 0;
+        }
+        // Undo/redo belong to the app: the timeline lives there, and a provider
+        // cannot reach it. Only for providers that ask, because the terminal
+        // needs Ctrl+Z to reach the running program as SIGTSTP.
+        if ctrl
+            && !alt
+            && crate::provider::get_active_provider_ref(r)
+                .map(|p| p.dashboard_uses_app_undo())
+                .unwrap_or(false)
+        {
+            if k == Keycode::Z && !shift {
+                handlers::handle_undo(r);
+                return false;
+            }
+            if k == Keycode::Y || (k == Keycode::Z && shift) {
+                handlers::handle_redo(r);
+                return false;
+            }
         }
         if let Some(keysym) = sdl_keycode_to_dashboard_keysym(k) {
             let key = sicompass_sdk::DashboardKey {
@@ -2272,6 +2298,11 @@ pub fn dispatch_key(r: &mut AppRenderer, keycode: Option<Keycode>, keymod: Mod) 
             };
             if let Some(p) = crate::provider::get_active_provider(r) {
                 if p.dashboard_key(key) {
+                    // Restart the blink, the way every insert-mode handler does.
+                    // A free-running caret can be in its dark half when the key
+                    // lands, so the bar appears late or not at all and the whole
+                    // dashboard feels like it is lagging behind the keyboard.
+                    r.caret.reset(handlers::sdl_ticks());
                     r.needs_redraw = true;
                 }
             }

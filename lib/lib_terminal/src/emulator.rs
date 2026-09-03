@@ -18,7 +18,9 @@
 //! sets, sixel/SGR mouse, OSC titles, scrollback. The emulator's grid is
 //! always exactly `cols × rows`; nothing scrolls off into a backbuffer.
 
-use sicompass_sdk::{CellAttrs, DashboardCell, DashboardFrame, DashboardKey, DashboardKeysym};
+use sicompass_sdk::{
+    CellAttrs, DashboardCell, DashboardCursor, DashboardFrame, DashboardKey, DashboardKeysym,
+};
 use vte::{Params, Parser, Perform};
 
 const DEFAULT_FG: u32 = 0xE0E0E0FF;
@@ -559,6 +561,12 @@ impl EmulatorState {
             rows: self.rows,
             cells: s.cells.clone(),
             cursor: None,
+            // No selection: every fill here is an SGR background the program
+            // asked for, and rounding one would misrepresent it.
+            selection: None,
+            half_gap_rows: Vec::new(),
+            // A filled cell, because that is what a terminal cursor is.
+            cursor_style: DashboardCursor::Block,
         };
         if self.cursor_visible && s.cursor_col < self.cols && s.cursor_row < self.rows {
             frame.cursor = Some((s.cursor_col, s.cursor_row));

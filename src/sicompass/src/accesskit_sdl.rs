@@ -1000,6 +1000,7 @@ mod tests {
 
     #[test]
     fn speak_mode_change_simple_search_no_context() {
+        let _g = crate::app_state::locale_test_lock();
         let mut r = AppRenderer::new();
         r.coordinate = crate::app_state::Coordinate::SimpleSearch;
         r.speak_mode_change(None);
@@ -1008,6 +1009,7 @@ mod tests {
 
     #[test]
     fn speak_mode_change_with_context() {
+        let _g = crate::app_state::locale_test_lock();
         let mut r = AppRenderer::new();
         r.coordinate = crate::app_state::Coordinate::Insert;
         r.speak_mode_change(Some("filename.txt".to_string()));
@@ -1019,6 +1021,7 @@ mod tests {
 
     #[test]
     fn speak_mode_change_masks_password_context() {
+        let _g = crate::app_state::locale_test_lock();
         // A password field's value must never be spoken: the context is masked
         // to one asterisk per character.
         let mut r = AppRenderer::new();
@@ -1030,6 +1033,7 @@ mod tests {
 
     #[test]
     fn announce_char_masks_password() {
+        let _g = crate::app_state::locale_test_lock();
         // Each typed/cursored character is echoed as `*` while editing a
         // password, not the real character.
         let mut r = AppRenderer::new();
@@ -1044,6 +1048,7 @@ mod tests {
 
     #[test]
     fn speak_mode_change_empty_context_gives_mode_only() {
+        let _g = crate::app_state::locale_test_lock();
         let mut r = AppRenderer::new();
         r.coordinate = crate::app_state::Coordinate::Command;
         r.speak_mode_change(Some(String::new()));
@@ -1052,6 +1057,7 @@ mod tests {
 
     #[test]
     fn speak_mode_change_controls_palette_reads_controls() {
+        let _g = crate::app_state::locale_test_lock();
         // The `c` window-controls palette reuses Coordinate::Command but is
         // distinguished by CommandPhase::Controls; it must announce "controls",
         // not "command".
@@ -1064,6 +1070,7 @@ mod tests {
 
     #[test]
     fn speak_mode_change_names_each_colon_layer() {
+        let _g = crate::app_state::locale_test_lock();
         // One name per colon layer, so the screen reader says which one answered.
         // The terminal's shell and claude's session are the same *state* and
         // differ only in whether a further layer is on offer.
@@ -1103,6 +1110,7 @@ mod tests {
 
     #[test]
     fn speak_mode_change_general() {
+        let _g = crate::app_state::locale_test_lock();
         let mut r = AppRenderer::new(); // default is General
         r.speak_mode_change(None);
         assert_eq!(announced_text(&r).as_deref(), Some("general mode"));
@@ -1110,6 +1118,7 @@ mod tests {
 
     #[test]
     fn speak_mode_change_insert_with_context() {
+        let _g = crate::app_state::locale_test_lock();
         let mut r = AppRenderer::new();
         r.coordinate = crate::app_state::Coordinate::Insert;
         r.speak_mode_change(Some("Documents".to_string()));
@@ -1121,6 +1130,7 @@ mod tests {
 
     #[test]
     fn speak_mode_change_normal() {
+        let _g = crate::app_state::locale_test_lock();
         let mut r = AppRenderer::new();
         r.coordinate = crate::app_state::Coordinate::Normal;
         r.speak_mode_change(None);
@@ -1129,6 +1139,7 @@ mod tests {
 
     #[test]
     fn speak_mode_change_visual() {
+        let _g = crate::app_state::locale_test_lock();
         let mut r = AppRenderer::new();
         r.coordinate = crate::app_state::Coordinate::Visual;
         r.speak_mode_change(None);
@@ -1137,6 +1148,7 @@ mod tests {
 
     #[test]
     fn speak_mode_change_extended_search() {
+        let _g = crate::app_state::locale_test_lock();
         let mut r = AppRenderer::new();
         r.coordinate = crate::app_state::Coordinate::ExtendedSearch;
         r.speak_mode_change(None);
@@ -1145,6 +1157,7 @@ mod tests {
 
     #[test]
     fn speak_mode_change_scroll() {
+        let _g = crate::app_state::locale_test_lock();
         let mut r = AppRenderer::new();
         r.coordinate = crate::app_state::Coordinate::Scroll;
         r.speak_mode_change(None);
@@ -1153,6 +1166,7 @@ mod tests {
 
     #[test]
     fn speak_mode_change_dashboard() {
+        let _g = crate::app_state::locale_test_lock();
         let mut r = AppRenderer::new();
         r.coordinate = crate::app_state::Coordinate::Dashboard;
         r.speak_mode_change(None);
@@ -1161,6 +1175,7 @@ mod tests {
 
     #[test]
     fn speak_mode_change_input_search() {
+        let _g = crate::app_state::locale_test_lock();
         let mut r = AppRenderer::new();
         r.coordinate = crate::app_state::Coordinate::InputSearch;
         r.speak_mode_change(None);

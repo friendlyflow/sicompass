@@ -36,6 +36,7 @@ pub fn register_all() {
         sicompass_claude::register();
         sicompass_gitclient::register();
         sicompass_notes::register();
+        sicompass_project_management::register();
     });
 }
 
@@ -112,6 +113,22 @@ mod tests {
         let p = sicompass_sdk::create_provider_by_name("terminal");
         assert!(p.is_some(), "terminal factory should be registered");
         assert_eq!(p.unwrap().name(), "terminal");
+    }
+
+    #[test]
+    fn project_management_factory_is_registered() {
+        register_all();
+        let p = sicompass_sdk::create_provider_by_name("projectmanagement");
+        assert!(
+            p.is_some(),
+            "projectmanagement factory should be registered"
+        );
+        let p = p.unwrap();
+        assert_eq!(p.name(), "projectmanagement");
+        // The settings panel matches a section to a provider by stripping the
+        // spaces out of the display name, so a mismatch silently drops the
+        // provider's settings section rather than failing anywhere visible.
+        assert_eq!(p.display_name().replace(' ', ""), p.name());
     }
 
     #[test]

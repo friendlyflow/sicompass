@@ -227,6 +227,9 @@ interface types {
     at-root: bool,
     /// A pending error to surface as a row. (`take-error`)
     error: option<string>,
+    /// A line for the screen reader: not an error, not shown as a row, and
+    /// spoken only for the active provider. (`take-announcement`)
+    announcement: option<string>,
     /// (`take-dashboard-request`)
     dashboard-request: option<dashboard-request>,
     /// (`take-navigation-request`)
