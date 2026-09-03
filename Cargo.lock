@@ -4570,6 +4570,8 @@ dependencies = [
 [[package]]
 name = "sicompass-sdk"
 version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1d1370d903e6bdb96ad194a62e611fcbce5377a7c9244a35d35e5450aa9485dc"
 dependencies = [
  "async-trait",
  "fluent",
