@@ -3,6 +3,32 @@
 cargo-dist parses this file and uses the matching version's section as the
 GitHub Release body, so entries here are what users read on the download page.
 
+## 0.1.19
+
+### A kanban board (project management)
+
+Sicompass has a project-management provider now, and its first feature is a
+kanban board. Add it from Settings, and it turns into a two-level tree the same
+way every other provider does: a list of columns, each holding its cards. Add,
+rename, reorder and delete columns and cards from the list exactly as you
+already do with notes or files, with the same undo history.
+
+Press `d` on a card to see the same board drawn as a board instead, columns side
+by side. The cursor sits on one card at a time, the same rounded highlight the
+list uses for its selected row, drawn in whichever colour theme you already
+have. Left and Right move between columns, Up and Down move through a column's
+cards, `i` and `a` edit the card the cursor is on, `o` and shift+`o` open a new
+one below or above, and `ctrl+d`, `ctrl+x`, `ctrl+c` and `ctrl+v` delete, cut,
+copy and paste. `ctrl+z` undoes a board edit the same way it undoes everything
+else. Escape returns to the list, on the exact card the board was just showing,
+and pressing `d` again opens the board back on the exact card the list cursor
+was on: the two views stay in step in both directions.
+
+Only cards are focusable on the board. A column with nothing in it yet still
+shows one place to stand, so pressing `ctrl+a` there starts its first card.
+Columns themselves, being fewer and less frequently touched, are still managed
+from the list.
+
 ## 0.1.18
 
 ### Claude starts in the folder you are standing in
