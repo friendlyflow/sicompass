@@ -3893,6 +3893,9 @@ pub fn handle_input(r: &mut AppRenderer, text: &str) {
         if let Some(p) = crate::provider::get_active_provider(r) {
             p.dashboard_text(text);
         }
+        // Same as every other typed character in the app: the caret is solid
+        // while you type and only blinks once you stop.
+        r.caret.reset(sdl_ticks());
         r.needs_redraw = true;
         return;
     }
@@ -6483,6 +6486,19 @@ pub fn enter_dashboard_for_active(r: &mut AppRenderer) {
     let kind = p.dashboard_kind();
     match kind {
         DashboardKind::Interactive => {
+            // Where the cursor is, in the provider's own terms: the leading
+            // component is the provider's index in the root list, which is the
+            // app's bookkeeping and means nothing to it. The inbound counterpart
+            // of `NavigationRequest::SelectPath`, so a provider showing a second
+            // view of its tree can open on what the user was looking at.
+            let entry: Vec<usize> = (1..r.current_id.depth())
+                .filter_map(|d| r.current_id.get(d))
+                .collect();
+            let p = match r.providers.get_mut(provider_idx) {
+                Some(p) => p,
+                None => return,
+            };
+            p.set_dashboard_entry(&entry);
             p.enter_dashboard();
             r.previous_coordinate = r.coordinate;
             r.coordinate = Coordinate::Dashboard;

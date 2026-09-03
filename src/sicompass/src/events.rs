@@ -426,6 +426,57 @@ pub fn drain_provider_errors(r: &mut AppRenderer) {
     }
 }
 
+/// Speak whatever the **active** provider asked to have announced.
+///
+/// The same active-provider-only rule `drain_provider_errors` follows, for the
+/// same reason: a background provider — a sandboxed WASM plugin included — must
+/// never be able to talk over the view the user is reading. Background providers
+/// are still drained, so a line queued while a tab was in the background does not
+/// surface frames later when the user finally navigates there.
+///
+/// Called every frame, deliberately **not** behind `active_tick_update` the way
+/// `drain_provider_errors` is. An arrow key inside an interactive dashboard moves
+/// the provider's own cursor without producing a tick, and that cursor move is
+/// exactly what this exists to announce.
+pub fn drain_provider_announcements(r: &mut AppRenderer) {
+    use sicompass_sdk::Provider;
+    let active_root = r.current_id.get(0);
+    // Collected rather than spoken inside the loop: `announce_provider_line` is a
+    // method on the whole renderer, so calling it while `r.providers` is borrowed
+    // would be a second mutable borrow. (`drain_provider_errors` gets away with a
+    // bare field assignment because disjoint fields borrow independently.)
+    let mut spoken: Option<String> = None;
+    for (i, p) in r.providers.iter_mut().enumerate() {
+        if let Some(line) = p.take_announcement()
+            && Some(i) == active_root
+        {
+            spoken = Some(line);
+        }
+    }
+    if let Some(line) = spoken {
+        r.announce_provider_line(line);
+    }
+}
+
+/// Move any timeline entries the active provider emitted from its dashboard onto
+/// the tab's timeline.
+///
+/// A dashboard edit never passes through a handler, so nothing else drains it and
+/// Ctrl+Z would have nothing to undo. Only while a dashboard is open, and only
+/// for the active provider — the same gate every other per-frame drain uses.
+///
+/// A no-op for a provider that emits none, which is every dashboard provider that
+/// does not opt into `dashboard_uses_app_undo`.
+pub fn drain_dashboard_timeline_entries(r: &mut AppRenderer) {
+    if r.coordinate != Coordinate::Dashboard {
+        return;
+    }
+    let Some(idx) = r.current_id.get(0) else {
+        return;
+    };
+    crate::provider::drain_provider_entries(r, idx, None);
+}
+
 /// Apply the dashboard requests collected by [`run_provider_ticks`], honouring
 /// only the **active** provider's.
 ///
@@ -490,19 +541,71 @@ pub fn apply_navigation_requests(r: &mut AppRenderer) -> bool {
             }
         }
     }
-    let Some(NavigationRequest::EnterChildren) = active_request else {
+    let Some(request) = active_request else {
         return false;
     };
-    // Only from the provider's own top level. Depth 1 is the root list of
-    // providers, where the move would enter a provider the user never opened;
-    // deeper than 2 the user is already inside the content the request is
-    // about, and descending again would bury them a level too far.
-    if r.current_id.depth() != 2 || crate::view::is_insert_mode(r.coordinate) {
+    // Yanking the caret out of a half-typed line would lose it.
+    if crate::view::is_insert_mode(r.coordinate) {
+        return false;
+    }
+    match request {
+        NavigationRequest::EnterChildren => {
+            // Only from the provider's own top level. Depth 1 is the root list of
+            // providers, where the move would enter a provider the user never
+            // opened; deeper than 2 the user is already inside the content the
+            // request is about, and descending again would bury them a level too
+            // far.
+            if r.current_id.depth() != 2 {
+                return false;
+            }
+            let before = r.current_id.clone();
+            // Same path as the Right key, so the descent records a Navigate entry
+            // and undo steps back out to the row the user came from.
+            crate::handlers::handle_right(r);
+            r.current_id != before
+        }
+        NavigationRequest::SelectPath(path) => apply_select_path(r, &path),
+    }
+}
+
+/// Walk the cursor to the element `path` names, one level at a time.
+///
+/// Every step goes through the same `handle_left` / `handle_right` the arrow keys
+/// use, so the provider's own path is pushed and popped in step with the cursor
+/// and each descent records its `Navigate` entry — a hand-built `IdArray` would
+/// leave both behind.
+fn apply_select_path(r: &mut AppRenderer, path: &[usize]) -> bool {
+    if path.is_empty() {
         return false;
     }
     let before = r.current_id.clone();
-    // Same path as the Right key, so the descent records a Navigate entry and
-    // undo steps back out to the row the user came from.
-    crate::handlers::handle_right(r);
+    // Back up to the provider's own top level, wherever the cursor was.
+    while r.current_id.depth() > 2 {
+        crate::handlers::handle_left(r);
+    }
+    if r.current_id.depth() != 2 {
+        return false;
+    }
+    for (level, &want) in path.iter().enumerate() {
+        // Clamped, so a request built against a tree that has since shrunk lands
+        // on something real instead of off the end.
+        let len = r.active_list_len();
+        if len == 0 {
+            break;
+        }
+        let idx = want.min(len - 1);
+        r.current_id.set_last(idx);
+        r.list_index = idx;
+        if level + 1 < path.len() {
+            crate::handlers::handle_right(r);
+            // The row had no next level, so this is as far as the path goes.
+            if r.current_id.depth() != level + 3 {
+                break;
+            }
+        }
+    }
+    crate::list::create_list_current_layer(r);
+    r.list_index = r.current_id.last().unwrap_or(0);
+    r.speak_current_element();
     r.current_id != before
 }

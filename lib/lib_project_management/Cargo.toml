@@ -1,0 +1,18 @@
+[package]
+publish = false  # internal crate, never published to crates.io
+name = "sicompass-project-management"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Sicompass project-management provider (a kanban board, in a list and on a grid)"
+
+[dependencies]
+sicompass-sdk = { workspace = true }
+# `undo` / `redo` are `#[async_trait]` methods. Nothing here awaits — a board
+# edit is memory plus one write — but overriding them still needs the macro.
+async-trait = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

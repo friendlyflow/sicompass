@@ -4410,6 +4410,7 @@ dependencies = [
  "sicompass-filebrowser",
  "sicompass-gitclient",
  "sicompass-notes",
+ "sicompass-project-management",
  "sicompass-remote",
  "sicompass-sdk",
  "sicompass-settings",
@@ -4442,6 +4443,7 @@ dependencies = [
  "sicompass-filebrowser",
  "sicompass-gitclient",
  "sicompass-notes",
+ "sicompass-project-management",
  "sicompass-remote",
  "sicompass-sales-demo",
  "sicompass-sdk",
@@ -4534,6 +4536,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "sicompass-project-management"
+version = "0.1.18"
+dependencies = [
+ "async-trait",
+ "serde",
+ "serde_json",
+ "sicompass-sdk",
+ "tempfile",
+]
+
+[[package]]
 name = "sicompass-remote"
 version = "0.1.18"
 dependencies = [
@@ -4556,9 +4569,7 @@ dependencies = [
 
 [[package]]
 name = "sicompass-sdk"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "de85b70aafbee3042ec97bc916195f23436496c6972b10b7bde5c480a5618f4b"
+version = "0.6.0"
 dependencies = [
  "async-trait",
  "fluent",

@@ -1468,6 +1468,31 @@ impl AppRenderer {
         self.pending_announcement = Some(format!("{text}{sentinel}"));
     }
 
+    /// Announce a line a provider asked for, via the live region.
+    ///
+    /// Drained from the **active** provider's `take_announcement()` every frame.
+    /// It exists for the interactive dashboard, where the provider owns its own
+    /// cursor and the app forwards every keystroke without interpreting it —
+    /// `speak_current_element` has no list item to read there, and
+    /// `announce_error_if_new` would paint routine cursor movement onto the
+    /// error line.
+    ///
+    /// Toggles `announcement_parity` like every other `speak_*` helper, so two
+    /// identical consecutive announcements still produce an AccessKit tree diff
+    /// and the second is actually spoken.
+    pub fn announce_provider_line(&mut self, text: String) {
+        if text.is_empty() {
+            return;
+        }
+        self.announcement_parity = !self.announcement_parity;
+        let sentinel = if self.announcement_parity {
+            "\u{200B}"
+        } else {
+            ""
+        };
+        self.pending_announcement = Some(format!("{text}{sentinel}"));
+    }
+
     /// If `error_message` holds a new error, announce it via the live region.
     /// Called once per render frame so any error reaching the header is spoken
     /// exactly once, regardless of which code path set it. Clears the tracker
@@ -1845,6 +1870,25 @@ impl Drop for AppState {
 // Tests
 // ---------------------------------------------------------------------------
 
+/// Serializes every test that touches the process-global Fluent localizer.
+///
+/// `localize::set_locale` is process-wide and cargo runs a crate's tests in
+/// parallel threads of **one** process, so a test switching to `nl-BE` is visible
+/// to every other test for as long as it holds it. Anything that either sets the
+/// locale or asserts on localized output has to take this first, or it will fail
+/// once in a while for a reason that has nothing to do with what it is testing.
+///
+/// Poison is deliberately ignored: a panicking test has already failed, and
+/// letting it poison the mutex would fail every later locale test too and bury
+/// the real one.
+#[cfg(test)]
+pub(crate) fn locale_test_lock() -> std::sync::MutexGuard<'static, ()> {
+    static L: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+    L.get_or_init(|| std::sync::Mutex::new(()))
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1853,10 +1897,7 @@ mod tests {
     // The display_label / speak_tab_change tests mutate the global active
     // locale; serialize them to avoid racing other tests in the binary.
     fn locale_test_lock() -> std::sync::MutexGuard<'static, ()> {
-        static L: OnceLock<Mutex<()>> = OnceLock::new();
-        L.get_or_init(|| Mutex::new(()))
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
+        crate::app_state::locale_test_lock()
     }
 
     // --- Custom titlebar button geometry ---

@@ -47,6 +47,10 @@ fn ensure_builtins() {
     // against whatever tree a test built — which does not add notes, it
     // deletes the ones that are not in it.
     sicompass_notes::_set_test_no_persist(true);
+    // Same for the kanban board, for the same reason: `save_board` reconciles a
+    // directory against a board, so a test board saved to the real directory
+    // does not add two columns, it deletes every other one.
+    sicompass_project_management::_set_test_no_persist(true);
 }
 
 // ---------------------------------------------------------------------------
@@ -10807,6 +10811,8 @@ fn settle_provider_ops(r: &mut AppRenderer) {
 fn pump_tick(r: &mut AppRenderer) {
     let (_, requests) = sicompass::events::run_provider_ticks(r);
     sicompass::events::apply_dashboard_requests(r, requests);
+    sicompass::events::drain_provider_announcements(r);
+    sicompass::events::drain_dashboard_timeline_entries(r);
 }
 
 #[cfg(unix)]
@@ -18077,4 +18083,339 @@ fn deleting_a_file_lands_on_the_one_below_it() {
     sicompass::list::create_list_current_layer(&mut r);
 
     assert_eq!(focused_row(&r), "-i c.txt", "{:?}", screen(&r));
+}
+
+// ---------------------------------------------------------------------------
+// The board dashboard: the app-side half
+//
+// The kanban board is the first provider to edit from inside an interactive
+// dashboard, which put weight on three app paths that nothing exercised before:
+// the Ctrl+C exit gesture (which used to make Ctrl+C unusable as a copy key),
+// Ctrl+Z routing, and the placeholder swap during a provider undo.
+// ---------------------------------------------------------------------------
+
+fn harness_with_board() -> (AppRenderer, TempDir) {
+    ensure_builtins();
+    let tmp = TempDir::new().expect("tempdir");
+    let mut renderer = AppRenderer::new();
+    let mut board =
+        sicompass_sdk::create_provider_by_name("projectmanagement").expect("board provider");
+    board.set_config_path(tmp.path().join("board"));
+    register(&mut renderer, board);
+    renderer.current_id = IdArray::new();
+    renderer.current_id.push(0);
+    sicompass::list::create_list_current_layer(&mut renderer);
+    (renderer, tmp)
+}
+
+/// A board with one column, opened in its dashboard.
+fn board_in_dashboard() -> (AppRenderer, TempDir) {
+    let (mut r, tmp) = harness_with_board();
+    press_right(&mut r); // into the provider
+    press_ctrl(&mut r, Keycode::A);
+    type_text(&mut r, "To do");
+    press_enter(&mut r);
+    sicompass::list::create_list_current_layer(&mut r);
+
+    sicompass::handlers::handle_dashboard(&mut r);
+    assert_eq!(
+        r.coordinate,
+        Coordinate::Dashboard,
+        "`d` should open the board"
+    );
+    (r, tmp)
+}
+
+/// Add a card from inside the dashboard: `o`, type, Enter.
+///
+/// `o` and not `a`: on the board, as everywhere else in the app, `a` opens insert
+/// mode on the item the cursor is already on. Creating is `o` / `O`, or the
+/// Ctrl+I / Ctrl+A that insert a sibling.
+fn add_card_on_board(r: &mut AppRenderer, text: &str) {
+    press(r, Keycode::O);
+    type_text(r, text);
+    press_enter(r);
+    pump_tick(r);
+}
+
+#[test]
+fn two_consecutive_ctrl_c_still_leave_an_interactive_dashboard() {
+    let (mut r, _tmp) = board_in_dashboard();
+    press_ctrl(&mut r, Keycode::C);
+    press_ctrl(&mut r, Keycode::C);
+    assert_ne!(
+        r.coordinate,
+        Coordinate::Dashboard,
+        "the escape hatch must survive"
+    );
+}
+
+#[test]
+fn a_key_between_two_ctrl_c_cancels_the_exit_gesture() {
+    // This is what makes Ctrl+C usable as a copy key: copy a card, move, copy
+    // another, and the board must still be there. Before the fix any two Ctrl+C
+    // within the window exited, however many keystrokes fell between them.
+    let (mut r, _tmp) = board_in_dashboard();
+    press_ctrl(&mut r, Keycode::C);
+    press(&mut r, Keycode::Down);
+    press_ctrl(&mut r, Keycode::C);
+    assert_eq!(
+        r.coordinate,
+        Coordinate::Dashboard,
+        "an intervening key must break the gesture"
+    );
+}
+
+#[test]
+fn ctrl_z_on_the_board_reaches_the_apps_undo() {
+    let (mut r, _tmp) = board_in_dashboard();
+    add_card_on_board(&mut r, "ship it");
+    assert!(
+        matches!(
+            r.active_timeline().entries.last(),
+            Some(sicompass_sdk::timeline::TimelineEntry::ProviderOp { command, .. })
+                if command == "add-card"
+        ),
+        "the board edit should have reached the tab's timeline, got {:?}",
+        r.active_timeline().entries.last()
+    );
+
+    press_ctrl(&mut r, Keycode::Z);
+    settle_provider_ops(&mut r);
+    press_left(&mut r); // leave the dashboard's own key routing behind
+    sicompass::handlers::handle_dashboard_leave(&mut r);
+    sicompass::provider::refresh_current_directory(&mut r);
+    sicompass::list::create_list_current_layer(&mut r);
+    press_right(&mut r);
+    assert!(
+        !screen(&r).iter().any(|l| l.contains("ship it")),
+        "ctrl+z should have removed the card, screen: {:?}",
+        screen(&r)
+    );
+}
+
+#[test]
+fn a_provider_undo_inside_a_dashboard_never_swaps_in_the_placeholder() {
+    // The regression this pins: the async provider-undo path leaves a
+    // `PlaceholderProvider` in the slot for a frame or more, and the placeholder
+    // does not override `dashboard_kind()`. Reporting `None` for even one frame
+    // flips key routing back to the SHORTCUTS table and drops the render into the
+    // image branch with no image — the user is thrown out of the board mid-edit.
+    let (mut r, _tmp) = board_in_dashboard();
+    add_card_on_board(&mut r, "ship it");
+
+    press_ctrl(&mut r, Keycode::Z);
+    assert!(
+        r.pending_provider_ops.is_empty(),
+        "a board undo must run in place, not on a task"
+    );
+    assert_eq!(
+        r.coordinate,
+        Coordinate::Dashboard,
+        "undo must not eject the user from the board"
+    );
+    assert_eq!(
+        r.providers[0].dashboard_kind(),
+        sicompass_sdk::DashboardKind::Interactive,
+        "the real provider must still be in its slot — a placeholder reports None, \
+         which is what flips key routing and the render branch"
+    );
+}
+
+#[test]
+fn ctrl_z_is_still_forwarded_to_a_provider_that_does_not_ask_for_the_apps_undo() {
+    // The terminal needs Ctrl+Z to reach the running program as SIGTSTP, which is
+    // why the routing is opt-in rather than unconditional.
+    ensure_builtins();
+    let mut r = AppRenderer::new();
+    let term = sicompass_sdk::create_provider_by_name("terminal").expect("terminal provider");
+    assert!(
+        !term.dashboard_uses_app_undo(),
+        "the terminal must not claim the app's undo"
+    );
+    register(&mut r, term);
+    r.current_id = IdArray::new();
+    r.current_id.push(0);
+    r.coordinate = Coordinate::Dashboard;
+
+    let before = r.active_timeline().position;
+    press_ctrl(&mut r, Keycode::Z);
+    assert_eq!(
+        r.active_timeline().position,
+        before,
+        "ctrl+z must not have been consumed as an undo"
+    );
+}
+
+#[test]
+fn only_the_active_providers_announcement_is_spoken() {
+    // A background provider — a sandboxed plugin included — must never be able to
+    // talk over the view the user is reading.
+    let (mut r, _tmp) = board_in_dashboard();
+    r.pending_announcement = None;
+    press(&mut r, Keycode::Down);
+    pump_tick(&mut r);
+    let spoken = r
+        .pending_announcement
+        .clone()
+        .expect("the active provider's move should be announced");
+    assert!(!spoken.is_empty());
+
+    // Now point the cursor at a provider index that is not this one. The board
+    // still queues a line; nothing should reach the live region.
+    r.pending_announcement = None;
+    press(&mut r, Keycode::Up);
+    r.current_id = IdArray::new();
+    r.current_id.push(99);
+    pump_tick(&mut r);
+    assert_eq!(
+        r.pending_announcement, None,
+        "a background provider must not be spoken"
+    );
+}
+
+#[test]
+fn escape_puts_the_list_cursor_on_the_card_the_board_was_showing() {
+    // Entering already follows the list, so leaving has to reciprocate or the
+    // round trip is one-way: Escape used to drop the user back on the column row
+    // they pressed `d` from, however long they had spent arranging cards.
+    let (mut r, _tmp) = board_in_dashboard();
+    add_card_on_board(&mut r, "first");
+    add_card_on_board(&mut r, "das");
+    add_card_on_board(&mut r, "third");
+
+    // Land on the middle card.
+    press(&mut r, Keycode::Up);
+    press_escape(&mut r);
+    pump_tick(&mut r);
+    sicompass::events::apply_navigation_requests(&mut r);
+
+    assert_ne!(
+        r.coordinate,
+        Coordinate::Dashboard,
+        "escape leaves the board"
+    );
+    // The label carries the app's own row prefix (`-i`, `+i`), so match on the
+    // text rather than pinning decoration this test is not about.
+    let on = r
+        .current_list_item()
+        .map(|i| i.label.clone())
+        .unwrap_or_default();
+    assert!(
+        on.ends_with("das"),
+        "expected the cursor on the card the board was showing, got {on:?} in {:?}",
+        screen(&r)
+    );
+}
+
+#[test]
+fn escape_from_an_empty_columns_slot_lands_on_the_column_itself() {
+    // There is no card to land on, so the column row is as close as the list gets.
+    let (mut r, _tmp) = board_in_dashboard();
+    press_escape(&mut r);
+    pump_tick(&mut r);
+    sicompass::events::apply_navigation_requests(&mut r);
+    assert_ne!(r.coordinate, Coordinate::Dashboard);
+    let on = r
+        .current_list_item()
+        .map(|i| i.label.clone())
+        .unwrap_or_default();
+    assert!(
+        on.ends_with("To do"),
+        "expected the cursor on the column row, got {on:?} in {:?}",
+        screen(&r)
+    );
+}
+
+#[test]
+fn d_on_a_card_opens_the_board_on_that_card() {
+    // The mirror of the Escape round trip: the cursor's row has to reach the
+    // provider, because moving within a level never calls `push_path`.
+    let (mut r, _tmp) = board_in_dashboard();
+    add_card_on_board(&mut r, "first");
+    add_card_on_board(&mut r, "das");
+    add_card_on_board(&mut r, "third");
+    press_escape(&mut r);
+    pump_tick(&mut r);
+    sicompass::events::apply_navigation_requests(&mut r);
+
+    // Stand on the first card in the list, then open the board.
+    press_up(&mut r);
+    press_up(&mut r);
+    let on = r
+        .current_list_item()
+        .map(|i| i.label.clone())
+        .unwrap_or_default();
+    assert!(
+        on.ends_with("first"),
+        "expected to be on 'first', got {on:?}"
+    );
+
+    sicompass::handlers::handle_dashboard(&mut r);
+    assert_eq!(r.coordinate, Coordinate::Dashboard);
+    // Leaving reports where the board was, which is how the test can see it.
+    press_escape(&mut r);
+    pump_tick(&mut r);
+    sicompass::events::apply_navigation_requests(&mut r);
+    let back = r
+        .current_list_item()
+        .map(|i| i.label.clone())
+        .unwrap_or_default();
+    assert!(
+        back.ends_with("first"),
+        "the board should have opened on 'first', but leaving landed on {back:?}"
+    );
+}
+
+#[test]
+fn d_on_a_column_title_opens_the_board_on_its_first_card() {
+    let (mut r, _tmp) = board_in_dashboard();
+    add_card_on_board(&mut r, "first");
+    add_card_on_board(&mut r, "second");
+    press_escape(&mut r);
+    pump_tick(&mut r);
+    sicompass::events::apply_navigation_requests(&mut r);
+
+    // Back out to the column title.
+    press_left(&mut r);
+    let on = r
+        .current_list_item()
+        .map(|i| i.label.clone())
+        .unwrap_or_default();
+    assert!(on.ends_with("To do"), "expected the column row, got {on:?}");
+
+    sicompass::handlers::handle_dashboard(&mut r);
+    press_escape(&mut r);
+    pump_tick(&mut r);
+    sicompass::events::apply_navigation_requests(&mut r);
+    let back = r
+        .current_list_item()
+        .map(|i| i.label.clone())
+        .unwrap_or_default();
+    assert!(
+        back.ends_with("first"),
+        "a title should open the board on the column's first card, got {back:?}"
+    );
+}
+
+#[test]
+fn a_dashboard_keystroke_restarts_the_caret_blink() {
+    // Without this the bar free-runs: a key can land in the caret's dark half,
+    // so it shows up late or not at all and the whole board feels like it is
+    // lagging behind the keyboard. Every insert-mode handler in the app resets
+    // the blink for exactly this reason.
+    let (mut r, _tmp) = board_in_dashboard();
+    add_card_on_board(&mut r, "fix login");
+
+    r.caret.visible = false;
+    press(&mut r, Keycode::A); // open insert on the card
+    assert!(r.caret.visible, "a key must make the caret solid again");
+
+    r.caret.visible = false;
+    type_text(&mut r, "x");
+    assert!(r.caret.visible, "and so must a typed character");
+
+    r.caret.visible = false;
+    press(&mut r, Keycode::Left);
+    assert!(r.caret.visible, "and moving it");
 }

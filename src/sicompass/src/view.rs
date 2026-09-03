@@ -340,6 +340,11 @@ pub fn main_loop(app: &mut AppState) {
         // out of one tab into another tab's dashboard. The gate itself lives in
         // `events` so the loop and the tests exercise the same code.
         crate::events::apply_dashboard_requests(&mut app.renderer, dashboard_requests);
+        // Every frame, not behind `active_tick_update`: an arrow key inside an
+        // interactive dashboard moves the provider's own cursor without ticking,
+        // and that move is exactly what needs announcing.
+        crate::events::drain_provider_announcements(&mut app.renderer);
+        crate::events::drain_dashboard_timeline_entries(&mut app.renderer);
         // Sync SDL text-input state with the coordinate after the dispatch.
         // Without this, the dashboard's text-input-enabled state lingers
         // through auto-leave; the next `i` keypress would fire BOTH the
@@ -911,11 +916,24 @@ fn update_view(app: &mut AppState) {
             // Forward resize once whenever the cell-grid size changes (incl. on
             // first entry, since `dashboard_cell_size` starts at (0, 0)).
             let prev_size = app.renderer.dashboard_cell_size;
+            // Hand the provider the live palette before it draws. Per frame
+            // rather than on entry, so a theme switch reaches the dashboard on
+            // the next frame and a provider never has to watch for one.
+            let palette = sicompass_sdk::DashboardPalette {
+                background: p.background,
+                text: p.text,
+                header_sep: p.header_sep,
+                selected: p.selected,
+                ext_search: p.ext_search,
+                scroll_search: p.scroll_search,
+                error: p.error,
+            };
             let frame = match crate::provider::get_active_provider(&mut app.renderer) {
                 Some(prov) => {
                     if prev_size != (cols, rows) {
                         prov.dashboard_resize(rows, cols);
                     }
+                    prov.set_dashboard_palette(palette);
                     prov.dashboard_render(cols, rows)
                 }
                 None => return,
@@ -953,20 +971,106 @@ fn update_view(app: &mut AppState) {
                 .unwrap()
                 .prepare_text_for_rendering(&header, text_x, header_baseline, scale, p.text);
 
-            // Pass 1: cell backgrounds (and the cursor block).
+            // Pass 1: cell backgrounds (and the cursor block), merged into
+            // horizontal runs of one colour.
+            //
+            // Not an optimisation, though it is one — a full grid drops from
+            // cols*rows rectangles to a handful. `cell_w` is the font's em width
+            // and is fractional, so a rectangle per cell put every interior edge
+            // on a fractional pixel and left hairline seams straight through any
+            // filled band: a solid column head came out visibly striped. A run
+            // has no interior edges left to seam, and rounding its two outer
+            // edges to whole pixels makes them meet exactly — the end of one run
+            // and the start of the next round the same boundary to the same
+            // pixel, so they abut with no gap and no overlap.
+            // A row's top edge, including any half-lines the provider asked to be
+            // opened above it. `half` is a whole number of pixels so two rows on
+            // the same side of a gap still land exactly one `cell_h` apart.
+            let half = (cell_h / 2.0).round();
+            let row_y = |row: u16| -> f32 {
+                (grid_top + row as f32 * cell_h).round() + frame.half_gaps_above(row) as f32 * half
+            };
+
+            // A block cursor fills the cell and inverts the glyph on top of it; a
+            // bar is its own rectangle, so the cell under it keeps its own
+            // colours in both passes.
+            let block_cursor = matches!(frame.cursor_style, sicompass_sdk::DashboardCursor::Block);
+
             if let Some(rr) = app.rect_renderer.as_mut() {
+                // The selection, if the provider named one: **one** rounded
+                // rectangle for the whole region, at the same radius the list
+                // uses for its selected row, and inset a little vertically.
+                //
+                // Both halves need the region named rather than inferred. Corner
+                // rounding is per rectangle, so a multi-row selection drawn row by
+                // row would come out as a stack of separate blobs; and a cell is a
+                // whole row tall, so the only way to leave breathing space around
+                // a highlight is to paint it slightly smaller than the rows it
+                // covers. Neither is expressible one cell at a time.
+                let sel = frame.selection.filter(|s| s.cols > 0 && s.rows > 0);
+                if let Some(s) = sel {
+                    let inset = (cell_h * 0.14).round().max(1.0);
+                    let x0 = (s.col as f32 * cell_w).round();
+                    let x1 = ((s.col + s.cols) as f32 * cell_w).round();
+                    let y0 = row_y(s.row) + inset;
+                    let y1 = row_y(s.row + s.rows) - inset;
+                    let bg = frame.cell(s.col, s.row).bg;
+                    if (bg & 0xFF) != 0 && y1 > y0 {
+                        rr.prepare_rectangle(x0, y0, x1 - x0, y1 - y0, bg, 5.0);
+                    }
+                }
+                let in_selection = |col: u16, row: u16| -> bool {
+                    sel.is_some_and(|s| {
+                        col >= s.col && col < s.col + s.cols && row >= s.row && row < s.row + s.rows
+                    })
+                };
+                let bg_at = |col: u16, row: u16| -> u32 {
+                    let cell = frame.cell(col, row);
+                    if block_cursor && frame.cursor == Some((col, row)) {
+                        cell.fg
+                    } else if in_selection(col, row) {
+                        // Already painted, as one rounded shape.
+                        0
+                    } else {
+                        cell.bg
+                    }
+                };
                 for row in 0..rows {
-                    for col in 0..cols {
-                        let cell = frame.cell(col, row);
-                        let is_cursor = frame.cursor == Some((col, row));
-                        let bg = if is_cursor { cell.fg } else { cell.bg };
+                    let y0 = row_y(row);
+                    let y1 = y0 + cell_h.round();
+                    let mut col = 0u16;
+                    while col < cols {
+                        let bg = bg_at(col, row);
                         if (bg & 0xFF) == 0 {
+                            col += 1;
                             continue;
                         }
-                        let x = col as f32 * cell_w;
-                        let y = grid_top + row as f32 * cell_h;
-                        rr.prepare_rectangle(x, y, cell_w, cell_h, bg, 0.0);
+                        let start = col;
+                        while col < cols && bg_at(col, row) == bg {
+                            col += 1;
+                        }
+                        let x0 = (start as f32 * cell_w).round();
+                        let x1 = (col as f32 * cell_w).round();
+                        rr.prepare_rectangle(x0, y0, x1 - x0, y1 - y0, bg, 0.0);
                     }
+                }
+
+                // The caret, for a provider editing text rather than running a
+                // program: the same thin blinking bar the app draws in its own
+                // insert mode, not a terminal's filled cell.
+                if !block_cursor
+                    && app.renderer.caret.visible
+                    && let Some((col, row)) = frame.cursor
+                {
+                    let pad = crate::text::TEXT_PADDING as f32;
+                    rr.prepare_rectangle(
+                        (col as f32 * cell_w).round(),
+                        row_y(row) + pad,
+                        2.0,
+                        cell_h - 2.0 * pad,
+                        frame.cell(col, row).fg,
+                        0.0,
+                    );
                 }
             }
 
@@ -975,15 +1079,13 @@ fn update_view(app: &mut AppState) {
             let fr = app.font_renderer.as_mut().unwrap();
             let mut utf8 = [0u8; 4];
             for row in 0..rows {
-                let baseline = grid_top
-                    + row as f32 * cell_h
-                    + (ascender * scale + crate::text::TEXT_PADDING) as f32;
+                let baseline = row_y(row) + (ascender * scale + crate::text::TEXT_PADDING) as f32;
                 for col in 0..cols {
                     let cell = frame.cell(col, row);
                     if cell.ch == ' ' {
                         continue;
                     }
-                    let is_cursor = frame.cursor == Some((col, row));
+                    let is_cursor = block_cursor && frame.cursor == Some((col, row));
                     let fg = if is_cursor { cell.bg } else { cell.fg };
                     if (fg & 0xFF) == 0 {
                         continue;

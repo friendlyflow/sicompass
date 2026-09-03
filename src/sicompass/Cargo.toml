@@ -411,6 +411,10 @@ sicompass-claude = { workspace = true }
 # would have these tests contacting it.
 sicompass-gitclient = { workspace = true }
 sicompass-notes = { workspace = true }
+# Only to switch persistence off for the test binary — see
+# `ensure_builtins`. Without it the kanban board would reconcile the
+# developer's real board directory against whatever a test built.
+sicompass-project-management = { workspace = true }
 sicompass-chatclient = { workspace = true }
 sicompass-emailclient = { workspace = true }
 sicompass-remote = { workspace = true }

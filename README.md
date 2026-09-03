@@ -151,8 +151,17 @@ toolchain. Rerun that script if you change anything under `shaders/`, and
 ## Built-in providers
 
 Each provider turns a different data source into the same keyboard-navigable
-tree: File Browser, Text Editor, Notes, Email, Chat, Web Browser, Terminal, Git
-Client, Plugin Store, and Settings.
+tree: File Browser, Text Editor, Notes, Project Management, Email, Chat, Web
+Browser, Terminal, Git Client, Plugin Store, and Settings.
+
+Project Management holds a kanban board. The root lists the columns and each
+column lists its cards, so the whole board is navigable as an ordinary tree.
+Press d to see it drawn as a board instead, with the columns side by side. The
+cursor sits on a card, and the one card it is on is the only thing highlighted.
+The editing keys are the ones you already know, i and a to edit the card, o to
+open a new one, ctrl+d to delete, ctrl+x, ctrl+c and ctrl+v to cut, copy and
+paste, and ctrl+z to undo. Columns themselves are added, renamed and reordered
+in the list.
 
 ## Community
 
