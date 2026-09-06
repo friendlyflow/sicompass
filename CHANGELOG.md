@@ -3,6 +3,16 @@
 cargo-dist parses this file and uses the matching version's section as the
 GitHub Release body, so entries here are what users read on the download page.
 
+## 0.1.20
+
+### No user-visible change
+
+This release exists to move the SDK pin to 0.7.0. Everything in it is internal:
+tests no longer leave fixtures in the OS trash, and a debug build now keeps its
+own settings, log and cache separate from an installed release build's, so a
+developer can run one beside the other. Neither affects the app you download
+from this page.
+
 ## 0.1.19
 
 ### A kanban board (project management)
