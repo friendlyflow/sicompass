@@ -4382,9 +4382,12 @@ pub fn handle_file_cut(r: &mut AppRenderer) {
 
     // Resolve clipboard cache dir
     let cache_dir = {
-        let base = sicompass_sdk::platform::cache_home()
-            .unwrap_or_else(|| std::path::PathBuf::from("/tmp"));
-        let dir = base.join("sicompass").join("clipboard");
+        // `temp_dir()` rather than a literal "/tmp": that path does not exist
+        // on Windows, and a fixed fallback would be shared by every instance.
+        let base = sicompass_sdk::platform::app_cache_dir().unwrap_or_else(|| {
+            std::env::temp_dir().join(sicompass_sdk::platform::app_dir_name())
+        });
+        let dir = base.join("clipboard");
         let _ = std::fs::create_dir_all(&dir);
         dir.to_string_lossy().into_owned()
     };

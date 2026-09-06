@@ -899,7 +899,11 @@ pub fn build_app() -> Result<AppState, SiError> {
     let sdl = sdl3::init().map_err(|e| SiError::Sdl(e.to_string()))?;
     let video = sdl.video().map_err(|e| SiError::Sdl(e.to_string()))?;
 
-    let mut wb = video.window(WINDOW_TITLE, WINDOW_WIDTH, WINDOW_HEIGHT);
+    let mut wb = video.window(
+        crate::app_state::window_title(),
+        WINDOW_WIDTH,
+        WINDOW_HEIGHT,
+    );
     // Borderless: the app draws its own min/max/close controls (see
     // `app_state::WindowAction` and the renderer's titlebar buttons) and
     // restores drag/resize via `set_hit_test` below. `resizable()` is kept so

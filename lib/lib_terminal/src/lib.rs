@@ -334,8 +334,7 @@ impl TerminalProvider {
         if test_no_history() {
             return None;
         }
-        sicompass_sdk::platform::state_home()
-            .map(|s| s.join("sicompass").join("terminal").join("history"))
+        sicompass_sdk::platform::app_state_dir().map(|s| s.join("terminal").join("history"))
     }
 
     /// Read the recall-history file, keep the last `command_history_size`

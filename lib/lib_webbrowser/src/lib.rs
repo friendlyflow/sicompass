@@ -427,8 +427,7 @@ impl WebbrowserProvider {
         if test_no_history() {
             return None;
         }
-        sicompass_sdk::platform::state_home()
-            .map(|s| s.join("sicompass").join("webbrowser").join("history"))
+        sicompass_sdk::platform::app_state_dir().map(|s| s.join("webbrowser").join("history"))
     }
 
     /// Read every line of the history file, newest first, plus the set of URLs
@@ -2466,10 +2465,24 @@ struct BrowserSession {
 /// Lives alongside the app's other config (e.g. `settings.json`) rather than in
 /// a temp dir that the OS wipes on reboot. Falls back to a temp dir only if no
 /// config home can be resolved.
+///
+/// The fallback carries the process id. Chrome refuses to open a user-data-dir
+/// that another process already holds, so a *fixed* fallback path meant two
+/// instances degrading to it would fight over one profile — and since
+/// `app_dir_name()` already separates a debug build from an installed one,
+/// running both at once is now an ordinary thing to do. A pid-scoped directory
+/// is disposable by definition here: this branch is the "no config home at all"
+/// degenerate case.
 fn chrome_profile_dir() -> std::path::PathBuf {
-    sicompass_sdk::platform::config_home()
-        .map(|d| d.join("sicompass").join("chrome-profile"))
-        .unwrap_or_else(|| std::env::temp_dir().join("sicompass-chrome"))
+    sicompass_sdk::platform::app_config_dir()
+        .map(|d| d.join("chrome-profile"))
+        .unwrap_or_else(|| {
+            std::env::temp_dir().join(format!(
+                "{}-chrome-{}",
+                sicompass_sdk::platform::app_dir_name(),
+                std::process::id()
+            ))
+        })
 }
 
 /// Linux: run Chrome headed on an invisible X11 display when Xvfb is available,
