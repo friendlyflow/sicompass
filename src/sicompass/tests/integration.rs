@@ -51,6 +51,15 @@ fn ensure_builtins() {
     // directory against a board, so a test board saved to the real directory
     // does not add two columns, it deletes every other one.
     sicompass_project_management::_set_test_no_persist(true);
+    // And for the two filesystem providers, whose deletes go to the *OS* trash
+    // rather than anywhere sicompass owns — which is why no amount of guarding
+    // sicompass's own directories ever caught it. Every harness delete left its
+    // fixture in the developer's real trash permanently; that is where 37 850
+    // `aaa` / `doomed.txt` / `undotest.txt` entries in a 45 479-entry trash came
+    // from. Under the flag the provider removes the item outright instead,
+    // which is what the assertions here check anyway.
+    sicompass_filebrowser::_set_test_no_trash(true);
+    sicompass_text_editor::_set_test_no_trash(true);
 }
 
 // ---------------------------------------------------------------------------
@@ -18418,4 +18427,61 @@ fn a_dashboard_keystroke_restarts_the_caret_blink() {
     r.caret.visible = false;
     press(&mut r, Keycode::Left);
     assert!(r.caret.visible, "and moving it");
+}
+
+// ---------------------------------------------------------------------------
+// OS-trash isolation
+// ---------------------------------------------------------------------------
+
+/// A delete driven through the real app must leave the OS trash untouched.
+///
+/// The counterpart to the greps in `tests/hygiene.rs`: those prove no new sink
+/// was added, this proves `ensure_builtins` actually switched the existing one
+/// off in *this* binary. That distinction matters here more than usual, because
+/// integration tests compile the lib crates without `cfg(test)`, so the crates'
+/// own compile-time default does not apply and the setter call is the only
+/// thing standing between these tests and the developer's real trash.
+///
+/// Linux-gated: `data_home()/Trash` is the freedesktop layout, and CI runs no
+/// tests on Windows and only a `--lib` subset on macOS.
+#[test]
+#[cfg(target_os = "linux")]
+fn deleting_through_the_harness_leaves_the_os_trash_untouched() {
+    // A stem no other test can produce, so a parallel test adding entries of
+    // its own cannot make this flaky the way a before/after count would.
+    let stem = format!("trashcanary-{}", std::process::id());
+    let name = format!("{stem}.txt");
+
+    let mut h = Harness::new();
+    let fb_idx = h.provider_idx("filebrowser").unwrap();
+    navigate_to_provider(h.r(), fb_idx);
+    press_right(h.r());
+
+    let target = h.tmp.path().join(&name);
+    std::fs::write(&target, b"canary").unwrap();
+    h.r().providers[fb_idx].fetch();
+
+    assert!(
+        sicompass::provider::delete_item_by_name(h.r(), &name),
+        "the canary file should delete cleanly"
+    );
+    assert!(!target.exists(), "delete must still remove the file");
+
+    let files = sicompass_sdk::platform::data_home()
+        .expect("a data home")
+        .join("Trash")
+        .join("files");
+    let leaked: Vec<String> = std::fs::read_dir(&files)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|n| n.starts_with(&stem))
+        .collect();
+    assert!(
+        leaked.is_empty(),
+        "the OS trash at {} received {leaked:?} — `ensure_builtins` is not \
+         switching the trash stub off in this binary",
+        files.display()
+    );
 }

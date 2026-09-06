@@ -37,6 +37,94 @@ pub fn register_translations() {
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
+// ---------------------------------------------------------------------------
+// Test stub: never move anything to the real OS trash from a test.
+//
+// `delete_item` and `redo` hand the target to the `trash` crate, which on Linux
+// moves it into `$XDG_DATA_HOME/Trash` — the developer's own trash, which keeps
+// every fixture forever. The delete tests here trash `aaa`, `doomed.txt`,
+// `undotest.txt` and friends dozens of times per run, and about a thousand runs
+// left 37 850 test fixtures in a 45 479-entry trash. That is what made the real
+// one unusable.
+//
+// The stub cannot be a no-op the way the history and notes stubs are: a dozen
+// tests assert the file is *gone* after a delete, and weakening them is not an
+// option. So under the flag the item is removed permanently instead of trashed.
+// Everything a test can observe stays true — the path is gone, and a path that
+// was never there is still an error, so `delete_item` keeps returning `false`
+// for it. In-app undo is unaffected either way, because it replays the
+// `fs_trash::snapshot_for_delete` snapshot taken before the delete, not the
+// trash. The one thing that is lost is `fs_trash::restore_from_os_trash`, the
+// fallback for items too large to snapshot; the single test that exercises it
+// takes `trash_flag_guard(false)` and says so.
+//
+// Two audiences, hence both a compile-time default and a runtime setter:
+//
+// * This crate's own unit tests get it from `cfg!(test)`. There is no
+//   per-instance override to forget, which is the point: the sink is a free
+//   function, so nothing a test constructs can opt into safety.
+// * The app's integration tests are a different binary, where this crate is an
+//   ordinary dependency compiled *without* `cfg(test)`, and they reach the
+//   provider as a `Box<dyn Provider>` with no way to set anything. They call
+//   `_set_test_no_trash(true)` once per binary instead.
+// ---------------------------------------------------------------------------
+
+static TEST_NO_TRASH: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(cfg!(test));
+
+#[doc(hidden)]
+pub fn _set_test_no_trash(enabled: bool) {
+    TEST_NO_TRASH.store(enabled, std::sync::atomic::Ordering::Release);
+}
+
+// Per-test opt-out from the stub, for the one test that genuinely needs the
+// real trash. Thread-local on purpose: the test harness gives every test its
+// own thread, so this is scoped to exactly one test. A process-global
+// off-switch is *not* — it was tried, and while the oversized-restore test
+// held it off, every delete test running concurrently in another thread saw
+// the off value and put its fixture in the developer's real trash.
+#[cfg(test)]
+thread_local! {
+    static ALLOW_REAL_TRASH: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+#[inline]
+fn test_no_trash() -> bool {
+    #[cfg(test)]
+    if ALLOW_REAL_TRASH.with(|a| a.get()) {
+        return false;
+    }
+    TEST_NO_TRASH.load(std::sync::atomic::Ordering::Acquire)
+}
+
+/// Move `path` to the OS trash, or remove it permanently when the test stub is
+/// on. Every delete in this crate goes through here; `os_trash_delete` is the
+/// only place allowed to name the `trash` crate, which
+/// `sicompass/tests/hygiene.rs` enforces.
+fn trash_delete(path: &Path) -> Result<(), trash::Error> {
+    if test_no_trash() {
+        return permanent_delete(path);
+    }
+    os_trash_delete(path)
+}
+
+/// The stubbed delete. Mirrors what a caller can observe from a successful
+/// trash: the path is gone afterwards, and a path that was not there to begin
+/// with is an error rather than a silent success.
+fn permanent_delete(path: &Path) -> Result<(), trash::Error> {
+    let unknown = |e: std::io::Error| trash::Error::Unknown {
+        description: format!("test stub: {} ({e})", path.display()),
+    };
+    // `symlink_metadata`, not `metadata`: a symlink to a directory must be
+    // unlinked, not recursed into.
+    let meta = std::fs::symlink_metadata(path).map_err(unknown)?;
+    if meta.is_dir() {
+        std::fs::remove_dir_all(path).map_err(unknown)
+    } else {
+        std::fs::remove_file(path).map_err(unknown)
+    }
+}
+
 /// Move `path` to the OS trash.
 ///
 /// On macOS the `trash` crate defaults to `DeleteMethod::Finder`, which spawns
@@ -53,7 +141,7 @@ use std::time::SystemTime;
 /// the Trash. In-app undo is unaffected: it restores from the snapshot
 /// [`sicompass_sdk::fs_trash::snapshot_for_delete`] took before the delete.
 #[cfg(target_os = "macos")]
-fn trash_delete(path: &Path) -> Result<(), trash::Error> {
+fn os_trash_delete(path: &Path) -> Result<(), trash::Error> {
     use trash::macos::{DeleteMethod, TrashContextExtMacos};
     let mut ctx = trash::TrashContext::default();
     ctx.set_delete_method(DeleteMethod::NsFileManager);
@@ -62,7 +150,7 @@ fn trash_delete(path: &Path) -> Result<(), trash::Error> {
 
 /// See the macOS variant above; everywhere else the crate default is fine.
 #[cfg(not(target_os = "macos"))]
-fn trash_delete(path: &Path) -> Result<(), trash::Error> {
+fn os_trash_delete(path: &Path) -> Result<(), trash::Error> {
     trash::delete(path)
 }
 
@@ -864,6 +952,62 @@ mod tests {
         let mut p = FilebrowserProvider::new();
         p.set_current_path(dir.path().to_str().unwrap());
         (p, dir)
+    }
+
+    /// Lets the calling test — and only it — reach the real OS trash, restoring
+    /// the stub on drop so a panic cannot leave the thread opted out.
+    ///
+    /// Deliberately not a process-global flag with a `Mutex`, which is the
+    /// shape the older stubs use. A `Mutex` serialises the tests that *take*
+    /// it, but every other delete test keeps running in parallel and reads the
+    /// same global: measured, one opted-out test put two other tests' fixtures
+    /// (`a`, `doomed.txt`) in the developer's real trash. Thread-local scoping
+    /// is exact, because the harness gives every test its own thread.
+    struct RealTrashAllowed;
+
+    impl RealTrashAllowed {
+        fn new() -> Self {
+            ALLOW_REAL_TRASH.with(|a| a.set(true));
+            Self
+        }
+    }
+
+    impl Drop for RealTrashAllowed {
+        fn drop(&mut self) {
+            ALLOW_REAL_TRASH.with(|a| a.set(false));
+        }
+    }
+
+    /// No in-crate test may reach the developer's real OS trash.
+    ///
+    /// Nothing forces a delete test to opt into safety — the sink is a free
+    /// function with no per-instance override — so the `cfg!(test)` default is
+    /// the whole defence. Without it, about a thousand runs put 37 850 fixtures
+    /// (`aaa`, `doomed.txt`, `undotest.txt`) in a real 45 479-entry trash.
+    #[test]
+    fn no_unit_test_can_reach_the_real_trash() {
+        assert!(
+            test_no_trash(),
+            "the compile-time default must keep unit tests out of the OS trash"
+        );
+
+        // And the stub must still actually delete, or every `!path.exists()`
+        // assertion in this module is inert.
+        let dir = TempDir::new().unwrap();
+        let file = dir.path().join("x.txt");
+        std::fs::write(&file, b"x").unwrap();
+        assert!(trash_delete(&file).is_ok());
+        assert!(!file.exists(), "the stub must remove the file, not skip it");
+
+        let sub = dir.path().join("sub");
+        std::fs::create_dir(&sub).unwrap();
+        std::fs::write(sub.join("inner"), b"x").unwrap();
+        assert!(trash_delete(&sub).is_ok());
+        assert!(!sub.exists(), "the stub must remove directories recursively");
+
+        // A path that is not there stays an error, so `delete_item` keeps
+        // returning false for it (see `test_delete_nonexistent_returns_false`).
+        assert!(trash_delete(&dir.path().join("never-existed")).is_err());
     }
 
     // ---- fetch structure ---------------------------------------------------
@@ -1742,6 +1886,14 @@ mod tests {
 
     #[test]
     fn undo_fsop_delete_restores_oversized_file_from_os_trash() {
+        // The only test in the workspace that needs the *real* OS trash: an
+        // oversized delete records `RenameOnly`, so undo has no snapshot to
+        // replay and must fall back to `fs_trash::restore_from_os_trash`,
+        // which only knows the real one. Nothing else here opts out, and on
+        // Linux the `.cargo/config.toml` XDG sandbox keeps even this one out of
+        // the developer's own trash.
+        let _allow = RealTrashAllowed::new();
+
         let tmp = tempfile::TempDir::new().unwrap();
         let target = tmp.path().join("huge.bin");
         // Larger than TRASH_SNAPSHOT_LIMIT_BYTES → no in-app snapshot, so the

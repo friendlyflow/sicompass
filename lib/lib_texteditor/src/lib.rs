@@ -41,6 +41,76 @@ pub fn register_translations() {
 use sicompass_sdk::{register_builtin_manifest, register_provider_factory};
 use std::path::{Path, PathBuf};
 
+// ---------------------------------------------------------------------------
+// Test stub: never move anything to the real OS trash from a test.
+//
+// `delete_item`'s directory-view arm and `redo` hand the target to the `trash`
+// crate, which on Linux moves it into `$XDG_DATA_HOME/Trash` — the developer's
+// own trash, which keeps every fixture forever. The delete tests here trash
+// `bye.txt`, `doomed.txt` and `doomed_dir` on every run, and together with the
+// file browser's fixtures about a thousand runs left 37 850 test files in a
+// 45 479-entry trash.
+//
+// The stub cannot be a no-op the way the history and notes stubs are: several
+// tests assert the file is *gone* after a delete, and weakening them is not an
+// option. So under the flag the item is removed permanently instead of trashed.
+// Everything a test can observe stays true — the path is gone, and a path that
+// was never there is still an error. In-app undo is unaffected either way,
+// because it replays the `fs_trash::snapshot_for_delete` snapshot taken before
+// the delete, not the trash.
+//
+// Two audiences, hence both a compile-time default and a runtime setter:
+//
+// * This crate's own unit tests get it from `cfg!(test)`. There is no
+//   per-instance override to forget, which is the point: the sink is a free
+//   function, so nothing a test constructs can opt into safety.
+// * The app's integration tests are a different binary, where this crate is an
+//   ordinary dependency compiled *without* `cfg(test)`, and they reach the
+//   provider as a `Box<dyn Provider>` with no way to set anything. They call
+//   `_set_test_no_trash(true)` once per binary instead.
+// ---------------------------------------------------------------------------
+
+static TEST_NO_TRASH: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(cfg!(test));
+
+#[doc(hidden)]
+pub fn _set_test_no_trash(enabled: bool) {
+    TEST_NO_TRASH.store(enabled, std::sync::atomic::Ordering::Release);
+}
+
+#[inline]
+fn test_no_trash() -> bool {
+    TEST_NO_TRASH.load(std::sync::atomic::Ordering::Acquire)
+}
+
+/// Move `path` to the OS trash, or remove it permanently when the test stub is
+/// on. Every delete in this crate goes through here; `os_trash_delete` is the
+/// only place allowed to name the `trash` crate, which
+/// `sicompass/tests/hygiene.rs` enforces.
+fn trash_delete(path: &Path) -> Result<(), trash::Error> {
+    if test_no_trash() {
+        return permanent_delete(path);
+    }
+    os_trash_delete(path)
+}
+
+/// The stubbed delete. Mirrors what a caller can observe from a successful
+/// trash: the path is gone afterwards, and a path that was not there to begin
+/// with is an error rather than a silent success.
+fn permanent_delete(path: &Path) -> Result<(), trash::Error> {
+    let unknown = |e: std::io::Error| trash::Error::Unknown {
+        description: format!("test stub: {} ({e})", path.display()),
+    };
+    // `symlink_metadata`, not `metadata`: a symlink to a directory must be
+    // unlinked, not recursed into.
+    let meta = std::fs::symlink_metadata(path).map_err(unknown)?;
+    if meta.is_dir() {
+        std::fs::remove_dir_all(path).map_err(unknown)
+    } else {
+        std::fs::remove_file(path).map_err(unknown)
+    }
+}
+
 /// Move `path` to the OS trash.
 ///
 /// On macOS the `trash` crate defaults to `DeleteMethod::Finder`, which spawns
@@ -57,7 +127,7 @@ use std::path::{Path, PathBuf};
 /// the Trash. In-app undo is unaffected: it restores from the snapshot
 /// [`sicompass_sdk::fs_trash::snapshot_for_delete`] took before the delete.
 #[cfg(target_os = "macos")]
-fn trash_delete(path: &Path) -> Result<(), trash::Error> {
+fn os_trash_delete(path: &Path) -> Result<(), trash::Error> {
     use trash::macos::{DeleteMethod, TrashContextExtMacos};
     let mut ctx = trash::TrashContext::default();
     ctx.set_delete_method(DeleteMethod::NsFileManager);
@@ -66,7 +136,7 @@ fn trash_delete(path: &Path) -> Result<(), trash::Error> {
 
 /// See the macOS variant above; everywhere else the crate default is fine.
 #[cfg(not(target_os = "macos"))]
-fn trash_delete(path: &Path) -> Result<(), trash::Error> {
+fn os_trash_delete(path: &Path) -> Result<(), trash::Error> {
     trash::delete(path)
 }
 
@@ -647,7 +717,12 @@ impl Provider for TextEditorProvider {
                     FsSideEffect::None => None,
                 };
                 if let Some(path) = path {
-                    if let Err(e) = trash::delete(path) {
+                    // Through the wrapper, never the `trash` crate directly:
+                    // this called `trash::delete` for a long time, which on
+                    // macOS took the slow Finder/osascript path
+                    // `os_trash_delete` exists to avoid, and which walks past
+                    // the `TEST_NO_TRASH` stub.
+                    if let Err(e) = trash_delete(path) {
                         let mut args = localize::Args::new();
                         args.set("err", e.to_string());
                         *error =
@@ -829,6 +904,38 @@ mod tests {
         let mut p = TextEditorProvider::new();
         p.on_setting_change("textEditorPath", tmp.path().to_str().unwrap());
         p
+    }
+
+    /// No in-crate test may reach the developer's real OS trash.
+    ///
+    /// Nothing forces a delete test to opt into safety — the sink is a free
+    /// function with no per-instance override — so the `cfg!(test)` default is
+    /// the whole defence. Unlike the file browser, no test here needs the real
+    /// trash, so there is no flag guard and nothing ever turns this off.
+    #[test]
+    fn no_unit_test_can_reach_the_real_trash() {
+        assert!(
+            test_no_trash(),
+            "the compile-time default must keep unit tests out of the OS trash"
+        );
+
+        // And the stub must still actually delete, or every `!path.exists()`
+        // assertion in this module is inert.
+        let dir = make_tmp();
+        let file = dir.path().join("x.txt");
+        std::fs::write(&file, b"x").unwrap();
+        assert!(trash_delete(&file).is_ok());
+        assert!(!file.exists(), "the stub must remove the file, not skip it");
+
+        let sub = dir.path().join("sub");
+        std::fs::create_dir(&sub).unwrap();
+        std::fs::write(sub.join("inner"), b"x").unwrap();
+        assert!(trash_delete(&sub).is_ok());
+        assert!(!sub.exists(), "the stub must remove directories recursively");
+
+        // A path that is not there stays an error, so a delete of something
+        // missing keeps reporting failure rather than silent success.
+        assert!(trash_delete(&dir.path().join("never-existed")).is_err());
     }
 
     // ---- basic fetch / navigation ------------------------------------------

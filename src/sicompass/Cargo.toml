@@ -418,6 +418,10 @@ sicompass-project-management = { workspace = true }
 sicompass-chatclient = { workspace = true }
 sicompass-emailclient = { workspace = true }
 sicompass-remote = { workspace = true }
+# Only to switch OS-trash deletes off for the test binary — see
+# `ensure_builtins`. Without it every delete a test drives leaves its fixture in
+# the developer's real trash, permanently.
+sicompass-text-editor = { workspace = true }
 mockall = { workspace = true }
 tempfile = { workspace = true }
 # The integration test injects its own `ImapBackend` stubs, which the trait
