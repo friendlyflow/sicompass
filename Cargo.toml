@@ -32,15 +32,22 @@ license = "GPL-3.0-only"
 # override in [patch.crates-io] below so edits in ../sicompass-plugin-sdk are
 # picked up without a publish round-trip.
 #
-# 0.6.0 is a hard floor, not a preference: it is the release that added
-# `take_announcement` and `dashboard_uses_app_undo`, both used unconditionally by
-# lib_project_management's kanban dashboard, and the app's own announcement drain
-# calls the first on every provider. (Also carries forward the
+# 0.7.0 is a hard floor, not a preference: it is the release that added
+# `platform::app_dir_name` and the `app_config_dir` / `app_data_dir` /
+# `app_state_dir` / `app_cache_dir` helpers, which are what keep a debug build's
+# config, state, data and cache out of an installed release build's. Every
+# provider that persists anything calls one of them unconditionally
+# (lib_notes, lib_terminal, lib_webbrowser, lib_emailclient,
+# lib_project_management) as does the app's own clipboard cache, and there is no
+# fallback path: on 0.6.0 they do not compile. (Carries forward
+# `take_announcement` and `dashboard_uses_app_undo` from 0.6.0, both used
+# unconditionally by lib_project_management's kanban dashboard, with the app's
+# own announcement drain calling the first on every provider. Also the
 # `supports_structural_edit` capability and `platform::data_home` from 0.5.0 —
 # used unconditionally by lib_notes, lib_filebrowser, lib_sales_demo and
 # lib_project_management — and the provider-scoped asset registry and
 # `read-asset` host import from 0.4.0, likewise required unconditionally.)
-sicompass-sdk = "0.6.0"
+sicompass-sdk = "0.7.0"
 sicompass-tutorial = { path = "lib/lib_tutorial" }
 sicompass-settings = { path = "lib/lib_settings" }
 sicompass-filebrowser = { path = "lib/lib_filebrowser" }

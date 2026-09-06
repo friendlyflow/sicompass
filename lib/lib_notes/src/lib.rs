@@ -216,7 +216,7 @@ impl NotesProvider {
         if test_no_persist() {
             return None;
         }
-        sicompass_sdk::platform::data_home().map(|d| d.join("sicompass").join("notes"))
+        sicompass_sdk::platform::app_data_dir().map(|d| d.join("notes"))
     }
 
     fn ensure_loaded(&mut self) {

@@ -23,7 +23,7 @@ impl EnvelopeCache {
     /// Returns `None` if the cache directory cannot be created or the DB
     /// cannot be opened — the caller silently falls back to uncached IMAP.
     pub fn open(username: &str) -> Option<Self> {
-        let cache_dir = platform::cache_home()?.join("sicompass").join("email");
+        let cache_dir = platform::app_cache_dir()?.join("email");
         std::fs::create_dir_all(&cache_dir).ok()?;
         // Safe filename: hex-encode the username bytes.
         let hex: String = username.bytes().map(|b| format!("{b:02x}")).collect();

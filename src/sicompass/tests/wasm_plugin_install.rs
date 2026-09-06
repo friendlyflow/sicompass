@@ -1,7 +1,7 @@
 //! Installed-on-disk to loaded-in-app, through the real discovery path.
 //!
 //! The other suites start from a known file path. This one starts where a user
-//! actually puts a plugin — `<config>/sicompass/plugins/<name>/` — and checks that
+//! actually puts a plugin — `<config>/<app_dir_name()>/plugins/<name>/` — and checks that
 //! `discover_user_plugins` finds it, parses its manifest, resolves its entry, and
 //! that the result is something the host will instantiate.
 //!
@@ -44,8 +44,11 @@ fn a_plugin_installed_on_disk_is_discovered_and_loads() {
         std::env::set_var("HOME", config_home.path());
     }
 
-    // Only the *root* differs per platform; the `sicompass/plugins/<name>` layout
-    // below it is the same everywhere, and is what this test is really pinning.
+    // Only the *root* differs per platform, and only the app directory's name
+    // differs per build profile (`sicompass` when installed, `sicompass-dev` out
+    // of `target/` — see `platform::app_dir_name`). The `plugins/<name>` layout
+    // below both is the same everywhere, and is what this test is really pinning,
+    // so it is spelled out below while the parts that vary are derived.
     let config_root = {
         #[cfg(target_os = "macos")]
         {
@@ -60,7 +63,8 @@ fn a_plugin_installed_on_disk_is_discovered_and_loads() {
         }
     };
 
-    let plugin_dir = config_root.join("sicompass/plugins/hello");
+    let app_dir = config_root.join(sicompass_sdk::platform::app_dir_name());
+    let plugin_dir = app_dir.join("plugins/hello");
     std::fs::create_dir_all(&plugin_dir).unwrap();
     std::fs::copy(fixture("hello.wasm"), plugin_dir.join("plugin.wasm")).unwrap();
     std::fs::write(
@@ -77,7 +81,7 @@ fn a_plugin_installed_on_disk_is_discovered_and_loads() {
 
     // Also install something that is not a plugin, so "discovered 1" means the scan
     // is selective rather than counting directories.
-    std::fs::create_dir_all(config_root.join("sicompass/plugins/not-a-plugin")).unwrap();
+    std::fs::create_dir_all(app_dir.join("plugins/not-a-plugin")).unwrap();
 
     let discovered = discover_user_plugins();
     let hello = discovered

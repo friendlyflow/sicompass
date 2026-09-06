@@ -17,6 +17,23 @@ use std::time::Instant;
 
 pub const MAX_FRAMES_IN_FLIGHT: usize = 2;
 pub const WINDOW_TITLE: &str = "sicompass";
+
+/// The title the window actually carries.
+///
+/// A debug build keeps its config, state, data and cache in a separate tree
+/// from an installed release build (see `sicompass_sdk::platform::app_dir_name`),
+/// so the two are meant to run side by side. Two identically-titled entries in
+/// the taskbar is what makes that confusing in practice, and the title is the
+/// only identity worth splitting: the Wayland `app_id` stays `sicompass` because
+/// the compositor resolves it to `sicompass.desktop` for the icon, and the
+/// Vulkan `pApplicationName` stays put because drivers key app profiles off it.
+pub fn window_title() -> &'static str {
+    if cfg!(debug_assertions) {
+        "sicompass (dev)"
+    } else {
+        WINDOW_TITLE
+    }
+}
 pub const WINDOW_WIDTH: u32 = 800;
 pub const WINDOW_HEIGHT: u32 = 600;
 
