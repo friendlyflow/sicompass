@@ -587,11 +587,11 @@ fn check_parent_has_radio(renderer: &AppRenderer) -> bool {
 /// Build the list for `Coordinate::TimelineView` — per-tab undo timeline.
 ///
 /// Entries are shown in reverse order (most recent on top). The entry
-/// every entry carries the standard `"- "` list prefix (announced as "minus"),
+/// every entry carries the standard `"- "` list prefix (announced as "dash"),
 /// consistent with every other list. On top of that, the entry currently at
 /// HEAD (next Ctrl+Z target) adds a `">"` positioner (`"- > "`, announced as
-/// "minus current") and entries in the redo branch (already undone) add a `"·"`
-/// positioner (`"- \u{00B7} "`, "minus undone"); older history below the cursor
+/// "dash current") and entries in the redo branch (already undone) add a `"·"`
+/// positioner (`"- \u{00B7} "`, "dash undone"); older history below the cursor
 /// stays at the bare `"- "`. ASCII `>` is used (vs the more decorative
 /// U+25B6 ▶) because it reads unambiguously in every screen reader and needs
 /// no fallback face. The embedded DejaVu faces do cover ▶, so this is now a
@@ -1070,7 +1070,7 @@ fn chat_op_summary(op: &ChatOpKind) -> String {
 /// spaces), so we split on the first whitespace run and trim the remainder.
 /// Keys are padded to the widest key in the set so the description column lines
 /// up. The `- ` prefix matches [`build_str_label`]'s default and is announced as
-/// "minus" by the screen reader (see `accesskit_sdl::list_prefix_to_word`).
+/// "dash" by the screen reader (see `accesskit_sdl::list_prefix_to_word`).
 fn format_meta_hints(hints: &[String]) -> Vec<String> {
     let split: Vec<(&str, &str)> = hints
         .iter()
