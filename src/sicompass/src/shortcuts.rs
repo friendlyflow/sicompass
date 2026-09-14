@@ -58,6 +58,28 @@ const NAV_UP_DOWN: &[Coordinate] = &[
     Coordinate::TabSwitcher,
 ];
 
+// Every base mode (`Coordinate::base()` folds the colon-command family into
+// General and Command). For Ctrl chords that must work everywhere: they emit no
+// text event, so they never collide with type-to-filter or text editing.
+const ALL_MODES: &[Coordinate] = &[
+    Coordinate::General,
+    Coordinate::Insert,
+    Coordinate::Normal,
+    Coordinate::Visual,
+    Coordinate::SimpleSearch,
+    Coordinate::ExtendedSearch,
+    Coordinate::Command,
+    Coordinate::Scroll,
+    Coordinate::ScrollSearch,
+    Coordinate::ScrollPrefixSearch,
+    Coordinate::InputSearch,
+    Coordinate::Dashboard,
+    Coordinate::Meta,
+    Coordinate::TimelineView,
+    Coordinate::ConfirmCloseTab,
+    Coordinate::TabSwitcher,
+];
+
 // Modes where Undo/Redo are active
 const UNDO_MODES_ALL: &[Coordinate] = &[
     Coordinate::General,
@@ -1251,6 +1273,28 @@ pub static SHORTCUTS: &[Shortcut] = &[
         is_available: always,
         handle: handlers::handle_enter_tab_switcher,
     },
+    // Tab switcher: Delete / Ctrl+D → close the highlighted tab. Plain `d` is
+    // not bound: it would also reach the type-to-filter query as text.
+    Shortcut {
+        key: Keycode::Delete,
+        key2: None,
+        ctrl: false,
+        shift: false,
+        modes: &[Coordinate::TabSwitcher],
+        label: "Del    Close tab",
+        is_available: more_than_one_tab,
+        handle: handlers::handle_tab_switcher_delete,
+    },
+    Shortcut {
+        key: Keycode::D,
+        key2: None,
+        ctrl: true,
+        shift: false,
+        modes: &[Coordinate::TabSwitcher],
+        label: "Ctrl+D Close tab",
+        is_available: more_than_one_tab,
+        handle: handlers::handle_tab_switcher_delete,
+    },
     // Insert modes: Ctrl+Return → newline
     Shortcut {
         key: Keycode::Return,
@@ -1619,19 +1663,6 @@ pub static SHORTCUTS: &[Shortcut] = &[
         is_available: always,
         handle: handlers::handle_z,
     },
-    // ---- W (whereami: speak the focus position) --------------------------
-    // General mode only. Announces the header line plus the breadcrumb path to
-    // the current focus. Plain `w` only — Ctrl+W (close tab) is bound below.
-    Shortcut {
-        key: Keycode::W,
-        key2: None,
-        ctrl: false,
-        shift: false,
-        modes: &[Coordinate::General],
-        label: "w      Where am I",
-        is_available: always,
-        handle: handlers::handle_speak_position,
-    },
     // ---- b (toggle bookmark) ---------------------------------------------
     // General mode only, and only for a provider advertising the command (the
     // web browser). Marks the focused history row, or the page being read.
@@ -1986,7 +2017,7 @@ pub static SHORTCUTS: &[Shortcut] = &[
         is_available: always,
         handle: handlers::handle_f5,
     },
-    // ---- Tab management (Ctrl+T / Ctrl+W / Ctrl+Tab / Ctrl+Shift+Tab / Ctrl+1..9)
+    // ---- Tab management (Ctrl+T / Ctrl+Shift+T / Ctrl+Tab / Ctrl+Shift+Tab / Ctrl+1..9)
     Shortcut {
         key: Keycode::T,
         key2: None,
@@ -1998,14 +2029,26 @@ pub static SHORTCUTS: &[Shortcut] = &[
         handle: handlers::handle_tab_new,
     },
     Shortcut {
+        key: Keycode::T,
+        key2: None,
+        ctrl: true,
+        shift: true,
+        modes: GENERAL,
+        label: "Ctrl+Shift+T Close tab",
+        is_available: more_than_one_tab,
+        handle: handlers::handle_tab_close,
+    },
+    // Ctrl+W — whereami from any mode (there is no plain `w` binding). A Ctrl
+    // chord is never typed into a filter or an editor, so it works everywhere.
+    Shortcut {
         key: Keycode::W,
         key2: None,
         ctrl: true,
         shift: false,
-        modes: GENERAL,
-        label: "Ctrl+W Close tab",
-        is_available: more_than_one_tab,
-        handle: handlers::handle_tab_close,
+        modes: ALL_MODES,
+        label: "Ctrl+W Where am I",
+        is_available: always,
+        handle: handlers::handle_whereami_any_mode,
     },
     // Ctrl+Tab / Ctrl+Shift+Tab open the held MRU switcher and walk it; they
     // stay active inside TabSwitcher so repeated taps keep advancing. Releasing
@@ -2030,7 +2073,8 @@ pub static SHORTCUTS: &[Shortcut] = &[
         is_available: more_than_one_tab,
         handle: handlers::handle_ctrl_shift_tab,
     },
-    // t (general mode) — open the sticky MRU tab switcher palette.
+    // t (general mode) — open the sticky MRU tab switcher palette. Available
+    // with a single tab too: its first row creates a new tab.
     Shortcut {
         key: Keycode::T,
         key2: None,
@@ -2038,7 +2082,7 @@ pub static SHORTCUTS: &[Shortcut] = &[
         shift: false,
         modes: GENERAL,
         label: "t      Switch tab",
-        is_available: more_than_one_tab,
+        is_available: always,
         handle: handlers::handle_t_tab_switcher,
     },
     // c (general mode) — open the window-controls palette (minimize/maximize/close).

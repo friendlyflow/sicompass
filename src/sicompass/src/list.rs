@@ -665,18 +665,34 @@ fn build_timeline_list(renderer: &mut AppRenderer) {
 /// in the Enter handler.
 pub const CONFIRM_CLOSE_CANCEL: &str = "cancel";
 pub const CONFIRM_CLOSE_KILL: &str = "close";
+/// Row of the close button in the close-tab confirmation list, where the
+/// cursor starts.
+pub const CONFIRM_CLOSE_KILL_INDEX: usize = 0;
+/// Row of the Cancel button.
+pub const CONFIRM_CLOSE_CANCEL_INDEX: usize = 1;
+
+/// Button payload of the tab switcher's leading "new tab" row.
+pub const TAB_SWITCHER_NEW_TAB: &str = "newtab";
 
 /// Build the modal yes/no list for `Coordinate::ConfirmCloseTab`.
 ///
 /// Both options are `<button>` Strs, so each renders with the `-b` ("button")
 /// list prefix via [`build_str_label`] and is announced as an actionable button
-/// by the screen reader. Index 0 ("Cancel") is the safe default the cursor
-/// starts on.
+/// by the screen reader. The close button comes first, where the cursor starts,
+/// and Cancel second. The prompt opening at all is the confirmation.
 fn build_confirm_close_tab_list(renderer: &mut AppRenderer) {
-    renderer.list_index = 0;
+    renderer.list_index = CONFIRM_CLOSE_KILL_INDEX;
+    let close = if renderer.pending_close_busy {
+        tr("confirm-close-tab-kill")
+    } else {
+        tr("confirm-close-tab-close")
+    };
     let options = [
-        format!("<button>{CONFIRM_CLOSE_CANCEL}</button>Cancel"),
-        format!("<button>{CONFIRM_CLOSE_KILL}</button>Close tab and kill process"),
+        format!("<button>{CONFIRM_CLOSE_KILL}</button>{close}"),
+        format!(
+            "<button>{CONFIRM_CLOSE_CANCEL}</button>{}",
+            tr("confirm-close-tab-cancel")
+        ),
     ];
     renderer.total_list = options
         .iter()
@@ -693,6 +709,33 @@ fn build_confirm_close_tab_list(renderer: &mut AppRenderer) {
             }
         })
         .collect();
+}
+
+/// A translated UI string from this crate's locale bundles.
+fn tr(key: &str) -> String {
+    crate::shortcuts::register_translations();
+    sicompass_sdk::localize::t(key)
+}
+
+/// The question above the close-tab buttons, also spoken when the prompt opens.
+/// It names the tab (its breadcrumb) and says that closing cannot be undone. A
+/// busy tab leads with a capitalised running-program marker (RUNNING PROGRAM in
+/// English) so that case cannot be mistaken for the ordinary one.
+pub(crate) fn confirm_close_tab_prompt(r: &AppRenderer) -> String {
+    let name = r
+        .pending_close_tab
+        .map(|ti| tab_pid_and_path(r, ti).1)
+        .filter(|crumb| !crumb.is_empty());
+    let key = match (r.pending_close_busy, name.is_some()) {
+        (true, true) => "confirm-close-tab-prompt-busy",
+        (true, false) => "confirm-close-tab-prompt-busy-unnamed",
+        (false, true) => "confirm-close-tab-prompt",
+        (false, false) => "confirm-close-tab-prompt-unnamed",
+    };
+    crate::shortcuts::register_translations();
+    let mut args = sicompass_sdk::localize::Args::new();
+    args.set("name", name.unwrap_or_default());
+    sicompass_sdk::localize::t_args(key, &args)
 }
 
 /// Navigation breadcrumb for a tab, built by walking the in-memory FFON tree
@@ -769,11 +812,26 @@ fn tab_pid_and_path(r: &AppRenderer, ti: usize) -> (Option<u32>, String) {
 /// number means the tab has no terminal or its shell has not started yet. The
 /// real tab index is stored in each item's `id` (read back on confirm).
 /// `list_index` is set by the caller (`open_tab_switcher`), not here.
+///
+/// The first row is a `-b new tab` button (does what Ctrl+T does). It carries an
+/// empty `id`, so it can never be mistaken for tab index 0.
 fn build_tab_switcher_list(renderer: &mut AppRenderer) {
     let order = renderer.tab_mru.clone();
-    renderer.total_list = order
-        .iter()
-        .map(|&ti| {
+    let new_tab = RenderListItem {
+        id: IdArray::new(),
+        label: build_str_label(
+            &format!(
+                "<button>{TAB_SWITCHER_NEW_TAB}</button>{}",
+                tr("tab-switcher-new-tab")
+            ),
+            false,
+        ),
+        data: None,
+        nav_path: None,
+        ext_prefix: None,
+    };
+    renderer.total_list = std::iter::once(new_tab)
+        .chain(order.iter().map(|&ti| {
             let (pid, crumb) = tab_pid_and_path(renderer, ti);
             let label_text = match pid {
                 Some(p) => format!("{p} - {crumb}"),
@@ -788,7 +846,7 @@ fn build_tab_switcher_list(renderer: &mut AppRenderer) {
                 nav_path: None,
                 ext_prefix: None,
             }
-        })
+        }))
         .collect();
 }
 
@@ -1166,6 +1224,63 @@ fn build_command_list(renderer: &mut AppRenderer) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn close_prompt_buttons_and_new_tab_row_follow_the_locale() {
+        let _g = crate::app_state::locale_test_lock();
+        let mut r = AppRenderer::new();
+        r.tab_mru.clear(); // only the new-tab row
+        for (locale, busy_marker, kill, cancel, new_tab) in [
+            (
+                "en-US",
+                "RUNNING PROGRAM",
+                "Close tab and kill process",
+                "Cancel",
+                "new tab",
+            ),
+            (
+                "nl-BE",
+                "PROGRAMMA ACTIEF",
+                "Sluit tabblad en stop proces",
+                "Annuleren",
+                "nieuw tabblad",
+            ),
+            (
+                "fr-BE",
+                "PROGRAMME EN COURS",
+                "Fermer l'onglet et arrêter le processus",
+                "Annuler",
+                "nouvel onglet",
+            ),
+            (
+                "de-BE",
+                "LAUFENDES PROGRAMM",
+                "Reiter schließen und Prozess beenden",
+                "Abbrechen",
+                "neuer Reiter",
+            ),
+        ] {
+            sicompass_sdk::localize::set_locale(locale);
+
+            r.pending_close_busy = true;
+            let prompt = confirm_close_tab_prompt(&r);
+            assert!(prompt.starts_with(busy_marker), "{locale}: {prompt:?}");
+            build_confirm_close_tab_list(&mut r);
+            assert!(r.total_list[0].label.contains(kill), "{locale}");
+            assert!(r.total_list[1].label.contains(cancel), "{locale}");
+
+            r.pending_close_busy = false;
+            let prompt = confirm_close_tab_prompt(&r);
+            assert!(
+                !prompt.contains(busy_marker) && !prompt.starts_with("confirm-close-tab"),
+                "{locale}: {prompt:?}"
+            );
+
+            build_tab_switcher_list(&mut r);
+            assert!(r.total_list[0].label.contains(new_tab), "{locale}");
+        }
+        sicompass_sdk::localize::set_locale("en-US");
+    }
+
     use super::*;
     use crate::app_state::AppRenderer;
     use sicompass_sdk::ffon::{FfonElement, IdArray};

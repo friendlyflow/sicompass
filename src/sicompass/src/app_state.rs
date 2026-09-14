@@ -140,8 +140,9 @@ pub enum Coordinate {
     Dashboard,
     Meta,
     TimelineView,
-    /// Modal yes/no list shown when Ctrl+W would close a tab whose providers
-    /// are still busy (e.g. a terminal running a foreground command). The list
+    /// Modal yes/no list before a tab closes, since a closed tab cannot be
+    /// undone. Ctrl+Shift+T always shows it, Delete / Ctrl+D in the tab switcher
+    /// only for a busy tab (e.g. a terminal running a foreground command). The list
     /// holds two `<button>` options; Enter activates the highlighted one.
     ConfirmCloseTab,
     /// MRU tab switcher overlay (VS Code style). Lists open tabs in
@@ -152,7 +153,7 @@ pub enum Coordinate {
     // ---- The colon-command family ----------------------------------------
     //
     // Three relabelled views of two base modes. They exist so each colon layer
-    // can name itself: the header line and the `w` announcement both read
+    // can name itself: the header line and the Ctrl+W announcement both read
     // `mode_display_label`, and before these variants a shell called itself
     // "general mode" and claude's skills palette called itself "insert mode".
     // Behaviour is unchanged from the base mode in every case — see
@@ -859,6 +860,15 @@ pub struct AppRenderer {
     /// Ctrl+Tab / Ctrl+Shift+Tab (releasing Ctrl commits the highlighted tab).
     /// False for the sticky `t`-key palette (Enter commits, Escape cancels).
     pub tab_switcher_held: bool,
+    /// Tab index the open `Coordinate::ConfirmCloseTab` prompt would close.
+    pub pending_close_tab: Option<usize>,
+    /// `Some(mode)` when the close prompt was opened from the tab switcher
+    /// (Delete / Ctrl+D on a busy tab). Cancelling or confirming then returns to
+    /// the switcher, and `mode` is what the switcher itself returns to.
+    pub close_confirm_switcher_return: Option<Coordinate>,
+    /// Whether the tab in `pending_close_tab` has a running program. Picks the
+    /// prompt text and the "Close tab and kill process" button label.
+    pub pending_close_busy: bool,
 
     /// Set by `walk_back` / `walk_forward` while applying an undo/redo so
     /// `record_entry` can ignore side-effect emissions (e.g. a Create undo
@@ -1016,6 +1026,9 @@ impl AppRenderer {
             tab_timelines: vec![Timeline::new()],
             tab_mru: vec![0],
             tab_switcher_held: false,
+            pending_close_tab: None,
+            close_confirm_switcher_return: None,
+            pending_close_busy: false,
             in_history_action: false,
             update_state: None,
             update_event_rx: None,
@@ -1567,7 +1580,7 @@ impl AppRenderer {
     /// what is on screen, so without a distinct label there is no way to tell by
     /// ear which one answered. It now has its own coordinate
     /// (`Coordinate::SecondCommand`) and so needs no special case. The header,
-    /// the window title and the `w` focus announcement all route through here.
+    /// the window title and the Ctrl+W focus announcement all route through here.
     pub(crate) fn mode_display_label(&self) -> String {
         if self.coordinate == Coordinate::Command && self.current_command == CommandPhase::Controls
         {
@@ -1606,8 +1619,8 @@ impl AppRenderer {
     }
 
     /// Announce the position of the focus: the header line followed by the
-    /// breadcrumb path to where the cursor is. Bound to the `w` (whereami) key
-    /// in General mode. Toggles `announcement_parity` like the other `speak_*`
+    /// breadcrumb path to where the cursor is. Bound to Ctrl+W (whereami) in
+    /// every mode. Toggles `announcement_parity` like the other `speak_*`
     /// helpers so a repeat press still produces an AccessKit tree diff.
     pub fn speak_focus_position(&mut self) {
         let header = self.header_text();

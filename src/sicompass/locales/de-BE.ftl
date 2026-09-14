@@ -53,7 +53,6 @@ hint-f5-refresh = F5     Aktualisieren
 
 hint-m-meta = M      Meta
 hint-z-timeline = Z      Verlauf
-hint-w-where-am-i = w      Wo bin ich
 hint-b-bookmark = b      Lesezeichen
 hint-i-edit = I      Bearbeiten
 hint-i-edit-input = I      Eingabe bearb.
@@ -86,7 +85,10 @@ hint-t-switch-tab = t      Reiter wechseln
 hint-enter-switch = Enter  Wechseln
 hint-ctrl-u-install-update = Ctrl+U Update install.
 hint-ctrl-v-paste = Ctrl+V Einfügen
-hint-ctrl-w-close-tab = Ctrl+W Reiter schl.
+hint-ctrl-shift-t-close-tab = Ctrl+Shift+T Reiter schl.
+hint-ctrl-w-where-am-i = Ctrl+W Wo bin ich
+hint-del-close-tab = Del    Reiter schl.
+hint-ctrl-d-close-tab = Ctrl+D Reiter schl.
 hint-ctrl-x-cut = Ctrl+X Ausschneiden
 hint-ctrl-z-undo = Ctrl+Z Rückgängig
 
@@ -114,6 +116,16 @@ mode-confirm-close-tab = Bestätigungsmodus Reiter schließen
 # Screen-reader announcements
 speak-tab-change = Reiter { $idx }/{ $total }: { $label }
 speak-language-change = Sprache geändert
+
+# Bestätigung Reiter schließen
+confirm-close-tab-prompt = Reiter „{ $name }“ schließen? Dies kann nicht rückgängig gemacht werden.
+confirm-close-tab-prompt-unnamed = Diesen Reiter schließen? Dies kann nicht rückgängig gemacht werden.
+confirm-close-tab-prompt-busy = LAUFENDES PROGRAMM in Reiter „{ $name }“. Schließen beendet das Programm. Dies kann nicht rückgängig gemacht werden.
+confirm-close-tab-prompt-busy-unnamed = LAUFENDES PROGRAMM in diesem Reiter. Schließen beendet das Programm. Dies kann nicht rückgängig gemacht werden.
+confirm-close-tab-close = Reiter schließen
+confirm-close-tab-kill = Reiter schließen und Prozess beenden
+confirm-close-tab-cancel = Abbrechen
+tab-switcher-new-tab = neuer Reiter
 hint-c-controls = c      Fensterknöpfe
 hint-insert = :      Einfügen
 hint-ctrl-insert = Ctrl+: Einfügen

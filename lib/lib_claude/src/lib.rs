@@ -450,7 +450,7 @@ impl Provider for ClaudeProvider {
     }
 
     /// Busy while a turn is in flight. The app uses this to confirm before
-    /// Ctrl+W tears the tab down, which matters more here than for the terminal:
+    /// Ctrl+Shift+T tears the tab down, which matters more here than for the terminal:
     /// closing takes the transcript with it.
     fn is_busy(&self) -> bool {
         self.convo.busy

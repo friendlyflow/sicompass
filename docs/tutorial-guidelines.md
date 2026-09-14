@@ -55,7 +55,7 @@ behaves differently. Skills learned in a fake environment do not transfer.
 ### 6. Make progress and exit visible
 
 The learner should always know where they are, how much is left, and how to leave or
-resume. The "w" whereami key and the breadcrumb path support this. A guided sequence
+resume. The Ctrl+W whereami key and the breadcrumb path support this. A guided sequence
 should let the learner skip ahead and leave at any point without losing their place.
 
 ### 7. Front-load the payoff

@@ -55,7 +55,6 @@ hint-f5-refresh = F5     Refresh
 
 hint-m-meta = M      Meta
 hint-z-timeline = Z      Timeline
-hint-w-where-am-i = w      Where am I
 hint-b-bookmark = b      Bookmark
 hint-i-edit = I      Edit
 hint-i-edit-input = I      Edit input
@@ -88,7 +87,10 @@ hint-t-switch-tab = t      Switch tab
 hint-enter-switch = Enter  Switch
 hint-ctrl-u-install-update = Ctrl+U Install update
 hint-ctrl-v-paste = Ctrl+V Paste
-hint-ctrl-w-close-tab = Ctrl+W Close tab
+hint-ctrl-shift-t-close-tab = Ctrl+Shift+T Close tab
+hint-ctrl-w-where-am-i = Ctrl+W Where am I
+hint-del-close-tab = Del    Close tab
+hint-ctrl-d-close-tab = Ctrl+D Close tab
 hint-ctrl-x-cut = Ctrl+X Cut
 hint-ctrl-z-undo = Ctrl+Z Undo
 
@@ -121,6 +123,19 @@ speak-tab-change = tab { $idx }/{ $total }: { $label }
 # Spoken in the newly selected language when the UI language changes, so the
 # screen reader switches voice even if the focused control's text is unchanged.
 speak-language-change = Language changed
+
+# Close-tab confirmation (the question above the buttons, also spoken) and its
+# buttons. $name is the tab's breadcrumb. The -unnamed variants are used when
+# the tab has no breadcrumb.
+confirm-close-tab-prompt = Close tab "{ $name }"? This cannot be undone.
+confirm-close-tab-prompt-unnamed = Close this tab? This cannot be undone.
+confirm-close-tab-prompt-busy = RUNNING PROGRAM in tab "{ $name }". Closing it kills the program. This cannot be undone.
+confirm-close-tab-prompt-busy-unnamed = RUNNING PROGRAM in this tab. Closing it kills the program. This cannot be undone.
+confirm-close-tab-close = Close tab
+confirm-close-tab-kill = Close tab and kill process
+confirm-close-tab-cancel = Cancel
+# First row of the t tab switcher, opens a new tab.
+tab-switcher-new-tab = new tab
 hint-c-controls = c      Controls
 hint-insert = :      Insert
 hint-ctrl-insert = Ctrl+: Insert

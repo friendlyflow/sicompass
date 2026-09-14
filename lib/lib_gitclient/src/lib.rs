@@ -2523,7 +2523,7 @@ impl Provider for GitClientProvider {
 
     /// True while a remote-contacting command is running.
     ///
-    /// Only gates the Ctrl+W close confirmation, which is exactly right: a
+    /// Only gates the Ctrl+Shift+T close confirmation, which is exactly right: a
     /// half-finished push is worth being asked about.
     fn is_busy(&self) -> bool {
         self.network.busy()
