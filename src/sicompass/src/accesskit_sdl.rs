@@ -362,14 +362,14 @@ impl AccessKitAdapter {
 
 fn list_prefix_to_word(prefix: &str) -> Option<&'static str> {
     match prefix {
-        "-" => Some("minus"),
-        "-p" => Some("minus p"),
-        "-cc" => Some("minus cc"),
-        "-c" => Some("minus c"),
-        "-rc" => Some("minus rc"),
-        "-b" => Some("minus b"),
-        "-i" => Some("minus i"),
-        "-r" => Some("minus r"),
+        "-" => Some("dash"),
+        "-p" => Some("dash p"),
+        "-cc" => Some("dash cc"),
+        "-c" => Some("dash c"),
+        "-rc" => Some("dash rc"),
+        "-b" => Some("dash b"),
+        "-i" => Some("dash i"),
+        "-r" => Some("dash r"),
         "+" => Some("plus"),
         "+cc" => Some("plus cc"),
         "+c" => Some("plus c"),
@@ -377,7 +377,7 @@ fn list_prefix_to_word(prefix: &str) -> Option<&'static str> {
         "+R" => Some("plus R"),
         "+i" => Some("plus i"),
         // Timeline-view positioners, which follow the `-` list prefix
-        // (e.g. "- > x" → "minus current x"). HEAD is the next ctrl-Z target;
+        // (e.g. "- > x" → "dash current x"). HEAD is the next ctrl-Z target;
         // redo-branch entries have already been undone. Without these mappings
         // the marker is silently stripped, leaving screenreader users with no
         // way to distinguish current / undone / older entries in the history.
@@ -412,7 +412,7 @@ pub(crate) fn label_to_speech(label: &str) -> String {
 // ---------------------------------------------------------------------------
 
 /// The spoken *content* of a list label with the FFON list prefix stripped.
-/// Language detection runs on this so the English prefix words ("minus i",
+/// Language detection runs on this so the English prefix words ("dash i",
 /// "current", …) don't bias the result.
 fn speech_content(label: &str) -> &str {
     // Peel every leading known prefix, including a timeline positioner that
@@ -839,12 +839,12 @@ mod tests {
 
     #[test]
     fn label_to_speech_minus_i() {
-        assert_eq!(label_to_speech("-i newfile.txt"), "minus i newfile.txt");
+        assert_eq!(label_to_speech("-i newfile.txt"), "dash i newfile.txt");
     }
 
     #[test]
     fn label_to_speech_bare_minus() {
-        assert_eq!(label_to_speech("- something"), "minus something");
+        assert_eq!(label_to_speech("- something"), "dash something");
     }
 
     #[test]
@@ -878,7 +878,7 @@ mod tests {
     fn label_to_speech_timeline_head_minus_arrow_says_minus_current() {
         assert_eq!(
             label_to_speech("- > nav ArrowRight /home/nico"),
-            "minus current nav ArrowRight /home/nico",
+            "dash current nav ArrowRight /home/nico",
         );
     }
 
@@ -886,7 +886,7 @@ mod tests {
     fn label_to_speech_timeline_redo_minus_dot_says_minus_undone() {
         assert_eq!(
             label_to_speech("- \u{00B7} nav ArrowRight /home/nico"),
-            "minus undone nav ArrowRight /home/nico",
+            "dash undone nav ArrowRight /home/nico",
         );
     }
 
@@ -897,7 +897,7 @@ mod tests {
         let tree = build_tree(&r);
         assert_eq!(
             tree.nodes[1].1.label().as_deref(),
-            Some("minus i newfile.txt")
+            Some("dash i newfile.txt")
         );
         // Second item (index 1)
         let mut r2 = make_renderer_with_list(&["-i newfile.txt", "+l dir"]);
