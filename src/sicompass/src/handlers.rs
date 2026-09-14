@@ -1017,12 +1017,10 @@ pub fn handle_z(r: &mut AppRenderer) {
     r.needs_redraw = true;
 }
 
-/// Announce the position of the focus (header + breadcrumb path) via the
-/// screen reader. The `w` (whereami) key is only bound in General mode.
-pub fn handle_speak_position(r: &mut AppRenderer) {
-    if !r.coordinate.is_general() {
-        return;
-    }
+/// Ctrl+W — whereami: announce the position of the focus (header + breadcrumb
+/// path) via the screen reader. Bound in every mode, since a Ctrl chord never
+/// reaches a filter or an editor as typed text.
+pub fn handle_whereami_any_mode(r: &mut AppRenderer) {
     r.speak_focus_position();
     r.needs_redraw = true;
 }
@@ -3792,14 +3790,8 @@ pub fn handle_escape(r: &mut AppRenderer) {
             return;
         }
         Coordinate::ConfirmCloseTab => {
-            // Cancel the close: restore the prior mode and its list.
-            r.coordinate = r.previous_coordinate;
-            r.speak_mode_change(None);
-            list::create_list_current_layer(r);
-            r.list_index = r.current_id.last().unwrap_or(0);
-            r.scroll_offset = 0;
-            r.caret.reset(sdl_ticks());
-            r.needs_redraw = true;
+            // Cancel the close: restore the prior mode (or the switcher) and its list.
+            cancel_confirm_close_tab(r);
             return;
         }
         Coordinate::Dashboard => {
@@ -4384,9 +4376,8 @@ pub fn handle_file_cut(r: &mut AppRenderer) {
     let cache_dir = {
         // `temp_dir()` rather than a literal "/tmp": that path does not exist
         // on Windows, and a fixed fallback would be shared by every instance.
-        let base = sicompass_sdk::platform::app_cache_dir().unwrap_or_else(|| {
-            std::env::temp_dir().join(sicompass_sdk::platform::app_dir_name())
-        });
+        let base = sicompass_sdk::platform::app_cache_dir()
+            .unwrap_or_else(|| std::env::temp_dir().join(sicompass_sdk::platform::app_dir_name()));
         let dir = base.join("clipboard");
         let _ = std::fs::create_dir_all(&dir);
         dir.to_string_lossy().into_owned()
@@ -7387,80 +7378,143 @@ fn active_tab_busy(r: &AppRenderer) -> bool {
     r.providers[..n - 1].iter().any(|p| p.is_busy())
 }
 
-/// Ctrl+W — close the active tab and tear down its providers (killing any shell
-/// process). No-op when only one tab remains. If the tab is busy, first show a
-/// confirmation prompt instead of closing immediately.
+/// Ctrl+Shift+T — close the active tab and tear down its providers (killing any
+/// shell process). No-op when only one tab remains. Always asks first, busy or
+/// not: a closed tab cannot be brought back with Ctrl+Z.
 pub fn handle_tab_close(r: &mut AppRenderer) {
     if r.tabs.len() <= 1 {
         return;
     }
-    if active_tab_busy(r) {
-        enter_confirm_close_tab(r);
-        return;
-    }
-    close_active_tab(r);
+    let active = r.active_tab;
+    enter_confirm_close_tab(r, active);
 }
 
-/// Enter the modal close-tab confirmation (`Coordinate::ConfirmCloseTab`).
-fn enter_confirm_close_tab(r: &mut AppRenderer) {
+/// Whether tab `idx` is busy. The active tab's content is live in
+/// `r.providers`, any other tab's content is parked in its snapshot (which never
+/// holds the shared settings provider).
+fn tab_busy(r: &AppRenderer, idx: usize) -> bool {
+    if idx == r.active_tab {
+        return active_tab_busy(r);
+    }
+    r.tabs
+        .get(idx)
+        .is_some_and(|t| t.providers.iter().any(|p| p.is_busy()))
+}
+
+/// Enter the modal close-tab confirmation (`Coordinate::ConfirmCloseTab`) for
+/// tab `idx`. Opened from the tab switcher, it remembers where the switcher
+/// itself returns to, so leaving the prompt lands back in the switcher. The
+/// prompt (shown and spoken) names the tab and says whether a running program
+/// would be killed.
+fn enter_confirm_close_tab(r: &mut AppRenderer, idx: usize) {
+    r.pending_close_tab = Some(idx);
+    r.pending_close_busy = tab_busy(r, idx);
+    r.close_confirm_switcher_return =
+        (r.coordinate == Coordinate::TabSwitcher).then_some(r.previous_coordinate);
     r.previous_coordinate = r.coordinate;
     r.coordinate = Coordinate::ConfirmCloseTab;
     list::create_list_current_layer(r);
-    r.list_index = 0; // default to "Cancel"
-    r.speak_mode_change(None);
+    r.list_index = list::CONFIRM_CLOSE_KILL_INDEX; // default to the close button
+    let prompt = list::confirm_close_tab_prompt(r);
+    r.speak_mode_change(Some(prompt));
     r.needs_redraw = true;
 }
 
 /// Enter handler for `Coordinate::ConfirmCloseTab`: activate the highlighted
 /// button. "Cancel" returns to the prior mode; "Close" tears the tab down.
 pub fn handle_enter_confirm_close_tab(r: &mut AppRenderer) {
-    let kill = r.list_index == 1; // [0]=Cancel, [1]=Close tab and kill process
-    // Restore the prior mode first; close_active_tab rebuilds the list/state.
-    r.coordinate = r.previous_coordinate;
-    if kill {
-        close_active_tab(r);
+    // [0]=Close tab (and kill process), [1]=Cancel
+    if r.list_index == list::CONFIRM_CLOSE_KILL_INDEX {
+        confirm_close_tab(r);
     } else {
-        list::create_list_current_layer(r);
-        r.list_index = r.current_id.last().unwrap_or(0);
-        r.speak_mode_change(None);
-        r.needs_redraw = true;
+        cancel_confirm_close_tab(r);
     }
 }
 
-/// Remove the active tab: drop its live content providers (Drop kills shells),
-/// swap the neighbouring tab's parked providers in, and refresh.
-fn close_active_tab(r: &mut AppRenderer) {
-    // Drop the active tab's live content providers — this fires each provider's
-    // Drop impl, killing the terminal's child shell process. The trailing
-    // shared settings provider stays in `r.providers`.
-    let (content_providers, _content_ffon) = r.detach_content();
-    drop(content_providers);
+/// Leave the close prompt without closing anything (Cancel button or Escape).
+fn cancel_confirm_close_tab(r: &mut AppRenderer) {
+    let target = r.pending_close_tab.take();
+    r.coordinate = r.previous_coordinate;
+    if let Some(ret) = r.close_confirm_switcher_return.take() {
+        r.previous_coordinate = ret;
+        refresh_tab_switcher(r, 1);
+        if let Some(row) = target.and_then(|t| tab_switcher_row_of(r, t)) {
+            r.list_index = row;
+        }
+    } else {
+        list::create_list_current_layer(r);
+        r.list_index = r.current_id.last().unwrap_or(0);
+    }
+    r.scroll_offset = 0;
+    r.caret.reset(sdl_ticks());
+    r.speak_mode_change(None);
+    r.needs_redraw = true;
+}
 
-    let closed = r.active_tab;
-    r.tabs.remove(closed);
-    r.tab_timelines.remove(closed);
-    if r.active_tab > 0 {
+/// Close the tab the prompt was opened for ("Close" button).
+fn confirm_close_tab(r: &mut AppRenderer) {
+    let Some(idx) = r
+        .pending_close_tab
+        .filter(|&i| i < r.tabs.len() && r.tabs.len() > 1)
+    else {
+        cancel_confirm_close_tab(r);
+        return;
+    };
+    r.pending_close_tab = None;
+    r.coordinate = r.previous_coordinate;
+    match r.close_confirm_switcher_return.take() {
+        Some(ret) => {
+            r.previous_coordinate = ret;
+            refresh_tab_switcher(r, 1);
+            let row = tab_switcher_row_of(r, idx).unwrap_or(1);
+            close_tab_in_switcher(r, idx, row);
+        }
+        None => {
+            remove_tab(r, idx);
+            after_tab_change(r);
+        }
+    }
+}
+
+/// Remove tab `idx` and tear down its content providers (their Drop impls kill
+/// shells). Closing the active tab swaps the neighbouring tab's parked providers
+/// in. Callers refresh the list and announce.
+fn remove_tab(r: &mut AppRenderer, idx: usize) {
+    let was_active = idx == r.active_tab;
+    if was_active {
+        // Drop the active tab's live content providers — this fires each
+        // provider's Drop impl, killing the terminal's child shell process. The
+        // trailing shared settings provider stays in `r.providers`.
+        let (content_providers, _content_ffon) = r.detach_content();
+        drop(content_providers);
+    }
+    // An inactive tab's parked providers are dropped along with its snapshot.
+    r.tabs.remove(idx);
+    r.tab_timelines.remove(idx);
+    if r.active_tab > idx || (was_active && r.active_tab > 0) {
         r.active_tab -= 1;
     }
 
     // Keep `tab_mru` parallel: drop the closed index and shift indices past it
-    // down by one, then make the new active tab most-recent.
-    r.tab_mru.retain(|&x| x != closed);
-    for idx in r.tab_mru.iter_mut() {
-        if *idx > closed {
-            *idx -= 1;
+    // down by one.
+    r.tab_mru.retain(|&x| x != idx);
+    for i in r.tab_mru.iter_mut() {
+        if *i > idx {
+            *i -= 1;
         }
     }
-    r.touch_mru(r.active_tab);
 
-    // Swap the new active tab's parked content into the live working set.
-    let idx = r.active_tab;
-    let np = std::mem::take(&mut r.tabs[idx].providers);
-    let nf = std::mem::take(&mut r.tabs[idx].ffon);
-    r.attach_content(np, nf);
-    r.current_id = r.tabs[idx].current_id.clone();
-    r.list_index = r.current_id.last().unwrap_or(0);
-    after_tab_change(r);
+    if was_active {
+        // Make the new active tab most-recent and swap its parked content into
+        // the live working set.
+        r.touch_mru(r.active_tab);
+        let a = r.active_tab;
+        let np = std::mem::take(&mut r.tabs[a].providers);
+        let nf = std::mem::take(&mut r.tabs[a].ffon);
+        r.attach_content(np, nf);
+        r.current_id = r.tabs[a].current_id.clone();
+        r.list_index = r.current_id.last().unwrap_or(0);
+    }
 }
 
 /// Open the `Coordinate::TabSwitcher` overlay, building the MRU-ordered list and
@@ -7485,13 +7539,14 @@ fn open_tab_switcher(r: &mut AppRenderer, held: bool, start_index: usize) {
     r.needs_redraw = true;
 }
 
-/// `t` (general mode) — open the sticky MRU tab switcher. Highlight starts on
-/// the current tab (`tab_mru[0]`); Enter confirms, Escape cancels.
+/// `t` (general mode) — open the sticky MRU tab switcher. Row 0 is the new-tab
+/// button, so the highlight starts on row 1, the current tab (`tab_mru[0]`).
+/// Enter confirms, Escape cancels. Works with a single tab too.
 pub fn handle_t_tab_switcher(r: &mut AppRenderer) {
-    if !r.coordinate.is_general() || r.tabs.len() < 2 {
+    if !r.coordinate.is_general() {
         return;
     }
-    open_tab_switcher(r, false, 0);
+    open_tab_switcher(r, false, 1);
 }
 
 /// Ctrl+Tab — open the held switcher (if not already open) and move the
@@ -7502,7 +7557,8 @@ pub fn handle_ctrl_tab(r: &mut AppRenderer) {
         return;
     }
     if r.coordinate != Coordinate::TabSwitcher {
-        open_tab_switcher(r, true, 1);
+        // Row 0 is the new-tab button and row 1 the current tab.
+        open_tab_switcher(r, true, 2);
         return;
     }
     let len = r.active_list_len();
@@ -7510,6 +7566,7 @@ pub fn handle_ctrl_tab(r: &mut AppRenderer) {
         return;
     }
     r.list_index = (r.list_index + 1) % len;
+    skip_new_tab_row_when_held(r, true);
     r.speak_current_element();
     r.needs_redraw = true;
 }
@@ -7531,6 +7588,7 @@ pub fn handle_ctrl_shift_tab(r: &mut AppRenderer) {
         return;
     }
     r.list_index = (r.list_index + len - 1) % len;
+    skip_new_tab_row_when_held(r, false);
     r.speak_current_element();
     r.needs_redraw = true;
 }
@@ -7540,11 +7598,19 @@ pub fn handle_ctrl_shift_tab(r: &mut AppRenderer) {
 fn confirm_tab_switcher(r: &mut AppRenderer) {
     // `current_list_item` honours the active filter (`filtered_list_indices`),
     // so the right tab is picked even when a search query is narrowing the list.
-    let target = r.current_list_item().and_then(|it| it.id.last());
+    // The leading new-tab row is the only row without a tab index in its id.
+    let (new_tab, target) = match r.current_list_item() {
+        Some(it) => (it.id.last().is_none(), it.id.last()),
+        None => (false, None),
+    };
     r.coordinate = r.previous_coordinate;
     r.tab_switcher_held = false;
     r.input_buffer.clear();
     r.cursor_position = 0;
+    if new_tab {
+        handle_tab_new(r);
+        return;
+    }
     match target {
         Some(t) if t != r.active_tab && t < r.tabs.len() => {
             r.switch_to_tab(t);
@@ -7557,6 +7623,80 @@ fn confirm_tab_switcher(r: &mut AppRenderer) {
             r.needs_redraw = true;
         }
     }
+}
+
+/// Held Ctrl+Tab / Ctrl+Shift+Tab cycling steps over the new-tab row, so
+/// releasing Ctrl never opens a tab by accident. The sticky `t` palette (and
+/// the arrow keys) can still reach it.
+fn skip_new_tab_row_when_held(r: &mut AppRenderer, forward: bool) {
+    let len = r.active_list_len();
+    if !r.tab_switcher_held || len < 2 {
+        return;
+    }
+    if r.current_list_item()
+        .is_some_and(|it| it.id.last().is_none())
+    {
+        r.list_index = if forward {
+            (r.list_index + 1) % len
+        } else {
+            (r.list_index + len - 1) % len
+        };
+    }
+}
+
+/// The tab index behind the highlighted switcher row. `None` for the new-tab
+/// row (its id is empty) and for an empty list.
+fn tab_switcher_target(r: &AppRenderer) -> Option<usize> {
+    r.current_list_item().and_then(|it| it.id.last())
+}
+
+/// The visible (filter-aware) switcher row that shows tab `tab`.
+fn tab_switcher_row_of(r: &AppRenderer, tab: usize) -> Option<usize> {
+    let shows = |raw: usize| r.total_list.get(raw).and_then(|it| it.id.last()) == Some(tab);
+    if r.filtered_list_indices.is_empty() {
+        (0..r.total_list.len()).find(|&i| shows(i))
+    } else {
+        r.filtered_list_indices.iter().position(|&raw| shows(raw))
+    }
+}
+
+/// Rebuild the switcher rows, re-applying any typed query, and put the
+/// highlight on `row` (clamped).
+fn refresh_tab_switcher(r: &mut AppRenderer, row: usize) {
+    list::create_list_current_layer(r);
+    if !r.input_buffer.is_empty() {
+        let filter = r.input_buffer.clone();
+        list::populate_list_current_layer(r, &filter);
+    }
+    r.list_index = row.min(r.active_list_len().saturating_sub(1));
+}
+
+/// Delete / Ctrl+D (in `Coordinate::TabSwitcher`) — close the highlighted tab,
+/// active or not, and stay in the switcher. A busy tab asks first. No-op on the
+/// new-tab row and when only one tab remains.
+pub fn handle_tab_switcher_delete(r: &mut AppRenderer) {
+    if r.tabs.len() <= 1 {
+        return;
+    }
+    let Some(idx) = tab_switcher_target(r).filter(|&i| i < r.tabs.len()) else {
+        return;
+    };
+    if tab_busy(r, idx) {
+        enter_confirm_close_tab(r, idx);
+        return;
+    }
+    let row = r.list_index;
+    close_tab_in_switcher(r, idx, row);
+}
+
+/// Close tab `idx` while the switcher stays open. The highlight stays on `row`,
+/// which now shows the next tab down (or the last one).
+fn close_tab_in_switcher(r: &mut AppRenderer, idx: usize, row: usize) {
+    remove_tab(r, idx);
+    refresh_tab_switcher(r, row);
+    persist_tabs(r);
+    r.speak_current_element();
+    r.needs_redraw = true;
 }
 
 /// Enter (in `Coordinate::TabSwitcher`) — confirm the highlighted tab.
@@ -8711,7 +8851,7 @@ mod tests {
     fn the_palette_announces_itself_apart_from_the_command_palette() {
         // The same key opens both depending on what is on screen, so the mode
         // label is the only way to tell by ear which one answered. The header
-        // and the `w` announcement both read from it.
+        // and the Ctrl+W announcement both read from it.
         let mut r = make_renderer_with_palette();
         r.coordinate = Coordinate::General;
         let ordinary = r.mode_display_label();

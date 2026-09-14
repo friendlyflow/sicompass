@@ -53,7 +53,6 @@ hint-f5-refresh = F5     Vernieuwen
 
 hint-m-meta = M      Meta
 hint-z-timeline = Z      Tijdlijn
-hint-w-where-am-i = w      Waar ben ik
 hint-b-bookmark = b      Bladwijzer
 hint-i-edit = I      Bewerken
 hint-i-edit-input = I      Bewerk invoer
@@ -86,7 +85,10 @@ hint-t-switch-tab = t      Wissel tabblad
 hint-enter-switch = Enter  Wissel
 hint-ctrl-u-install-update = Ctrl+U Update install.
 hint-ctrl-v-paste = Ctrl+V Plakken
-hint-ctrl-w-close-tab = Ctrl+W Sluit tabblad
+hint-ctrl-shift-t-close-tab = Ctrl+Shift+T Sluit tabblad
+hint-ctrl-w-where-am-i = Ctrl+W Waar ben ik
+hint-del-close-tab = Del    Sluit tabblad
+hint-ctrl-d-close-tab = Ctrl+D Sluit tabblad
 hint-ctrl-x-cut = Ctrl+X Knippen
 hint-ctrl-z-undo = Ctrl+Z Ongedaan
 
@@ -114,6 +116,16 @@ mode-confirm-close-tab = bevestigingsmodus tabblad sluiten
 # Screen-reader announcements
 speak-tab-change = tabblad { $idx }/{ $total }: { $label }
 speak-language-change = Taal gewijzigd
+
+# Bevestiging tabblad sluiten
+confirm-close-tab-prompt = Tabblad "{ $name }" sluiten? Dit kan niet ongedaan worden gemaakt.
+confirm-close-tab-prompt-unnamed = Dit tabblad sluiten? Dit kan niet ongedaan worden gemaakt.
+confirm-close-tab-prompt-busy = PROGRAMMA ACTIEF in tabblad "{ $name }". Sluiten stopt het programma. Dit kan niet ongedaan worden gemaakt.
+confirm-close-tab-prompt-busy-unnamed = PROGRAMMA ACTIEF in dit tabblad. Sluiten stopt het programma. Dit kan niet ongedaan worden gemaakt.
+confirm-close-tab-close = Sluit tabblad
+confirm-close-tab-kill = Sluit tabblad en stop proces
+confirm-close-tab-cancel = Annuleren
+tab-switcher-new-tab = nieuw tabblad
 hint-c-controls = c      Vensterknoppen
 hint-insert = :      Invoegen
 hint-ctrl-insert = Ctrl+: Invoegen

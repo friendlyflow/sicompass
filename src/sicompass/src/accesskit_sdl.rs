@@ -1325,7 +1325,7 @@ mod tests {
             assert_eq!(publish(&mut channel, &r), spoken);
         }
 
-        /// `w` (whereami) in General mode: the position must survive, not be
+        /// Ctrl+W (whereami): the position must survive, not be
         /// replaced by the list item one frame later.
         #[test]
         fn whereami_survives_the_next_frame() {

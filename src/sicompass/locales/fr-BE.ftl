@@ -53,7 +53,6 @@ hint-f5-refresh = F5     Actualiser
 
 hint-m-meta = M      Méta
 hint-z-timeline = Z      Chronologie
-hint-w-where-am-i = w      Où suis-je
 hint-b-bookmark = b      Favori
 hint-i-edit = I      Modifier
 hint-i-edit-input = I      Modifier saisie
@@ -86,7 +85,10 @@ hint-t-switch-tab = t      Changer onglet
 hint-enter-switch = Enter  Changer
 hint-ctrl-u-install-update = Ctrl+U Install. MAJ
 hint-ctrl-v-paste = Ctrl+V Coller
-hint-ctrl-w-close-tab = Ctrl+W Fermer onglet
+hint-ctrl-shift-t-close-tab = Ctrl+Shift+T Fermer onglet
+hint-ctrl-w-where-am-i = Ctrl+W Où suis-je
+hint-del-close-tab = Del    Fermer onglet
+hint-ctrl-d-close-tab = Ctrl+D Fermer onglet
 hint-ctrl-x-cut = Ctrl+X Couper
 hint-ctrl-z-undo = Ctrl+Z Annuler
 
@@ -114,6 +116,16 @@ mode-confirm-close-tab = mode confirmation fermeture onglet
 # Screen-reader announcements
 speak-tab-change = onglet { $idx }/{ $total } : { $label }
 speak-language-change = Langue modifiée
+
+# Confirmation de fermeture d'onglet
+confirm-close-tab-prompt = Fermer l'onglet « { $name } » ? Cette action est irréversible.
+confirm-close-tab-prompt-unnamed = Fermer cet onglet ? Cette action est irréversible.
+confirm-close-tab-prompt-busy = PROGRAMME EN COURS dans l'onglet « { $name } ». Le fermer arrête le programme. Cette action est irréversible.
+confirm-close-tab-prompt-busy-unnamed = PROGRAMME EN COURS dans cet onglet. Le fermer arrête le programme. Cette action est irréversible.
+confirm-close-tab-close = Fermer l'onglet
+confirm-close-tab-kill = Fermer l'onglet et arrêter le processus
+confirm-close-tab-cancel = Annuler
+tab-switcher-new-tab = nouvel onglet
 hint-c-controls = c      Contrôles fenêtre
 hint-insert = :      Insérer
 hint-ctrl-insert = Ctrl+: Insérer

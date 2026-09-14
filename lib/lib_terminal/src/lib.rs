@@ -709,7 +709,7 @@ impl Provider for TerminalProvider {
 
     /// Busy while a full-screen interactive program is up (`in_dashboard`) or
     /// while the PTY has a foreground command running (`Shell::foreground_busy`,
-    /// Linux only). The app uses this to confirm before Ctrl+W kills the shell.
+    /// Linux only). The app uses this to confirm before Ctrl+Shift+T kills the shell.
     fn is_busy(&self) -> bool {
         self.in_dashboard
             || self

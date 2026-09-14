@@ -5119,11 +5119,11 @@ fn editor_insert_left_announces_char() {
     );
 }
 
-/// Pressing `w` (whereami) in General mode announces the focus position: the
+/// Pressing Ctrl+W (whereami) in General mode announces the focus position: the
 /// header line (mode, layer, list position) followed by the Ctrl+F-style
 /// breadcrumb path to the cursor.
 #[test]
-fn w_speaks_focus_position() {
+fn ctrl_w_speaks_focus_position() {
     use sicompass_sdk::provider::Provider;
 
     // A minimal provider so `current_id[0]` resolves and the list builder runs.
@@ -5161,8 +5161,8 @@ fn w_speaks_focus_position() {
     r.previous_coordinate = Coordinate::General;
     sicompass::list::create_list_current_layer(&mut r);
 
-    press(&mut r, Keycode::W);
-    let spoken = announced_text(&r).expect("w should set an announcement");
+    press_ctrl(&mut r, Keycode::W);
+    let spoken = announced_text(&r).expect("Ctrl+W should set an announcement");
     assert!(
         spoken.starts_with("general mode, layer: 2 list: 1/2"),
         "header should lead the announcement, got {spoken:?}"
@@ -5175,7 +5175,7 @@ fn w_speaks_focus_position() {
     // Parity: a second press re-announces (different raw text via the U+200B
     // sentinel) but the spoken text is identical.
     let raw_first = r.pending_announcement.clone();
-    press(&mut r, Keycode::W);
+    press_ctrl(&mut r, Keycode::W);
     let raw_second = r.pending_announcement.clone();
     assert_ne!(
         raw_first, raw_second,
@@ -9300,15 +9300,15 @@ fn tab_timelines_stay_parallel_to_tabs() {
     }
 
     // Close one.
-    press_ctrl(h.r(), Keycode::W);
+    close_tab_confirmed(h.r());
     assert_eq!(h.renderer.tabs.len(), 2);
     assert_eq!(h.renderer.tab_timelines.len(), 2);
 
-    // Close down to one — Ctrl+W is a no-op at one tab.
-    press_ctrl(h.r(), Keycode::W);
+    // Close down to one — Ctrl+Shift+T is a no-op at one tab.
+    close_tab_confirmed(h.r());
     assert_eq!(h.renderer.tabs.len(), 1);
     assert_eq!(h.renderer.tab_timelines.len(), 1);
-    press_ctrl(h.r(), Keycode::W);
+    press_ctrl_shift(h.r(), Keycode::T);
     assert_eq!(h.renderer.tabs.len(), 1);
     assert_eq!(h.renderer.tab_timelines.len(), 1);
 }
@@ -9331,11 +9331,11 @@ fn ctrl_t_creates_new_tab_and_activates_it() {
 }
 
 #[test]
-fn ctrl_w_with_one_tab_is_noop() {
+fn ctrl_shift_t_with_one_tab_is_noop() {
     let mut h = Harness::new();
     let before_len = h.renderer.tabs.len();
-    press_ctrl(h.r(), Keycode::W);
-    // The meaningful invariant: Ctrl+W with one tab does not change the tab
+    press_ctrl_shift(h.r(), Keycode::T);
+    // The meaningful invariant: Ctrl+Shift+T with one tab does not change the tab
     // structure. (The active tab's snapshot is always refreshed from live state
     // by dispatch_key, so direct equality of `tabs` is not the right check.)
     assert_eq!(h.renderer.tabs.len(), before_len);
@@ -9343,7 +9343,7 @@ fn ctrl_w_with_one_tab_is_noop() {
 }
 
 #[test]
-fn ctrl_w_closes_active_and_activates_previous() {
+fn ctrl_shift_t_closes_active_and_activates_previous() {
     let mut h = Harness::new();
     press_ctrl(h.r(), Keycode::T);
     press_ctrl(h.r(), Keycode::T);
@@ -9354,24 +9354,36 @@ fn ctrl_w_closes_active_and_activates_previous() {
     h.renderer.active_tab = 1;
     h.renderer.current_id = h.renderer.tabs[1].current_id.clone();
 
-    press_ctrl(h.r(), Keycode::W);
+    close_tab_confirmed(h.r());
 
     assert_eq!(h.renderer.tabs.len(), 2);
     assert_eq!(h.renderer.active_tab, 0);
 }
 
 #[test]
-fn ctrl_w_closes_index_zero_keeps_zero() {
+fn ctrl_shift_t_closes_index_zero_keeps_zero() {
     let mut h = Harness::new();
     press_ctrl(h.r(), Keycode::T);
     press_ctrl(h.r(), Keycode::T);
     h.renderer.active_tab = 0;
     h.renderer.current_id = h.renderer.tabs[0].current_id.clone();
 
-    press_ctrl(h.r(), Keycode::W);
+    close_tab_confirmed(h.r());
 
     assert_eq!(h.renderer.tabs.len(), 2);
     assert_eq!(h.renderer.active_tab, 0);
+}
+
+/// Ctrl+Shift+T always asks first: press it, check the prompt opened, and
+/// confirm the highlighted "Close tab" button.
+fn close_tab_confirmed(r: &mut AppRenderer) {
+    press_ctrl_shift(r, Keycode::T);
+    assert_eq!(
+        r.coordinate,
+        Coordinate::ConfirmCloseTab,
+        "Ctrl+Shift+T always asks before closing"
+    );
+    press_enter(r);
 }
 
 /// Assert the MRU invariants: parallel length, every tab index present exactly
@@ -9412,7 +9424,7 @@ fn closing_tab_keeps_mru_valid() {
     press_ctrl(h.r(), Keycode::T);
     press_ctrl(h.r(), Keycode::T); // 3 tabs, active 2, mru [2,1,0]
 
-    press_ctrl(h.r(), Keycode::W); // close active 2
+    close_tab_confirmed(h.r()); // close active 2
     assert_eq!(h.renderer.tabs.len(), 2);
     assert_mru_valid(&h.renderer);
 }
@@ -9427,10 +9439,14 @@ fn t_opens_switcher_with_button_prefixes_in_mru_order() {
     assert_eq!(h.renderer.coordinate, Coordinate::TabSwitcher);
     // Items follow MRU order, carry the real tab index in their id, and render
     // with the `-b` button prefix.
+    // The first row is the new-tab button, with no tab index in its id.
+    assert!(h.renderer.total_list[0].label.contains("new tab"));
+    assert_eq!(h.renderer.total_list[0].id.last(), None);
     let ids: Vec<usize> = h
         .renderer
         .total_list
         .iter()
+        .skip(1)
         .map(|it| it.id.last().unwrap())
         .collect();
     assert_eq!(ids, vec![2, 1, 0]);
@@ -9440,8 +9456,8 @@ fn t_opens_switcher_with_button_prefixes_in_mru_order() {
             .iter()
             .all(|it| it.label.starts_with("-b "))
     );
-    // Highlight starts on the current tab (1st item, `tab_mru[0]`).
-    assert_eq!(h.renderer.list_index, 0);
+    // Highlight starts on the current tab (row 1, `tab_mru[0]`).
+    assert_eq!(h.renderer.list_index, 1);
 }
 
 #[test]
@@ -9513,8 +9529,8 @@ fn t_switcher_enter_confirms_highlighted_tab() {
     press_ctrl(h.r(), Keycode::T);
     press_ctrl(h.r(), Keycode::T); // active 2, mru [2,1,0]
 
-    press(h.r(), Keycode::T); // index 0 → current tab 2
-    press_down(h.r()); // index 1 → tab 1
+    press(h.r(), Keycode::T); // row 1 → current tab 2
+    press_down(h.r()); // row 2 → tab 1
     press_enter(h.r());
 
     assert_eq!(h.renderer.coordinate, Coordinate::General);
@@ -9541,9 +9557,9 @@ fn t_switcher_arrows_navigate_then_enter() {
     press_ctrl(h.r(), Keycode::T);
     press_ctrl(h.r(), Keycode::T); // active 2, mru [2,1,0]
 
-    press(h.r(), Keycode::T); // index 0 → current tab 2
-    press_down(h.r()); // index 1 → tab 1
-    press_down(h.r()); // index 2 → tab 0
+    press(h.r(), Keycode::T); // row 1 → current tab 2
+    press_down(h.r()); // row 2 → tab 1
+    press_down(h.r()); // row 3 → tab 0
     press_enter(h.r());
 
     assert_eq!(h.renderer.active_tab, 0);
@@ -9572,8 +9588,8 @@ fn ctrl_tab_advances_then_commits() {
     press_ctrl(h.r(), Keycode::T);
     press_ctrl(h.r(), Keycode::T); // active 2, mru [2,1,0]
 
-    press_ctrl(h.r(), Keycode::Tab); // open, index 1 → tab 1
-    press_ctrl(h.r(), Keycode::Tab); // index 2 → tab 0
+    press_ctrl(h.r(), Keycode::Tab); // open, row 2 → tab 1
+    press_ctrl(h.r(), Keycode::Tab); // row 3 → tab 0
     sicompass::handlers::handle_tab_switcher_commit(h.r());
 
     assert_eq!(h.renderer.active_tab, 0);
@@ -9588,7 +9604,7 @@ fn ctrl_shift_tab_opens_at_least_recent() {
     // Opening with Ctrl+Shift+Tab highlights the last (least-recent) tab.
     press_ctrl_shift(h.r(), Keycode::Tab);
     assert_eq!(h.renderer.coordinate, Coordinate::TabSwitcher);
-    assert_eq!(h.renderer.list_index, 2);
+    assert_eq!(h.renderer.list_index, 3);
     sicompass::handlers::handle_tab_switcher_commit(h.r());
 
     assert_eq!(h.renderer.active_tab, 0);
@@ -9610,14 +9626,37 @@ fn commit_is_noop_for_sticky_t_palette() {
 }
 
 #[test]
-fn t_is_noop_with_single_tab() {
+fn t_opens_switcher_with_single_tab() {
     let mut h = Harness::new();
     press(h.r(), Keycode::T);
     assert_eq!(
         h.renderer.coordinate,
-        Coordinate::General,
-        "t does nothing with only one tab"
+        Coordinate::TabSwitcher,
+        "t opens the switcher even with one tab, for its new-tab row"
     );
+    assert_eq!(
+        h.renderer.total_list.len(),
+        2,
+        "new-tab row + the current tab"
+    );
+    assert_eq!(
+        h.renderer.list_index, 1,
+        "highlight starts on the current tab"
+    );
+}
+
+#[test]
+fn held_ctrl_tab_cycling_skips_the_new_tab_row() {
+    let mut h = Harness::new();
+    press_ctrl(h.r(), Keycode::T); // mru [1,0], rows: new tab, tab 1, tab 0
+
+    press_ctrl(h.r(), Keycode::Tab); // open, row 2 → tab 0
+    press_ctrl(h.r(), Keycode::Tab); // wraps past row 0 (new tab) to row 1
+    assert_eq!(h.renderer.list_index, 1);
+    sicompass::handlers::handle_tab_switcher_commit(h.r());
+
+    assert_eq!(h.renderer.tabs.len(), 2, "releasing Ctrl creates no tab");
+    assert_eq!(h.renderer.active_tab, 1);
 }
 
 /// Open the switcher over two tabs with distinct navigation breadcrumbs: tab 0
@@ -9837,29 +9876,52 @@ impl Provider for BusyProvider {
 }
 
 #[test]
-fn ctrl_w_non_busy_tab_closes_immediately() {
+fn ctrl_shift_t_non_busy_tab_asks_before_closing() {
     let mut h = Harness::new();
     press_ctrl(h.r(), Keycode::T);
     assert_eq!(h.renderer.tabs.len(), 2);
 
-    press_ctrl(h.r(), Keycode::W);
+    press_ctrl_shift(h.r(), Keycode::T);
 
     assert_eq!(
-        h.renderer.tabs.len(),
-        1,
-        "non-busy tab closes without a prompt"
+        h.renderer.coordinate,
+        Coordinate::ConfirmCloseTab,
+        "a non-busy tab asks too"
     );
+    assert_eq!(
+        h.renderer.tabs.len(),
+        2,
+        "nothing closes before confirmation"
+    );
+    assert_eq!(
+        h.renderer.list_index, 0,
+        "cursor defaults to the close button"
+    );
+    assert!(h.renderer.total_list[1].label.contains("Cancel"));
+    let close = &h.renderer.total_list[0].label;
+    assert!(
+        close.contains("Close tab") && !close.contains("kill"),
+        "non-busy close button, got {close:?}"
+    );
+    let spoken = announced_text(&h.renderer).expect("the prompt is announced");
+    assert!(
+        spoken.contains("cannot be undone") && !spoken.contains("RUNNING PROGRAM"),
+        "non-busy prompt, got {spoken:?}"
+    );
+
+    press_enter(h.r());
+    assert_eq!(h.renderer.tabs.len(), 1, "confirming closes the tab");
     assert_ne!(h.renderer.coordinate, Coordinate::ConfirmCloseTab);
 }
 
 #[test]
-fn ctrl_w_busy_tab_shows_confirmation_with_button_prefixes() {
+fn ctrl_shift_t_busy_tab_shows_confirmation_with_button_prefixes() {
     let mut h = Harness::new();
     press_ctrl(h.r(), Keycode::T);
     // Make the active tab's content provider report busy.
     h.renderer.providers[0] = Box::new(BusyProvider { busy: true });
 
-    press_ctrl(h.r(), Keycode::W);
+    press_ctrl_shift(h.r(), Keycode::T);
 
     assert_eq!(h.renderer.coordinate, Coordinate::ConfirmCloseTab);
     assert_eq!(
@@ -9871,27 +9933,38 @@ fn ctrl_w_busy_tab_shows_confirmation_with_button_prefixes() {
     // Both options render with the `-b` button list prefix.
     assert!(
         h.renderer.total_list[0].label.starts_with("-b "),
-        "cancel option should carry the -b prefix, got {:?}",
+        "close option should carry the -b prefix, got {:?}",
         h.renderer.total_list[0].label
     );
     assert!(
         h.renderer.total_list[1].label.starts_with("-b "),
-        "close option should carry the -b prefix, got {:?}",
+        "cancel option should carry the -b prefix, got {:?}",
         h.renderer.total_list[1].label
     );
     assert_eq!(
         h.renderer.list_index, 0,
-        "cursor defaults to the safe Cancel option"
+        "cursor defaults to the close button"
+    );
+    // The busy case stands out from the ordinary one, on screen and by ear.
+    assert!(
+        h.renderer.total_list[0].label.contains("kill process"),
+        "busy close button, got {:?}",
+        h.renderer.total_list[0].label
+    );
+    let spoken = announced_text(&h.renderer).expect("the prompt is announced");
+    assert!(
+        spoken.contains("RUNNING PROGRAM") && spoken.contains("cannot be undone"),
+        "busy prompt, got {spoken:?}"
     );
 }
 
 #[test]
-fn ctrl_w_busy_tab_escape_cancels() {
+fn ctrl_shift_t_busy_tab_escape_cancels() {
     let mut h = Harness::new();
     press_ctrl(h.r(), Keycode::T);
     h.renderer.providers[0] = Box::new(BusyProvider { busy: true });
 
-    press_ctrl(h.r(), Keycode::W);
+    press_ctrl_shift(h.r(), Keycode::T);
     assert_eq!(h.renderer.coordinate, Coordinate::ConfirmCloseTab);
 
     press(h.r(), Keycode::Escape);
@@ -9901,13 +9974,14 @@ fn ctrl_w_busy_tab_escape_cancels() {
 }
 
 #[test]
-fn ctrl_w_busy_tab_cancel_button_keeps_tab() {
+fn ctrl_shift_t_busy_tab_cancel_button_keeps_tab() {
     let mut h = Harness::new();
     press_ctrl(h.r(), Keycode::T);
     h.renderer.providers[0] = Box::new(BusyProvider { busy: true });
 
-    press_ctrl(h.r(), Keycode::W);
-    // list_index 0 == Cancel; Enter activates it.
+    press_ctrl_shift(h.r(), Keycode::T);
+    // Move down to Cancel (index 1); Enter activates it.
+    press_down(h.r());
     press(h.r(), Keycode::Return);
 
     assert_eq!(h.renderer.tabs.len(), 2, "Cancel keeps the tab open");
@@ -10123,18 +10197,193 @@ fn language_change_collapses_inactive_tutorial_and_announces() {
 }
 
 #[test]
-fn ctrl_w_busy_tab_confirm_button_closes_tab() {
+fn ctrl_shift_t_busy_tab_confirm_button_closes_tab() {
     let mut h = Harness::new();
     press_ctrl(h.r(), Keycode::T);
     h.renderer.providers[0] = Box::new(BusyProvider { busy: true });
 
-    press_ctrl(h.r(), Keycode::W);
-    // Move to "Close tab and kill process" (index 1) and confirm.
-    press_down(h.r());
+    press_ctrl_shift(h.r(), Keycode::T);
+    // "Close tab and kill process" (index 0) is highlighted; confirm it.
     press(h.r(), Keycode::Return);
 
     assert_eq!(h.renderer.tabs.len(), 1, "confirming closes the tab");
     assert_ne!(h.renderer.coordinate, Coordinate::ConfirmCloseTab);
+}
+
+#[test]
+fn plain_w_no_longer_speaks_the_focus_position() {
+    let mut h = Harness::new();
+    h.renderer.pending_announcement = None;
+    press(h.r(), Keycode::W);
+    assert!(
+        announced_text(&h.renderer).is_none(),
+        "whereami moved to Ctrl+W"
+    );
+}
+
+#[test]
+fn ctrl_w_speaks_focus_position_in_every_mode() {
+    let mut h = Harness::new();
+    for mode in [
+        Coordinate::General,
+        Coordinate::Insert,
+        Coordinate::SimpleSearch,
+    ] {
+        h.renderer.coordinate = mode;
+        h.renderer.pending_announcement = None;
+        press_ctrl(h.r(), Keycode::W);
+        assert!(
+            announced_text(&h.renderer).is_some(),
+            "Ctrl+W should announce the focus position in {mode:?}"
+        );
+    }
+
+    h.renderer.coordinate = Coordinate::General;
+    press(h.r(), Keycode::T);
+    assert_eq!(h.renderer.coordinate, Coordinate::TabSwitcher);
+    h.renderer.pending_announcement = None;
+    press_ctrl(h.r(), Keycode::W);
+    assert!(
+        announced_text(&h.renderer).is_some(),
+        "Ctrl+W should announce in the tab switcher"
+    );
+    assert_eq!(h.renderer.coordinate, Coordinate::TabSwitcher);
+    assert_eq!(h.renderer.tabs.len(), 1, "Ctrl+W no longer closes a tab");
+}
+
+#[test]
+fn switcher_new_tab_row_creates_a_tab_like_ctrl_t() {
+    let mut h = Harness::new();
+    press(h.r(), Keycode::T);
+    let first = &h.renderer.total_list[0];
+    assert!(
+        first.label.starts_with("-b ") && first.label.contains("new tab"),
+        "first row is the new-tab button, got {:?}",
+        first.label
+    );
+
+    press_up(h.r()); // row 1 (current tab) → row 0 (new tab)
+    assert_eq!(h.renderer.list_index, 0);
+    press_enter(h.r());
+
+    assert_eq!(h.renderer.coordinate, Coordinate::General);
+    assert_eq!(h.renderer.tabs.len(), 2);
+    assert_eq!(h.renderer.active_tab, 1, "the new tab becomes active");
+    assert_mru_valid(&h.renderer);
+}
+
+#[test]
+fn switcher_delete_closes_highlighted_inactive_tab_and_stays_open() {
+    let mut h = Harness::new();
+    press_ctrl(h.r(), Keycode::T);
+    press_ctrl(h.r(), Keycode::T); // active 2, mru [2,1,0]
+
+    press(h.r(), Keycode::T); // row 1 → current tab 2
+    press_down(h.r()); // row 2 → tab 1
+    press(h.r(), Keycode::Delete);
+
+    assert_eq!(
+        h.renderer.coordinate,
+        Coordinate::TabSwitcher,
+        "the switcher stays open"
+    );
+    assert_eq!(h.renderer.tabs.len(), 2);
+    assert_eq!(h.renderer.active_tab, 1, "old tab 2 shifts down to index 1");
+    assert_mru_valid(&h.renderer);
+    assert_eq!(h.renderer.total_list.len(), 3, "new-tab row + two tabs");
+    // The highlight stays on row 2, which now shows the remaining older tab.
+    assert_eq!(h.renderer.list_index, 2);
+    assert_eq!(
+        h.renderer.current_list_item().and_then(|it| it.id.last()),
+        Some(0)
+    );
+}
+
+#[test]
+fn switcher_ctrl_d_closes_the_active_tab() {
+    let mut h = Harness::new();
+    press_ctrl(h.r(), Keycode::T); // active 1, mru [1,0]
+
+    press(h.r(), Keycode::T); // row 1 → active tab 1
+    press_ctrl(h.r(), Keycode::D);
+
+    assert_eq!(h.renderer.coordinate, Coordinate::TabSwitcher);
+    assert_eq!(h.renderer.tabs.len(), 1);
+    assert_eq!(h.renderer.active_tab, 0);
+    assert_mru_valid(&h.renderer);
+    assert_eq!(h.renderer.list_index, 1);
+
+    press_escape(h.r());
+    assert_eq!(h.renderer.coordinate, Coordinate::General);
+}
+
+#[test]
+fn switcher_delete_is_noop_on_new_tab_row_and_with_one_tab() {
+    let mut h = Harness::new();
+    press(h.r(), Keycode::T);
+    press(h.r(), Keycode::Delete);
+    assert_eq!(h.renderer.tabs.len(), 1, "the last tab cannot be closed");
+    assert_eq!(h.renderer.coordinate, Coordinate::TabSwitcher);
+    press_escape(h.r());
+
+    press_ctrl(h.r(), Keycode::T);
+    press(h.r(), Keycode::T);
+    press_up(h.r()); // row 0 → new tab
+    press(h.r(), Keycode::Delete);
+    assert_eq!(
+        h.renderer.tabs.len(),
+        2,
+        "Delete on the new-tab row closes nothing"
+    );
+}
+
+#[test]
+fn switcher_typed_d_filters_instead_of_deleting() {
+    let mut h = Harness::new();
+    press_ctrl(h.r(), Keycode::T);
+    press(h.r(), Keycode::T);
+    type_text(h.r(), "d");
+    assert_eq!(h.renderer.tabs.len(), 2);
+    assert_eq!(h.renderer.input_buffer, "d");
+}
+
+#[test]
+fn switcher_delete_busy_tab_confirms_and_returns_to_switcher() {
+    let mut h = Harness::new();
+    press_ctrl(h.r(), Keycode::T); // active 1, tab 0 parked
+    h.renderer.tabs[0].providers[0] = Box::new(BusyProvider { busy: true });
+
+    press(h.r(), Keycode::T);
+    press_down(h.r()); // row 2 → tab 0
+    press(h.r(), Keycode::Delete);
+    assert_eq!(h.renderer.coordinate, Coordinate::ConfirmCloseTab);
+    assert_eq!(
+        h.renderer.tabs.len(),
+        2,
+        "busy tab is NOT closed before confirmation"
+    );
+
+    // Cancel lands back in the switcher, on the same tab.
+    press_down(h.r()); // Cancel
+    press_enter(h.r());
+    assert_eq!(h.renderer.coordinate, Coordinate::TabSwitcher);
+    assert_eq!(h.renderer.tabs.len(), 2);
+    assert_eq!(
+        h.renderer.current_list_item().and_then(|it| it.id.last()),
+        Some(0)
+    );
+
+    // Confirming closes it, and Escape from the switcher still reaches General.
+    press(h.r(), Keycode::Delete);
+    // "Close tab and kill process" is highlighted.
+    press_enter(h.r());
+    assert_eq!(h.renderer.coordinate, Coordinate::TabSwitcher);
+    assert_eq!(h.renderer.tabs.len(), 1);
+    assert_eq!(h.renderer.active_tab, 0);
+    assert_mru_valid(&h.renderer);
+
+    press_escape(h.r());
+    assert_eq!(h.renderer.coordinate, Coordinate::General);
 }
 
 #[test]
@@ -16741,12 +16990,12 @@ fn controls_palette_maximize_label_tracks_state() {
 // The colon-command labels, end to end through the real providers
 // ---------------------------------------------------------------------------
 //
-// One test per row of the label map. Each checks the header line *and* the `w`
+// One test per row of the label map. Each checks the header line *and* the Ctrl+W
 // announcement, because the reported complaint was those two disagreeing about
 // which mode you were in.
 
 #[test]
-fn the_shell_view_says_command_mode_in_the_header_and_on_w() {
+fn the_shell_view_says_command_mode_in_the_header_and_on_ctrl_w() {
     ensure_builtins();
     let mut renderer = AppRenderer::new();
     register_terminal_in_shell(&mut renderer);
@@ -16759,8 +17008,8 @@ fn the_shell_view_says_command_mode_in_the_header_and_on_w() {
         renderer.header_text()
     );
 
-    press(&mut renderer, Keycode::W);
-    let spoken = announced_text(&renderer).expect("w should still work in the shell");
+    press_ctrl(&mut renderer, Keycode::W);
+    let spoken = announced_text(&renderer).expect("Ctrl+W should still work in the shell");
     assert!(
         spoken.starts_with("command mode, layer:"),
         "whereami: {spoken:?}"
@@ -16804,8 +17053,8 @@ fn the_claude_session_says_first_command_mode() {
         renderer.header_text()
     );
 
-    press(&mut renderer, Keycode::W);
-    let spoken = announced_text(&renderer).expect("w should still work in the session");
+    press_ctrl(&mut renderer, Keycode::W);
+    let spoken = announced_text(&renderer).expect("Ctrl+W should still work in the session");
     assert!(
         spoken.starts_with("first command mode, layer:"),
         "whereami: {spoken:?}"
@@ -16917,10 +17166,10 @@ fn no_general_mode_key_goes_silent_inside_a_shell() {
     press_escape(&mut renderer);
     assert_eq!(renderer.coordinate, at_rest, "Escape out of search");
 
-    // w: still announces.
+    // Ctrl+W: still announces.
     renderer.pending_announcement = None;
-    press(&mut renderer, Keycode::W);
-    assert!(announced_text(&renderer).is_some(), "w");
+    press_ctrl(&mut renderer, Keycode::W);
+    assert!(announced_text(&renderer).is_some(), "Ctrl+W");
 }
 
 // ---------------------------------------------------------------------------

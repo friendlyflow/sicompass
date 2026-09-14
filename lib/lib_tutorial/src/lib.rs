@@ -720,7 +720,7 @@ mod tests {
             );
         }
         let text = joined(&elems);
-        for token in ["Right", "Left", "Enter", "Escape", "w:", "m:", "b:"] {
+        for token in ["Right", "Left", "Enter", "Escape", "Ctrl+W:", "m:", "b:"] {
             assert!(
                 text.contains(token),
                 "general shortcuts must mention {token}, got:\n{text}"

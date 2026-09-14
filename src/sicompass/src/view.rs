@@ -1215,7 +1215,7 @@ fn update_view(app: &mut AppState) {
     let caret_visible = app.renderer.caret.visible;
     let search_str = if app.renderer.coordinate == Coordinate::ConfirmCloseTab {
         // Modal prompt above the two `-b` button options.
-        Some("This tab has a running program. Close it?".to_string())
+        Some(crate::list::confirm_close_tab_prompt(&app.renderer))
     } else if matches!(
         app.renderer.coordinate,
         Coordinate::SimpleSearch
@@ -1267,7 +1267,8 @@ fn update_view(app: &mut AppState) {
             Coordinate::SimpleSearch | Coordinate::ExtendedSearch => {
                 format!(" [{} items]", list_items.len())
             }
-            Coordinate::TabSwitcher => format!(" [{} tabs]", list_items.len()),
+            // Not `list_items.len()`: the first row is the new-tab button.
+            Coordinate::TabSwitcher => format!(" [{} tabs]", app.renderer.tabs.len()),
             Coordinate::InputSearch => {
                 format!(" [{} items]", app.renderer.input_search_match_count)
             }
