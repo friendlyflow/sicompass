@@ -1370,6 +1370,27 @@ mod tests {
     }
 
     #[test]
+    fn a_note_with_newlines_survives_a_reload() {
+        let d = TempDir::new().unwrap();
+        let mut p = provider(&d);
+        sync(
+            &mut p,
+            vec![new_row("first line\nsecond line\n\nafter a blank")],
+        );
+
+        let mut q = provider(&d);
+        q.fetch();
+        assert_eq!(
+            q.tree
+                .notes
+                .iter()
+                .map(|n| n.text.as_str())
+                .collect::<Vec<_>>(),
+            ["first line\nsecond line\n\nafter a blank"]
+        );
+    }
+
+    #[test]
     fn visibility_survives_a_reload() {
         let d = TempDir::new().unwrap();
         let mut p = provider(&d);

@@ -637,6 +637,18 @@ fn draw_window_controls(app: &mut AppState) {
     }
 }
 
+/// The non-editable text drawn before the buffer on the insert line.
+///
+/// A placeholder's `i ` / `ci ` marker invites typing into a new element; it is
+/// not part of what is being written, so it is gone as soon as the edit starts.
+/// `input_prefix` still holds it, because the commit paths read it.
+fn insert_line_prefix(raw: &str, placeholder_mode: bool) -> String {
+    if placeholder_mode || matches!(raw.trim(), "i" | "ci") {
+        return String::new();
+    }
+    strip_for_insert_line(raw)
+}
+
 /// Display form of `input_prefix` / `input_suffix` on the insert line.
 ///
 /// `strip_tags` drops the tag *tokens* and keeps what sits between them, which
@@ -1210,7 +1222,10 @@ fn update_view(app: &mut AppState) {
     // `input_prefix`/`input_suffix` are kept raw (they reconstruct the FFON
     // key on commit), but an input slot puts a dangling `<input>` in the
     // prefix and `</input>` in the suffix — strip all tag tokens for display.
-    let insert_prefix = strip_for_insert_line(&app.renderer.input_prefix);
+    let insert_prefix = insert_line_prefix(
+        &app.renderer.input_prefix,
+        app.renderer.placeholder_insert_mode,
+    );
     let insert_suffix = strip_for_insert_line(&app.renderer.input_suffix);
     let caret_visible = app.renderer.caret.visible;
     let search_str = if app.renderer.coordinate == Coordinate::ConfirmCloseTab {
@@ -1888,6 +1903,9 @@ fn update_view(app: &mut AppState) {
     let mut captured_elem_x: f32 = 0.0;
     let mut captured_elem_base_x: f32 = 0.0;
     let mut captured_elem_y: f32 = 0.0;
+    // The edited field's visual lines, shared by the selection pass below and,
+    // through the renderer, by Up/Down. Empty when no field is drawn.
+    let mut captured_lines: Vec<sicompass_sdk::input::InputLine> = Vec::new();
     for (i, (label, item_data, is_selected, match_pos, ext_prefix)) in list_items[start_index..]
         .iter()
         .take(item_metrics.len())
@@ -2271,33 +2289,56 @@ fn update_view(app: &mut AppState) {
                 let buf = insert_buf.as_str();
                 let lh = line_height as f32;
                 let segs = insert_buf_segments(fr, buf, scale, pfx_w, item_max_w);
+                // A masked password's bytes do not line up with the real
+                // buffer's, so its layout is not handed to Up/Down.
+                if !mask_password {
+                    let prefix_cols = (pfx_w / em_width.max(1.0)).round() as usize;
+                    captured_lines = insert_lines_from_segments(&segs, prefix_cols);
+                }
+                // An empty line still counts as one space wide, so an empty
+                // field remains visible.
+                let seg_text = |byte_start: usize, byte_end: usize| match &buf[byte_start..byte_end]
+                {
+                    "" => " ",
+                    s => s,
+                };
+                let seg_x = |n: usize| {
+                    if n == 0 {
+                        after_prefix_x
+                    } else {
+                        text_prefix_x
+                    }
+                };
+                // One background block behind the whole field, like a selected
+                // row, rather than a ragged rectangle per wrapped line.
+                let right = segs
+                    .iter()
+                    .enumerate()
+                    .map(|(n, &(s, e, _))| seg_x(n) + fr.measure_text_width(seg_text(s, e), scale))
+                    .fold(after_prefix_x, f32::max);
+                let left = if segs.len() > 1 {
+                    text_prefix_x
+                } else {
+                    after_prefix_x
+                };
+                if let Some(rr) = app.rect_renderer.as_mut() {
+                    rr.prepare_rectangle(
+                        left - crate::text::TEXT_PADDING,
+                        item_y - ascender * scale - crate::text::TEXT_PADDING,
+                        right - left + 2.0 * crate::text::TEXT_PADDING,
+                        segs.len().max(1) as f32 * lh,
+                        p.selected,
+                        5.0,
+                    );
+                }
                 let mut last_seg_x = after_prefix_x;
                 let mut last_seg_w = 0.0;
                 let mut last_seg_y = item_y;
                 for (n, &(byte_start, byte_end, _)) in segs.iter().enumerate() {
-                    // An empty line still gets a one-space highlight so the
-                    // field remains visible.
-                    let seg_text = match &buf[byte_start..byte_end] {
-                        "" => " ",
-                        s => s,
-                    };
-                    let seg_x = if n == 0 {
-                        after_prefix_x
-                    } else {
-                        text_prefix_x
-                    };
+                    let seg_text = seg_text(byte_start, byte_end);
+                    let seg_x = seg_x(n);
                     let seg_y = item_y + n as f32 * lh;
                     let seg_w = fr.measure_text_width(seg_text, scale);
-                    if let Some(rr) = app.rect_renderer.as_mut() {
-                        rr.prepare_rectangle(
-                            seg_x - crate::text::TEXT_PADDING,
-                            seg_y - ascender * scale - crate::text::TEXT_PADDING,
-                            seg_w + 2.0 * crate::text::TEXT_PADDING,
-                            lh,
-                            p.selected,
-                            5.0,
-                        );
-                    }
                     fr.prepare_text_for_rendering(seg_text, seg_x, seg_y, scale, p.text);
                     last_seg_x = seg_x;
                     last_seg_w = seg_w;
@@ -2400,6 +2441,13 @@ fn update_view(app: &mut AppState) {
     app.renderer.current_element_x = captured_elem_x;
     app.renderer.current_element_base_x = captured_elem_base_x;
     app.renderer.current_element_y = captured_elem_y;
+    if renders_insert_buffer && !captured_lines.is_empty() {
+        app.renderer.insert_lines = captured_lines.clone();
+        app.renderer.insert_lines_text = app.renderer.input_buffer.clone();
+    } else {
+        app.renderer.insert_lines.clear();
+        app.renderer.insert_lines_text.clear();
+    }
 
     // ---- Input-search match highlights ---------------------------------------
     // Drawn after the item text pass so these rects sit on top of the row's
@@ -2522,33 +2570,19 @@ fn update_view(app: &mut AppState) {
                 insert_buf.as_str()
             };
 
-            // Build line-start offsets
-            let mut line_starts: Vec<usize> = vec![0];
-            for (i, c) in buf.char_indices() {
-                if c == '\n' {
-                    line_starts.push(i + 1);
-                }
-            }
-            let num_lines = line_starts.len();
-
-            // Find start/end lines
-            let start_line = line_starts
-                .partition_point(|&s| s <= sel_start)
-                .saturating_sub(1);
-            let end_line = line_starts
-                .partition_point(|&s| s <= sel_end)
-                .saturating_sub(1);
+            // The edited field selects along the same wrapped lines it was
+            // drawn with; a search bar never wraps, so `\n` is all it needs.
+            let sel_lines = if in_insert_mode && !captured_lines.is_empty() {
+                std::mem::take(&mut captured_lines)
+            } else {
+                sicompass_sdk::input::hard_lines(buf)
+            };
 
             if let Some(fr) = app.font_renderer.as_ref() {
-                for line in start_line..=end_line {
-                    let line_start_off = line_starts[line];
-                    let line_end_off = if line + 1 < num_lines {
-                        line_starts[line + 1] - 1
-                    } else {
-                        buf.len()
-                    };
-                    let clamp_start = sel_start.max(line_start_off);
-                    let clamp_end = sel_end.min(line_end_off);
+                for (line, clamp_start, clamp_end) in
+                    sicompass_sdk::input::selection_spans(&sel_lines, sel_start, sel_end)
+                {
+                    let line_start_off = sel_lines[line].start;
                     let line_x = if in_insert_mode && line > 0 {
                         captured_elem_base_x
                     } else {
@@ -2556,16 +2590,10 @@ fn update_view(app: &mut AppState) {
                     };
                     let line_y = base_y + line as f32 * line_height as f32;
 
-                    let x_start = if clamp_start > line_start_off {
-                        line_x + fr.measure_text_width(&buf[line_start_off..clamp_start], scale)
-                    } else {
-                        line_x
-                    };
-                    let x_end = if clamp_end > line_start_off {
-                        line_x + fr.measure_text_width(&buf[line_start_off..clamp_end], scale)
-                    } else {
-                        line_x
-                    };
+                    let x_start =
+                        line_x + fr.measure_text_width(&buf[line_start_off..clamp_start], scale);
+                    let x_end =
+                        line_x + fr.measure_text_width(&buf[line_start_off..clamp_end], scale);
                     let sel_w = x_end - x_start;
                     if sel_w > 0.0 {
                         if let Some(rr) = app.rect_renderer.as_mut() {
@@ -3451,6 +3479,22 @@ fn insert_buf_segments(
     fr.line_segments(buf, scale, Some(((wrap_w - pfx_w).max(1.0), wrap_w)))
 }
 
+/// The shared text-field model's view of [`insert_buf_segments`]: the same byte
+/// ranges, with the first line pushed right by the prefix drawn before it.
+fn insert_lines_from_segments(
+    segs: &[(usize, usize, u32)],
+    prefix_cols: usize,
+) -> Vec<sicompass_sdk::input::InputLine> {
+    segs.iter()
+        .enumerate()
+        .map(|(n, &(start, end, _))| sicompass_sdk::input::InputLine {
+            start,
+            end,
+            indent_cols: if n == 0 { prefix_cols } else { 0 },
+        })
+        .collect()
+}
+
 /// Lay out `[breadcrumb][prefix][content]` as one continuous flow `rest_w` wide.
 /// See [`ExtFlow`]. Pass an empty `prefix` when the caller draws no separate tag.
 fn ext_flow(
@@ -3949,6 +3993,14 @@ mod tests {
         let fr = make_fr_uniform(10.0);
         let segs = insert_buf_segments(&fr, "a\nb\nc", 1.0, 0.0, 1000.0);
         assert_eq!(segs.len(), 3);
+    }
+
+    #[test]
+    fn insert_line_prefix_hides_the_placeholder_marker() {
+        assert_eq!(insert_line_prefix("i ", false), "");
+        assert_eq!(insert_line_prefix("ci ", false), "");
+        assert_eq!(insert_line_prefix("", true), "");
+        assert_eq!(insert_line_prefix("<id>7</id>name: ", false), "name: ");
     }
 
     #[test]

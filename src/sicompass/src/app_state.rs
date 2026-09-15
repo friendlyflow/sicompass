@@ -660,6 +660,14 @@ pub struct AppRenderer {
     /// the committed FFON element are masked (one asterisk per character).
     /// Set by `populate_input_buffer`, reset on insert-mode exit.
     pub input_is_password: bool,
+    /// Visual lines of the field being edited, as the last frame wrapped them,
+    /// and the buffer they were laid out for. Written by the view, read by
+    /// Up/Down so they follow the wrapping on screen.
+    pub insert_lines: Vec<sicompass_sdk::input::InputLine>,
+    pub insert_lines_text: String,
+    /// `(caret, column)` left by the last Up/Down, so a run of them keeps its
+    /// column across short lines. Stale as soon as the caret moves elsewhere.
+    pub insert_goal: Option<(usize, usize)>,
 
     /// Active per-keystroke edit session on an `<input>` tag (see
     /// [`InsertSession`]). `Some` from insert-mode entry until Enter or Escape.
@@ -966,6 +974,9 @@ impl AppRenderer {
             input_prefix: String::new(),
             input_suffix: String::new(),
             input_is_password: false,
+            insert_lines: Vec::new(),
+            insert_lines_text: String::new(),
+            insert_goal: None,
             insert_session: None,
             suspended_input_edit: None,
             scroll_offset: 0,

@@ -16580,6 +16580,57 @@ fn cursor_to_label(r: &mut AppRenderer, needle: &str) {
 }
 
 #[test]
+fn insert_ctrl_enter_adds_a_line_that_up_and_down_cross() {
+    let tmp = TempDir::new().unwrap();
+    std::fs::write(tmp.path().join("lines.txt"), "hello world\n").unwrap();
+
+    let mut r = setup_texteditor(tmp.path());
+    press_right(&mut r); // into the text-editor listing
+    cursor_to_label(&mut r, "lines.txt");
+    press_right(&mut r); // into the file
+    cursor_to_label(&mut r, "hello world");
+    press(&mut r, Keycode::A);
+    assert_eq!(r.coordinate, Coordinate::Insert);
+    assert_eq!(r.input_buffer, "hello world");
+    assert_eq!(r.cursor_position, r.input_buffer.len());
+
+    press_ctrl(&mut r, Keycode::Return);
+    type_text(&mut r, "xy");
+    assert_eq!(
+        r.coordinate,
+        Coordinate::Insert,
+        "Ctrl+Enter must not commit"
+    );
+    assert_eq!(r.input_buffer, "hello world\nxy");
+    let end = r.input_buffer.len();
+
+    press_up(&mut r);
+    assert_eq!(r.cursor_position, 2, "same column on the line above");
+    press_down(&mut r);
+    assert_eq!(r.cursor_position, end);
+    press_down(&mut r);
+    assert_eq!(
+        r.cursor_position, end,
+        "Down on the last line stays at the end"
+    );
+    press_up(&mut r);
+    press_up(&mut r);
+    assert_eq!(
+        r.cursor_position, 0,
+        "Up on the first line goes to the start"
+    );
+
+    // The caret is at column 0 now, so Shift+Down selects to the start of the
+    // next line.
+    dispatch_key(&mut r, Some(Keycode::Down), Mod::LSHIFTMOD);
+    assert_eq!(
+        sicompass::handlers::selection_range(&r),
+        Some((0, "hello world\n".len())),
+        "Shift+Down selects down to the same column"
+    );
+}
+
+#[test]
 fn texteditor_file_deletion_is_undoable() {
     let tmp = TempDir::new().unwrap();
     let target = tmp.path().join("doomed.txt");
