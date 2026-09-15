@@ -47,6 +47,7 @@ pub mod store;
 
 use serde::{Deserialize, Serialize};
 use sicompass_sdk::ffon::FfonElement;
+use sicompass_sdk::input::{self, InputLine, InputState};
 use sicompass_sdk::timeline::TimelineEntry;
 use sicompass_sdk::{
     BuiltinManifest, DashboardFrame, DashboardKey, DashboardKeysym, DashboardKind,
@@ -221,8 +222,10 @@ enum EditTarget {
 struct EditState {
     target: EditTarget,
     text: String,
-    /// Caret position in **characters**, not bytes.
+    /// Caret position as a byte offset into `text`.
     caret: usize,
+    /// The column a run of Up/Down aims for. See [`input::vertical`].
+    goal_col: Option<usize>,
     original: String,
     creating: bool,
 }
@@ -266,6 +269,9 @@ pub struct ProjectManagementProvider {
     /// app's dark theme, so a provider drawn before the app has handed one over
     /// still draws in real colours.
     palette: sicompass_sdk::DashboardPalette,
+    /// Width of the last frame drawn, so Up/Down in a card follow the same
+    /// wrapping the user sees. Zero before the first frame.
+    board_cols: u16,
     dashboard_request: Option<DashboardRequest>,
 }
 
@@ -298,6 +304,7 @@ impl ProjectManagementProvider {
             navigation: None,
             entry_path: Vec::new(),
             palette: sicompass_sdk::DashboardPalette::default(),
+            board_cols: 0,
             dashboard_request: None,
         }
     }
@@ -823,11 +830,12 @@ impl ProjectManagementProvider {
         };
         let original = card.text.clone();
         let target = EditTarget::Card(card.id);
-        let caret = if at_end { original.chars().count() } else { 0 };
+        let caret = if at_end { original.len() } else { 0 };
         self.edit = Some(EditState {
             target,
             text: original.clone(),
             caret,
+            goal_col: None,
             original,
             creating: false,
         });
@@ -875,6 +883,7 @@ impl ProjectManagementProvider {
             target: EditTarget::Card(id),
             text: String::new(),
             caret: 0,
+            goal_col: None,
             original: String::new(),
             creating: true,
         });
@@ -1061,39 +1070,47 @@ impl ProjectManagementProvider {
 
     // ---- Insert-mode text editing ---------------------------------------
 
-    fn insert_text(&mut self, s: &str) {
+    /// The open card's visual lines, wrapped exactly as the last frame drew it.
+    fn edit_lines(&self) -> Vec<InputLine> {
+        let Some(edit) = self.edit.as_ref() else {
+            return Vec::new();
+        };
+        if self.board_cols == 0 || self.board.columns.is_empty() {
+            return input::hard_lines(&edit.text);
+        }
+        let lay = render::layout(self.board.columns.len(), self.focus.col, self.board_cols);
+        render::card_lines(&edit.text, lay.width_of(self.focus.col))
+    }
+
+    /// Apply one operation of the shared text-field model to the open card, so
+    /// a card edits, wraps and moves like every `<input>` in the app.
+    fn edit_with(&mut self, op: impl FnOnce(&mut InputState, &[InputLine])) {
+        let lines = self.edit_lines();
         let Some(edit) = self.edit.as_mut() else {
             return;
         };
-        let at = byte_offset(&edit.text, edit.caret);
-        edit.text.insert_str(at, s);
-        edit.caret += s.chars().count();
+        let mut field = InputState {
+            text: std::mem::take(&mut edit.text),
+            caret: edit.caret,
+            anchor: None,
+            goal_col: edit.goal_col,
+        };
+        op(&mut field, &lines);
+        edit.text = field.text;
+        edit.caret = field.caret;
+        edit.goal_col = field.goal_col;
+    }
+
+    fn insert_text(&mut self, s: &str) {
+        self.edit_with(|f, _| f.insert_str(s));
     }
 
     fn backspace(&mut self) {
-        let Some(edit) = self.edit.as_mut() else {
-            return;
-        };
-        if edit.caret == 0 {
-            return;
-        }
-        let from = byte_offset(&edit.text, edit.caret - 1);
-        let to = byte_offset(&edit.text, edit.caret);
-        edit.text.replace_range(from..to, "");
-        edit.caret -= 1;
+        self.edit_with(|f, _| f.backspace());
     }
 
     fn delete_forward(&mut self) {
-        let Some(edit) = self.edit.as_mut() else {
-            return;
-        };
-        let len = edit.text.chars().count();
-        if edit.caret >= len {
-            return;
-        }
-        let from = byte_offset(&edit.text, edit.caret);
-        let to = byte_offset(&edit.text, edit.caret + 1);
-        edit.text.replace_range(from..to, "");
+        self.edit_with(|f, _| f.delete_forward());
     }
 
     // ---- Command handling (colon commands, list side) --------------------
@@ -1212,11 +1229,6 @@ fn row_text(raw: &str) -> String {
         Some(inner) => escape::unescape(&inner),
         None => tags::strip_display(raw),
     }
-}
-
-/// Byte index of character `n`, clamped to the end.
-fn byte_offset(s: &str, n: usize) -> usize {
-    s.char_indices().nth(n).map(|(i, _)| i).unwrap_or(s.len())
 }
 
 // ---------------------------------------------------------------------------
@@ -1507,6 +1519,7 @@ impl Provider for ProjectManagementProvider {
         register_translations();
         self.ensure_loaded();
         self.clamp_focus();
+        self.board_cols = cols;
         let editing = self.edit.as_ref().map(|e| (e.text.as_str(), e.caret));
         // Resolved here rather than inside the renderer: `render` is pure drawing
         // and has no business reaching the localizer.
@@ -1654,6 +1667,11 @@ impl ProjectManagementProvider {
             // Escape keeps what was typed rather than discarding it, matching
             // the app's own Insert to General transition. Anyone who wanted the
             // old text back is one Ctrl+Z away, and that is undoable in turn.
+            // Ctrl+Enter is a new line, as in every `<input>` in the app.
+            K::Enter if key.ctrl => {
+                self.insert_text("\n");
+                true
+            }
             K::Enter | K::Escape => {
                 self.commit_edit_state();
                 true
@@ -1667,27 +1685,35 @@ impl ProjectManagementProvider {
                 true
             }
             K::Left => {
-                if let Some(e) = self.edit.as_mut() {
-                    e.caret = e.caret.saturating_sub(1);
-                }
+                self.edit_with(|f, _| f.left());
                 true
             }
             K::Right => {
-                if let Some(e) = self.edit.as_mut() {
-                    e.caret = (e.caret + 1).min(e.text.chars().count());
-                }
+                self.edit_with(|f, _| f.right());
                 true
             }
+            // Home/End keep to the line the caret is on, split at newlines, the
+            // same as the app's own Home/End.
             K::Home => {
-                if let Some(e) = self.edit.as_mut() {
-                    e.caret = 0;
-                }
+                self.edit_with(|f, _| {
+                    let lines = input::hard_lines(&f.text);
+                    f.home(&lines);
+                });
                 true
             }
             K::End => {
-                if let Some(e) = self.edit.as_mut() {
-                    e.caret = e.text.chars().count();
-                }
+                self.edit_with(|f, _| {
+                    let lines = input::hard_lines(&f.text);
+                    f.end(&lines);
+                });
+                true
+            }
+            K::Up => {
+                self.edit_with(|f, lines| f.up(lines, false));
+                true
+            }
+            K::Down => {
+                self.edit_with(|f, lines| f.down(lines, false));
                 true
             }
             _ => false,
@@ -2201,6 +2227,57 @@ mod tests {
             assert_eq!(edit.caret, want, "`{k}` caret");
             assert!(!edit.creating, "`{k}` must not create a card");
         }
+    }
+
+    #[test]
+    fn ctrl_enter_adds_a_line_that_up_and_down_cross_and_enter_commits() {
+        let mut p = seeded();
+        p.enter_dashboard();
+        let _ = p.dashboard_render(80, 30);
+        p.dashboard_key(key(DashboardKeysym::Char('a')));
+        p.dashboard_key(ctrl(DashboardKeysym::Enter));
+        p.dashboard_text("ship");
+        let len = "fix login\nship".len();
+        {
+            let edit = p.edit.as_ref().expect("Ctrl+Enter must not commit");
+            assert_eq!(edit.text, "fix login\nship");
+            assert_eq!(edit.caret, len);
+        }
+        // "ship" sits under the two-cell hanging indent, so its end is column 6.
+        p.dashboard_key(key(DashboardKeysym::Up));
+        assert_eq!(p.edit.as_ref().unwrap().caret, "fix lo".len());
+        p.dashboard_key(key(DashboardKeysym::Down));
+        assert_eq!(p.edit.as_ref().unwrap().caret, len);
+        p.dashboard_key(key(DashboardKeysym::Down));
+        assert_eq!(p.edit.as_ref().unwrap().caret, len, "Down on the last line");
+        p.dashboard_key(key(DashboardKeysym::Up));
+        p.dashboard_key(key(DashboardKeysym::Up));
+        assert_eq!(p.edit.as_ref().unwrap().caret, 0, "Up on the first line");
+        p.dashboard_key(key(DashboardKeysym::Enter));
+        assert!(p.edit.is_none(), "Enter commits");
+        assert_eq!(p.board.columns[0].cards[0].text, "fix login\nship");
+    }
+
+    #[test]
+    fn up_and_down_walk_the_wrapped_lines_of_a_long_card() {
+        let mut p = seeded();
+        p.enter_dashboard();
+        let _ = p.dashboard_render(80, 30);
+        p.dashboard_key(key(DashboardKeysym::Char('a')));
+        let lay = render::layout(p.board.columns.len(), p.focus.col, 80);
+        let width = lay.width_of(p.focus.col);
+        p.dashboard_text(&" word".repeat(width as usize));
+        let text = p.edit.as_ref().unwrap().text.clone();
+        let lines = render::card_lines(&text, width);
+        assert!(lines.len() >= 3, "the card must wrap: {lines:?}");
+        p.dashboard_key(key(DashboardKeysym::Up));
+        let caret = p.edit.as_ref().unwrap().caret;
+        assert_eq!(input::line_index(&lines, caret), lines.len() - 2);
+        p.dashboard_key(key(DashboardKeysym::Down));
+        let caret = p.edit.as_ref().unwrap().caret;
+        assert_eq!(input::line_index(&lines, caret), lines.len() - 1);
+        p.dashboard_key(key(DashboardKeysym::Down));
+        assert_eq!(p.edit.as_ref().unwrap().caret, text.len());
     }
 
     #[test]

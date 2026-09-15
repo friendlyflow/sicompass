@@ -21,6 +21,7 @@
 //! themselves are created, renamed and reordered in the list view.
 
 use crate::board::Board;
+use sicompass_sdk::input::{self, InputLine};
 use sicompass_sdk::{
     CellAttrs, DashboardCell, DashboardCursor, DashboardFrame, DashboardPalette, DashboardSelection,
 };
@@ -123,7 +124,7 @@ pub fn is_placeholder(board: &Board, col: usize) -> bool {
 pub struct View<'a> {
     pub focus: Focus,
     /// The in-progress text when insert mode is open, and the caret's position
-    /// in characters.
+    /// as a byte offset into it.
     pub editing: Option<(&'a str, usize)>,
     /// What an empty column shows in place of its cards.
     pub empty_label: &'a str,
@@ -214,7 +215,17 @@ pub fn layout(n: usize, focused: usize, cols: u16) -> Layout {
 /// No separator row. A column is a list, and the list this board lives in packs
 /// its rows one per line; the cursor's fill is what says where one ends.
 pub fn card_height(text: &str, width: u16) -> u16 {
-    wrap(text, text_width(width)).len().max(1) as u16
+    card_lines(text, width).len().max(1) as u16
+}
+
+/// A card's visual lines at `width`: wrapped to the text width, continuation
+/// lines under the hanging indent.
+///
+/// The one layout the drawing, the caret and the editor's Up/Down all read, so
+/// a card cannot be drawn one way and navigated another.
+pub fn card_lines(text: &str, width: u16) -> Vec<InputLine> {
+    let w = text_width(width) as usize;
+    input::wrap_cells(text, w, w, CONT_INDENT as usize)
 }
 
 /// How far a card's continuation lines are indented under its first.
@@ -239,40 +250,18 @@ fn text_width(width: u16) -> u16 {
 }
 
 /// Wrap on word boundaries, breaking a word longer than the line rather than
-/// letting it run off the edge.
+/// letting it run off the edge. `\n` starts a new line.
 pub fn wrap(text: &str, width: u16) -> Vec<String> {
     let w = width.max(1) as usize;
-    let mut out: Vec<String> = Vec::new();
-    let mut line = String::new();
-    for word in text.split_whitespace() {
-        let mut word = word;
-        while word.chars().count() > w {
-            if !line.is_empty() {
-                out.push(std::mem::take(&mut line));
-                continue;
-            }
-            let head: String = word.chars().take(w).collect();
-            let taken = head.len();
-            out.push(head);
-            word = &word[taken..];
-        }
-        let need = if line.is_empty() {
-            word.chars().count()
-        } else {
-            line.chars().count() + 1 + word.chars().count()
-        };
-        if need > w && !line.is_empty() {
-            out.push(std::mem::take(&mut line));
-        }
-        if !line.is_empty() {
-            line.push(' ');
-        }
-        line.push_str(word);
-    }
-    if !line.is_empty() || out.is_empty() {
-        out.push(line);
-    }
-    out
+    line_texts(text, &input::wrap_cells(text, w, w, 0))
+        .into_iter()
+        .map(str::to_owned)
+        .collect()
+}
+
+/// The text of each visual line.
+fn line_texts<'t>(text: &'t str, lines: &[InputLine]) -> Vec<&'t str> {
+    lines.iter().map(|l| &text[l.start..l.end]).collect()
 }
 
 /// First card to draw in a column so `focused` stays on screen.
@@ -414,7 +403,8 @@ pub fn render(board: &Board, view: &View<'_>, cols: u16, rows: u16) -> Dashboard
             // Wrapped, not clipped: the hint is a localized sentence and a
             // narrow column would otherwise cut it mid-word in some languages
             // and not others.
-            let lines = wrap(shown, text_width(width));
+            let cells = card_lines(shown, width);
+            let lines = line_texts(shown, &cells);
             for (li, line) in lines.iter().enumerate() {
                 let ly = CARDS_TOP + li as u16;
                 let indent = if li == 0 { 0 } else { CONT_INDENT };
@@ -437,7 +427,7 @@ pub fn render(board: &Board, view: &View<'_>, cols: u16, rows: u16) -> Dashboard
                     rows: lines.len() as u16,
                 });
                 if let Some((_, caret)) = view.editing {
-                    frame.cursor = Some(caret_cell(&lines, caret, x, CARDS_TOP, width));
+                    frame.cursor = Some(caret_cell(shown, &cells, caret, x, CARDS_TOP, width));
                 }
             }
             continue;
@@ -478,7 +468,8 @@ pub fn render(board: &Board, view: &View<'_>, cols: u16, rows: u16) -> Dashboard
 
         let mut drawn = first;
         for (i, card_text) in texts.iter().enumerate().skip(first) {
-            let lines = wrap(card_text, text_width(width));
+            let cells = card_lines(card_text, width);
+            let lines = line_texts(card_text, &cells);
             let h = lines.len() as u16;
             if y + h > rows {
                 break;
@@ -516,7 +507,7 @@ pub fn render(board: &Board, view: &View<'_>, cols: u16, rows: u16) -> Dashboard
                     rows: h,
                 });
                 if let Some((_, caret)) = view.editing {
-                    frame.cursor = Some(caret_cell(&lines, caret, x, y, width));
+                    frame.cursor = Some(caret_cell(card_text, &cells, caret, x, y, width));
                 }
             }
             y += h;
@@ -544,20 +535,18 @@ pub fn render(board: &Board, view: &View<'_>, cols: u16, rows: u16) -> Dashboard
 ///
 /// `x` is where the *first* line starts; later lines carry the hanging indent, so
 /// the caret has to as well or it drifts left of the text it is sitting in.
-fn caret_cell(lines: &[String], caret: usize, x: u16, y: u16, width: u16) -> (u16, u16) {
-    let mut left = caret;
-    for (i, line) in lines.iter().enumerate() {
-        let len = line.chars().count();
-        if left <= len {
-            let start = if i == 0 { x } else { x + CONT_INDENT };
-            let cx = (start as usize + left).min(u16::MAX as usize) as u16;
-            return (cx.min(x + width.saturating_sub(1)), y + i as u16);
-        }
-        // +1 for the space the wrap consumed between lines.
-        left = left.saturating_sub(len + 1);
-    }
-    let last = lines.len().saturating_sub(1) as u16;
-    (x, y + last)
+/// [`input::line_of`] counts that indent in its column.
+fn caret_cell(
+    text: &str,
+    lines: &[InputLine],
+    caret: usize,
+    x: u16,
+    y: u16,
+    width: u16,
+) -> (u16, u16) {
+    let (li, col) = input::line_of(text, lines, caret.min(text.len()));
+    let cx = (x as usize + col).min(u16::MAX as usize) as u16;
+    (cx.min(x + width.saturating_sub(1)), y + li as u16)
 }
 
 #[cfg(test)]
@@ -1097,6 +1086,36 @@ mod tests {
         let lines = wrap("supercalifragilistic", 6);
         assert!(lines.iter().all(|l| l.chars().count() <= 6), "{lines:?}");
         assert_eq!(lines.concat(), "supercalifragilistic");
+    }
+
+    #[test]
+    fn a_newline_in_a_card_starts_an_indented_line() {
+        let b = board(&[("To do", &["fix\nlogin"])]);
+        let f = render(&b, &view(Focus { col: 0, row: 0 }), 40, 20);
+        let x = layout(1, 0, 40).x_of(0);
+        assert_eq!(f.cell(x, CARDS_TOP).ch, 'f');
+        assert_eq!(
+            f.cell(x + 3, CARDS_TOP).ch,
+            ' ',
+            "nothing after the newline"
+        );
+        assert_eq!(f.cell(x + CONT_INDENT, CARDS_TOP + 1).ch, 'l');
+        assert_eq!(card_height("fix\nlogin", 38), 2);
+    }
+
+    #[test]
+    fn the_caret_after_a_newline_sits_under_the_hanging_indent() {
+        let b = board(&[("To do", &["fix\nlogin"])]);
+        let v = View {
+            focus: Focus { col: 0, row: 0 },
+            editing: Some(("fix\nlogin", "fix\nlo".len())),
+            empty_label: "(empty)",
+            no_columns_label: "no columns yet",
+            palette: pal(),
+        };
+        let f = render(&b, &v, 40, 20);
+        let x = layout(1, 0, 40).x_of(0);
+        assert_eq!(f.cursor, Some((x + CONT_INDENT + 2, CARDS_TOP + 1)));
     }
 
     #[test]

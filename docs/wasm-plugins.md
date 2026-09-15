@@ -315,6 +315,13 @@ against each other by `wit_vendor_descriptor_fields_match_the_host` in
 `tests/wasm_plugin.rs`, because neither the import guard nor the export-list
 contract notices a new record field.
 
+## Text fields
+
+An `<input>` in a guest's FFON is edited by the host exactly like a built-in
+provider's. A guest that edits text inside its own dashboard should use
+`sicompass_pdk::input` (the SDK's text-field model) instead of its own string and
+caret. See [multiline-input.md](multiline-input.md).
+
 ## Known limits
 
 - **The allowlist is by name, so this is not full SSRF protection.** A hostname

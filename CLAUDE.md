@@ -111,6 +111,14 @@ plus the cargo-packager `resources`, the `generate-rpm` assets and
 `wix/main.wxs`). That is what made every release up to 0.1.8 unable to start.
 See [docs/releasing.md](docs/releasing.md).
 
+## Architecture: text fields
+
+Every editable value is an `<input>`, edited by the app's shared Insert mode
+(wrapping, wrap-aware Up/Down, selection, one background block, Ctrl+Enter
+newline). A surface that edits text itself (a dashboard) builds on
+`sicompass_sdk::input` rather than its own string and caret. Follow
+[docs/multiline-input.md](docs/multiline-input.md).
+
 ## Releasing
 
 See [docs/releasing.md](docs/releasing.md) for the tag-to-artifact pipeline,
