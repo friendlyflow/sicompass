@@ -664,6 +664,7 @@ pub fn handle_left(r: &mut AppRenderer) {
     // deeper than the cursor and the next descent would double the segment.
     // Deeper in (inside the input slot's history) Left is unchanged.
     if at_session_input_level(r) {
+        refuse_leaving_command_layer(r);
         return;
     }
     let pre_nav_id = r.current_id.clone();
@@ -1589,6 +1590,35 @@ pub(crate) fn at_session_input_level(r: &AppRenderer) -> bool {
         })
 }
 
+/// True in a colon command layer that only Escape may leave: a session view
+/// (terminal shell, claude session) or the git client's opened repository, at
+/// any depth inside it.
+///
+/// Read off the coordinate, which `rest_coordinate` keeps accurate on every list
+/// rebuild, so a new provider adopting either pattern is covered for free.
+pub(crate) fn in_escape_only_layer(r: &AppRenderer) -> bool {
+    r.coordinate.is_session_view()
+}
+
+/// Refuse a key that would leave a colon command layer, and say why.
+///
+/// Every such refusal used to be silent (or, for a double Home, an endless
+/// loop), which reads as a frozen app. The error lands in the header and is
+/// spoken once by `announce_error_if_new`, naming the layer to escape.
+pub(crate) fn refuse_leaving_command_layer(r: &mut AppRenderer) {
+    crate::shortcuts::register_translations();
+    let mode = r.coordinate.display_label();
+    let mut args = sicompass_sdk::localize::Args::new();
+    args.set("mode", mode.clone());
+    let msg = sicompass_sdk::localize::t_args("escape-command-mode-first", &args);
+    r.error_message = if msg == "escape-command-mode-first" {
+        format!("press Escape to leave {mode} first")
+    } else {
+        msg
+    };
+    r.needs_redraw = true;
+}
+
 /// `:` in a browse-then-session provider — swap its list between the folder
 /// browser and the session.
 ///
@@ -1606,6 +1636,7 @@ pub(crate) fn open_session_view(r: &mut AppRenderer) {
     // Already in the session: `:` does nothing. Escape is the one way out, so
     // there is a single key to learn and no way to lose the session by reflex.
     if in_session_view(r) {
+        refuse_leaving_command_layer(r);
         return;
     }
     // Safe to take the first: every caller gates on
@@ -1628,6 +1659,9 @@ pub(crate) fn open_session_view(r: &mut AppRenderer) {
 /// `current_path()` still reads `/home/nico/Projects` — the folder the session
 /// is actually running in.
 fn apply_view_command(r: &mut AppRenderer, cmd: &str) {
+    // Only an error the command itself raises is a refusal. One left over from
+    // an earlier key (a Left refused in the shell, say) must not block Escape.
+    r.error_message.clear();
     crate::provider::handle_command(r, cmd, "", 0);
 
     // A view-swap command can refuse: the git client's `:` on a folder that is
@@ -5290,9 +5324,20 @@ pub fn handle_home(r: &mut AppRenderer) {
         Coordinate::General => {
             let now = sdl_ticks();
             if now.saturating_sub(r.last_keypress_time) <= DELTA_MS && r.current_id.depth() > 1 {
-                // Double-tap: navigate to root
+                // Double-tap: navigate to root — but never out of a colon
+                // command layer, which only Escape leaves.
+                if in_escape_only_layer(r) {
+                    r.last_keypress_time = 0;
+                    refuse_leaving_command_layer(r);
+                    return;
+                }
                 while r.current_id.depth() > 1 {
+                    let depth = r.current_id.depth();
                     handle_left(r);
+                    if r.current_id.depth() >= depth {
+                        // Left refused: stop rather than spin forever.
+                        break;
+                    }
                 }
             } else {
                 r.current_id.set_last(0);
@@ -8666,6 +8711,11 @@ mod tests {
         handle_colon(&mut r);
         assert!(in_session_view(&r), "still in the session");
         assert_eq!(r.coordinate, Coordinate::SessionCommand);
+        assert!(
+            r.error_message.contains("Escape"),
+            "the refusal explains itself, got {:?}",
+            r.error_message
+        );
     }
 
     #[test]
@@ -8677,6 +8727,53 @@ mod tests {
         handle_left(&mut r);
         assert!(in_session_view(&r), "Left must not leave the session");
         assert_eq!(r.current_id, before);
+        assert!(
+            r.error_message.contains("Escape"),
+            "the refusal explains itself, got {:?}",
+            r.error_message
+        );
+    }
+
+    /// Double-tap Home in a colon command layer: must return (it used to spin
+    /// forever), stay put, and tell the user to press Escape first.
+    fn assert_double_home_refused(r: &mut AppRenderer) {
+        assert!(in_escape_only_layer(r), "precondition: {:?}", r.coordinate);
+        let before = r.current_id.clone();
+        let coordinate = r.coordinate;
+        r.last_keypress_time = sdl_ticks();
+        handle_home(r);
+        assert_eq!(r.current_id, before, "Home Home must not leave the layer");
+        assert_eq!(r.coordinate, coordinate);
+        assert!(
+            r.error_message.contains("Escape"),
+            "got {:?}",
+            r.error_message
+        );
+    }
+
+    #[test]
+    fn double_home_in_the_claude_session_refuses_with_an_escape_hint() {
+        let mut r = make_renderer_with_claude();
+        r.coordinate = Coordinate::General;
+        handle_colon(&mut r);
+        assert_double_home_refused(&mut r);
+        assert!(in_session_view(&r));
+    }
+
+    #[test]
+    fn double_home_in_the_terminal_shell_refuses_with_an_escape_hint() {
+        let mut r = make_renderer_with_terminal();
+        r.coordinate = Coordinate::General;
+        handle_colon(&mut r);
+        assert_double_home_refused(&mut r);
+        assert!(in_session_view(&r));
+    }
+
+    #[test]
+    fn double_home_in_an_open_repository_refuses_with_an_escape_hint() {
+        let mut r = make_renderer_with_gitclient(true);
+        assert_double_home_refused(&mut r);
+        assert!(browse_then_view_is_open(&r), "the repository stays open");
     }
 
     // ---- Insert palette ---------------------------------------------------

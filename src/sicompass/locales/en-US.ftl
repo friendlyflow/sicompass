@@ -141,3 +141,4 @@ hint-insert = :      Insert
 hint-ctrl-insert = Ctrl+: Insert
 hint-enter-insert = Enter  Insert
 insert-palette-empty = nothing to insert
+escape-command-mode-first = press Escape to leave { $mode } first
