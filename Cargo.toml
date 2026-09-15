@@ -47,7 +47,7 @@ license = "GPL-3.0-only"
 # used unconditionally by lib_notes, lib_filebrowser, lib_sales_demo and
 # lib_project_management — and the provider-scoped asset registry and
 # `read-asset` host import from 0.4.0, likewise required unconditionally.)
-sicompass-sdk = "0.7.0"
+sicompass-sdk = "0.8.0"
 sicompass-tutorial = { path = "lib/lib_tutorial" }
 sicompass-settings = { path = "lib/lib_settings" }
 sicompass-filebrowser = { path = "lib/lib_filebrowser" }

@@ -5377,76 +5377,63 @@ pub fn handle_shift_end(r: &mut AppRenderer) {
 // Multiline insert-mode navigation
 // ---------------------------------------------------------------------------
 
-/// Up in insert mode — move cursor to same column on the previous line.
+/// The visual lines of the field being edited, as the last frame drew them.
+///
+/// Up/Down have to follow the wrapping the user sees, and only the view can
+/// measure text, so it leaves its layout in `insert_lines`. When that layout
+/// is for a different buffer (typed since the last frame, or a masked
+/// password), the `\n`-only split is used instead: it is always a valid view of
+/// the text, just without the soft wraps.
+fn insert_visual_lines(r: &AppRenderer) -> Vec<sicompass_sdk::input::InputLine> {
+    if !r.insert_lines.is_empty() && r.insert_lines_text == r.input_buffer {
+        r.insert_lines.clone()
+    } else {
+        sicompass_sdk::input::hard_lines(&r.input_buffer)
+    }
+}
+
+/// Up/Down in insert mode: same column on the adjacent visual line, to the
+/// start of the text from the first line and to the end from the last.
+fn move_vertically_insert(r: &mut AppRenderer, down: bool, extend: bool) {
+    let lines = insert_visual_lines(r);
+    let pos = r.cursor_position.min(r.input_buffer.len());
+    // The goal column only carries over while the caret is still where the
+    // previous Up/Down left it. Any other move or edit shifts the caret, which
+    // retires the goal without every other handler having to reset it.
+    let goal = r
+        .insert_goal
+        .filter(|&(at, _)| at == pos)
+        .map(|(_, col)| col);
+    if extend {
+        r.selection_anchor.get_or_insert(pos);
+    } else {
+        clear_selection(r);
+    }
+    let (new_pos, goal) = sicompass_sdk::input::vertical(&r.input_buffer, &lines, pos, goal, down);
+    r.cursor_position = new_pos;
+    r.insert_goal = goal.map(|col| (new_pos, col));
+    r.caret.reset(sdl_ticks());
+    r.needs_redraw = true;
+}
+
+/// Up in insert mode — same column on the previous visual line.
 pub fn handle_up_insert(r: &mut AppRenderer) {
-    let pos = r.cursor_position;
-    let cur_line_start = find_line_start(&r.input_buffer, pos);
-    if cur_line_start == 0 {
-        return;
-    }
-    let col = utf8_count_chars(&r.input_buffer, cur_line_start, pos);
-    let prev_line_end = cur_line_start - 1; // the '\n'
-    let prev_line_start = find_line_start(&r.input_buffer, prev_line_end);
-    r.cursor_position = utf8_advance_n(&r.input_buffer, prev_line_start, col, prev_line_end);
-    clear_selection(r);
-    r.caret.reset(sdl_ticks());
-    r.needs_redraw = true;
+    move_vertically_insert(r, false, false);
 }
 
-/// Down in insert mode — move cursor to same column on the next line.
+/// Down in insert mode — same column on the next visual line.
 pub fn handle_down_insert(r: &mut AppRenderer) {
-    let pos = r.cursor_position;
-    let buf_len = r.input_buffer.len();
-    let cur_line_end = find_line_end(&r.input_buffer, pos);
-    if cur_line_end >= buf_len {
-        return;
-    }
-    let cur_line_start = find_line_start(&r.input_buffer, pos);
-    let col = utf8_count_chars(&r.input_buffer, cur_line_start, pos);
-    let next_line_start = cur_line_end + 1;
-    let next_line_end = find_line_end(&r.input_buffer, next_line_start);
-    r.cursor_position = utf8_advance_n(&r.input_buffer, next_line_start, col, next_line_end);
-    clear_selection(r);
-    r.caret.reset(sdl_ticks());
-    r.needs_redraw = true;
+    move_vertically_insert(r, true, false);
 }
 
-/// Shift+Up in insert mode — extend selection to same column on previous line.
+/// Shift+Up in insert mode — extend selection to the previous visual line.
 pub fn handle_shift_up_insert(r: &mut AppRenderer) {
-    let pos = r.cursor_position;
-    let cur_line_start = find_line_start(&r.input_buffer, pos);
-    if cur_line_start == 0 {
-        return;
-    }
-    if r.selection_anchor.is_none() {
-        r.selection_anchor = Some(pos);
-    }
-    let col = utf8_count_chars(&r.input_buffer, cur_line_start, pos);
-    let prev_line_end = cur_line_start - 1;
-    let prev_line_start = find_line_start(&r.input_buffer, prev_line_end);
-    r.cursor_position = utf8_advance_n(&r.input_buffer, prev_line_start, col, prev_line_end);
-    r.caret.reset(sdl_ticks());
-    r.needs_redraw = true;
+    move_vertically_insert(r, false, true);
 }
 
-/// Shift+Down in insert mode — extend selection to same column on next line.
+/// Shift+Down in insert mode — extend selection to the next visual line.
 pub fn handle_shift_down_insert(r: &mut AppRenderer) {
-    let pos = r.cursor_position;
-    let buf_len = r.input_buffer.len();
-    let cur_line_end = find_line_end(&r.input_buffer, pos);
-    if cur_line_end >= buf_len {
-        return;
-    }
-    if r.selection_anchor.is_none() {
-        r.selection_anchor = Some(pos);
-    }
-    let cur_line_start = find_line_start(&r.input_buffer, pos);
-    let col = utf8_count_chars(&r.input_buffer, cur_line_start, pos);
-    let next_line_start = cur_line_end + 1;
-    let next_line_end = find_line_end(&r.input_buffer, next_line_start);
-    r.cursor_position = utf8_advance_n(&r.input_buffer, next_line_start, col, next_line_end);
-    r.caret.reset(sdl_ticks());
-    r.needs_redraw = true;
+    move_vertically_insert(r, true, true);
 }
 
 // ---------------------------------------------------------------------------
@@ -8082,6 +8069,84 @@ mod tests {
         r.selection_anchor = Some(3);
         clear_selection(&mut r);
         assert_eq!(r.selection_anchor, None);
+    }
+
+    // Up/Down in insert mode
+
+    /// A renderer whose field the view has drawn wrapped as `"one two"` /
+    /// `"three"`, with the first line pushed right by a 4-column prefix.
+    fn make_wrapped_renderer() -> AppRenderer {
+        use sicompass_sdk::input::InputLine;
+        let mut r = make_input_renderer("one two three");
+        r.insert_lines = vec![
+            InputLine {
+                start: 0,
+                end: 7,
+                indent_cols: 4,
+            },
+            InputLine {
+                start: 8,
+                end: 13,
+                indent_cols: 0,
+            },
+        ];
+        r.insert_lines_text = r.input_buffer.clone();
+        r
+    }
+
+    #[test]
+    fn down_follows_the_wrapped_lines_the_view_drew() {
+        let mut r = make_wrapped_renderer();
+        // "one t|wo" is column 4 + 5 = 9, past the end of "three".
+        r.cursor_position = 5;
+        handle_down_insert(&mut r);
+        assert_eq!(r.cursor_position, 13);
+        r.cursor_position = 0; // column 4 lands at "thre|e"
+        handle_down_insert(&mut r);
+        assert_eq!(r.cursor_position, 12);
+    }
+
+    #[test]
+    fn up_keeps_its_column_across_a_run_of_presses() {
+        let mut r = make_input_renderer("abcdef\nx\nabcdef");
+        r.cursor_position = 9 + 4;
+        handle_up_insert(&mut r);
+        assert_eq!(r.cursor_position, 8, "end of the short line");
+        handle_up_insert(&mut r);
+        assert_eq!(r.cursor_position, 4, "back at the column it started from");
+    }
+
+    #[test]
+    fn up_on_the_first_line_goes_to_the_start_and_down_on_the_last_to_the_end() {
+        let mut r = make_wrapped_renderer();
+        r.cursor_position = 3;
+        handle_up_insert(&mut r);
+        assert_eq!(r.cursor_position, 0);
+        r.cursor_position = 10;
+        handle_down_insert(&mut r);
+        assert_eq!(r.cursor_position, 13);
+    }
+
+    #[test]
+    fn a_stale_layout_falls_back_to_newlines() {
+        let mut r = make_wrapped_renderer();
+        // Typed since the last frame: the cached wrap no longer describes it.
+        r.input_buffer.push_str("\nfour");
+        r.cursor_position = r.input_buffer.len();
+        handle_up_insert(&mut r);
+        assert_eq!(r.cursor_position, 4, "column 4 of the one hard line above");
+    }
+
+    #[test]
+    fn shift_down_extends_the_selection_along_wrapped_lines() {
+        let mut r = make_wrapped_renderer();
+        r.cursor_position = 0;
+        handle_shift_down_insert(&mut r);
+        assert_eq!(selection_range(&r), Some((0, 12)));
+        handle_shift_down_insert(&mut r);
+        assert_eq!(selection_range(&r), Some((0, 13)));
+        handle_down_insert(&mut r);
+        assert!(!has_selection(&r), "a plain Down drops the selection");
     }
 
     // selection_range
