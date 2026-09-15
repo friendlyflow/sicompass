@@ -131,3 +131,4 @@ hint-insert = :      Invoegen
 hint-ctrl-insert = Ctrl+: Invoegen
 hint-enter-insert = Enter  Invoegen
 insert-palette-empty = niets om in te voegen
+escape-command-mode-first = druk op Escape om eerst { $mode } te verlaten
