@@ -12216,6 +12216,36 @@ fn claude_ctrl_colon_keeps_the_half_typed_message() {
 }
 
 #[test]
+fn claude_double_home_in_the_session_says_escape_first_instead_of_freezing() {
+    // Home Home jumps to the root by looping Left, and Left is refused at the
+    // session's own level, so this used to hang the app. It must now refuse
+    // once, stay in the session, and tell the user how to leave it.
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+
+    ensure_builtins();
+    let mut renderer = AppRenderer::new();
+    register_claude_in_session(&mut renderer, &root);
+    assert!(renderer.coordinate.is_session_view());
+    let before = renderer.current_id.clone();
+
+    press(&mut renderer, Keycode::Home);
+    press(&mut renderer, Keycode::Home);
+
+    assert!(
+        renderer.coordinate.is_session_view(),
+        "still in the session, got {:?}",
+        renderer.coordinate
+    );
+    assert_eq!(renderer.current_id.depth(), before.depth());
+    assert!(
+        renderer.error_message.contains("Escape"),
+        "got {:?}",
+        renderer.error_message
+    );
+}
+
+#[test]
 fn claude_ctrl_colon_escape_keeps_the_half_typed_message() {
     let tmp = TempDir::new().unwrap();
     let root = tmp.path().canonicalize().unwrap();
