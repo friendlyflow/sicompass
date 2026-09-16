@@ -3,11 +3,14 @@
 *A keyboard-first, accessibility-first way to use your entire computer.*
 
 Sicompass is a free, open-source way to use your computer entirely from the
-keyboard, with no mouse needed. Under the hood, every screen is just a tree of
-lists. Sicompass shows you that structure directly, so you move through it with
-the arrow keys, the same way for your files, settings, email, and any other
-data. It is fast, precise, and predictable, it feels the same everywhere, and it
-works with screen readers on Linux, macOS, and Windows.
+keyboard, with no mouse needed. Under the hood, your computer is a hierarchy,
+and every screen shows you one list, a single layer of it. Four arrow keys get
+you anywhere, the same way for your files, settings, email, and any other data.
+It is fast, precise, and predictable, it feels the same everywhere, and it works
+with screen readers on Linux, macOS, and Windows.
+
+It also holds a development environment: a git client, a text editor, a kanban
+board, Claude Code, and a real terminal.
 
 ## Download
 
@@ -110,6 +113,13 @@ agent and your own credential helpers, exactly as your shell would, so a
 repository you can push from a terminal is one you can push from here. Nothing is
 fetched in the background unless you ask for it in Settings.
 
+### Claude Code
+
+The Claude provider drives the `claude` command line tool, so install Claude
+Code if you want to use it. It runs with the login that tool already has, so
+there is no key to paste here. If it is not on your `PATH`, point Settings at
+the binary.
+
 ### Checking that it worked
 
 ```bash
@@ -141,7 +151,7 @@ toolchain. Rerun that script if you change anything under `shaders/`, and
 ## Key features
 
 - **Unambiguous focus**: you always know where the focus is, no guessing
-- **Flat interface**: no popups, dialogs, or overlays, everything is navigated inline within the tree
+- **Flat interface**: no popups, dialogs, or overlays, everything is navigated inline in the list you are on
 - **Keyboard-first**: your hands never leave the keyboard, with tabbed workspaces and letter-driven command palettes
 - **Native accessibility**: built-in screen reader support on Linux, macOS, and Windows
 - **Cross-platform**: packaged for Windows, macOS, and Linux, with paths, shells, and PTYs routed through platform helpers
@@ -152,7 +162,7 @@ toolchain. Rerun that script if you change anything under `shaders/`, and
 
 Each provider turns a different data source into the same keyboard-navigable
 tree: File Browser, Text Editor, Notes, Project Management, Email, Chat, Web
-Browser, Terminal, Git Client, Plugin Store, and Settings.
+Browser, Terminal, Git Client, Claude, Plugin Store, and Settings.
 
 Project Management holds a kanban board. The root lists the columns and each
 column lists its cards, so the whole board is navigable as an ordinary tree.
@@ -162,6 +172,33 @@ The editing keys are the ones you already know, i and a to edit the card, o to
 open a new one, ctrl+d to delete, ctrl+x, ctrl+c and ctrl+v to cut, copy and
 paste, and ctrl+z to undo. Columns themselves are added, renamed and reordered
 in the list.
+
+## The IDE
+
+Five providers add up to a development environment you can drive without a
+mouse. Each is navigated like everything else, one list per layer, and each
+opens in its own tab.
+
+- **Git Client** opens a repository as changes, graph, branches, stashes and
+  remotes. The changes section holds the commit message and its buttons, then
+  every changed file, and Right on a file reads its diff line by line. Fetch,
+  pull, push, stage, branch, merge, rebase and stash are colon commands, and
+  staging and committing undo with ctrl+z.
+- **Text Editor** opens a file as a tree of its lines. Python indentation and
+  braces in C-family, Rust, Go, JavaScript and TypeScript files become tree
+  levels, so you walk a function the way you walk a folder.
+- **Project Management** is the kanban board described just above.
+- **Claude** starts a Claude Code session in the folder you stand in. Answers
+  arrive as a tree of messages, tool calls and results, and a second colon
+  lists the project's skills.
+- **Terminal** turns that folder into a real shell. Full screen programs like
+  vim and htop get an interactive mode that hands them the raw keys.
+
+The last three start out off, because each drives a tool you may not have. Turn
+them on in Settings. They use your own `git`, shell and `claude`, with your own
+config and credentials. There is no shared project root, you point each one at
+the folder you want, so one repository across all four is four tabs you move
+between with ctrl+tab.
 
 ## Community
 
