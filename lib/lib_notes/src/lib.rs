@@ -727,12 +727,65 @@ impl Provider for NotesProvider {
         &self.rendered_path
     }
 
+    /// Accepts both forms the app hands back.
+    ///
+    /// The token form (`/n3/n7`) is what [`Self::current_path`] renders, and it
+    /// round-trips: a tab restored from disk and `refresh_visible_path`'s
+    /// save-and-restore of the deepest path both come back this way.
+    ///
+    /// But the app also *derives* a path from the cursor, out of the display
+    /// text of each ancestor row — `sync_inmemory_provider_path_to_cursor` does
+    /// it after every search jump. Parsing only tokens dropped every segment of
+    /// such a path and left this provider believing it was at the root while
+    /// the cursor was several levels down, so the next edit re-fetched the root
+    /// listing over the sublayer and the cursor fell to its first row. Labels
+    /// are therefore resolved the same way [`Self::push_path`] resolves them,
+    /// through the per-level map `level_children` fills in.
     fn set_current_path(&mut self, path: &str) {
-        self.segments = path
-            .split('/')
-            .filter(|s| !s.is_empty())
-            .filter_map(Segment::from_token)
-            .collect();
+        let toks: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
+        if toks.is_empty() {
+            self.segments = Vec::new();
+            self.sync_rendered_path();
+            return;
+        }
+
+        // Tokens win when the *whole* path is one, which is what makes the
+        // round-trip exact: a note may legitimately be titled `n3`, and on a
+        // path this provider rendered itself that title is not what `n3` means.
+        let as_tokens: Option<Vec<Segment>> = toks.iter().map(|t| Segment::from_token(t)).collect();
+        if let Some(segs) = as_tokens {
+            self.segments = segs;
+            self.sync_rendered_path();
+            return;
+        }
+
+        // Label form. Note text is free text and may itself contain a `/`, so
+        // the split above is not authoritative: at each level the longest run of
+        // pieces that names a row wins, and only a piece that names nothing
+        // falls back to being read as a token.
+        let mut segs: Vec<Segment> = Vec::new();
+        let mut i = 0;
+        while i < toks.len() {
+            let mut step = None;
+            for end in (i + 1..=toks.len()).rev() {
+                let label = toks[i..end].join("/");
+                if let Some(s) = self.labels.get(&segs).and_then(|m| m.get(&label)).copied() {
+                    step = Some((s, end));
+                    break;
+                }
+            }
+            let (seg, next) = match step.or_else(|| Segment::from_token(toks[i]).map(|s| (s, i + 1)))
+            {
+                Some(x) => x,
+                // Nothing here names a row — stop and keep the prefix that did.
+                // A valid ancestor is a better answer than the root, which is
+                // the one place the cursor demonstrably is not.
+                None => break,
+            };
+            segs.push(seg);
+            i = next;
+        }
+        self.segments = segs;
         self.sync_rendered_path();
     }
 
@@ -760,6 +813,26 @@ impl Provider for NotesProvider {
         register_translations();
         self.ensure_loaded();
         Some(self.level_children())
+    }
+
+    /// The row the cursor descended through to reach this level, rendered
+    /// exactly as `level_children` renders it in the level above.
+    ///
+    /// Two callers. `refresh_subtree_parent` re-keys the parent Obj with it, so
+    /// renaming a branch row updates the row itself and not only its children.
+    /// And `deep_rebuild_provider_tree` uses it to find that row when restoring
+    /// a tab: it walks a saved path of *tokens* but matches rows by their
+    /// display text, and no note is titled `n3`, so without this the descent
+    /// stopped at the first level and the tab reopened at the root.
+    fn fetch_subtree_parent_key(&mut self) -> Option<String> {
+        register_translations();
+        match *self.segments.last()? {
+            Segment::Meta => Some(localize::t("notes-list-meta")),
+            Segment::Node(id) => {
+                self.ensure_loaded();
+                Node::find(&self.tree.notes, id).map(Self::row_label)
+            }
+        }
     }
 
     fn commands(&self) -> Vec<String> {
@@ -1191,6 +1264,126 @@ mod tests {
         let mut q = provider(&d);
         q.set_current_path(&path);
         assert_eq!(q.current_path(), path);
+    }
+
+    /// The app also builds a path out of the display text of the rows the
+    /// cursor sits under — `sync_inmemory_provider_path_to_cursor` does it after
+    /// every search jump. Reading only tokens dropped every segment of such a
+    /// path, so a Tab search inside a note left this provider at the root while
+    /// the cursor was still inside, and the next edit re-fetched the root
+    /// listing over the sublayer.
+    #[test]
+    fn a_path_of_display_labels_lands_where_push_path_would() {
+        let d = TempDir::new().unwrap();
+        let mut p = provider(&d);
+        sync(&mut p, vec![new_branch_row("Groceries")]);
+        enter(&mut p, "Groceries");
+        sync(&mut p, vec![new_branch_row("Tuesday")]);
+        enter(&mut p, "Tuesday");
+        let walked = p.current_path().to_owned();
+
+        p.set_current_path("/Groceries/Tuesday");
+        assert_eq!(
+            p.current_path(),
+            walked,
+            "a label path must reach the level walking there reaches"
+        );
+        assert_eq!(note_labels(&p.fetch()), Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_label_path_keeps_reporting_the_token_form() {
+        let d = TempDir::new().unwrap();
+        let mut p = provider(&d);
+        sync(&mut p, vec![new_branch_row("Groceries")]);
+        p.fetch();
+
+        p.set_current_path("/Groceries");
+        let id = p.tree.notes[0].id;
+        assert_eq!(p.current_path(), format!("/n{id}"));
+    }
+
+    /// Note text is whatever the user typed, slashes included, so the `/` the
+    /// app joins segments with is not a reliable separator. The longest run of
+    /// pieces that names a row wins.
+    #[test]
+    fn a_label_containing_a_slash_still_resolves() {
+        let d = TempDir::new().unwrap();
+        let mut p = provider(&d);
+        sync(&mut p, vec![new_branch_row("milk / eggs")]);
+        p.fetch();
+
+        p.set_current_path("/milk / eggs");
+        let id = p.tree.notes[0].id;
+        assert_eq!(p.current_path(), format!("/n{id}"));
+    }
+
+    /// A note may be titled `n3`, and on a path this provider rendered itself
+    /// that is not what `n3` means.
+    #[test]
+    fn a_whole_path_of_tokens_beats_a_note_titled_like_one() {
+        let d = TempDir::new().unwrap();
+        let mut p = provider(&d);
+        sync(&mut p, vec![new_branch_row("first"), new_branch_row("n1")]);
+        p.fetch();
+        let second = p.tree.notes[1].id;
+
+        p.set_current_path(&format!("/n{second}"));
+        assert_eq!(
+            p.current_path(),
+            format!("/n{second}"),
+            "the token names the second note, not the one titled `n1`"
+        );
+    }
+
+    #[test]
+    fn the_root_path_still_means_the_root() {
+        let d = TempDir::new().unwrap();
+        let mut p = provider(&d);
+        sync(&mut p, vec![new_branch_row("Groceries")]);
+        enter(&mut p, "Groceries");
+
+        p.set_current_path("/");
+        assert!(p.at_root(), "`/` is how the app resets a provider");
+        assert_eq!(p.current_path(), "/");
+    }
+
+    /// Landing on a valid ancestor beats landing on the root, which is the one
+    /// place the cursor demonstrably is not.
+    #[test]
+    fn an_unresolvable_segment_keeps_the_prefix_that_resolved() {
+        let d = TempDir::new().unwrap();
+        let mut p = provider(&d);
+        sync(&mut p, vec![new_branch_row("Groceries")]);
+        p.fetch();
+        let id = p.tree.notes[0].id;
+
+        p.set_current_path("/Groceries/never rendered");
+        assert_eq!(p.current_path(), format!("/n{id}"));
+    }
+
+    #[test]
+    fn the_subtree_parent_key_names_the_row_the_cursor_came_through() {
+        let d = TempDir::new().unwrap();
+        let mut p = provider(&d);
+        sync(&mut p, vec![new_branch_row("Groceries")]);
+        assert_eq!(
+            p.fetch_subtree_parent_key(),
+            None,
+            "nothing was descended through at the root"
+        );
+
+        enter(&mut p, "Groceries");
+        let id = p.tree.notes[0].id;
+        assert_eq!(
+            p.fetch_subtree_parent_key(),
+            Some(NotesProvider::row_label(&p.tree.notes[0])),
+            "must read exactly as the level above renders it"
+        );
+        assert!(
+            p.fetch_subtree_parent_key()
+                .is_some_and(|k| k.contains(&format!("<id>{id}</id>")))
+        );
     }
 
     // ---- The protected meta row -----------------------------------------

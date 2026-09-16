@@ -17936,16 +17936,22 @@ fn gitclient_left_still_steps_one_level_at_a_time_inside_the_repository() {
 /// against a tree, so a test that writes to the real notes directory would not
 /// add notes to it, it would delete every note not in the test's tree.
 fn harness_with_notes() -> (AppRenderer, TempDir) {
-    ensure_builtins();
     let tmp = TempDir::new().expect("tempdir");
+    let renderer = notes_app_at(tmp.path());
+    (renderer, tmp)
+}
+
+/// A second app over the same store — what a restart looks like.
+fn notes_app_at(dir: &std::path::Path) -> AppRenderer {
+    ensure_builtins();
     let mut renderer = AppRenderer::new();
     let mut notes = sicompass_sdk::create_provider_by_name("notes").expect("notes provider");
-    notes.set_config_path(tmp.path().join("notes"));
+    notes.set_config_path(dir.join("notes"));
     register(&mut renderer, notes);
     renderer.current_id = IdArray::new();
     renderer.current_id.push(0);
     sicompass::list::create_list_current_layer(&mut renderer);
-    (renderer, tmp)
+    renderer
 }
 
 /// The display text of every row currently on screen.
@@ -18260,6 +18266,164 @@ fn ctrl_a_inside_a_note_lands_on_the_new_line() {
 
     add_note(&mut r, "milk");
     assert_eq!(focused_row(&r), "-i milk", "{:?}", screen(&r));
+}
+
+/// Walk into the note whose row says `needle`, and rebuild the list there.
+fn enter_note(r: &mut AppRenderer, needle: &str) {
+    focus_row(r, needle);
+    press_right(r);
+    sicompass::list::create_list_current_layer(r);
+}
+
+/// `a`, replace the whole line, Enter — the way a user adapts an existing note.
+fn adapt_focused_note(r: &mut AppRenderer, text: &str) {
+    press(r, Keycode::A);
+    assert_eq!(r.coordinate, Coordinate::Insert, "`a` must open insert mode");
+    r.input_buffer.clear();
+    r.cursor_position = 0;
+    type_text(r, text);
+    press_enter(r);
+    sicompass::list::create_list_current_layer(r);
+}
+
+/// Tab search, type, Enter — landing on the matched row in the layer in view.
+fn search_to(r: &mut AppRenderer, needle: &str) {
+    press_tab(r);
+    assert_eq!(r.coordinate, Coordinate::SimpleSearch);
+    type_text(r, needle);
+    press_enter(r);
+    sicompass::list::create_list_current_layer(r);
+}
+
+/// Adapting a note inside a sublayer must leave the cursor on that note.
+///
+/// The regression: Tab search re-syncs the provider's path from the cursor
+/// (`sync_inmemory_provider_path_to_cursor`), and it builds that path out of the
+/// ancestor rows' *display text*. The notes provider only read its own token
+/// form, so every segment was dropped and it went back to believing it was at
+/// the root — while the cursor was still down in the note. The Enter that
+/// committed the edit then re-fetched the root listing over the sublayer and the
+/// cursor fell to its first row, throwing the user up to the top level.
+#[test]
+fn tab_search_then_adapt_keeps_the_cursor_in_the_sublayer() {
+    let (mut r, _tmp) = harness_with_notes();
+    press_right(&mut r);
+    add_note(&mut r, "Groceries:");
+    enter_note(&mut r, "Groceries");
+    add_note(&mut r, "milk");
+    add_note(&mut r, "eggs");
+    add_note(&mut r, "bread");
+
+    search_to(&mut r, "eggs");
+    assert_eq!(focused_row(&r), "-i eggs", "{:?}", screen(&r));
+
+    adapt_focused_note(&mut r, "eggs, a dozen");
+
+    assert_eq!(
+        notes_on_screen(&r),
+        vec!["-i milk", "-i eggs, a dozen", "-i bread"],
+        "the sublayer must still be the list in view: {:?}",
+        screen(&r)
+    );
+    assert_eq!(focused_row(&r), "-i eggs, a dozen", "{:?}", screen(&r));
+    assert_eq!(r.current_id.depth(), 3, "still inside Groceries");
+}
+
+/// The same one level deeper, because "it works at depth 2" is not the claim.
+#[test]
+fn tab_search_then_adapt_keeps_the_cursor_in_a_deeper_sublayer() {
+    let (mut r, _tmp) = harness_with_notes();
+    press_right(&mut r);
+    add_note(&mut r, "Groceries:");
+    enter_note(&mut r, "Groceries");
+    add_note(&mut r, "Tuesday:");
+    enter_note(&mut r, "Tuesday");
+    add_note(&mut r, "milk");
+    add_note(&mut r, "eggs");
+
+    search_to(&mut r, "eggs");
+    adapt_focused_note(&mut r, "eggs, a dozen");
+
+    assert_eq!(
+        notes_on_screen(&r),
+        vec!["-i milk", "-i eggs, a dozen"],
+        "{:?}",
+        screen(&r)
+    );
+    assert_eq!(focused_row(&r), "-i eggs, a dozen", "{:?}", screen(&r));
+    assert_eq!(r.current_id.depth(), 4, "still inside Groceries > Tuesday");
+}
+
+/// The control: reaching the note by walking rather than by searching was never
+/// broken, and must stay that way.
+#[test]
+fn adapting_a_note_reached_by_walking_keeps_the_cursor_too() {
+    let (mut r, _tmp) = harness_with_notes();
+    press_right(&mut r);
+    add_note(&mut r, "Groceries:");
+    enter_note(&mut r, "Groceries");
+    add_note(&mut r, "milk");
+    add_note(&mut r, "eggs");
+
+    focus_row(&mut r, "milk");
+    adapt_focused_note(&mut r, "oat milk");
+
+    assert_eq!(
+        notes_on_screen(&r),
+        vec!["-i oat milk", "-i eggs"],
+        "{:?}",
+        screen(&r)
+    );
+    assert_eq!(focused_row(&r), "-i oat milk", "{:?}", screen(&r));
+    assert_eq!(r.current_id.depth(), 3);
+}
+
+/// A tab left inside a note must reopen inside it.
+///
+/// `deep_rebuild_provider_tree` walks the saved path segment by segment, but it
+/// matches each one against the *display text* of the rows it just fetched. A
+/// notes path is a chain of opaque ids (`/n1/n4`), and no note is titled `n1`,
+/// so the descent stopped at the very first level: only the root got grafted,
+/// the clamp then pulled the cursor back to depth 2 and reset the path, and the
+/// tab reopened at the top level. `fetch_subtree_parent_key` is how the provider
+/// names that row.
+#[test]
+fn load_active_tab_restores_a_notes_cursor_inside_a_sublayer() {
+    let tmp = TempDir::new().expect("tempdir");
+    let (saved_id, saved_path) = {
+        let mut r = notes_app_at(tmp.path());
+        press_right(&mut r);
+        add_note(&mut r, "Groceries:");
+        enter_note(&mut r, "Groceries");
+        add_note(&mut r, "milk");
+        add_note(&mut r, "eggs");
+        focus_row(&mut r, "eggs");
+        (
+            r.current_id.clone(),
+            sicompass::provider::current_path(&r).to_owned(),
+        )
+    };
+    assert_eq!(saved_id.depth(), 3, "saved inside the note");
+
+    // A fresh app over the same store, as after a restart: the provider is at
+    // its root and has to be walked back down to the saved path.
+    let mut r = notes_app_at(tmp.path());
+    r.tabs[0] = sicompass::app_state::TabSnapshot::nav_only(saved_id.clone(), saved_path);
+    r.active_tab = 0;
+    r.load_active_tab();
+    sicompass::list::create_list_current_layer(&mut r);
+
+    assert_eq!(
+        r.current_id, saved_id,
+        "the cursor must come back inside the note, not at the top level"
+    );
+    assert_eq!(
+        notes_on_screen(&r),
+        vec!["-i milk", "-i eggs"],
+        "{:?}",
+        screen(&r)
+    );
+    assert_eq!(focused_row(&r), "-i eggs", "{:?}", screen(&r));
 }
 
 /// The sha256 the `list meta:` row of the current level is showing.
