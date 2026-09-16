@@ -1383,16 +1383,7 @@ impl AppRenderer {
         let mut indices: Vec<usize> = Vec::with_capacity(segments.len());
         let mut prefix = root_prefix.clone();
         for seg in &segments {
-            let found =
-                levels.last().unwrap().iter().position(
-                    |e| matches!(e, FfonElement::Obj(o) if strip_display(&o.key) == *seg),
-                );
-            let idx = match found {
-                Some(i) => i,
-                None => break, // can't descend further — graft what matched
-            };
-            indices.push(idx);
-            prefix = if is_fs {
+            let next_prefix = if is_fs {
                 let mut buf = PathBuf::from(&prefix);
                 buf.push(seg);
                 buf.to_string_lossy().into_owned()
@@ -1401,7 +1392,32 @@ impl AppRenderer {
             } else {
                 format!("{prefix}/{seg}")
             };
-            self.providers[provider_idx].set_current_path(&prefix);
+            // Move the provider down first, so it can name the row it was
+            // descended through. A saved segment is the *provider's* word for
+            // that row, and for a provider whose path is a set of opaque tokens
+            // (notes' `n3`, the board's `c3`) it never equals the row's display
+            // text — the descent stopped at the first level and the tab reopened
+            // at the provider root. `fetch_subtree_parent_key` answers with the
+            // row exactly as that provider renders it. Providers whose segments
+            // *are* display text match on the first test and never reach it,
+            // and one that does not implement it behaves as it always did.
+            self.providers[provider_idx].set_current_path(&next_prefix);
+            let parent_key = self.providers[provider_idx].fetch_subtree_parent_key();
+            let matches_seg = |e: &FfonElement| {
+                let Some(o) = e.as_obj() else {
+                    return false;
+                };
+                strip_display(&o.key) == *seg
+                    || parent_key
+                        .as_ref()
+                        .is_some_and(|k| strip_display(&o.key) == strip_display(k))
+            };
+            let idx = match levels.last().unwrap().iter().position(matches_seg) {
+                Some(i) => i,
+                None => break, // can't descend further — graft what matched
+            };
+            indices.push(idx);
+            prefix = next_prefix;
             levels.push(self.providers[provider_idx].fetch());
         }
 

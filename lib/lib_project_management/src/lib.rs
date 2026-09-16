@@ -1318,12 +1318,37 @@ impl Provider for ProjectManagementProvider {
         &self.rendered_path
     }
 
+    /// Accepts both forms the app hands back: the `c<id>` token
+    /// [`Self::current_path`] renders, and a column's display text.
+    ///
+    /// The app derives the second one from the cursor —
+    /// `sync_inmemory_provider_path_to_cursor` does it after every search jump,
+    /// out of the display text of each ancestor row. Reading only the token
+    /// form closed the open column, so the next edit re-fetched the board root
+    /// over the column's listing and the cursor fell to its first row. Labels
+    /// resolve the same way [`Self::push_path`] resolves them.
     fn set_current_path(&mut self, path: &str) {
-        self.open_column = path
-            .trim_start_matches('/')
-            .strip_prefix('c')
-            .and_then(|s| s.parse().ok());
-        self.sync_rendered_path();
+        let seg = path.trim_start_matches('/');
+        if seg.is_empty() {
+            self.open_column = None;
+            self.sync_rendered_path();
+            return;
+        }
+        // The label first, the token second — same order as `push_path`, and a
+        // column may legitimately be titled `c3`. A segment that names neither
+        // leaves the open column alone: only `"/"` means the board root, and
+        // closing the column on a name we merely failed to recognise is the
+        // very desync this method exists to avoid.
+        let resolved = self
+            .labels
+            .get(&None)
+            .and_then(|m| m.get(seg))
+            .copied()
+            .or_else(|| seg.strip_prefix('c').and_then(|s| s.parse().ok()));
+        if let Some(id) = resolved {
+            self.open_column = Some(id);
+            self.sync_rendered_path();
+        }
     }
 
     fn at_root(&self) -> bool {
@@ -1348,6 +1373,24 @@ impl Provider for ProjectManagementProvider {
         register_translations();
         self.ensure_loaded();
         Some(self.level_children())
+    }
+
+    /// The column row the cursor descended through, rendered exactly as
+    /// `level_children` renders it on the board root.
+    ///
+    /// Two callers. `refresh_subtree_parent` re-keys the parent Obj with it, so
+    /// renaming a column updates the column row and not only its cards. And
+    /// `deep_rebuild_provider_tree` uses it to find that row when restoring a
+    /// tab: it walks a saved path of *tokens* but matches rows by their display
+    /// text, and no column is titled `c3`, so without this the descent stopped
+    /// at the root and the tab reopened with the column closed.
+    fn fetch_subtree_parent_key(&mut self) -> Option<String> {
+        let col = self.open_column?;
+        register_translations();
+        self.ensure_loaded();
+        self.board
+            .column(col)
+            .map(|c| Self::row_label(c.id, &c.title))
     }
 
     fn needs_refresh(&self) -> bool {
@@ -2062,6 +2105,75 @@ mod tests {
         let mut fresh = seeded();
         fresh.set_current_path(&saved);
         assert_eq!(labels(&fresh.fetch()), vec!["kanban ui"]);
+    }
+
+    /// The app also builds a path out of the display text of the row the cursor
+    /// sits under — `sync_inmemory_provider_path_to_cursor` does it after every
+    /// search jump. Reading only the `c<id>` token closed the column, so a Tab
+    /// search inside one left this provider on the board root while the cursor
+    /// was still in the column, and the next edit re-fetched the root listing
+    /// over it.
+    #[test]
+    fn a_path_of_display_labels_opens_the_same_column() {
+        let mut p = seeded();
+        descend(&mut p, "Doing");
+        let walked = p.current_path().to_owned();
+
+        let mut q = seeded();
+        let _ = q.fetch();
+        q.set_current_path("/Doing");
+        assert_eq!(q.current_path(), walked);
+        assert_eq!(labels(&q.fetch()), vec!["kanban ui"]);
+    }
+
+    /// A column may be titled `c1`, and on a path this provider rendered itself
+    /// that is not what `c1` means.
+    #[test]
+    fn a_column_token_beats_a_column_titled_like_one() {
+        let mut p = seeded();
+        p.board.columns[1].title = "c1".to_owned();
+        let _ = p.fetch();
+
+        p.set_current_path("/c4");
+        assert_eq!(labels(&p.fetch()), vec!["kanban ui"], "column 4 is `Doing`");
+    }
+
+    #[test]
+    fn the_root_path_closes_the_column() {
+        let mut p = seeded();
+        descend(&mut p, "Doing");
+        p.set_current_path("/");
+        assert!(p.at_root());
+        assert_eq!(labels(&p.fetch()), vec!["To do", "Doing"]);
+    }
+
+    /// Staying put beats falling back to the board root, which is the one place
+    /// the cursor demonstrably is not.
+    #[test]
+    fn an_unresolvable_segment_leaves_the_column_open() {
+        let mut p = seeded();
+        descend(&mut p, "Doing");
+        let walked = p.current_path().to_owned();
+
+        p.set_current_path("/never rendered");
+        assert_eq!(p.current_path(), walked);
+    }
+
+    #[test]
+    fn the_subtree_parent_key_names_the_open_column() {
+        let mut p = seeded();
+        assert_eq!(
+            p.fetch_subtree_parent_key(),
+            None,
+            "no column is open on the board root"
+        );
+
+        descend(&mut p, "Doing");
+        assert_eq!(
+            p.fetch_subtree_parent_key(),
+            Some(ProjectManagementProvider::row_label(4, "Doing")),
+            "must read exactly as the board root renders it"
+        );
     }
 
     // ---- Only cards are focusable ---------------------------------------
