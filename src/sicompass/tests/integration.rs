@@ -18278,7 +18278,11 @@ fn enter_note(r: &mut AppRenderer, needle: &str) {
 /// `a`, replace the whole line, Enter — the way a user adapts an existing note.
 fn adapt_focused_note(r: &mut AppRenderer, text: &str) {
     press(r, Keycode::A);
-    assert_eq!(r.coordinate, Coordinate::Insert, "`a` must open insert mode");
+    assert_eq!(
+        r.coordinate,
+        Coordinate::Insert,
+        "`a` must open insert mode"
+    );
     r.input_buffer.clear();
     r.cursor_position = 0;
     type_text(r, text);
