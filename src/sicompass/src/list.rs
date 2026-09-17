@@ -4,7 +4,8 @@
 //! navigation path, then optionally filters it by a search string.
 
 use crate::app_state::{AppRenderer, CommandPhase, Coordinate, RenderListItem};
-use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
+use nucleo_matcher::chars::to_lower_case;
+use nucleo_matcher::pattern::{AtomKind, CaseMatching, Normalization, Pattern};
 use nucleo_matcher::{Config, Matcher, Utf32Str};
 use sicompass_sdk::ffon::{FfonElement, FfonObject, IdArray, get_ffon_at_id};
 use sicompass_sdk::tags;
@@ -365,6 +366,12 @@ pub fn create_list_current_layer(renderer: &mut AppRenderer) {
 /// As a result, characters `^ $ ' ! | \` and space are interpreted as
 /// operators rather than literal text. To search for them literally, escape
 /// with `\` (e.g. `\$` for a literal dollar sign).
+///
+/// Highlight positions cover *every* occurrence of each plain or `'exact` term
+/// in a row, not just the one alignment `nucleo` scores. The anchored forms
+/// (`^foo`, `foo$`, `^foo$`) keep a single highlight, since "here and nowhere
+/// else" is what they assert, and a term that only matched fuzzily keeps
+/// `nucleo`'s scattered alignment.
 pub fn populate_list_current_layer(renderer: &mut AppRenderer, search: &str) {
     renderer.filtered_list_indices.clear();
     renderer.fuzzy_match_positions.clear();
@@ -376,16 +383,53 @@ pub fn populate_list_current_layer(renderer: &mut AppRenderer, search: &str) {
     let mut matcher = Matcher::new(Config::DEFAULT);
     let pattern = Pattern::parse(search, CaseMatching::Ignore, Normalization::Smart);
 
+    // `Pattern::indices` reports one alignment per atom, so on its own only the
+    // first hit in a row is ever marked. Collect the needles we may legitimately
+    // re-scan for, so the loop below can mark the rest.
+    //
+    // Both filters are load-bearing. Negative atoms contribute no indices at all
+    // (they only veto rows), and the anchored kinds mean "here and nowhere
+    // else", so for those `nucleo`'s single run already is the whole answer.
+    // Neither guard alone closes the hole: `!err` is rewritten to a negated
+    // `Substring`, so no surviving row can contain it, but `!^err` stays a
+    // negated `Prefix` and a row reading "the error" does survive it — and must
+    // not light up its "err".
+    //
+    // `Atom::parse` has already stripped the operator characters and case-folded
+    // these needles, so they are comparable against a folded haystack as-is.
+    let literal_needles: Vec<Vec<char>> = pattern
+        .atoms
+        .iter()
+        .filter(|a| !a.negative && matches!(a.kind, AtomKind::Fuzzy | AtomKind::Substring))
+        .map(|a| a.needle_text().chars().collect())
+        .collect();
+
     let mut scored: Vec<(usize, u32, Vec<u32>)> = Vec::new();
     let mut char_buf: Vec<char> = Vec::new();
     let mut indices_buf: Vec<u32> = Vec::new();
 
     for (i, item) in renderer.total_list.iter().enumerate() {
         char_buf.clear();
+        // NOTE: with `nucleo`'s `unicode-segmentation` feature these positions
+        // index graphemes, not codepoints, for a non-ASCII label, while `view`
+        // consumes them as codepoint indices. That mismatch predates this code;
+        // scanning in the same space below at least keeps every position in one
+        // convention rather than mixing two in a single `Vec`.
         let haystack = Utf32Str::new(&item.label, &mut char_buf);
         indices_buf.clear();
         if let Some(score) = pattern.indices(haystack, &mut matcher, &mut indices_buf) {
+            // Union rather than replacement: an atom that only matched
+            // non-contiguously ("dcmt" against "document") has no literal
+            // occurrence to find, and `nucleo`'s alignment is the only sensible
+            // answer there. Adding to it can never lose a highlight.
+            for needle in &literal_needles {
+                push_literal_occurrences(haystack, needle, &mut indices_buf);
+            }
             indices_buf.sort_unstable();
+            // Overlapping hits and two atoms covering the same character both
+            // produce duplicates, and `render_with_highlights` binary-searches
+            // these positions, so sorted-and-unique is a precondition.
+            indices_buf.dedup();
             scored.push((i, score, indices_buf.clone()));
         }
     }
@@ -400,6 +444,72 @@ pub fn populate_list_current_layer(renderer: &mut AppRenderer, search: &str) {
     let active_len = renderer.filtered_list_indices.len();
     if renderer.list_index >= active_len {
         renderer.list_index = active_len.saturating_sub(1);
+    }
+}
+
+/// Append the position of every occurrence of `needle` in `haystack` to `out`.
+///
+/// `nucleo` answers a different question than a highlight needs: `Atom::indices`
+/// reports the single best-scoring alignment per atom, so a row reading "the
+/// errno error handler" searched for "err" lights up "errno" and nothing else.
+/// This walks the haystack and marks them all.
+///
+/// The scan runs in `nucleo`'s own index space — `Utf32Str` positions, which is
+/// what `fuzzy_match_positions` already holds — so the result merges into
+/// `indices_buf` with no conversion, and no conversion bug is possible.
+/// `needle` must already be case-folded, which `Atom::parse` does for us under
+/// `CaseMatching::Ignore`; haystack characters are folded with the same simple
+/// fold on the way past, so neither side needs a lower-cased copy.
+///
+/// Overlapping occurrences are all reported ("aa" in "aaa" marks all three
+/// characters): a highlight cares about the union, not about a count.
+fn push_literal_occurrences(haystack: Utf32Str<'_>, needle: &[char], out: &mut Vec<u32>) {
+    // `Utf32Str::get` re-matches the variant per character and lives in another
+    // crate without `#[inline]`, and the release profile sets no LTO — so pull
+    // the codepoints out once and let this monomorphise into two tight loops.
+    match haystack {
+        Utf32Str::Ascii(bytes) => scan_occurrences(bytes, |&b| b as char, needle, out),
+        Utf32Str::Unicode(chars) => scan_occurrences(chars, |&c| c, needle, out),
+    }
+}
+
+/// Naive all-occurrences scan over a presegmented haystack. Split out from
+/// `push_literal_occurrences` only so the ASCII and Unicode halves of a
+/// `Utf32Str` share one body.
+fn scan_occurrences<T>(
+    hay: &[T],
+    as_char: impl Fn(&T) -> char,
+    needle: &[char],
+    out: &mut Vec<u32>,
+) {
+    if needle.is_empty() || needle.len() > hay.len() {
+        return;
+    }
+    for start in 0..=hay.len() - needle.len() {
+        let hit = hay[start..start + needle.len()]
+            .iter()
+            .zip(needle)
+            .all(|(h, &n)| fold_char(as_char(h)) == n);
+        if hit {
+            out.extend(start as u32..(start + needle.len()) as u32);
+        }
+    }
+}
+
+/// `nucleo`'s simple case fold, with the ASCII shortcut it takes internally.
+///
+/// `chars::to_lower_case` binary-searches a fold table for every character,
+/// including the ASCII ones that make up virtually every list label. That table
+/// maps `A-Z` to `a-z`, so the shortcut is not merely cheaper, it is the same
+/// answer. Folding with `nucleo`'s own function (rather than
+/// `char::to_lowercase`, which is a full fold and can expand one character into
+/// several) keeps this scan agreeing with the matcher by construction.
+#[inline]
+fn fold_char(c: char) -> char {
+    if c.is_ascii() {
+        c.to_ascii_lowercase()
+    } else {
+        to_lower_case(c)
     }
 }
 
@@ -1954,6 +2064,150 @@ mod tests {
         let mut r = make_renderer_with_items(&["hello", "world"]);
         populate_list_current_layer(&mut r, "hel");
         assert_eq!(r.filtered_list_indices.len(), r.fuzzy_match_positions.len());
+        // `render_with_highlights` binary-searches these, so they have to come
+        // out sorted, unique and inside the label.
+        for (row, pos) in r.filtered_list_indices.iter().zip(&r.fuzzy_match_positions) {
+            let len = r.total_list[*row].label.chars().count() as u32;
+            assert!(
+                pos.windows(2).all(|w| w[0] < w[1]),
+                "sorted and unique: {pos:?}"
+            );
+            assert!(pos.iter().all(|&p| p < len), "in range: {pos:?}");
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Search highlights — every occurrence, not just `nucleo`'s one alignment
+    // -----------------------------------------------------------------------
+
+    /// Group sorted match positions into the `(start, len)` runs that
+    /// `render_with_highlights` turns into one highlight rectangle each.
+    /// Asserting on runs rather than raw positions keeps these tests readable
+    /// and matches what is actually drawn.
+    fn runs(pos: &[u32]) -> Vec<(u32, u32)> {
+        let mut out: Vec<(u32, u32)> = Vec::new();
+        for &p in pos {
+            match out.last_mut() {
+                Some((start, len)) if *start + *len == p => *len += 1,
+                _ => out.push((p, 1)),
+            }
+        }
+        out
+    }
+
+    /// Positions for the single matching row of a one-item list.
+    /// `make_renderer_with_items` prefixes labels with `"- "`, so every
+    /// position below is offset by 2.
+    fn only_row_runs(item: &str, query: &str) -> Vec<(u32, u32)> {
+        let mut r = make_renderer_with_items(&[item]);
+        populate_list_current_layer(&mut r, query);
+        assert_eq!(
+            r.filtered_list_indices.len(),
+            1,
+            "expected {item:?} to match"
+        );
+        runs(&r.fuzzy_match_positions[0])
+    }
+
+    #[test]
+    fn every_occurrence_of_a_term_is_highlighted() {
+        // "- the errno error handler": "err" at 6 and again at 12. `nucleo`
+        // alone would mark only the first.
+        assert_eq!(
+            only_row_runs("the errno error handler", "err"),
+            vec![(6, 3), (12, 3)]
+        );
+    }
+
+    #[test]
+    fn overlapping_occurrences_merge_into_one_run() {
+        // "- aaa": "aa" occurs at 2 and 3, so all three characters are marked
+        // and collapse into a single rectangle.
+        assert_eq!(only_row_runs("aaa", "aa"), vec![(2, 3)]);
+    }
+
+    #[test]
+    fn all_occurrences_are_case_insensitive() {
+        assert_eq!(only_row_runs("Err and err", "ERR"), vec![(2, 3), (10, 3)]);
+    }
+
+    #[test]
+    fn exact_substring_atom_expands() {
+        // `'foo` is a substring atom — it should mark every hit, like a plain term.
+        assert_eq!(
+            only_row_runs("the errno error handler", "'err"),
+            vec![(6, 3), (12, 3)]
+        );
+    }
+
+    #[test]
+    fn anchored_prefix_keeps_a_single_highlight() {
+        // "- a - b" contains two "-", but `^-` asserts a match at the front
+        // only, so the interior one must stay unmarked.
+        assert_eq!(only_row_runs("a - b", "^-"), vec![(0, 1)]);
+    }
+
+    #[test]
+    fn anchored_postfix_keeps_a_single_highlight() {
+        // "- ab ab": `ab$` anchors to the trailing occurrence.
+        assert_eq!(only_row_runs("ab ab", "ab$"), vec![(5, 2)]);
+    }
+
+    #[test]
+    fn negated_prefix_atom_never_highlights() {
+        // `!^err` leaves "the error" in the list (it does not *start* with
+        // "err"), so the row survives while containing the needle. A negative
+        // atom contributes no indices, and must not gain any by expansion.
+        let mut r = make_renderer_with_items(&["the error"]);
+        populate_list_current_layer(&mut r, "!^err");
+        assert_eq!(r.filtered_list_indices.len(), 1);
+        assert!(
+            r.fuzzy_match_positions[0].is_empty(),
+            "negated atom highlighted: {:?}",
+            r.fuzzy_match_positions[0]
+        );
+    }
+
+    #[test]
+    fn each_atom_expands_independently() {
+        // "- err handler err": both terms of an AND pattern expand.
+        assert_eq!(
+            only_row_runs("err handler err", "err handler"),
+            vec![(2, 3), (6, 7), (14, 3)]
+        );
+    }
+
+    #[test]
+    fn non_contiguous_match_keeps_nucleos_alignment() {
+        // No literal "dcmt" to find, so the fallback stands. Assert the
+        // invariant (one position per needle character, spelling the needle
+        // back out) rather than `nucleo`'s exact choice, so a version bump
+        // cannot break this test.
+        let mut r = make_renderer_with_items(&["document"]);
+        populate_list_current_layer(&mut r, "dcmt");
+        let label: Vec<char> = r.total_list[0].label.chars().collect();
+        let spelled: String = r.fuzzy_match_positions[0]
+            .iter()
+            .map(|&p| label[p as usize])
+            .collect();
+        assert_eq!(spelled, "dcmt");
+    }
+
+    #[test]
+    fn escaped_dollar_is_matched_literally_everywhere() {
+        // `\$` parses to a plain needle of "$" (via `append_dollar`), not to
+        // the suffix anchor, so both dollars are marked.
+        assert_eq!(
+            only_row_runs("cost $5 and $6", r"\$"),
+            vec![(7, 1), (14, 1)]
+        );
+    }
+
+    #[test]
+    fn multibyte_label_positions_are_character_indices() {
+        // "- é err — err" — byte offsets would put these runs at 5 and 14.
+        // Fails loudly if anyone reintroduces a byte/char conversion here.
+        assert_eq!(only_row_runs("é err — err", "err"), vec![(4, 3), (10, 3)]);
     }
 
     // -----------------------------------------------------------------------

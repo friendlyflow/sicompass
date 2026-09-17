@@ -2103,7 +2103,9 @@ fn update_view(app: &mut AppState) {
                     .collect();
                 let rr = app.rect_renderer.as_mut();
                 // First content line trails the breadcrumb + prefix; wrapped
-                // continuation lines run full-width below, at the left margin.
+                // continuation lines drop below with a hanging indent, aligned
+                // under the content rather than under the `- ` tag. Widths must
+                // match what `ext_flow` reserved height for.
                 render_with_highlights(
                     fr,
                     rr,
@@ -2118,8 +2120,8 @@ fn update_view(app: &mut AppState) {
                     &content_positions,
                     Some(WrapLayout {
                         first_width: flow.first_w,
-                        rest_x: text_prefix_x,
-                        rest_width: rest_w,
+                        rest_x: text_prefix_x + flow.rest_dx,
+                        rest_width: (rest_w - flow.rest_dx).max(1.0),
                     }),
                 );
             }
@@ -2465,67 +2467,27 @@ fn update_view(app: &mut AppState) {
         let lh = line_height as f32;
         let hl_height = lh - 2.0 * crate::text::TEXT_PADDING;
 
-        let mut line_starts: Vec<usize> = vec![0];
-        for (i, c) in buf.char_indices() {
-            if c == '\n' {
-                line_starts.push(i + 1);
-            }
-        }
-
         if let Some(fr) = app.font_renderer.as_ref() {
-            let mut rects: Vec<(f32, f32, f32, f32, u32)> = Vec::new();
-            // Rects for the current match are collected separately and drawn
-            // last: overlapping hits are possible ("aa" in "aaa"), and the
-            // current one must stay visible when a later hit covers it.
-            let mut current_rects: Vec<(f32, f32, f32, f32, u32)> = Vec::new();
-            for (mi, &(off, len)) in matches.iter().enumerate() {
-                // A query containing a newline spans lines; clamp per line so
-                // each covered line gets its own rect, as the selection loop does.
-                let m_start = off.min(buf.len());
-                let m_end = (off + len).min(buf.len());
-                let start_line = line_starts
-                    .partition_point(|&s| s <= m_start)
-                    .saturating_sub(1);
-                let end_line = line_starts
-                    .partition_point(|&s| s <= m_end)
-                    .saturating_sub(1);
-                let color = if mi == current {
-                    p.scroll_search
-                } else {
-                    p.ext_search
-                };
-                for line in start_line..=end_line {
-                    let line_start_off = line_starts[line];
-                    let line_end_off = if line + 1 < line_starts.len() {
-                        line_starts[line + 1] - 1
-                    } else {
-                        buf.len()
-                    };
-                    let clamp_start = m_start.max(line_start_off);
-                    let clamp_end = m_end.min(line_end_off);
-                    if clamp_end <= clamp_start {
-                        continue;
-                    }
-                    let line_x = if line == 0 {
-                        captured_elem_x
-                    } else {
-                        captured_elem_base_x
-                    };
-                    let line_y = captured_elem_y - ascender * scale + line as f32 * lh;
-                    let x_start =
-                        line_x + fr.measure_text_width(&buf[line_start_off..clamp_start], scale);
-                    let w = fr
-                        .measure_text_width(&buf[clamp_start..clamp_end], scale)
-                        .max(2.0);
-                    let target = if mi == current {
-                        &mut current_rects
-                    } else {
-                        &mut rects
-                    };
-                    target.push((x_start, line_y, w, hl_height, color));
-                }
-            }
-            rects.extend(current_rects);
+            // `captured_lines` is the wrapped layout this buffer was just drawn
+            // with; handing it over (rather than re-deriving one here) is what
+            // keeps the boxes on the same rows as the glyphs.
+            let rects = input_search_highlight_rects(
+                fr,
+                &buf,
+                &captured_lines,
+                &matches,
+                current,
+                &HighlightGeom {
+                    first_x: captured_elem_x,
+                    rest_x: captured_elem_base_x,
+                    top_y: captured_elem_y - ascender * scale,
+                    scale,
+                    line_height: lh,
+                    height: hl_height,
+                    current_color: p.scroll_search,
+                    other_color: p.ext_search,
+                },
+            );
             if let Some(rr) = app.rect_renderer.as_mut() {
                 for (x, y, w, h, color) in rects {
                     rr.prepare_rectangle(x, y, w, h, color, 3.0);
@@ -3430,9 +3392,10 @@ fn collect_list_items(
 ///
 /// ExtendedSearch results use the hanging form, where line 1 trails the
 /// breadcrumb + prefix and the remaining lines run full-width below them at the
-/// left margin. The ordinary list (including SimpleSearch) uses the uniform
-/// form — all three fields matching the sibling `prepare_text_wrapped` call, so
-/// highlighted items break at exactly the same points as unhighlighted ones.
+/// left margin, or in ExtendedSearch under the content, a prefix width in. The
+/// ordinary list (including SimpleSearch) uses the uniform form — all three
+/// fields matching the sibling `prepare_text_wrapped` call, so highlighted items
+/// break at exactly the same points as unhighlighted ones.
 struct WrapLayout {
     first_width: f32,
     rest_x: f32,
@@ -3459,6 +3422,10 @@ struct ExtFlow {
     content_dx: f32,
     /// Wrap width of the content's first line (what the prefix leaves over).
     first_w: f32,
+    /// X offset from the left margin of every wrapped continuation line: the
+    /// width of the list prefix, so the text hangs under the content rather
+    /// than under the `- ` tag, the way an ordinary list row wraps.
+    rest_dx: f32,
     /// Total visual lines the row occupies.
     total_lines: usize,
 }
@@ -3533,8 +3500,14 @@ fn ext_flow(
             (rest_w - last_bc_w - prefix_w).max(1.0),
         )
     };
+    // Continuation lines hang under the content, not under the `- ` tag, so a
+    // wrapped result reads as one element instead of as a new list row. The
+    // width has to shrink by the same amount the line is pushed in, or the text
+    // would run past the right edge.
+    let rest_dx = prefix_w;
+    let content_rest_w = (rest_w - rest_dx).max(1.0);
     let content_lines = fr
-        .wrap_lines_with_offsets_hanging(content, scale, first_w, rest_w)
+        .wrap_lines_with_offsets_hanging(content, scale, first_w, content_rest_w)
         .len()
         .max(1);
     ExtFlow {
@@ -3542,8 +3515,91 @@ fn ext_flow(
         content_line,
         content_dx,
         first_w,
+        rest_dx,
         total_lines: content_line + content_lines,
     }
+}
+
+/// Where an in-element search draws its highlight boxes, and in what colours.
+/// `top_y` is the cell top of the buffer's first line, not the baseline.
+struct HighlightGeom {
+    /// Left edge of the first line, which trails the non-editable prefix.
+    first_x: f32,
+    /// Left edge of every wrapped continuation line.
+    rest_x: f32,
+    top_y: f32,
+    scale: f32,
+    line_height: f32,
+    height: f32,
+    current_color: u32,
+    other_color: u32,
+}
+
+/// Highlight rectangles for the hits of an in-element (Ctrl+F) search, as
+/// `(x, y, w, h, color)`.
+///
+/// `drawn_lines` is the wrapped layout the buffer was *drawn* with. Placing the
+/// boxes along it is the whole point: the field soft-wraps, so segmenting on
+/// `\n` alone would put every hit past the first wrap on the wrong row and
+/// measure its x across the whole logical line, throwing the box off the right
+/// edge, where it reads as a missing highlight. The caret and the selection
+/// pass read the same layout for that reason. Owning the fallback here (rather
+/// than at the call site) leaves the caller no layout to get wrong.
+///
+/// Rects for the current match come last: overlapping hits are possible ("aa"
+/// in "aaa"), and the current one must stay visible when a later hit covers it.
+///
+/// Split out of `update_view` so this geometry can be tested without a GPU.
+fn input_search_highlight_rects(
+    fr: &crate::text::FontRenderer,
+    buf: &str,
+    drawn_lines: &[sicompass_sdk::input::InputLine],
+    matches: &[(usize, usize)],
+    current: usize,
+    g: &HighlightGeom,
+) -> Vec<(f32, f32, f32, f32, u32)> {
+    // Empty when the edited row never rendered (scrolled out of view); hard
+    // lines are always a valid view of the text.
+    let fallback;
+    let lines = if drawn_lines.is_empty() {
+        fallback = sicompass_sdk::input::hard_lines(buf);
+        &fallback[..]
+    } else {
+        drawn_lines
+    };
+    let mut rects: Vec<(f32, f32, f32, f32, u32)> = Vec::new();
+    let mut current_rects: Vec<(f32, f32, f32, f32, u32)> = Vec::new();
+    for (mi, &(off, len)) in matches.iter().enumerate() {
+        let m_start = off.min(buf.len());
+        let m_end = (off + len).min(buf.len());
+        let color = if mi == current {
+            g.current_color
+        } else {
+            g.other_color
+        };
+        // A hit that wraps (or spans a newline) covers several lines; each one
+        // gets its own rect, as the selection loop does.
+        for (line, clamp_start, clamp_end) in
+            sicompass_sdk::input::selection_spans(lines, m_start, m_end)
+        {
+            let line_start_off = lines[line].start;
+            let line_x = if line == 0 { g.first_x } else { g.rest_x };
+            let line_y = g.top_y + line as f32 * g.line_height;
+            let x_start =
+                line_x + fr.measure_text_width(&buf[line_start_off..clamp_start], g.scale);
+            let w = fr
+                .measure_text_width(&buf[clamp_start..clamp_end], g.scale)
+                .max(2.0);
+            let target = if mi == current {
+                &mut current_rects
+            } else {
+                &mut rects
+            };
+            target.push((x_start, line_y, w, g.height, color));
+        }
+    }
+    rects.extend(current_rects);
+    rects
 }
 
 /// Render `text` at `(x, y)` with background highlight rectangles behind
@@ -3946,6 +4002,51 @@ mod tests {
     }
 
     #[test]
+    fn ext_flow_hangs_wrapped_lines_under_the_content() {
+        // A wrapped result has to read as one element. Continuation lines
+        // indent past the "- " tag, so they cannot be mistaken for a new row.
+        let fr = make_fr_uniform(10.0);
+        let flow = ext_flow(&fr, "", "- ", "one two three four five six", 1.0, 100.0, EM);
+        assert!(flow.total_lines > 1, "this test needs content that wraps");
+        assert!(
+            (flow.rest_dx - 20.0).abs() < 1e-3,
+            "continuation lines hang by the prefix width, got {}",
+            flow.rest_dx
+        );
+    }
+
+    #[test]
+    fn ext_flow_without_a_prefix_has_no_hanging_indent() {
+        // The image branch passes an empty prefix and draws the caption itself;
+        // there is no tag to hang under, so nothing should shift.
+        let fr = make_fr_uniform(10.0);
+        let flow = ext_flow(
+            &fr,
+            "Home > ",
+            "",
+            "a caption that wraps here",
+            1.0,
+            100.0,
+            EM,
+        );
+        assert!((flow.rest_dx - 0.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn ext_flow_narrower_continuation_is_reflected_in_the_reserved_height() {
+        // The indent eats into the wrap width, so the row can need a line it
+        // would not have needed at full width. Reservation and draw both read
+        // `ext_flow`, so this is the check that they agree.
+        let fr = make_fr_uniform(10.0);
+        let content = "aaaaaaaa bbbbbbbb cccccccc dddddddd";
+        let flow = ext_flow(&fr, "", "- ", content, 1.0, 100.0, EM);
+        let at_indented_width = fr
+            .wrap_lines_with_offsets_hanging(content, 1.0, flow.first_w, 100.0 - flow.rest_dx)
+            .len();
+        assert_eq!(flow.total_lines, flow.content_line + at_indented_width);
+    }
+
+    #[test]
     fn ext_flow_total_lines_covers_every_drawn_line() {
         let fr = make_fr_uniform(10.0);
         // The height a row reserves must cover the breadcrumb lines plus the
@@ -3956,7 +4057,12 @@ mod tests {
                 for rest_w in [80.0_f32, 200.0, 400.0] {
                     let flow = ext_flow(&fr, bc, "- ", content, 1.0, rest_w, EM);
                     let content_lines = fr
-                        .wrap_lines_with_offsets_hanging(content, 1.0, flow.first_w, rest_w)
+                        .wrap_lines_with_offsets_hanging(
+                            content,
+                            1.0,
+                            flow.first_w,
+                            (rest_w - flow.rest_dx).max(1.0),
+                        )
                         .len()
                         .max(1);
                     assert_eq!(
@@ -4029,6 +4135,121 @@ mod tests {
                 "cursor {pos} fell outside segment {n} ({start}..{end})",
             );
         }
+    }
+
+    // ---- in-element search highlight geometry ---
+
+    /// The buffer, layout and geometry the two tests below share: a 30-char
+    /// line with no newline in it, wrapped by a 10px-per-char font into a
+    /// column that fits 8 characters on the first line (behind a 20px prefix)
+    /// and 10 on each one after.
+    fn wrapped_highlight_fixture() -> (
+        crate::text::FontRenderer,
+        &'static str,
+        Vec<sicompass_sdk::input::InputLine>,
+        HighlightGeom,
+    ) {
+        let fr = make_fr_uniform(10.0);
+        let buf = "abcdefghijklmnopqrstuvwxyz0123";
+        let pfx_w = 20.0;
+        let segs = insert_buf_segments(&fr, buf, 1.0, pfx_w, 100.0);
+        assert!(segs.len() > 1, "this fixture needs a buffer that wraps");
+        let lines = insert_lines_from_segments(&segs, 2);
+        let geom = HighlightGeom {
+            first_x: pfx_w,
+            rest_x: 0.0,
+            top_y: 0.0,
+            scale: 1.0,
+            line_height: 10.0,
+            height: 8.0,
+            current_color: 0xAAAAAAFF,
+            other_color: 0xBBBBBBFF,
+        };
+        (fr, buf, lines, geom)
+    }
+
+    #[test]
+    fn a_hit_past_the_first_wrap_is_drawn_on_its_own_row() {
+        // Regression guard: the highlight pass used to segment the buffer on
+        // '\n' alone while the field soft-wraps, so a hit past the first wrap
+        // was placed on row 0 and measured from the start of the whole logical
+        // line — drawing the box far off the right edge, where it reads as a
+        // missing highlight.
+        let (fr, buf, lines, geom) = wrapped_highlight_fixture();
+        let last = buf.len() - 3;
+        let rects = input_search_highlight_rects(&fr, buf, &lines, &[(last, 3)], 0, &geom);
+
+        let (x, y, ..) = rects[0];
+        assert!(y > 0.0, "a hit after the wrap belongs below the first row");
+        assert!(
+            x < 100.0,
+            "hit drawn at x={x}, outside the 100px column it should sit in"
+        );
+
+        // The layout this replaced: one hard line, so the same hit is claimed
+        // to be on row 0 and measured across everything before it.
+        let hard = sicompass_sdk::input::hard_lines(buf);
+        let (bad_x, bad_y, ..) =
+            input_search_highlight_rects(&fr, buf, &hard, &[(last, 3)], 0, &geom)[0];
+        assert_eq!(bad_y, 0.0);
+        assert!(bad_x > 100.0, "expected the old geometry to overflow");
+    }
+
+    #[test]
+    fn every_hit_is_drawn_on_the_row_the_caret_would_use() {
+        // Highlight and caret must agree on which row an offset sits on, or the
+        // box lands away from the text it marks.
+        let (fr, buf, lines, geom) = wrapped_highlight_fixture();
+        let segs = insert_buf_segments(&fr, buf, 1.0, geom.first_x, 100.0);
+        for start in 0..buf.len() {
+            let len = 3.min(buf.len() - start);
+            let rects = input_search_highlight_rects(&fr, buf, &lines, &[(start, len)], 0, &geom);
+            let row = (rects[0].1 / geom.line_height).round() as usize;
+            // The lookup the caret renderer does for the same offset.
+            let caret_row = segs
+                .iter()
+                .rposition(|&(byte_start, _, _)| byte_start <= start)
+                .expect("a segment always starts at 0");
+            assert_eq!(row, caret_row, "hit at {start} drawn on the wrong row");
+        }
+    }
+
+    #[test]
+    fn an_unrendered_row_falls_back_to_hard_lines() {
+        // The edited row can be scrolled out of view, so nothing was captured.
+        // The hits still have to be placed somewhere sane rather than vanish.
+        let (fr, buf, _, geom) = wrapped_highlight_fixture();
+        let rects = input_search_highlight_rects(&fr, buf, &[], &[(0, 3)], 0, &geom);
+        assert_eq!(rects.len(), 1);
+        assert_eq!(
+            rects[0].1, geom.top_y,
+            "one hard line puts the hit on row 0"
+        );
+    }
+
+    #[test]
+    fn the_current_hit_is_drawn_last_so_an_overlap_cannot_hide_it() {
+        // "aa" in "aaa" produces overlapping hits; whichever one is current has
+        // to survive the one drawn over it.
+        let fr = make_fr_uniform(10.0);
+        let lines = sicompass_sdk::input::hard_lines("aaa");
+        let geom = HighlightGeom {
+            first_x: 0.0,
+            rest_x: 0.0,
+            top_y: 0.0,
+            scale: 1.0,
+            line_height: 10.0,
+            height: 8.0,
+            current_color: 0xAAAAAAFF,
+            other_color: 0xBBBBBBFF,
+        };
+        let rects = input_search_highlight_rects(&fr, "aaa", &lines, &[(0, 2), (1, 2)], 0, &geom);
+        assert_eq!(rects.len(), 2);
+        assert_eq!(
+            rects.last().unwrap().4,
+            geom.current_color,
+            "the current hit must be drawn last"
+        );
     }
 
     #[test]
