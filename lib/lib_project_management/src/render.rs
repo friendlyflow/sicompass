@@ -218,25 +218,30 @@ pub fn card_height(text: &str, width: u16) -> u16 {
     card_lines(text, width).len().max(1) as u16
 }
 
-/// A card's visual lines at `width`: wrapped to the text width, continuation
-/// lines under the hanging indent.
+/// A card's visual lines at `width`: wrapped to the text width, every line
+/// starting flush.
 ///
 /// The one layout the drawing, the caret and the editor's Up/Down all read, so
 /// a card cannot be drawn one way and navigated another.
 pub fn card_lines(text: &str, width: u16) -> Vec<InputLine> {
     let w = text_width(width) as usize;
-    input::wrap_cells(text, w, w, CONT_INDENT as usize)
+    input::wrap_cells(text, w, w, 0)
 }
 
-/// How far a card's continuation lines are indented under its first.
+/// Cells of air on each side of a card's text inside its focus block.
 ///
-/// With no blank row between cards, this is the only thing that says where one
-/// card ends and the next begins: a line that starts flush is a new card, an
-/// indented one is more of the card above. The list does the same, aligning
-/// wrapped text to its content column rather than spacing rows apart.
-pub const CONT_INDENT: u16 = 2;
+/// The list leaves ground either side of the label it has selected, and a card
+/// does the same. Without it the block sat flush against the first character
+/// and a cell clear of the last, so the text read as shoved left inside its own
+/// fill.
+///
+/// It is spent out of [`MARGIN`] and [`GUTTER`] — the cells already set aside as
+/// space between columns — rather than out of the card. So the text does not
+/// move, a card still starts exactly where its title does, and two neighbouring
+/// blocks still have a cell between them.
+pub const FOCUS_PAD: u16 = 1;
 
-/// Usable text width inside a card.
+/// Usable text width inside a card: the whole column.
 ///
 /// No padding of its own: text starts flush at the column's left edge, so the
 /// space before it is exactly [`MARGIN`] — the same as the space after the last
@@ -244,9 +249,13 @@ pub const CONT_INDENT: u16 = 2;
 /// extra cell of internal padding made the left inset three cells against one
 /// row at the top, which is the asymmetry you actually see.
 ///
-/// Only the hanging indent is reserved, so a continuation line still fits.
+/// Nothing is reserved for a hanging indent either. Continuation lines start
+/// flush, which is what the app's own Insert mode does with a field that wraps
+/// or that `Ctrl+Enter` has split (`rest_x: text_prefix_x` in its renderer). A
+/// card that indented them answered to a rule no other text field in the app
+/// has, and put the caret two cells in the moment you pressed `Ctrl+Enter`.
 fn text_width(width: u16) -> u16 {
-    width.saturating_sub(CONT_INDENT).max(1)
+    width.max(1)
 }
 
 /// Wrap on word boundaries, breaking a word longer than the line rather than
@@ -262,6 +271,37 @@ pub fn wrap(text: &str, width: u16) -> Vec<String> {
 /// The text of each visual line.
 fn line_texts<'t>(text: &'t str, lines: &[InputLine]) -> Vec<&'t str> {
     lines.iter().map(|l| &text[l.start..l.end]).collect()
+}
+
+/// The focus block behind a card drawn at `x`: where it starts, and how wide.
+///
+/// Fitted to the card, not to the column, because that is what the list does
+/// with the row it has selected — its block is the text's own width plus a
+/// little air, never the window's. A band the full width of the column read as a
+/// different convention, and on a half-empty column it was mostly empty fill.
+///
+/// [`FOCUS_PAD`] on each side, so the text sits in the middle of its own fill
+/// rather than against one edge of it. The right-hand cell is also where `a`
+/// parks the caret, one past the last character.
+///
+/// The same pair feeds the fill and the [`DashboardSelection`], and it has to:
+/// the app skips per-cell backgrounds inside the region the frame names, so a
+/// cell filled `selected` outside it comes back as a square blob beside the
+/// rounded one, and an unfilled cell inside it decides the colour of the whole
+/// shape.
+fn focus_block(texts: &[&str], lines: &[InputLine], x: u16, width: u16, cols: u16) -> (u16, u16) {
+    let widest = texts
+        .iter()
+        .zip(lines)
+        .map(|(t, l)| l.indent_cols + t.chars().count())
+        .max()
+        .unwrap_or(0)
+        .min(width as usize) as u16;
+    let bx = x.saturating_sub(FOCUS_PAD);
+    let bw = (widest + (x - bx) + FOCUS_PAD)
+        .min(cols.saturating_sub(bx))
+        .max(1);
+    (bx, bw)
 }
 
 /// First card to draw in a column so `focused` stays on screen.
@@ -405,25 +445,17 @@ pub fn render(board: &Board, view: &View<'_>, cols: u16, rows: u16) -> Dashboard
             // and not others.
             let cells = card_lines(shown, width);
             let lines = line_texts(shown, &cells);
+            let (bx, bw) = focus_block(&lines, &cells, x, width, cols);
             for (li, line) in lines.iter().enumerate() {
                 let ly = CARDS_TOP + li as u16;
-                let indent = if li == 0 { 0 } else { CONT_INDENT };
-                fill(&mut frame, x, ly, width, fg, bg);
-                put(
-                    &mut frame,
-                    x + indent,
-                    ly,
-                    line,
-                    fg,
-                    bg,
-                    width.saturating_sub(indent),
-                );
+                fill(&mut frame, bx, ly, bw, fg, bg);
+                put(&mut frame, x, ly, line, fg, bg, width);
             }
             if focused {
                 frame.selection = Some(DashboardSelection {
-                    col: x,
+                    col: bx,
                     row: CARDS_TOP,
-                    cols: width,
+                    cols: bw,
                     rows: lines.len() as u16,
                 });
                 if let Some((_, caret)) = view.editing {
@@ -480,30 +512,25 @@ pub fn render(board: &Board, view: &View<'_>, cols: u16, rows: u16) -> Dashboard
             } else {
                 (text, TRANSPARENT)
             };
+            let (bx, bw) = focus_block(&lines, &cells, x, width, cols);
             for (li, line) in lines.iter().enumerate() {
                 let ly = y + li as u16;
-                let indent = if li == 0 { 0 } else { CONT_INDENT };
-                fill(&mut frame, x, ly, width, fg, bg);
-                put(
-                    &mut frame,
-                    x + indent,
-                    ly,
-                    line,
-                    fg,
-                    bg,
-                    width.saturating_sub(indent),
-                );
+                fill(&mut frame, bx, ly, bw, fg, bg);
+                put(&mut frame, x, ly, line, fg, bg, width);
             }
             if focused {
-                // Named so the app paints it as one rounded, inset shape rather
-                // than a stack of square per-row fills. This is also where the
-                // breathing space around the highlight comes from: the app draws
-                // it a little shorter than the rows it covers, which a cell grid
-                // cannot express on its own.
+                // Named so the app paints it as one rounded shape rather than a
+                // stack of square per-row fills: corner rounding is per
+                // rectangle, and a cell grid cannot ask for it at all.
+                //
+                // The region is exactly the rows the card covers and the cells
+                // [`focus_block`] measured, which is what makes it the same
+                // shape as the list's selected row. The air around it is named
+                // here too, rather than being shaved off by the app.
                 frame.selection = Some(DashboardSelection {
-                    col: x,
+                    col: bx,
                     row: y,
-                    cols: width,
+                    cols: bw,
                     rows: h,
                 });
                 if let Some((_, caret)) = view.editing {
@@ -807,8 +834,12 @@ mod tests {
         assert!(
             focused
                 .iter()
-                .all(|(fx, _)| *fx >= x && *fx < x + lay.width),
-            "focus must stay inside its own column"
+                .all(|(fx, _)| *fx >= x - FOCUS_PAD && *fx < x + lay.width + FOCUS_PAD),
+            "focus must stay inside its own column, give or take its cell of air"
+        );
+        assert!(
+            focused.iter().all(|(fx, _)| *fx < x + lay.width),
+            "and the air on the left is the only cell it may borrow"
         );
     }
 
@@ -829,7 +860,7 @@ mod tests {
         let sel = f.selection.expect("the focused card names a selection");
         assert_eq!(sel.row, CARDS_TOP);
         assert_eq!(sel.rows, n, "the region spans the whole card");
-        assert_eq!(sel.col, lay.x_of(0));
+        assert_eq!(sel.col, lay.x_of(0) - FOCUS_PAD);
     }
 
     #[test]
@@ -838,7 +869,11 @@ mod tests {
         let f = render(&b, &view(Focus { col: 1, row: 0 }), 60, 20);
         let sel = f.selection.expect("something is always focused");
         let lay = layout(2, 1, 60);
-        assert_eq!(sel.col, lay.x_of(1), "in the focused column");
+        assert_eq!(
+            sel.col,
+            lay.x_of(1) - FOCUS_PAD,
+            "in the focused column, less its cell of air"
+        );
         assert_eq!(sel.rows, 1);
     }
 
@@ -877,9 +912,10 @@ mod tests {
     }
 
     #[test]
-    fn a_wrapped_line_is_indented_under_the_card_it_belongs_to() {
-        // With no blank row between cards, the indent is the only thing that says
-        // "this line is more of the card above" rather than a card of its own.
+    fn every_line_of_a_card_starts_flush_like_the_apps_own_text_fields() {
+        // A wrapped line used to hang two cells in. No other field in the app
+        // does that — Insert mode puts a continuation line back at the row's
+        // left edge — so a card no longer does either.
         let b = board(&[("To do", &["a card long enough to wrap over", "after"])]);
         let cols = 24;
         let f = render(&b, &view(Focus { col: 0, row: 1 }), cols, 20);
@@ -897,13 +933,9 @@ mod tests {
         // it is the outer margin.
         let flush = MARGIN as usize;
         assert_eq!(lead(&first), flush, "a card's first line sits flush");
-        assert_eq!(
-            lead(&cont),
-            flush + CONT_INDENT as usize,
-            "its continuation hangs under it"
-        );
+        assert_eq!(lead(&cont), flush, "and so does its continuation");
         assert_eq!(next.trim(), "after");
-        assert_eq!(lead(&next), flush, "the next card starts flush again");
+        assert_eq!(lead(&next), flush, "and the next card");
     }
 
     #[test]
@@ -1089,7 +1121,7 @@ mod tests {
     }
 
     #[test]
-    fn a_newline_in_a_card_starts_an_indented_line() {
+    fn a_newline_in_a_card_starts_a_flush_line() {
         let b = board(&[("To do", &["fix\nlogin"])]);
         let f = render(&b, &view(Focus { col: 0, row: 0 }), 40, 20);
         let x = layout(1, 0, 40).x_of(0);
@@ -1099,12 +1131,16 @@ mod tests {
             ' ',
             "nothing after the newline"
         );
-        assert_eq!(f.cell(x + CONT_INDENT, CARDS_TOP + 1).ch, 'l');
+        assert_eq!(
+            f.cell(x, CARDS_TOP + 1).ch,
+            'l',
+            "the second line starts under the first, not indented from it"
+        );
         assert_eq!(card_height("fix\nlogin", 38), 2);
     }
 
     #[test]
-    fn the_caret_after_a_newline_sits_under_the_hanging_indent() {
+    fn the_caret_after_a_newline_sits_where_the_new_line_starts() {
         let b = board(&[("To do", &["fix\nlogin"])]);
         let v = View {
             focus: Focus { col: 0, row: 0 },
@@ -1115,7 +1151,11 @@ mod tests {
         };
         let f = render(&b, &v, 40, 20);
         let x = layout(1, 0, 40).x_of(0);
-        assert_eq!(f.cursor, Some((x + CONT_INDENT + 2, CARDS_TOP + 1)));
+        assert_eq!(
+            f.cursor,
+            Some((x + 2, CARDS_TOP + 1)),
+            "two characters into the second line, and the line starts flush"
+        );
     }
 
     #[test]
@@ -1128,6 +1168,74 @@ mod tests {
             pal().selected,
             "second line too"
         );
+    }
+
+    #[test]
+    fn the_focus_block_stops_at_the_text_not_at_the_column_edge() {
+        // The list fits its selected-row block to the row's text. A band the
+        // full width of the column is a different convention, and on a short
+        // card it is mostly empty fill.
+        let b = board(&[("To do", &["short"])]);
+        let f = render(&b, &view(Focus { col: 0, row: 0 }), 40, 20);
+        let sel = f.selection.expect("the focused card names a selection");
+        let lay = layout(1, 0, 40);
+        let x = lay.x_of(0);
+        assert_eq!(
+            sel.cols,
+            "short".chars().count() as u16 + 2 * FOCUS_PAD,
+            "the text, with a cell of air on each side of it"
+        );
+        assert_eq!(sel.col, x - FOCUS_PAD, "the air starts before the text");
+        assert_eq!(
+            x - sel.col,
+            sel.col + sel.cols - (x + "short".chars().count() as u16),
+            "and is the same on both sides, so the text sits in the middle"
+        );
+        assert!(
+            sel.cols < lay.width_of(0),
+            "and well short of the column edge"
+        );
+    }
+
+    #[test]
+    fn a_card_with_a_newline_is_one_block_as_wide_as_its_longest_line() {
+        // `Ctrl+Enter` makes a card two lines. Both share one block, and it is
+        // the longer line that sets its width — the second one here, hanging
+        // indent included.
+        let b = board(&[("To do", &["short\na longer second line"])]);
+        let f = render(&b, &view(Focus { col: 0, row: 0 }), 40, 20);
+        let sel = f.selection.expect("the focused card names a selection");
+        assert_eq!(sel.rows, 2, "the newline made a second line");
+        assert_eq!(
+            sel.cols,
+            "a longer second line".chars().count() as u16 + 2 * FOCUS_PAD,
+            "the longer line sets the width"
+        );
+    }
+
+    #[test]
+    fn every_filled_cell_lies_inside_the_named_region() {
+        // The app skips per-cell backgrounds inside the region the frame names
+        // and paints it as one rounded shape, so the two have to agree exactly:
+        // a `selected` cell outside it comes back as a square blob beside the
+        // rounded one, and an unfilled cell inside it picks the wrong colour for
+        // the whole shape.
+        let b = board(&[(
+            "To do",
+            &["a card whose text is long enough to wrap", "next"],
+        )]);
+        let f = render(&b, &view(Focus { col: 0, row: 0 }), 24, 20);
+        let sel = f.selection.expect("the focused card names a selection");
+        for y in 0..f.rows {
+            for x in 0..f.cols {
+                let inside = x >= sel.col
+                    && x < sel.col + sel.cols
+                    && y >= sel.row
+                    && y < sel.row + sel.rows;
+                let filled = f.cell(x, y).bg == pal().selected;
+                assert_eq!(filled, inside, "cell ({x}, {y}) disagrees with the region");
+            }
+        }
     }
 
     // ---- The caret ------------------------------------------------------

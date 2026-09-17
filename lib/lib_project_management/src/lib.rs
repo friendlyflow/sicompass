@@ -2355,9 +2355,10 @@ mod tests {
             assert_eq!(edit.text, "fix login\nship");
             assert_eq!(edit.caret, len);
         }
-        // "ship" sits under the two-cell hanging indent, so its end is column 6.
+        // "ship" starts flush, like a new line in any other field in the app,
+        // so its end is column 4 and Up lands on column 4 of the line above.
         p.dashboard_key(key(DashboardKeysym::Up));
-        assert_eq!(p.edit.as_ref().unwrap().caret, "fix lo".len());
+        assert_eq!(p.edit.as_ref().unwrap().caret, "fix ".len());
         p.dashboard_key(key(DashboardKeysym::Down));
         assert_eq!(p.edit.as_ref().unwrap().caret, len);
         p.dashboard_key(key(DashboardKeysym::Down));

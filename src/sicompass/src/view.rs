@@ -1011,21 +1011,24 @@ fn update_view(app: &mut AppState) {
             if let Some(rr) = app.rect_renderer.as_mut() {
                 // The selection, if the provider named one: **one** rounded
                 // rectangle for the whole region, at the same radius the list
-                // uses for its selected row, and inset a little vertically.
+                // uses for its selected row, and exactly as tall as the rows it
+                // covers — `lines * line_height`, the list's own geometry.
                 //
-                // Both halves need the region named rather than inferred. Corner
-                // rounding is per rectangle, so a multi-row selection drawn row by
-                // row would come out as a stack of separate blobs; and a cell is a
-                // whole row tall, so the only way to leave breathing space around
-                // a highlight is to paint it slightly smaller than the rows it
-                // covers. Neither is expressible one cell at a time.
+                // The region has to be named rather than inferred, because corner
+                // rounding is per rectangle: a multi-row selection drawn row by
+                // row would come out as a stack of separate blobs.
+                //
+                // Nothing is shaved off it here. This used to inset the block
+                // vertically to leave breathing space, which made every dashboard
+                // highlight visibly shorter than the list's. The air belongs to
+                // the provider instead: it names a region that stops at its own
+                // text, the way the list fits its block to the row's.
                 let sel = frame.selection.filter(|s| s.cols > 0 && s.rows > 0);
                 if let Some(s) = sel {
-                    let inset = (cell_h * 0.14).round().max(1.0);
                     let x0 = (s.col as f32 * cell_w).round();
                     let x1 = ((s.col + s.cols) as f32 * cell_w).round();
-                    let y0 = row_y(s.row) + inset;
-                    let y1 = row_y(s.row + s.rows) - inset;
+                    let y0 = row_y(s.row);
+                    let y1 = row_y(s.row + s.rows);
                     let bg = frame.cell(s.col, s.row).bg;
                     if (bg & 0xFF) != 0 && y1 > y0 {
                         rr.prepare_rectangle(x0, y0, x1 - x0, y1 - y0, bg, 5.0);
