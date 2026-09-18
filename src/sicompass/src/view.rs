@@ -951,6 +951,7 @@ fn update_view(app: &mut AppState) {
                 None => return,
             };
             app.renderer.dashboard_cell_size = (cols, rows);
+            app.renderer.dashboard_has_caret = frame.cursor.is_some();
 
             // Begin render passes
             let fr = match app.font_renderer.as_mut() {

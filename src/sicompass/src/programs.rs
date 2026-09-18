@@ -970,6 +970,7 @@ pub fn apply_tabs_section(
                 provider_path,
                 providers: cp,
                 ffon: cf,
+                mode: None,
             });
         }
         r.tabs = tabs;
