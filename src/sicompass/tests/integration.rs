@@ -10386,15 +10386,24 @@ fn switcher_delete_busy_tab_confirms_and_returns_to_switcher() {
     assert_eq!(h.renderer.coordinate, Coordinate::General);
 }
 
+/// Ctrl+T works in Insert (it commits the edit first, see
+/// `ctrl_t_from_insert_commits_the_edit`) except where committing would send:
+/// a terminal prompt would run.
+#[cfg(unix)]
 #[test]
-fn ctrl_t_blocked_outside_general() {
-    let mut h = Harness::new();
-    h.renderer.coordinate = Coordinate::Insert;
-    let before_len = h.renderer.tabs.len();
+fn ctrl_t_blocked_only_where_the_prompt_would_send() {
+    ensure_builtins();
+    let mut r = AppRenderer::new();
+    register_terminal_in_shell(&mut r);
+    sicompass::list::create_list_current_layer(&mut r);
+    press(&mut r, Keycode::I);
+    assert_eq!(r.coordinate, Coordinate::Insert);
+    type_text(&mut r, "echo hi");
 
-    press_ctrl(h.r(), Keycode::T);
-
-    assert_eq!(h.renderer.tabs.len(), before_len);
+    press_ctrl(&mut r, Keycode::T);
+    assert_eq!(r.tabs.len(), 1, "no tab while the prompt would be sent");
+    assert_eq!(r.coordinate, Coordinate::Insert, "the prompt stays open");
+    assert_eq!(r.input_buffer, "echo hi");
 }
 
 #[test]
@@ -18982,4 +18991,323 @@ fn deleting_through_the_harness_leaves_the_os_trash_untouched() {
          switching the trash stub off in this binary",
         files.display()
     );
+}
+
+// ---------------------------------------------------------------------------
+// Tab keys outside General
+//
+// Ctrl+Tab, Ctrl+Shift+Tab, Ctrl+T, Ctrl+Shift+T, Ctrl+1..9 work in every mode,
+// and plain `t` in a dashboard that does not take the key itself. A tab keeps
+// its mode while it is in the background, so a tab left showing its dashboard
+// comes back showing it.
+// ---------------------------------------------------------------------------
+
+/// Render one dashboard frame and record its caret, the way `view.rs` does.
+/// The harness never draws, and a plain `t` depends on what the last frame
+/// showed.
+fn render_dashboard_frame(r: &mut AppRenderer) {
+    let frame = sicompass::provider::get_active_provider(r)
+        .expect("active provider")
+        .dashboard_render(80, 24);
+    r.dashboard_has_caret = frame.cursor.is_some();
+}
+
+/// Two tabs over the board, the active one (tab 0) open in its dashboard. Tab 1
+/// has its own board stored in a second temp dir.
+fn two_tabs_board_in_dashboard() -> (AppRenderer, TempDir, TempDir, TempDir) {
+    let (mut r, tmp) = harness_with_board();
+    let settings_tmp = TempDir::new().expect("settings tempdir");
+    let mut settings = sicompass_sdk::create_provider_by_name("settings").unwrap();
+    settings.set_config_path(settings_tmp.path().join("settings.json"));
+    register(&mut r, settings);
+    sicompass::list::create_list_current_layer(&mut r);
+
+    press_ctrl(&mut r, Keycode::T); // tab 1, a fresh board
+    assert_eq!(r.active_tab, 1);
+    let tab1_tmp = TempDir::new().expect("tab 1 tempdir");
+    r.providers[0].set_config_path(tab1_tmp.path().join("board"));
+    press_ctrl(&mut r, Keycode::_1); // back to tab 0
+    assert_eq!(r.active_tab, 0);
+
+    press_right(&mut r);
+    press_ctrl(&mut r, Keycode::A);
+    type_text(&mut r, "To do");
+    press_enter(&mut r);
+    sicompass::list::create_list_current_layer(&mut r);
+    sicompass::handlers::handle_dashboard(&mut r);
+    assert_eq!(r.coordinate, Coordinate::Dashboard);
+    render_dashboard_frame(&mut r);
+    (r, tmp, settings_tmp, tab1_tmp)
+}
+
+#[test]
+fn ctrl_tab_leaves_a_board_dashboard_and_comes_back_to_it() {
+    let (mut r, _a, _b, _c) = two_tabs_board_in_dashboard();
+    let before_dashboard = r.previous_coordinate;
+
+    press_ctrl(&mut r, Keycode::Tab);
+    assert_eq!(r.coordinate, Coordinate::TabSwitcher);
+    sicompass::handlers::handle_tab_switcher_commit(&mut r);
+    assert_eq!(r.active_tab, 1);
+    assert_eq!(
+        r.coordinate,
+        Coordinate::General,
+        "the other tab was at rest on its list"
+    );
+
+    press_ctrl(&mut r, Keycode::Tab);
+    sicompass::handlers::handle_tab_switcher_commit(&mut r);
+    assert_eq!(r.active_tab, 0);
+    assert_eq!(
+        r.coordinate,
+        Coordinate::Dashboard,
+        "the board tab comes back showing its board"
+    );
+    assert_eq!(
+        r.previous_coordinate, before_dashboard,
+        "the switcher must not overwrite where the dashboard's Escape returns to"
+    );
+
+    sicompass::handlers::handle_dashboard_leave(&mut r);
+    assert_eq!(r.coordinate, before_dashboard);
+}
+
+#[test]
+fn ctrl_shift_tab_and_ctrl_digits_work_from_a_board_dashboard() {
+    let (mut r, _a, _b, _c) = two_tabs_board_in_dashboard();
+
+    press_ctrl_shift(&mut r, Keycode::Tab);
+    assert_eq!(r.coordinate, Coordinate::TabSwitcher);
+    press_escape(&mut r);
+    assert_eq!(
+        r.coordinate,
+        Coordinate::Dashboard,
+        "cancelling the switcher returns to the board"
+    );
+
+    press_ctrl(&mut r, Keycode::_2);
+    assert_eq!(r.active_tab, 1);
+    assert_eq!(r.coordinate, Coordinate::General);
+    press_ctrl(&mut r, Keycode::_1);
+    assert_eq!(r.active_tab, 0);
+    assert_eq!(r.coordinate, Coordinate::Dashboard);
+}
+
+#[test]
+fn t_on_the_board_opens_the_switcher_with_an_empty_filter() {
+    let (mut r, _a, _b, _c) = two_tabs_board_in_dashboard();
+    press(&mut r, Keycode::T);
+    assert_eq!(r.coordinate, Coordinate::TabSwitcher);
+    // SDL delivers the `t` again as text, text input being on in a dashboard.
+    type_text(&mut r, "t");
+    assert!(
+        r.input_buffer.is_empty(),
+        "the key that opened the switcher must not seed its filter"
+    );
+    press_escape(&mut r);
+    assert_eq!(r.coordinate, Coordinate::Dashboard);
+}
+
+#[test]
+fn t_types_into_a_card_being_edited() {
+    let (mut r, _a, _b, _c) = two_tabs_board_in_dashboard();
+    press(&mut r, Keycode::O); // new card, now editing it
+    type_text(&mut r, "o");
+    render_dashboard_frame(&mut r);
+    assert!(r.dashboard_has_caret, "an edited card shows a caret");
+
+    press(&mut r, Keycode::T);
+    assert_eq!(
+        r.coordinate,
+        Coordinate::Dashboard,
+        "`t` is text while a card is being edited"
+    );
+}
+
+#[test]
+fn ctrl_t_on_the_board_opens_a_new_tab() {
+    let (mut r, _a, _b, _c) = two_tabs_board_in_dashboard();
+    press_ctrl(&mut r, Keycode::T);
+    assert_eq!(r.tabs.len(), 3, "the board does not use Ctrl+T itself");
+    assert_eq!(r.active_tab, 1);
+    assert_eq!(
+        r.coordinate,
+        Coordinate::General,
+        "a new tab starts on the list"
+    );
+    let tmp = TempDir::new().unwrap();
+    r.providers[0].set_config_path(tmp.path().join("board"));
+
+    press_ctrl(&mut r, Keycode::_1);
+    assert_eq!(r.coordinate, Coordinate::Dashboard);
+}
+
+#[test]
+fn ctrl_shift_t_on_the_board_asks_and_cancel_returns_to_it() {
+    let (mut r, _a, _b, _c) = two_tabs_board_in_dashboard();
+    press_ctrl_shift(&mut r, Keycode::T);
+    assert_eq!(r.coordinate, Coordinate::ConfirmCloseTab);
+    press_escape(&mut r);
+    assert_eq!(r.coordinate, Coordinate::Dashboard);
+    assert_eq!(r.tabs.len(), 2);
+}
+
+/// An interactive dashboard that consumes every key, the way the terminal does
+/// for the program it runs.
+struct ConsumeAllDashboard {
+    keys: std::sync::Arc<std::sync::Mutex<Vec<sicompass_sdk::DashboardKey>>>,
+}
+impl Provider for ConsumeAllDashboard {
+    fn name(&self) -> &str {
+        "consumeall"
+    }
+    fn fetch(&mut self) -> Vec<FfonElement> {
+        vec![FfonElement::new_str("x")]
+    }
+    fn dashboard_kind(&self) -> sicompass_sdk::DashboardKind {
+        sicompass_sdk::DashboardKind::Interactive
+    }
+    fn dashboard_key(&mut self, key: sicompass_sdk::DashboardKey) -> bool {
+        self.keys.lock().unwrap().push(key);
+        true
+    }
+}
+
+#[test]
+fn a_dashboard_that_consumes_every_key_keeps_t_and_ctrl_t() {
+    let keys = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let mut r = AppRenderer::new();
+    register(&mut r, Box::new(ConsumeAllDashboard { keys: keys.clone() }));
+    r.current_id = IdArray::new();
+    r.current_id.push(0);
+    // A second tab, so Ctrl+Tab has somewhere to go.
+    r.tabs.push(sicompass::app_state::TabSnapshot::nav_only(
+        r.current_id.clone(),
+        String::new(),
+    ));
+    r.tab_timelines.push(sicompass::app_state::Timeline::new());
+    r.tab_mru.push(1);
+    sicompass::handlers::enter_dashboard_for_active(&mut r);
+    assert_eq!(r.coordinate, Coordinate::Dashboard);
+
+    press(&mut r, Keycode::T);
+    press_ctrl(&mut r, Keycode::T);
+    assert_eq!(r.coordinate, Coordinate::Dashboard);
+    assert_eq!(r.tabs.len(), 2, "Ctrl+T belongs to the program");
+    assert_eq!(keys.lock().unwrap().len(), 2, "both reached the provider");
+
+    press_ctrl(&mut r, Keycode::Tab);
+    assert_eq!(
+        r.coordinate,
+        Coordinate::TabSwitcher,
+        "no program can tell Ctrl+Tab from Tab, so the app keeps it"
+    );
+    assert_eq!(keys.lock().unwrap().len(), 2, "Ctrl+Tab was not forwarded");
+}
+
+/// An image dashboard.
+struct ImageDashboard;
+impl Provider for ImageDashboard {
+    fn name(&self) -> &str {
+        "imagedash"
+    }
+    fn fetch(&mut self) -> Vec<FfonElement> {
+        vec![FfonElement::new_str("x")]
+    }
+    fn dashboard_image_path(&self) -> Option<&str> {
+        Some("asset:imagedash/chart.png")
+    }
+}
+
+#[test]
+fn an_image_dashboard_round_trips_through_the_switcher() {
+    let mut h = Harness::new();
+    press_ctrl(h.r(), Keycode::T); // tab 1
+    let r = h.r();
+    // Put the image provider in front of tab 1's file browser.
+    r.providers.insert(0, Box::new(ImageDashboard));
+    r.ffon.insert(0, FfonElement::new_obj("imagedash"));
+    r.current_id = IdArray::new();
+    r.current_id.push(0);
+    sicompass::handlers::enter_dashboard_for_active(r);
+    assert_eq!(r.coordinate, Coordinate::Dashboard);
+
+    press(r, Keycode::T);
+    assert_eq!(
+        r.coordinate,
+        Coordinate::TabSwitcher,
+        "`t` opens the switcher"
+    );
+    type_text(r, "t");
+    assert!(r.input_buffer.is_empty());
+    press_escape(r);
+    assert_eq!(r.coordinate, Coordinate::Dashboard);
+
+    press_ctrl(r, Keycode::Tab);
+    sicompass::handlers::handle_tab_switcher_commit(r);
+    assert_eq!(r.active_tab, 0);
+    assert_eq!(r.coordinate, Coordinate::General);
+    assert!(r.dashboard_image_path.is_empty());
+
+    press_ctrl(r, Keycode::Tab);
+    sicompass::handlers::handle_tab_switcher_commit(r);
+    assert_eq!(r.active_tab, 1);
+    assert_eq!(r.coordinate, Coordinate::Dashboard);
+    assert_eq!(r.dashboard_image_path, "asset:imagedash/chart.png");
+}
+
+#[test]
+fn ctrl_tab_from_search_cancels_the_search_first() {
+    let mut h = Harness::new();
+    press_ctrl(h.r(), Keycode::T);
+    press_tab(h.r());
+    assert_eq!(h.renderer.coordinate, Coordinate::SimpleSearch);
+    type_text(h.r(), "beta");
+
+    press_ctrl(h.r(), Keycode::Tab);
+    assert_eq!(h.renderer.coordinate, Coordinate::TabSwitcher);
+    press_escape(h.r());
+    assert_eq!(
+        h.renderer.coordinate,
+        Coordinate::General,
+        "the search was cancelled, not parked"
+    );
+}
+
+#[test]
+fn ctrl_t_from_insert_commits_the_edit() {
+    let mut h = Harness::new();
+    let fb = h.provider_idx("filebrowser").unwrap();
+    navigate_to_provider(h.r(), fb);
+    press_right(h.r());
+    let idx = h
+        .renderer
+        .total_list
+        .iter()
+        .position(|i| i.label.contains("alpha.txt"))
+        .expect("alpha.txt in listing");
+    let cur = h.renderer.list_index;
+    for _ in 0..idx.saturating_sub(cur) {
+        press_down(h.r());
+    }
+    for _ in 0..cur.saturating_sub(idx) {
+        press_up(h.r());
+    }
+    press(h.r(), Keycode::I);
+    assert_eq!(h.renderer.coordinate, Coordinate::Insert);
+    type_text(h.r(), "x");
+
+    press_ctrl(h.r(), Keycode::T);
+    assert_eq!(h.renderer.tabs.len(), 2);
+    assert_eq!(h.renderer.coordinate, Coordinate::General);
+    let root = h.tmp.path();
+    assert!(
+        !root.join("alpha.txt").exists(),
+        "the rename was committed, not discarded"
+    );
+    let renamed = std::fs::read_dir(root)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .any(|e| e.file_name().to_string_lossy().contains('x'));
+    assert!(renamed);
 }

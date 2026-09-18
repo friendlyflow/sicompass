@@ -198,7 +198,8 @@ The last three start out off, because each drives a tool you may not have. Turn
 them on in Settings. They use your own `git`, shell and `claude`, with your own
 config and credentials. There is no shared project root, you point each one at
 the folder you want, so one repository across all four is four tabs you move
-between with ctrl+tab.
+between with ctrl+tab. The tab keys work from anywhere, a board or a full screen
+program included, and each tab comes back the way you left it.
 
 ## Community
 

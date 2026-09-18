@@ -80,6 +80,47 @@ const ALL_MODES: &[Coordinate] = &[
     Coordinate::TabSwitcher,
 ];
 
+// Tab management (Ctrl+T, Ctrl+Shift+T, Ctrl+1..9): every mode except the two
+// tab overlays themselves. `handlers::settle_mode_for_tab_action` first brings a
+// transient mode back to rest, so the tab being left keeps a mode it can return
+// to (General, or its dashboard).
+const TAB_MODES: &[Coordinate] = &[
+    Coordinate::General,
+    Coordinate::Insert,
+    Coordinate::Normal,
+    Coordinate::Visual,
+    Coordinate::SimpleSearch,
+    Coordinate::ExtendedSearch,
+    Coordinate::Command,
+    Coordinate::Scroll,
+    Coordinate::ScrollSearch,
+    Coordinate::ScrollPrefixSearch,
+    Coordinate::InputSearch,
+    Coordinate::Dashboard,
+    Coordinate::Meta,
+    Coordinate::TimelineView,
+];
+
+// Ctrl+Tab / Ctrl+Shift+Tab: `TAB_MODES` plus the switcher they open, so repeated
+// taps keep walking it.
+const TAB_CYCLE_MODES: &[Coordinate] = &[
+    Coordinate::General,
+    Coordinate::Insert,
+    Coordinate::Normal,
+    Coordinate::Visual,
+    Coordinate::SimpleSearch,
+    Coordinate::ExtendedSearch,
+    Coordinate::Command,
+    Coordinate::Scroll,
+    Coordinate::ScrollSearch,
+    Coordinate::ScrollPrefixSearch,
+    Coordinate::InputSearch,
+    Coordinate::Dashboard,
+    Coordinate::Meta,
+    Coordinate::TimelineView,
+    Coordinate::TabSwitcher,
+];
+
 // Modes where Undo/Redo are active
 const UNDO_MODES_ALL: &[Coordinate] = &[
     Coordinate::General,
@@ -2023,7 +2064,7 @@ pub static SHORTCUTS: &[Shortcut] = &[
         key2: None,
         ctrl: true,
         shift: false,
-        modes: GENERAL,
+        modes: TAB_MODES,
         label: "Ctrl+T New tab",
         is_available: always,
         handle: handlers::handle_tab_new,
@@ -2033,7 +2074,7 @@ pub static SHORTCUTS: &[Shortcut] = &[
         key2: None,
         ctrl: true,
         shift: true,
-        modes: GENERAL,
+        modes: TAB_MODES,
         label: "Ctrl+Shift+T Close tab",
         is_available: more_than_one_tab,
         handle: handlers::handle_tab_close,
@@ -2058,7 +2099,7 @@ pub static SHORTCUTS: &[Shortcut] = &[
         key2: None,
         ctrl: true,
         shift: false,
-        modes: &[Coordinate::General, Coordinate::TabSwitcher],
+        modes: TAB_CYCLE_MODES,
         label: "Ctrl+Tab Next tab",
         is_available: more_than_one_tab,
         handle: handlers::handle_ctrl_tab,
@@ -2068,7 +2109,7 @@ pub static SHORTCUTS: &[Shortcut] = &[
         key2: None,
         ctrl: true,
         shift: true,
-        modes: &[Coordinate::General, Coordinate::TabSwitcher],
+        modes: TAB_CYCLE_MODES,
         label: "Ctrl+Shift+Tab Prev tab",
         is_available: more_than_one_tab,
         handle: handlers::handle_ctrl_shift_tab,
@@ -2080,7 +2121,7 @@ pub static SHORTCUTS: &[Shortcut] = &[
         key2: None,
         ctrl: false,
         shift: false,
-        modes: GENERAL,
+        modes: &[Coordinate::General, Coordinate::Dashboard],
         label: "t      Switch tab",
         is_available: always,
         handle: handlers::handle_t_tab_switcher,
@@ -2102,7 +2143,7 @@ pub static SHORTCUTS: &[Shortcut] = &[
         key2: None,
         ctrl: true,
         shift: false,
-        modes: GENERAL,
+        modes: TAB_MODES,
         label: "",
         is_available: always,
         handle: handlers::handle_tab_select_1,
@@ -2112,7 +2153,7 @@ pub static SHORTCUTS: &[Shortcut] = &[
         key2: None,
         ctrl: true,
         shift: false,
-        modes: GENERAL,
+        modes: TAB_MODES,
         label: "",
         is_available: always,
         handle: handlers::handle_tab_select_2,
@@ -2122,7 +2163,7 @@ pub static SHORTCUTS: &[Shortcut] = &[
         key2: None,
         ctrl: true,
         shift: false,
-        modes: GENERAL,
+        modes: TAB_MODES,
         label: "",
         is_available: always,
         handle: handlers::handle_tab_select_3,
@@ -2132,7 +2173,7 @@ pub static SHORTCUTS: &[Shortcut] = &[
         key2: None,
         ctrl: true,
         shift: false,
-        modes: GENERAL,
+        modes: TAB_MODES,
         label: "",
         is_available: always,
         handle: handlers::handle_tab_select_4,
@@ -2142,7 +2183,7 @@ pub static SHORTCUTS: &[Shortcut] = &[
         key2: None,
         ctrl: true,
         shift: false,
-        modes: GENERAL,
+        modes: TAB_MODES,
         label: "",
         is_available: always,
         handle: handlers::handle_tab_select_5,
@@ -2152,7 +2193,7 @@ pub static SHORTCUTS: &[Shortcut] = &[
         key2: None,
         ctrl: true,
         shift: false,
-        modes: GENERAL,
+        modes: TAB_MODES,
         label: "",
         is_available: always,
         handle: handlers::handle_tab_select_6,
@@ -2162,7 +2203,7 @@ pub static SHORTCUTS: &[Shortcut] = &[
         key2: None,
         ctrl: true,
         shift: false,
-        modes: GENERAL,
+        modes: TAB_MODES,
         label: "",
         is_available: always,
         handle: handlers::handle_tab_select_7,
@@ -2172,7 +2213,7 @@ pub static SHORTCUTS: &[Shortcut] = &[
         key2: None,
         ctrl: true,
         shift: false,
-        modes: GENERAL,
+        modes: TAB_MODES,
         label: "",
         is_available: always,
         handle: handlers::handle_tab_select_8,
@@ -2182,7 +2223,7 @@ pub static SHORTCUTS: &[Shortcut] = &[
         key2: None,
         ctrl: true,
         shift: false,
-        modes: GENERAL,
+        modes: TAB_MODES,
         label: "",
         is_available: always,
         handle: handlers::handle_tab_select_9,
@@ -2333,6 +2374,14 @@ pub fn dispatch_key(r: &mut AppRenderer, keycode: Option<Keycode>, keymod: Mod) 
                 return false;
             }
         }
+        // Tab keys no terminal program can tell apart from something else
+        // (Ctrl+Tab arrives as Tab, Ctrl+digit as the digit) and the Ctrl+Shift
+        // chords, which belong to the app here as Ctrl+Shift+V does above.
+        if is_reserved_dashboard_tab_key(k, ctrl, shift, alt) {
+            dispatch_table(r, k, ctrl, shift);
+            return false;
+        }
+        let mut consumed = false;
         if let Some(keysym) = sdl_keycode_to_dashboard_keysym(k) {
             let key = sicompass_sdk::DashboardKey {
                 keysym,
@@ -2341,7 +2390,8 @@ pub fn dispatch_key(r: &mut AppRenderer, keycode: Option<Keycode>, keymod: Mod) 
                 alt,
             };
             if let Some(p) = crate::provider::get_active_provider(r) {
-                if p.dashboard_key(key) {
+                consumed = p.dashboard_key(key);
+                if consumed {
                     // Restart the blink, the way every insert-mode handler does.
                     // A free-running caret can be in its dark half when the key
                     // lands, so the bar appears late or not at all and the whole
@@ -2350,6 +2400,14 @@ pub fn dispatch_key(r: &mut AppRenderer, keycode: Option<Keycode>, keymod: Mod) 
                     r.needs_redraw = true;
                 }
             }
+        }
+        // Ctrl+T and `t` go to the program first: vim and readline use Ctrl+T,
+        // and the terminal consumes every key. Only a dashboard that declines
+        // them (the board) hands them back. A plain `t` is text while the
+        // dashboard shows a caret, even though the provider takes text through
+        // `dashboard_text` and so declines the key itself.
+        if !consumed && k == Keycode::T && !shift && !alt && (ctrl || !r.dashboard_has_caret) {
+            dispatch_table(r, k, ctrl, shift);
         }
         return false;
     }
@@ -2396,6 +2454,13 @@ pub fn dispatch_key(r: &mut AppRenderer, keycode: Option<Keycode>, keymod: Mod) 
         }
     }
 
+    dispatch_table(r, k, ctrl, shift);
+    false
+}
+
+/// Run the first `SHORTCUTS` row matching the key, modifiers and current mode.
+/// Returns whether one ran.
+fn dispatch_table(r: &mut AppRenderer, k: Keycode, ctrl: bool, shift: bool) -> bool {
     for s in SHORTCUTS {
         if s.ctrl != ctrl || s.shift != shift {
             continue;
@@ -2414,9 +2479,31 @@ pub fn dispatch_key(r: &mut AppRenderer, keycode: Option<Keycode>, keymod: Mod) 
             continue;
         }
         (s.handle)(r);
-        return false;
+        return true;
     }
     false
+}
+
+/// Tab keys the app keeps inside an interactive dashboard instead of forwarding:
+/// Ctrl+Tab, Ctrl+Shift+Tab, Ctrl+Shift+T and Ctrl+1..9.
+fn is_reserved_dashboard_tab_key(k: Keycode, ctrl: bool, shift: bool, alt: bool) -> bool {
+    if !ctrl || alt {
+        return false;
+    }
+    match k {
+        Keycode::Tab => true,
+        Keycode::T => shift,
+        Keycode::_1
+        | Keycode::_2
+        | Keycode::_3
+        | Keycode::_4
+        | Keycode::_5
+        | Keycode::_6
+        | Keycode::_7
+        | Keycode::_8
+        | Keycode::_9 => !shift,
+        _ => false,
+    }
 }
 
 // ---------------------------------------------------------------------------

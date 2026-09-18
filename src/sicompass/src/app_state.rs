@@ -720,6 +720,11 @@ pub struct AppRenderer {
     /// lone Ctrl+C interrupts what's running inside. `0` means no pending
     /// first press. Reset to `0` on dashboard enter/leave.
     pub dashboard_last_ctrl_c: u64,
+    /// Whether the last interactive dashboard frame drew a text caret, i.e. the
+    /// provider is taking typed text (the board while a card is being edited).
+    /// A plain `t` the provider declines opens the tab switcher only when this
+    /// is false.
+    pub dashboard_has_caret: bool,
 
     // ---- Keypress timing (for double-tap detection) ------------------------
     pub last_keypress_time: u64,
@@ -868,6 +873,10 @@ pub struct AppRenderer {
     /// Ctrl+Tab / Ctrl+Shift+Tab (releasing Ctrl commits the highlighted tab).
     /// False for the sticky `t`-key palette (Enter commits, Escape cancels).
     pub tab_switcher_held: bool,
+    /// The mode the tab switcher and the close-tab prompt return to. Kept apart
+    /// from `previous_coordinate`, which a dashboard needs intact for its own
+    /// Escape: the switcher can open on top of one.
+    pub tab_overlay_return: Coordinate,
     /// Tab index the open `Coordinate::ConfirmCloseTab` prompt would close.
     pub pending_close_tab: Option<usize>,
     /// `Some(mode)` when the close prompt was opened from the tab switcher
@@ -924,6 +933,21 @@ pub struct TabSnapshot {
     pub providers: Vec<Box<dyn Provider>>,
     /// FFON roots parallel to `providers`. Empty for the active tab.
     pub ffon: Vec<FfonElement>,
+    /// The mode an INACTIVE tab was left in, restored when it becomes active
+    /// again, so a tab left showing its dashboard comes back showing it. `None`
+    /// means the tab is at rest: a fresh tab, one restored from disk, and the
+    /// active tab.
+    pub mode: Option<ParkedMode>,
+}
+
+/// A background tab's mode. Only rest modes are ever parked (the General
+/// family or a dashboard); `handlers::settle_mode_for_tab_action` brings any
+/// other mode to rest before a tab is left.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParkedMode {
+    pub coordinate: Coordinate,
+    pub previous_coordinate: Coordinate,
+    pub dashboard_image_path: String,
 }
 
 impl TabSnapshot {
@@ -936,6 +960,7 @@ impl TabSnapshot {
             provider_path,
             providers: Vec::new(),
             ffon: Vec::new(),
+            mode: None,
         }
     }
 }
@@ -993,6 +1018,7 @@ impl AppRenderer {
             dashboard_image_path: String::new(),
             dashboard_cell_size: (0, 0),
             dashboard_last_ctrl_c: 0,
+            dashboard_has_caret: false,
             last_keypress_time: 0,
             search_string: String::new(),
             search_origin_id: IdArray::new(),
@@ -1037,6 +1063,7 @@ impl AppRenderer {
             tab_timelines: vec![Timeline::new()],
             tab_mru: vec![0],
             tab_switcher_held: false,
+            tab_overlay_return: Coordinate::General,
             pending_close_tab: None,
             close_confirm_switcher_return: None,
             pending_close_busy: false,
@@ -1142,6 +1169,7 @@ impl AppRenderer {
         let (cp, cf) = self.detach_content();
         self.tabs[active].providers = cp;
         self.tabs[active].ffon = cf;
+        self.park_active_mode();
         // Swap in the target tab's parked content. The pending shell-return row
         // belongs to the outgoing tab's tree, so it dies with the switch rather
         // than being consumed by an Escape over here.
@@ -1152,6 +1180,48 @@ impl AppRenderer {
         self.attach_content(cp, cf);
         self.current_id = self.tabs[target].current_id.clone();
         self.list_index = self.current_id.last().unwrap_or(0);
+        self.restore_active_mode();
+    }
+
+    /// Store the active tab's mode in its snapshot, before it goes to the
+    /// background. A dashboard's provider is not told to leave: a terminal keeps
+    /// its full-screen program, the board its open card edit.
+    pub fn park_active_mode(&mut self) {
+        let a = self.active_tab;
+        self.tabs[a].mode = Some(ParkedMode {
+            coordinate: self.coordinate,
+            previous_coordinate: self.previous_coordinate,
+            dashboard_image_path: std::mem::take(&mut self.dashboard_image_path),
+        });
+        self.reset_dashboard_session();
+    }
+
+    /// Bring back the mode of the tab that just became active. Its content must
+    /// already be the live working set, because a tab at rest takes the label
+    /// its current view calls for (`handlers::rest_coordinate`).
+    pub fn restore_active_mode(&mut self) {
+        let a = self.active_tab;
+        match self.tabs[a].mode.take() {
+            Some(m) => {
+                self.coordinate = m.coordinate;
+                self.previous_coordinate = m.previous_coordinate;
+                self.dashboard_image_path = m.dashboard_image_path;
+            }
+            None => {
+                self.coordinate = crate::handlers::rest_coordinate(self);
+                self.previous_coordinate = Coordinate::General;
+                self.dashboard_image_path.clear();
+            }
+        }
+        self.reset_dashboard_session();
+    }
+
+    /// Per-visit dashboard state: the cell size (so the next frame resizes the
+    /// provider to this window) and a pending first Ctrl+C.
+    fn reset_dashboard_session(&mut self) {
+        self.dashboard_cell_size = (0, 0);
+        self.dashboard_last_ctrl_c = 0;
+        self.dashboard_has_caret = false;
     }
 
     /// Rebuild the active tab's saved provider FFON tree (for the cold-start

@@ -3801,7 +3801,7 @@ pub fn handle_escape(r: &mut AppRenderer) {
         }
         Coordinate::TabSwitcher => {
             // Cancel the switcher without changing tabs.
-            r.coordinate = r.previous_coordinate;
+            r.coordinate = r.tab_overlay_return;
             r.tab_switcher_held = false;
             r.input_buffer.clear();
             r.cursor_position = 0;
@@ -7347,6 +7347,9 @@ fn after_tab_change(r: &mut AppRenderer) {
 /// etc.). The new tab opens on the same provider as the current one (e.g. a
 /// fresh terminal if you were in the terminal) and becomes active.
 pub fn handle_tab_new(r: &mut AppRenderer) {
+    if !settle_mode_for_tab_action(r) {
+        return;
+    }
     let active = r.active_tab;
 
     // Capture the content provider names while the live set is still intact
@@ -7363,6 +7366,7 @@ pub fn handle_tab_new(r: &mut AppRenderer) {
     let (cp, cf) = r.detach_content();
     r.tabs[active].providers = cp;
     r.tabs[active].ffon = cf;
+    r.park_active_mode();
 
     // Build a fresh content-provider set mirroring the source tab and make it
     // the live working set.
@@ -7396,6 +7400,8 @@ pub fn handle_tab_new(r: &mut AppRenderer) {
     }
     r.tab_mru.insert(0, insert_at);
     r.active_tab = insert_at;
+    // A fresh tab starts at rest, on the list, whatever the source tab showed.
+    r.restore_active_mode();
     after_tab_change(r);
 }
 
@@ -7414,7 +7420,7 @@ fn active_tab_busy(r: &AppRenderer) -> bool {
 /// shell process). No-op when only one tab remains. Always asks first, busy or
 /// not: a closed tab cannot be brought back with Ctrl+Z.
 pub fn handle_tab_close(r: &mut AppRenderer) {
-    if r.tabs.len() <= 1 {
+    if r.tabs.len() <= 1 || !settle_mode_for_tab_action(r) {
         return;
     }
     let active = r.active_tab;
@@ -7442,8 +7448,8 @@ fn enter_confirm_close_tab(r: &mut AppRenderer, idx: usize) {
     r.pending_close_tab = Some(idx);
     r.pending_close_busy = tab_busy(r, idx);
     r.close_confirm_switcher_return =
-        (r.coordinate == Coordinate::TabSwitcher).then_some(r.previous_coordinate);
-    r.previous_coordinate = r.coordinate;
+        (r.coordinate == Coordinate::TabSwitcher).then_some(r.tab_overlay_return);
+    r.tab_overlay_return = r.coordinate;
     r.coordinate = Coordinate::ConfirmCloseTab;
     list::create_list_current_layer(r);
     r.list_index = list::CONFIRM_CLOSE_KILL_INDEX; // default to the close button
@@ -7466,9 +7472,9 @@ pub fn handle_enter_confirm_close_tab(r: &mut AppRenderer) {
 /// Leave the close prompt without closing anything (Cancel button or Escape).
 fn cancel_confirm_close_tab(r: &mut AppRenderer) {
     let target = r.pending_close_tab.take();
-    r.coordinate = r.previous_coordinate;
+    r.coordinate = r.tab_overlay_return;
     if let Some(ret) = r.close_confirm_switcher_return.take() {
-        r.previous_coordinate = ret;
+        r.tab_overlay_return = ret;
         refresh_tab_switcher(r, 1);
         if let Some(row) = target.and_then(|t| tab_switcher_row_of(r, t)) {
             r.list_index = row;
@@ -7493,10 +7499,10 @@ fn confirm_close_tab(r: &mut AppRenderer) {
         return;
     };
     r.pending_close_tab = None;
-    r.coordinate = r.previous_coordinate;
+    r.coordinate = r.tab_overlay_return;
     match r.close_confirm_switcher_return.take() {
         Some(ret) => {
-            r.previous_coordinate = ret;
+            r.tab_overlay_return = ret;
             refresh_tab_switcher(r, 1);
             let row = tab_switcher_row_of(r, idx).unwrap_or(1);
             close_tab_in_switcher(r, idx, row);
@@ -7546,6 +7552,81 @@ fn remove_tab(r: &mut AppRenderer, idx: usize) {
         r.attach_content(np, nf);
         r.current_id = r.tabs[a].current_id.clone();
         r.list_index = r.current_id.last().unwrap_or(0);
+        // The neighbour comes back in its own mode. When the tab switcher stays
+        // open over it, that mode becomes what the switcher returns to.
+        let overlay = r.coordinate;
+        r.restore_active_mode();
+        if overlay == Coordinate::TabSwitcher {
+            r.tab_overlay_return = r.coordinate;
+            r.coordinate = overlay;
+        }
+    }
+}
+
+/// Bring the current mode to rest before a tab action (switch, new, close), so
+/// the tab being left is parked in a mode it can come back to. Returns `false`
+/// when it cannot, and the caller then does nothing.
+///
+/// - The General family and a dashboard are already at rest. The tab overlays
+///   are the tab action's own modes.
+/// - An edit (Insert, Normal, Visual, the in-field search) is committed, the way
+///   Enter commits it, unless committing would send something (see
+///   [`commit_would_send`]). Then the key is ignored and the edit stays open.
+/// - Every other mode (searches, scroll, command palette, meta, timeline) runs
+///   its own Escape, so each keeps exactly one way out.
+pub fn settle_mode_for_tab_action(r: &mut AppRenderer) -> bool {
+    let editing = matches!(
+        r.coordinate.base(),
+        Coordinate::Insert | Coordinate::Normal | Coordinate::Visual | Coordinate::InputSearch
+    ) || r.coordinate == Coordinate::SecondCommand;
+    if editing && commit_would_send(r) {
+        return false;
+    }
+    // Normal and Visual step down to Insert and InputSearch back up to it before
+    // the commit, so a few rounds are needed. The bound only guards against a
+    // mode whose Escape leads nowhere.
+    for _ in 0..4 {
+        match r.coordinate.base() {
+            Coordinate::General
+            | Coordinate::Dashboard
+            | Coordinate::TabSwitcher
+            | Coordinate::ConfirmCloseTab => return true,
+            Coordinate::Insert => handle_enter_insert(r),
+            _ => {
+                crate::shortcuts::dispatch_key(
+                    r,
+                    Some(sdl3::keyboard::Keycode::Escape),
+                    sdl3::keyboard::Mod::NOMOD,
+                );
+            }
+        }
+    }
+    matches!(
+        r.coordinate.base(),
+        Coordinate::General | Coordinate::Dashboard
+    )
+}
+
+/// Whether committing the open edit would send or run something rather than
+/// store it: a terminal or claude prompt runs, and the chat client sends a
+/// message or executes a pending command. Ordinary fields just store.
+fn commit_would_send(r: &AppRenderer) -> bool {
+    use sicompass_sdk::ffon::{FfonElement, get_ffon_at_id};
+    if crate::provider::get_active_provider_ref(r).is_some_and(|p| p.name() == "chatclient") {
+        return true;
+    }
+    let elem = r
+        .insert_session
+        .as_ref()
+        .map(|s| s.original_element.clone())
+        .or_else(|| {
+            let arr = get_ffon_at_id(&r.ffon, &r.current_id)?;
+            arr.get(r.current_id.last()?).cloned()
+        });
+    match elem {
+        Some(FfonElement::Str(text)) => cursor_on_live_input_slot(r, &text, false),
+        Some(FfonElement::Obj(o)) => cursor_on_live_input_slot(r, &o.key, true),
+        None => false,
     }
 }
 
@@ -7554,7 +7635,7 @@ fn remove_tab(r: &mut AppRenderer, idx: usize) {
 /// `t` entry and the held Ctrl+Tab entry. Announces the mode plus the
 /// highlighted tab (mirrors `handle_colon`).
 fn open_tab_switcher(r: &mut AppRenderer, held: bool, start_index: usize) {
-    r.previous_coordinate = r.coordinate;
+    r.tab_overlay_return = r.coordinate;
     r.coordinate = Coordinate::TabSwitcher;
     r.tab_switcher_held = held;
     // Fresh, unfiltered search each time the overlay opens.
@@ -7575,7 +7656,7 @@ fn open_tab_switcher(r: &mut AppRenderer, held: bool, start_index: usize) {
 /// button, so the highlight starts on row 1, the current tab (`tab_mru[0]`).
 /// Enter confirms, Escape cancels. Works with a single tab too.
 pub fn handle_t_tab_switcher(r: &mut AppRenderer) {
-    if !r.coordinate.is_general() {
+    if !r.coordinate.is_general() && r.coordinate != Coordinate::Dashboard {
         return;
     }
     open_tab_switcher(r, false, 1);
@@ -7589,6 +7670,9 @@ pub fn handle_ctrl_tab(r: &mut AppRenderer) {
         return;
     }
     if r.coordinate != Coordinate::TabSwitcher {
+        if !settle_mode_for_tab_action(r) {
+            return;
+        }
         // Row 0 is the new-tab button and row 1 the current tab.
         open_tab_switcher(r, true, 2);
         return;
@@ -7611,6 +7695,9 @@ pub fn handle_ctrl_shift_tab(r: &mut AppRenderer) {
         return;
     }
     if r.coordinate != Coordinate::TabSwitcher {
+        if !settle_mode_for_tab_action(r) {
+            return;
+        }
         // `usize::MAX` clamps to the last item in `open_tab_switcher`.
         open_tab_switcher(r, true, usize::MAX);
         return;
@@ -7635,7 +7722,7 @@ fn confirm_tab_switcher(r: &mut AppRenderer) {
         Some(it) => (it.id.last().is_none(), it.id.last()),
         None => (false, None),
     };
-    r.coordinate = r.previous_coordinate;
+    r.coordinate = r.tab_overlay_return;
     r.tab_switcher_held = false;
     r.input_buffer.clear();
     r.cursor_position = 0;
@@ -7745,7 +7832,7 @@ pub fn handle_tab_switcher_commit(r: &mut AppRenderer) {
 }
 
 fn handle_tab_select_n(r: &mut AppRenderer, n: usize) {
-    if n >= r.tabs.len() || n == r.active_tab {
+    if n >= r.tabs.len() || n == r.active_tab || !settle_mode_for_tab_action(r) {
         return;
     }
     r.switch_to_tab(n);
