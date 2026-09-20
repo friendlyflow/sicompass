@@ -3,7 +3,7 @@
 cargo-dist parses this file and uses the matching version's section as the
 GitHub Release body, so entries here are what users read on the download page.
 
-## Unreleased
+## 0.1.21
 
 ### Claude keeps your sessions
 

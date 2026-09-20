@@ -4421,7 +4421,7 @@ checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
 
 [[package]]
 name = "sicompass"
-version = "0.1.20"
+version = "0.1.21"
 dependencies = [
  "accesskit",
  "accesskit_macos",
@@ -4475,7 +4475,7 @@ dependencies = [
 
 [[package]]
 name = "sicompass-builtins"
-version = "0.1.20"
+version = "0.1.21"
 dependencies = [
  "sicompass-chatclient",
  "sicompass-claude",
@@ -4496,7 +4496,7 @@ dependencies = [
 
 [[package]]
 name = "sicompass-chatclient"
-version = "0.1.20"
+version = "0.1.21"
 dependencies = [
  "async-trait",
  "reqwest",
@@ -4510,7 +4510,7 @@ dependencies = [
 
 [[package]]
 name = "sicompass-claude"
-version = "0.1.20"
+version = "0.1.21"
 dependencies = [
  "natord",
  "serde",
@@ -4522,7 +4522,7 @@ dependencies = [
 
 [[package]]
 name = "sicompass-emailclient"
-version = "0.1.20"
+version = "0.1.21"
 dependencies = [
  "async-imap",
  "async-native-tls",
@@ -4543,7 +4543,7 @@ dependencies = [
 
 [[package]]
 name = "sicompass-filebrowser"
-version = "0.1.20"
+version = "0.1.21"
 dependencies = [
  "async-trait",
  "libc",
@@ -4555,7 +4555,7 @@ dependencies = [
 
 [[package]]
 name = "sicompass-gitclient"
-version = "0.1.20"
+version = "0.1.21"
 dependencies = [
  "async-trait",
  "natord",
@@ -4565,7 +4565,7 @@ dependencies = [
 
 [[package]]
 name = "sicompass-notes"
-version = "0.1.20"
+version = "0.1.21"
 dependencies = [
  "async-trait",
  "serde",
@@ -4577,7 +4577,7 @@ dependencies = [
 
 [[package]]
 name = "sicompass-project-management"
-version = "0.1.20"
+version = "0.1.21"
 dependencies = [
  "async-trait",
  "serde",
@@ -4588,7 +4588,7 @@ dependencies = [
 
 [[package]]
 name = "sicompass-remote"
-version = "0.1.20"
+version = "0.1.21"
 dependencies = [
  "reqwest",
  "serde_json",
@@ -4599,7 +4599,7 @@ dependencies = [
 
 [[package]]
 name = "sicompass-sales-demo"
-version = "0.1.20"
+version = "0.1.21"
 dependencies = [
  "async-trait",
  "serde",
@@ -4631,7 +4631,7 @@ dependencies = [
 
 [[package]]
 name = "sicompass-settings"
-version = "0.1.20"
+version = "0.1.21"
 dependencies = [
  "async-trait",
  "base64 0.23.1",
@@ -4647,14 +4647,14 @@ dependencies = [
 
 [[package]]
 name = "sicompass-shell"
-version = "0.1.20"
+version = "0.1.21"
 dependencies = [
  "portable-pty",
 ]
 
 [[package]]
 name = "sicompass-terminal"
-version = "0.1.20"
+version = "0.1.21"
 dependencies = [
  "natord",
  "sicompass-sdk",
@@ -4665,7 +4665,7 @@ dependencies = [
 
 [[package]]
 name = "sicompass-text-editor"
-version = "0.1.20"
+version = "0.1.21"
 dependencies = [
  "async-trait",
  "serde_json",
@@ -4676,7 +4676,7 @@ dependencies = [
 
 [[package]]
 name = "sicompass-tutorial"
-version = "0.1.20"
+version = "0.1.21"
 dependencies = [
  "serde_json",
  "sicompass-sdk",
@@ -4685,7 +4685,7 @@ dependencies = [
 
 [[package]]
 name = "sicompass-updater"
-version = "0.1.20"
+version = "0.1.21"
 dependencies = [
  "base64 0.23.1",
  "ed25519-dalek",
@@ -4705,7 +4705,7 @@ dependencies = [
 
 [[package]]
 name = "sicompass-webbrowser"
-version = "0.1.20"
+version = "0.1.21"
 dependencies = [
  "chromiumoxide",
  "futures",
