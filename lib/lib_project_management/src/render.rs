@@ -384,7 +384,11 @@ pub fn render(board: &Board, view: &View<'_>, cols: u16, rows: u16) -> Dashboard
         cursor_style: DashboardCursor::Bar,
     };
 
-    if board.columns.is_empty() {
+    // `visible_len`, not `columns.len()`: a board whose only remaining column is
+    // the archive draws nothing at all otherwise -- `layout(0, ..)` reports no
+    // visible columns, the loop below never runs, and the screen is blank with no
+    // line saying why.
+    if board.visible_len() == 0 {
         put(
             &mut frame,
             MARGIN,
@@ -397,9 +401,12 @@ pub fn render(board: &Board, view: &View<'_>, cols: u16, rows: u16) -> Dashboard
         return frame;
     }
 
-    let lay = layout(board.columns.len(), view.focus.col, cols);
+    // The archive is pinned last, so drawing the first `visible_len` columns is
+    // the whole of hiding it -- no per-column test, and every index below is a
+    // real column.
+    let lay = layout(board.visible_len(), view.focus.col, cols);
 
-    for index in lay.first..(lay.first + lay.visible).min(board.columns.len()) {
+    for index in lay.first..(lay.first + lay.visible).min(board.visible_len()) {
         let col = &board.columns[index];
         let x = lay.x_of(index);
         let width = lay.width_of(index);

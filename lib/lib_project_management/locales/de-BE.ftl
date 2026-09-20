@@ -12,6 +12,7 @@ pm-cmd-move-up = nach oben verschieben
 pm-cmd-move-down = nach unten verschieben
 pm-cmd-move-left = in die vorige spalte verschieben
 pm-cmd-move-right = in die nächste spalte verschieben
+pm-cmd-archive-card = karte archivieren
 
 pm-error-unreadable = ihr board konnte nicht gelesen werden, daher wurde nichts gespeichert, die dateien auf der festplatte bleiben unberührt
 pm-error-save = ihr board konnte nicht gespeichert werden
@@ -20,6 +21,10 @@ pm-error-nothing-to-paste = es wurde noch nichts kopiert
 
 pm-board-empty-slot = drücken Sie strg+a für eine erste karte
 pm-board-no-columns = noch keine spalten, fügen Sie eine in der liste mit strg+a hinzu
+
+# Der Titel der Archivspalte bei ihrer Erstellung. Nur ein Name: die Spalte
+# wird über ihre id erkannt, Umbenennen ändert daran nichts.
+pm-archive-title = Archiv
 
 pm-say-card = { $column }, karte { $index } von { $total }, { $text }
 pm-say-column-empty = spalte { $index } von { $total }, { $title }, leer
@@ -30,6 +35,9 @@ pm-say-deleted = gelöscht, { $text }
 pm-say-copied = kopiert, { $text }
 pm-say-cut = ausgeschnitten, { $text }
 pm-say-pasted = eingefügt, { $text }
+pm-say-archived = archiviert, { $text }
+pm-say-nothing-to-archive = nichts zu archivieren, setzen Sie den cursor zuerst auf eine karte
+pm-say-already-archived = bereits archiviert
 pm-say-undone = rückgängig gemacht, { $what }
 pm-say-redone = wiederhergestellt, { $what }
 pm-say-edge = nicht weiter
@@ -38,3 +46,4 @@ pm-op-add-card = karte hinzufügen
 pm-op-delete-card = karte löschen
 pm-op-rename-card = karte umbenennen
 pm-op-move-card = karte verschieben
+pm-op-archive-card = karte archivieren

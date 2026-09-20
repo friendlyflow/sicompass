@@ -19311,3 +19311,231 @@ fn ctrl_t_from_insert_commits_the_edit() {
         .any(|e| e.file_name().to_string_lossy().contains('x'));
     assert!(renamed);
 }
+
+// ---------------------------------------------------------------------------
+// The colon palette from inside an interactive dashboard
+//
+// The board is the first provider to want a command while its dashboard owns
+// the screen. `dispatch_key` forwards every key to an interactive dashboard
+// before the SHORTCUTS table is consulted, so `:` was inert there; and
+// `handle_colon` saves the mode it was called from into the single
+// `previous_coordinate` slot that `handle_dashboard_leave` also reads.
+// ---------------------------------------------------------------------------
+
+/// Everything the board actually draws.
+///
+/// `screen` reads `total_list`, which is the list surface and is empty while a
+/// dashboard owns the display -- asserting against it here would pass whatever
+/// the board showed.
+fn board_screen(r: &mut AppRenderer) -> String {
+    let frame = sicompass::provider::get_active_provider(r)
+        .expect("an active provider")
+        .dashboard_render(120, 40);
+    (0..frame.rows)
+        .map(|y| {
+            (0..frame.cols)
+                .map(|x| frame.cell(x, y).ch)
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// The command names the palette is currently offering.
+fn palette_commands(r: &AppRenderer) -> Vec<String> {
+    r.total_list
+        .iter()
+        .filter_map(|i| i.nav_path.clone())
+        .collect()
+}
+
+/// Put the palette cursor on `cmd`.
+fn focus_command(r: &mut AppRenderer, cmd: &str) {
+    let at = palette_commands(r)
+        .iter()
+        .position(|c| c == cmd)
+        .unwrap_or_else(|| panic!("{cmd} not in palette: {:?}", palette_commands(r)));
+    while r.list_index > at {
+        press_up(r);
+    }
+    while r.list_index < at {
+        press_down(r);
+    }
+}
+
+#[test]
+fn colon_opens_the_command_palette_from_the_board() {
+    let (mut r, _tmp) = board_in_dashboard();
+    press_colon(&mut r);
+    assert_eq!(r.coordinate, Coordinate::Command, "{:?}", screen(&r));
+    assert!(
+        palette_commands(&r).contains(&"archive card".to_owned()),
+        "got {:?}",
+        palette_commands(&r)
+    );
+}
+
+#[test]
+fn the_board_palette_offers_only_the_archive() {
+    // The four move verbs act on the list cursor, which is stale on the board,
+    // and each returns an element on success, which would splice a row into the
+    // tree and drop the app out of Dashboard without `leave_dashboard` running.
+    let (mut r, _tmp) = board_in_dashboard();
+    press_colon(&mut r);
+    assert_eq!(palette_commands(&r), vec!["archive card".to_owned()]);
+}
+
+#[test]
+fn colon_is_a_literal_character_while_a_card_is_being_edited() {
+    let (mut r, _tmp) = board_in_dashboard();
+    press(&mut r, Keycode::O); // open a new card
+    // Stand in for the render pass: `view.rs` sets this from the frame's cursor,
+    // and the board only asks for one while its own insert mode is open.
+    r.dashboard_has_caret = true;
+    press_colon(&mut r);
+    assert_eq!(
+        r.coordinate,
+        Coordinate::Dashboard,
+        "a colon typed into a card must stay a colon"
+    );
+}
+
+#[test]
+fn escape_from_the_board_palette_returns_to_the_board() {
+    let (mut r, _tmp) = board_in_dashboard();
+    press_colon(&mut r);
+    press_escape(&mut r);
+    assert_eq!(r.coordinate, Coordinate::Dashboard);
+}
+
+#[test]
+fn escape_still_leaves_the_board_after_a_cancelled_palette() {
+    // `handle_colon` writes `previous_coordinate = Dashboard`, and
+    // `handle_dashboard_leave` reads that same slot. Without the reset in the
+    // Command escape arm, Escape put the user straight back on the board and
+    // there was no way off it.
+    let (mut r, _tmp) = board_in_dashboard();
+    press_colon(&mut r);
+    press_escape(&mut r); // out of the palette
+    press_escape(&mut r); // and off the board
+    // Escape on a board is forwarded to the provider, which queues a
+    // `DashboardRequest::Leave`; only the event pump acts on it.
+    pump_tick(&mut r);
+    assert_ne!(r.coordinate, Coordinate::Dashboard);
+}
+
+#[test]
+fn double_ctrl_c_still_leaves_the_board_after_a_cancelled_palette() {
+    // The documented escape hatch goes through `handle_dashboard_leave` too, so
+    // it died with the same bug.
+    let (mut r, _tmp) = board_in_dashboard();
+    press_colon(&mut r);
+    press_escape(&mut r);
+    press_ctrl(&mut r, Keycode::C);
+    press_ctrl(&mut r, Keycode::C);
+    assert_ne!(r.coordinate, Coordinate::Dashboard);
+}
+
+#[test]
+fn archiving_from_the_board_hides_the_card_and_keeps_the_board_up() {
+    let (mut r, _tmp) = board_in_dashboard();
+    add_card_on_board(&mut r, "ship it");
+    press_colon(&mut r);
+    focus_command(&mut r, "archive card");
+    press_enter(&mut r);
+    pump_tick(&mut r);
+
+    assert_eq!(
+        r.coordinate,
+        Coordinate::Dashboard,
+        "the palette must hand the board back"
+    );
+    let drawn = board_screen(&mut r);
+    assert!(
+        !drawn.contains("ship it"),
+        "the archived card must be off the board: {drawn}"
+    );
+    assert!(
+        !drawn.contains("Archive"),
+        "and the archive itself must not be drawn: {drawn}"
+    );
+    assert!(
+        drawn.contains("To do"),
+        "the real column is still there: {drawn}"
+    );
+}
+
+#[test]
+fn the_archive_is_visible_in_the_list_after_archiving_from_the_board() {
+    let (mut r, _tmp) = board_in_dashboard();
+    add_card_on_board(&mut r, "ship it");
+    press_colon(&mut r);
+    focus_command(&mut r, "archive card");
+    press_enter(&mut r);
+    pump_tick(&mut r);
+
+    sicompass::handlers::handle_dashboard_leave(&mut r);
+    while r.current_id.depth() > 2 {
+        press_left(&mut r);
+    }
+    sicompass::provider::refresh_current_directory(&mut r);
+    sicompass::list::create_list_current_layer(&mut r);
+    assert!(
+        screen(&r).iter().any(|l| l.contains("Archive")),
+        "the archive belongs in general mode, screen: {:?}",
+        screen(&r)
+    );
+}
+
+#[test]
+fn ctrl_z_brings_an_archived_card_back() {
+    let (mut r, _tmp) = board_in_dashboard();
+    add_card_on_board(&mut r, "ship it");
+    press_colon(&mut r);
+    focus_command(&mut r, "archive card");
+    press_enter(&mut r);
+    pump_tick(&mut r);
+    assert!(
+        matches!(
+            r.active_timeline().entries.last(),
+            Some(sicompass_sdk::timeline::TimelineEntry::ProviderOp { command, .. })
+                if command == "archive-card"
+        ),
+        "the archive should be on the tab's timeline, got {:?}",
+        r.active_timeline().entries.last()
+    );
+
+    press_ctrl(&mut r, Keycode::Z);
+    settle_provider_ops(&mut r);
+    let drawn = board_screen(&mut r);
+    assert!(
+        drawn.contains("ship it"),
+        "ctrl+z should have put the card back on the board: {drawn}"
+    );
+}
+
+#[test]
+fn archiving_from_the_list_keeps_the_user_in_general_mode() {
+    let (mut r, _tmp) = board_in_dashboard();
+    add_card_on_board(&mut r, "ship it");
+    sicompass::handlers::handle_dashboard_leave(&mut r);
+    while r.current_id.depth() > 2 {
+        press_left(&mut r);
+    }
+    sicompass::provider::refresh_current_directory(&mut r);
+    sicompass::list::create_list_current_layer(&mut r);
+    press_right(&mut r); // into the column, onto the card
+
+    press_colon(&mut r);
+    assert_eq!(r.coordinate, Coordinate::Command);
+    focus_command(&mut r, "archive card");
+    press_enter(&mut r);
+    pump_tick(&mut r);
+
+    assert_eq!(r.coordinate, Coordinate::General);
+    assert!(
+        !screen(&r).iter().any(|l| l.contains("ship it")),
+        "screen: {:?}",
+        screen(&r)
+    );
+}

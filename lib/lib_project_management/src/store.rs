@@ -2,7 +2,7 @@
 //!
 //! ```text
 //! projectmanagement/
-//! |-- .listmeta        {"children":[{"n":1,"id":1},{"n":2,"id":4}]}
+//! |-- .listmeta        {"children":[{"n":1,"id":1},{"n":2,"id":4,"archive":true}]}
 //! |-- 0001             "To do"                    a column's own file
 //! |-- 0001.d/                                     its cards
 //! |   |-- .listmeta    {"children":[{"n":1,"id":2},{"n":2,"id":3}]}
@@ -44,6 +44,19 @@ pub struct ChildMeta {
     /// 1-based position, matching the file name.
     pub n: usize,
     pub id: Id,
+    /// True for the one column that is the archive. Only ever set in the root
+    /// `.listmeta`, because only a column can be the archive.
+    ///
+    /// Skipped when false rather than written as `false` everywhere. Without
+    /// that, the first save by this version would rewrite every sidecar in the
+    /// store, including one per card directory, to record a flag nobody set, and
+    /// `write_if_changed` exists precisely so an untouched board keeps its bytes.
+    #[serde(default, skip_serializing_if = "is_not_archive")]
+    pub archive: bool,
+}
+
+fn is_not_archive(flag: &bool) -> bool {
+    !*flag
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -91,8 +104,18 @@ pub fn load_board(root: &Path) -> Option<Board> {
         return Some(b);
     }
     let mut board = Board::new();
-    board.columns = load_columns(root)?;
+    let (columns, archive_at) = load_columns(root)?;
+    board.columns = columns;
+    // Ids first. The archive column may have come off disk without one -- an
+    // older store, or a hand edit -- and `assign_missing_ids` is what fills those
+    // in, so its id is not knowable until this has run. Hence a *position* on the
+    // way out of `load_columns` and an id only here.
     board.assign_missing_ids();
+    if let Some(i) = archive_at
+        && let Some(id) = board.columns.get(i).map(|c| c.id)
+    {
+        board.set_archive(id);
+    }
     Some(board)
 }
 
@@ -127,9 +150,15 @@ fn id_at(meta: &Option<ListMeta>, n: usize) -> Id {
         .unwrap_or(0)
 }
 
-fn load_columns(dir: &Path) -> Option<Vec<Column>> {
+/// The columns, and the position of the one flagged as the archive.
+///
+/// A position rather than an id, because an id read here can still be 0 --
+/// see [`load_board`]. A second flagged child (only a hand edit can produce one)
+/// is ignored: the first wins and the rest stay ordinary columns.
+fn load_columns(dir: &Path) -> Option<(Vec<Column>, Option<usize>)> {
     let meta = read_listmeta(dir);
     let mut out = Vec::new();
+    let mut archive_at = None;
     for n in positions(dir)? {
         let title = std::fs::read_to_string(dir.join(entry_name(n))).ok()?;
         let card_dir = dir.join(child_dir_name(n));
@@ -138,13 +167,23 @@ fn load_columns(dir: &Path) -> Option<Vec<Column>> {
         } else {
             Vec::new()
         };
+        if archive_at.is_none() && is_archive_at(&meta, n) {
+            archive_at = Some(out.len());
+        }
         out.push(Column {
             id: id_at(&meta, n),
             title,
             cards,
         });
     }
-    Some(out)
+    Some((out, archive_at))
+}
+
+/// Whether the child at position `n` carries the archive flag.
+fn is_archive_at(meta: &Option<ListMeta>, n: usize) -> bool {
+    meta.as_ref()
+        .and_then(|m| m.children.iter().find(|c| c.n == n))
+        .is_some_and(|c| c.archive)
 }
 
 /// Cards are leaves, so a `NNNN.d` folder inside a card directory is not read.
@@ -185,7 +224,11 @@ pub fn save_board(root: &Path, board: &Board) -> std::io::Result<()> {
         keep.push(child_dir_name(n));
         save_cards(&card_dir, &col.cards)?;
 
-        children.push(ChildMeta { n, id: col.id });
+        children.push(ChildMeta {
+            n,
+            id: col.id,
+            archive: board.is_archive(col.id),
+        });
     }
 
     prune(root, &keep)?;
@@ -200,7 +243,13 @@ fn save_cards(dir: &Path, cards: &[Card]) -> std::io::Result<()> {
         let n = i + 1;
         keep.push(entry_name(n));
         write_if_changed(&dir.join(entry_name(n)), &card.text)?;
-        children.push(ChildMeta { n, id: card.id });
+        children.push(ChildMeta {
+            n,
+            id: card.id,
+            // Only a column can be the archive, so a card's meta never carries
+            // the flag and `skip_serializing_if` keeps it out of the bytes.
+            archive: false,
+        });
     }
     prune(dir, &keep)?;
     write_meta(dir, children)
@@ -349,6 +398,108 @@ mod tests {
         let back = load_board(&root).unwrap();
         assert_eq!(back.columns[0].cards.len(), 2);
         assert_eq!(back.columns[0].cards[0].text, "fix login");
+    }
+
+    // ---- The archive flag -----------------------------------------------
+
+    fn with_archive() -> Board {
+        let mut b = sample();
+        b.columns.push(Column::new(9, "Archive"));
+        b.columns[2].cards.push(Card::new(10, "shipped"));
+        b.set_archive(9);
+        b.reseat_counter();
+        b
+    }
+
+    #[test]
+    fn the_archive_flag_survives_a_round_trip() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path().join("board");
+        save_board(&root, &with_archive()).unwrap();
+        let back = load_board(&root).expect("a board just written must read back");
+        assert_eq!(back.archive_id(), Some(9));
+        assert_eq!(back.visible_len(), 2);
+        assert_eq!(back.columns.last().unwrap().cards[0].text, "shipped");
+    }
+
+    #[test]
+    fn a_store_written_before_the_archive_existed_loads_with_none() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path().join("board");
+        save_board(&root, &sample()).unwrap();
+        let back = load_board(&root).unwrap();
+        assert_eq!(back.archive_id(), None);
+        assert_eq!(back.visible_len(), back.columns.len());
+    }
+
+    #[test]
+    fn a_board_with_no_archive_writes_no_archive_key_anywhere() {
+        // `skip_serializing_if` is not cosmetic: without it the first save by
+        // this version rewrites every sidecar in the store, one per card folder
+        // included, to record a flag nobody set.
+        let dir = TempDir::new().unwrap();
+        let root = dir.path().join("board");
+        save_board(&root, &sample()).unwrap();
+        for dir in [root.clone(), root.join("0001.d"), root.join("0002.d")] {
+            let raw = std::fs::read_to_string(dir.join(LISTMETA)).unwrap();
+            assert!(!raw.contains("archive"), "{dir:?} carries a flag: {raw}");
+        }
+    }
+
+    #[test]
+    fn only_the_archive_column_carries_the_flag() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path().join("board");
+        save_board(&root, &with_archive()).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(root.join(LISTMETA))
+                .unwrap()
+                .matches("\"archive\"")
+                .count(),
+            1
+        );
+        // A card is never the archive, so no card's sidecar mentions it.
+        let cards = std::fs::read_to_string(root.join("0003.d").join(LISTMETA)).unwrap();
+        assert!(!cards.contains("archive"), "{cards}");
+    }
+
+    #[test]
+    fn an_archive_column_with_no_id_on_disk_still_becomes_the_archive() {
+        // The ordering trap: ids are healed by `assign_missing_ids` *after* the
+        // columns are read, so the flag has to travel as a position and be
+        // resolved to an id afterwards.
+        let dir = TempDir::new().unwrap();
+        let root = dir.path().join("board");
+        save_board(&root, &with_archive()).unwrap();
+        // As an older version, or a hand edit, would leave it: the flag is there
+        // but the ids are not.
+        std::fs::write(
+            root.join(LISTMETA),
+            r#"{"children":[{"n":1,"id":0},{"n":2,"id":0},{"n":3,"id":0,"archive":true}]}"#,
+        )
+        .unwrap();
+        let back = load_board(&root).unwrap();
+        let id = back
+            .archive_id()
+            .expect("the flag must survive a missing id");
+        assert_eq!(back.column(id).unwrap().title, "Archive");
+        assert_ne!(id, 0, "the archive must have been given a real id");
+    }
+
+    #[test]
+    fn an_archive_flagged_in_the_middle_is_pinned_last_on_load() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path().join("board");
+        save_board(&root, &sample()).unwrap();
+        std::fs::write(
+            root.join(LISTMETA),
+            r#"{"children":[{"n":1,"id":1,"archive":true},{"n":2,"id":4}]}"#,
+        )
+        .unwrap();
+        let back = load_board(&root).unwrap();
+        assert_eq!(back.archive_id(), Some(1));
+        assert_eq!(back.columns.last().unwrap().id, 1);
+        assert_eq!(back.columns[0].id, 4, "the real column moved up");
     }
 
     #[test]

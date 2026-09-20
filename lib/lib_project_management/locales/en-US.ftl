@@ -17,6 +17,7 @@ pm-cmd-move-up = move up
 pm-cmd-move-down = move down
 pm-cmd-move-left = move to previous column
 pm-cmd-move-right = move to next column
+pm-cmd-archive-card = archive card
 
 pm-error-unreadable = your board could not be read, so nothing has been saved, the files on disk are untouched
 pm-error-save = your board could not be saved
@@ -25,6 +26,11 @@ pm-error-nothing-to-paste = nothing has been copied yet
 
 pm-board-empty-slot = press ctrl+a for a first card
 pm-board-no-columns = no columns yet, add one in the list with ctrl+a
+
+# The archive column's title when it is first created. Only a name: the
+# column is identified by its id, so the user can rename it afterwards and it
+# is still the archive. No trailing colon, `column_title` strips one.
+pm-archive-title = Archive
 
 # Screen-reader lines. The dashboard forwards every key to this provider, so
 # nothing else in the app is in a position to say where the cursor now is.
@@ -37,6 +43,9 @@ pm-say-deleted = deleted, { $text }
 pm-say-copied = copied, { $text }
 pm-say-cut = cut, { $text }
 pm-say-pasted = pasted, { $text }
+pm-say-archived = archived, { $text }
+pm-say-nothing-to-archive = nothing to archive, put the cursor on a card first
+pm-say-already-archived = already archived
 pm-say-undone = undone, { $what }
 pm-say-redone = redone, { $what }
 pm-say-edge = no further
@@ -46,3 +55,4 @@ pm-op-add-card = add card
 pm-op-delete-card = delete card
 pm-op-rename-card = rename card
 pm-op-move-card = move card
+pm-op-archive-card = archive card

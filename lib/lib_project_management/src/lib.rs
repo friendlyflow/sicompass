@@ -15,6 +15,28 @@
 //!   provider implements them itself: the app forwards every keystroke into an
 //!   interactive dashboard without interpreting it.
 //!
+//! # The archive is a column the board does not draw
+//!
+//! `archive card` retires a card. Where it goes is an ordinary [`board::Column`],
+//! pinned last and named by `Board::archive`, which the list shows like any other
+//! and the board simply stops drawing one column short of.
+//!
+//! That is the whole mechanism, and it is why the archive cost almost no code:
+//! navigating into it, editing it, reconciling it, storing it and undoing into it
+//! are the paths that already existed for every other column. A `Vec<Card>` parked
+//! outside `columns` would have left the board untouched instead, at the price of
+//! a second case in `locate_card`, `reconcile`, the path handling and the store.
+//!
+//! Two invariants carry it, both in `board.rs`: the archive column is always
+//! **last**, so `visible_len()` is a prefix and hiding it is arithmetic rather
+//! than a per-column test; and an id naming no column reads as **no archive**, so
+//! deleting it in the list needs no special handling. `clamp_focus` is the single
+//! line that keeps the board's cursor below `visible_len`, which is what lets
+//! everything downstream of it go on indexing `columns` directly.
+//!
+//! There is no `unarchive` command, because the archive is a real column and
+//! `move left` already walks a card back out of it.
+//!
 //! # Why a card is a `Str`
 //!
 //! `Obj` versus `Str` is the depth cap, not a stylistic choice. The app descends
@@ -125,6 +147,14 @@ pub const CMD_MOVE_DOWN: &str = "move down";
 pub const CMD_MOVE_LEFT: &str = "move left";
 pub const CMD_MOVE_RIGHT: &str = "move right";
 
+/// Retire a card: move it into the archive, which the board never draws.
+///
+/// Spelled the way the user reads it, because the app's palette renders the raw
+/// strings from `commands()` and never calls `command_label` (see
+/// `src/sicompass/src/list.rs`). Lowercase, like every other command id in the
+/// app.
+pub const CMD_ARCHIVE: &str = "archive card";
+
 // ---------------------------------------------------------------------------
 // Board operations, as they cross the timeline
 // ---------------------------------------------------------------------------
@@ -172,6 +202,17 @@ enum BoardOp {
         to_column: Id,
         to_index: usize,
     },
+    /// The same motion as [`BoardOp::Move`], recorded apart so the undo history
+    /// says what happened. `record` derives the timeline label from
+    /// [`BoardOp::command`], so reusing `Move` here would make the undo screen
+    /// and the spoken undo both say "move card" for an archive.
+    Archive {
+        card: Id,
+        from_column: Id,
+        from_index: usize,
+        to_column: Id,
+        to_index: usize,
+    },
 }
 
 impl BoardOp {
@@ -186,6 +227,7 @@ impl BoardOp {
             BoardOp::Delete { .. } => "delete-card",
             BoardOp::Rename { .. } => "rename-card",
             BoardOp::Move { .. } => "move-card",
+            BoardOp::Archive { .. } => "archive-card",
         }
     }
 }
@@ -273,6 +315,18 @@ pub struct ProjectManagementProvider {
     /// wrapping the user sees. Zero before the first frame.
     board_cols: u16,
     dashboard_request: Option<DashboardRequest>,
+    /// True between `enter_dashboard` and `leave_dashboard`.
+    ///
+    /// A colon command dispatched from the board arrives through the very same
+    /// `handle_command` as one dispatched from the list, and the `elem_key` it
+    /// carries comes from the *list* cursor, which is wherever the user left it
+    /// before pressing `d`. This is what tells the two apart, so the board acts
+    /// on its own `focus` instead.
+    ///
+    /// It is load-bearing that opening the palette does not disturb it: the app's
+    /// `handle_colon` only swaps its own coordinate and never calls
+    /// `leave_dashboard`, so the flag is still set when the command is dispatched.
+    in_dashboard: bool,
 }
 
 impl Default for ProjectManagementProvider {
@@ -306,6 +360,7 @@ impl ProjectManagementProvider {
             palette: sicompass_sdk::DashboardPalette::default(),
             board_cols: 0,
             dashboard_request: None,
+            in_dashboard: false,
         }
     }
 
@@ -345,6 +400,10 @@ impl ProjectManagementProvider {
                     c.title = column_title(&c.title);
                 }
                 self.board = b;
+                // A store last written by a build without the archive flag can
+                // have the archive sitting anywhere. Heal it on the way in, the
+                // same way the trailing colons above are healed.
+                self.board.pin_archive_last();
             }
             None => {
                 // Not an empty board. Refusing to write is the whole point: a
@@ -523,6 +582,11 @@ impl ProjectManagementProvider {
         }
         self.board.columns = rebuilt;
         self.board.reseat_counter();
+        // The app hands the rows back in *its* order, and the user may have
+        // deleted the archive column outright. Both halves of the invariant are
+        // re-established here: a dangling id is forgotten, and a surviving
+        // archive goes back to last so the board still cannot see it.
+        self.board.pin_archive_last();
     }
 
     fn reconcile_cards(&mut self, col: Id, children: &[FfonElement], rendered_only: &[String]) {
@@ -637,7 +701,18 @@ impl ProjectManagementProvider {
                 from_index,
                 to_column,
                 to_index,
+            }
+            | BoardOp::Archive {
+                card,
+                from_column,
+                from_index,
+                to_column,
+                to_index,
             } => {
+                // One arm for both, so an archive and a move can never come to
+                // disagree about what reversing one means. They differ only in
+                // the label the timeline shows.
+                //
                 // Where it came from is not named: the card is lifted from
                 // wherever it actually is, so a stale `from_*` can never make the
                 // two disagree. Only the destination differs by direction.
@@ -700,7 +775,9 @@ impl ProjectManagementProvider {
     /// position in its own list, so "card 2 of 4" alone would leave a listener
     /// unable to tell a sideways move from a vertical one.
     fn say_focus(&mut self) {
-        let total = self.board.columns.len();
+        // The visible count, so "column 2 of 3" never counts an archive the
+        // listener cannot see or reach.
+        let total = self.board.visible_len();
         let Some(col) = self.board.columns.get(self.focus.col) else {
             self.say(localize::t("pm-empty-columns"));
             return;
@@ -753,12 +830,16 @@ impl ProjectManagementProvider {
     }
 
     /// Keep the cursor on something that exists after the board changed under it.
+    /// This is also the single line that keeps the archive off the board.
+    /// Clamping to `visible_len` means `focus.col` can never index the archive
+    /// column, which is what lets `slots`, `is_placeholder`, `focused_column_id`,
+    /// `begin_new_card` and `paste` go on indexing `columns` directly.
     fn clamp_focus(&mut self) {
-        if self.board.columns.is_empty() {
+        if self.board.visible_len() == 0 {
             self.focus = Focus::default();
             return;
         }
-        self.focus.col = self.focus.col.min(self.board.columns.len() - 1);
+        self.focus.col = self.focus.col.min(self.board.visible_len() - 1);
         // `slots` is one for an empty column, because its placeholder is a real
         // focus target: it is the only thing to stand on while adding the first
         // card.
@@ -767,11 +848,13 @@ impl ProjectManagementProvider {
     }
 
     fn move_column(&mut self, delta: isize) -> bool {
-        if self.board.columns.is_empty() {
+        if self.board.visible_len() == 0 {
             return false;
         }
         let next = self.focus.col as isize + delta;
-        if next < 0 || next as usize >= self.board.columns.len() {
+        // Right from the last real column says "no further" rather than stepping
+        // onto the archive.
+        if next < 0 || next as usize >= self.board.visible_len() {
             self.say(localize::t("pm-say-edge"));
             return true;
         }
@@ -1075,10 +1158,12 @@ impl ProjectManagementProvider {
         let Some(edit) = self.edit.as_ref() else {
             return Vec::new();
         };
-        if self.board_cols == 0 || self.board.columns.is_empty() {
+        if self.board_cols == 0 || self.board.visible_len() == 0 {
             return input::hard_lines(&edit.text);
         }
-        let lay = render::layout(self.board.columns.len(), self.focus.col, self.board_cols);
+        // The same count `render` lays out with, so a card wraps while it is
+        // edited exactly as it was drawn.
+        let lay = render::layout(self.board.visible_len(), self.focus.col, self.board_cols);
         render::card_lines(&edit.text, lay.width_of(self.focus.col))
     }
 
@@ -1126,11 +1211,18 @@ impl ProjectManagementProvider {
         };
         match self.open_column {
             None => {
+                // The archive is pinned last and stays there. Moving it is the
+                // one reorder that would put it back on the board.
+                if self.board.is_archive(id) {
+                    return false;
+                }
                 let Some(i) = self.board.column_index(id) else {
                     return false;
                 };
                 let j = if down { i + 1 } else { i.wrapping_sub(1) };
-                if down && j >= self.board.columns.len() || !down && i == 0 {
+                // `visible_len`, so a column cannot be pushed past the archive
+                // either -- the two guards together keep it last from both sides.
+                if down && j >= self.board.visible_len() || !down && i == 0 {
                     return false;
                 }
                 self.board.columns.swap(i, j);
@@ -1172,7 +1264,11 @@ impl ProjectManagementProvider {
             return false;
         };
         let target = if right { ci + 1 } else { ci.wrapping_sub(1) };
-        if right && target >= self.board.columns.len() || !right && ci == 0 {
+        // Rightward stops at the last *visible* column, so nothing is archived by
+        // accident. Leftward is deliberately not bounded the same way: a card
+        // filed by mistake walks back out of the archive this way, which is the
+        // only route back and the reason no `unarchive` command is needed.
+        if right && target >= self.board.visible_len() || !right && ci == 0 {
             return false;
         }
         let op = BoardOp::Move {
@@ -1185,6 +1281,109 @@ impl ProjectManagementProvider {
         self.apply(&op, true);
         self.record(op);
         true
+    }
+
+    /// Which card `archive card` acts on.
+    ///
+    /// Two callers of one command, and they name a card differently. From the
+    /// board there is no row: the cursor is `focus`, and the `elem_key` the app
+    /// passes names whatever the *list* cursor was on before `d` was pressed,
+    /// which is not what the user is looking at. From the list the key is the
+    /// row, resolved the way every other list command resolves one.
+    fn card_to_archive(&self, elem_key: &str) -> Option<Id> {
+        if self.in_dashboard {
+            if self.on_placeholder() {
+                return None;
+            }
+            return self
+                .board
+                .columns
+                .get(self.focus.col)
+                .and_then(|c| c.cards.get(self.focus.row))
+                .map(|k| k.id);
+        }
+        self.labels
+            .get(&self.open_column)
+            .and_then(|m| m.get(elem_key))
+            .copied()
+            // A column row resolves to an id too, and a column is not a card.
+            .filter(|id| self.board.locate_card(*id).is_some())
+    }
+
+    /// The archive column, made on first use.
+    ///
+    /// Silently, and only once a card has been found to put in it, so a command
+    /// that turns out to have nothing to archive never leaves an empty column
+    /// behind. A fresh board therefore has no archive until the user asks for one.
+    fn ensure_archive(&mut self) -> Id {
+        if let Some(id) = self.board.archive_id() {
+            return id;
+        }
+        let id = self.board.mint_id();
+        self.board
+            .columns
+            .push(Column::new(id, localize::t("pm-archive-title")));
+        self.board.set_archive(id);
+        self.board.reseat_counter();
+        id
+    }
+
+    /// Move a card into the archive.
+    ///
+    /// Reports through the announcement channel and never through `self.error`.
+    /// An error would take the app down `handle_enter_command`'s error arm, which
+    /// resets the coordinate to `rest_coordinate` -- General -- without ever
+    /// calling `leave_dashboard`, leaving this provider believing it is still on
+    /// a board the user can no longer see.
+    ///
+    /// Creating the archive column is deliberately **not** part of the recorded
+    /// op. Undoing the first archive returns the card and leaves the empty
+    /// archive column behind, because the column belongs to the list surface,
+    /// where the app records its own `Structural` entries, and a second record of
+    /// it here would be a second history of the same thing.
+    fn archive_card(&mut self, elem_key: &str) {
+        let Some(id) = self.card_to_archive(elem_key) else {
+            self.say(localize::t("pm-say-nothing-to-archive"));
+            return;
+        };
+        let Some((ci, ki)) = self.board.locate_card(id) else {
+            return;
+        };
+        if self.board.is_archive(self.board.columns[ci].id) {
+            self.say(localize::t("pm-say-already-archived"));
+            return;
+        }
+        let from_column = self.board.columns[ci].id;
+        let text = self.board.columns[ci].cards[ki].text.clone();
+        let to_column = self.ensure_archive();
+        let to_index = self
+            .board
+            .column(to_column)
+            .map(|c| c.cards.len())
+            .unwrap_or(0);
+        let op = BoardOp::Archive {
+            card: id,
+            from_column,
+            from_index: ki,
+            to_column,
+            to_index,
+        };
+        self.apply(&op, true);
+        self.record(op);
+        // The card left the column the board cursor was in, and creating the
+        // archive may have been the first column on an empty board.
+        self.clamp_focus();
+        if !self.in_dashboard {
+            // Put the list cursor back on the column the card came from, rather
+            // than letting the app's state-toggle path unwind it to the board
+            // root. Only from the list: a request queued while the app is in
+            // Dashboard is drained and dropped, never deferred, and the board
+            // owns its own cursor anyway.
+            if let Some(at) = self.board.column_index(from_column) {
+                self.navigation = Some(NavigationRequest::SelectPath(vec![at]));
+            }
+        }
+        self.say_key("pm-say-archived", &[("text", text)]);
     }
 }
 
@@ -1432,11 +1631,22 @@ impl Provider for ProjectManagementProvider {
     }
 
     fn commands(&self) -> Vec<String> {
+        // On the board, only the archive. The four move verbs act on the list
+        // cursor, which is stale here, and each returns a `FfonElement` on
+        // success -- which sends the app down the splice-a-row-and-start-typing
+        // path, resetting its coordinate to General without ever calling
+        // `leave_dashboard`. The board would be gone and this provider would not
+        // know. The motions themselves are not missing from the board: it has the
+        // arrows and `h j k l` already.
+        if self.in_dashboard {
+            return vec![CMD_ARCHIVE.to_owned()];
+        }
         vec![
             CMD_MOVE_UP.to_owned(),
             CMD_MOVE_DOWN.to_owned(),
             CMD_MOVE_LEFT.to_owned(),
             CMD_MOVE_RIGHT.to_owned(),
+            CMD_ARCHIVE.to_owned(),
         ]
     }
 
@@ -1447,6 +1657,7 @@ impl Provider for ProjectManagementProvider {
             CMD_MOVE_DOWN => localize::t("pm-cmd-move-down"),
             CMD_MOVE_LEFT => localize::t("pm-cmd-move-left"),
             CMD_MOVE_RIGHT => localize::t("pm-cmd-move-right"),
+            CMD_ARCHIVE => localize::t("pm-cmd-archive-card"),
             other => other.to_owned(),
         }
     }
@@ -1460,6 +1671,15 @@ impl Provider for ProjectManagementProvider {
     ) -> Option<FfonElement> {
         register_translations();
         self.ensure_loaded();
+        // Always `None`, never an error. Both of the app's other return paths
+        // reset the coordinate to `rest_coordinate` -- General for this provider
+        // -- without calling `leave_dashboard`, which would strand the board.
+        // `None` with no error and no secondary list takes the state-toggle arm
+        // instead, which returns to whichever mode the palette was opened from.
+        if cmd == CMD_ARCHIVE {
+            self.archive_card(elem_key);
+            return None;
+        }
         let ok = match cmd {
             CMD_MOVE_UP => self.move_row_in_list(false, elem_key),
             CMD_MOVE_DOWN => self.move_row_in_list(true, elem_key),
@@ -1500,6 +1720,7 @@ impl Provider for ProjectManagementProvider {
         register_translations();
         self.ensure_loaded();
         self.mode = BoardMode::Board;
+        self.in_dashboard = true;
         self.edit = None;
         self.suppress_text = None;
         // Open on exactly what the list cursor was standing on, so `d` continues
@@ -1532,6 +1753,7 @@ impl Provider for ProjectManagementProvider {
             self.commit_edit_state();
         }
         self.mode = BoardMode::Board;
+        self.in_dashboard = false;
         self.suppress_text = None;
         self.refresh = true;
         // Put the list cursor on the card the board was showing. Entering already
@@ -2938,6 +3160,377 @@ mod tests {
         assert_eq!(
             ProjectManagementProvider::new().dashboard_kind(),
             DashboardKind::Interactive
+        );
+    }
+
+    // ---- The archive ----------------------------------------------------
+
+    /// Archive whatever `elem_key` names, through the same entry point the app
+    /// uses. `elem_key` is ignored on the board, which is the point of it.
+    fn archive(p: &mut ProjectManagementProvider, elem_key: &str) {
+        let mut err = String::new();
+        let out = p.handle_command(CMD_ARCHIVE, elem_key, 0, &mut err);
+        assert!(out.is_none(), "the archive command must return no element");
+        assert!(err.is_empty(), "and must never set an error: {err}");
+    }
+
+    /// The row label the list cursor would be on, for a card in a column.
+    fn row_key(p: &mut ProjectManagementProvider, title: &str, card: &str) -> String {
+        descend(p, title);
+        let rows = p.fetch();
+        let at = labels(&rows).iter().position(|l| l == card).expect(card);
+        raw_of(&rows[at]).to_owned()
+    }
+
+    /// Every character the board actually draws.
+    fn board_text(p: &mut ProjectManagementProvider) -> String {
+        let f = p.dashboard_render(120, 40);
+        (0..f.rows)
+            .map(|y| (0..f.cols).map(|x| f.cell(x, y).ch).collect::<String>())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[test]
+    fn the_archive_never_appears_on_the_board() {
+        // The headline requirement: hidden in dashboard mode, and it must stay
+        // hidden however many columns are on the board.
+        let mut p = seeded();
+        p.enter_dashboard();
+        archive(&mut p, "");
+        let drawn = board_text(&mut p);
+        assert!(
+            !drawn.contains("Archive"),
+            "the archive must not be drawn: {drawn}"
+        );
+        assert!(drawn.contains("To do") && drawn.contains("Doing"));
+        assert_eq!(p.board.visible_len(), 2);
+        assert_eq!(p.board.columns.len(), 3, "it exists, it is just not shown");
+    }
+
+    #[test]
+    fn the_archive_does_appear_in_the_list() {
+        // The other half: visible in general mode, and descendable, so archived
+        // cards stay readable and can be moved back by hand.
+        let mut p = seeded();
+        p.enter_dashboard();
+        archive(&mut p, "");
+        p.leave_dashboard();
+        p.pop_path();
+        assert!(labels(&p.fetch()).iter().any(|l| l == "Archive"));
+
+        descend(&mut p, "Archive");
+        assert_eq!(labels(&p.fetch()), vec!["fix login"]);
+    }
+
+    #[test]
+    fn archiving_from_the_board_takes_the_focused_card_not_the_list_cursor() {
+        // In the dashboard the `elem_key` the app passes names whatever the list
+        // cursor was on before `d` was pressed. Acting on it would archive a card
+        // the user is not looking at.
+        let mut p = seeded();
+        let stale = row_key(&mut p, "To do", "write docs");
+        p.pop_path();
+        p.enter_dashboard();
+        p.focus = Focus { col: 1, row: 0 }; // "kanban ui", in Doing
+        archive(&mut p, &stale);
+        assert_eq!(cards(&p, 1), Vec::<String>::new());
+        assert_eq!(cards(&p, 0), vec!["fix login", "write docs"]);
+        assert_eq!(cards(&p, 2), vec!["kanban ui"]);
+    }
+
+    #[test]
+    fn archiving_from_the_list_takes_the_row_under_the_cursor() {
+        let mut p = seeded();
+        let key = row_key(&mut p, "To do", "write docs");
+        archive(&mut p, &key);
+        assert_eq!(cards(&p, 0), vec!["fix login"]);
+        assert_eq!(cards(&p, 2), vec!["write docs"]);
+    }
+
+    #[test]
+    fn archiving_from_the_list_leaves_the_cursor_on_the_column_it_came_from() {
+        let mut p = seeded();
+        let key = row_key(&mut p, "To do", "write docs");
+        archive(&mut p, &key);
+        assert_eq!(
+            p.take_navigation_request(),
+            Some(NavigationRequest::SelectPath(vec![0])),
+            "without this the app unwinds the cursor to the board root"
+        );
+    }
+
+    #[test]
+    fn archiving_from_the_board_asks_for_no_navigation() {
+        // A request queued while the app is in Dashboard is drained and dropped,
+        // never deferred, and the board owns its own cursor anyway.
+        let mut p = seeded();
+        p.enter_dashboard();
+        archive(&mut p, "");
+        assert_eq!(p.take_navigation_request(), None);
+    }
+
+    #[test]
+    fn undo_puts_an_archived_card_back_where_it_was() {
+        let mut p = seeded();
+        p.enter_dashboard();
+        p.focus = Focus { col: 0, row: 1 }; // "write docs", second in To do
+        archive(&mut p, "");
+        let entries = p.take_timeline_entries();
+        assert_eq!(entries.len(), 1);
+        assert!(
+            matches!(&entries[0], TimelineEntry::ProviderOp { command, .. } if command == "archive-card"),
+            "the undo screen must not call this a move: {:?}",
+            entries[0]
+        );
+
+        sicompass_sdk::block_on(p.undo(&entries[0], &mut String::new()));
+        assert_eq!(
+            cards(&p, 0),
+            vec!["fix login", "write docs"],
+            "back in its own column, at its own index"
+        );
+        assert_eq!(cards(&p, 2), Vec::<String>::new());
+
+        sicompass_sdk::block_on(p.redo(&entries[0], &mut String::new()));
+        assert_eq!(cards(&p, 0), vec!["fix login"]);
+        assert_eq!(cards(&p, 2), vec!["write docs"]);
+    }
+
+    #[test]
+    fn undo_leaves_the_archive_column_standing() {
+        // Deliberate, and documented on `archive_card`: the column belongs to the
+        // list surface, where the app records its own structural entries.
+        let mut p = seeded();
+        p.enter_dashboard();
+        archive(&mut p, "");
+        let entries = p.take_timeline_entries();
+        sicompass_sdk::block_on(p.undo(&entries[0], &mut String::new()));
+        assert!(p.board.archive_id().is_some());
+        assert_eq!(p.board.columns.len(), 3);
+    }
+
+    #[test]
+    fn archiving_twice_makes_only_one_archive() {
+        let mut p = seeded();
+        p.enter_dashboard();
+        archive(&mut p, "");
+        archive(&mut p, "");
+        assert_eq!(p.board.columns.len(), 3);
+        assert_eq!(cards(&p, 2), vec!["fix login", "write docs"]);
+    }
+
+    #[test]
+    fn a_renamed_archive_is_still_the_archive() {
+        // Identity is the id, never the title, so the user can call it whatever
+        // they like and go on archiving into it.
+        let mut p = seeded();
+        p.enter_dashboard();
+        archive(&mut p, "");
+        p.leave_dashboard();
+        p.pop_path();
+        let id = p.board.archive_id().expect("an archive");
+
+        let rows = p.fetch();
+        let renamed: Vec<FfonElement> = rows
+            .iter()
+            .map(|e| {
+                let raw = raw_of(e);
+                if row_id(raw) == Some(id) {
+                    FfonElement::new_obj(ProjectManagementProvider::row_label(id, "Cold storage"))
+                } else {
+                    e.clone()
+                }
+            })
+            .collect();
+        p.sync_ffon_body_children(&renamed);
+
+        assert_eq!(
+            p.board.archive_id(),
+            Some(id),
+            "renaming is not unarchiving"
+        );
+        assert_eq!(p.board.column(id).unwrap().title, "Cold storage");
+        assert_eq!(p.board.visible_len(), 2);
+
+        p.enter_dashboard();
+        archive(&mut p, "");
+        assert_eq!(p.board.columns.len(), 3, "still one archive");
+    }
+
+    #[test]
+    fn deleting_the_archive_in_the_list_clears_the_flag() {
+        let mut p = seeded();
+        p.enter_dashboard();
+        archive(&mut p, "");
+        p.leave_dashboard();
+        p.pop_path();
+        let id = p.board.archive_id().expect("an archive");
+
+        let kept: Vec<FfonElement> = p
+            .fetch()
+            .into_iter()
+            .filter(|e| row_id(raw_of(e)) != Some(id))
+            .collect();
+        p.sync_ffon_body_children(&kept);
+
+        assert_eq!(p.board.archive_id(), None);
+        assert_eq!(p.board.visible_len(), 2);
+    }
+
+    #[test]
+    fn a_reordered_list_puts_the_archive_back_at_the_end() {
+        // `reconcile_columns` takes the app's order wholesale, so the invariant
+        // has to be re-established afterwards or the archive lands on the board.
+        let mut p = seeded();
+        p.enter_dashboard();
+        archive(&mut p, "");
+        p.leave_dashboard();
+        p.pop_path();
+
+        let mut rows = p.fetch();
+        rows.reverse(); // archive first
+        p.sync_ffon_body_children(&rows);
+
+        assert_eq!(
+            p.board.columns.last().unwrap().id,
+            p.board.archive_id().unwrap()
+        );
+        assert!(!board_text(&mut p).contains("Archive"));
+    }
+
+    #[test]
+    fn the_board_says_no_columns_when_only_the_archive_is_left() {
+        let mut p = seeded();
+        p.enter_dashboard();
+        archive(&mut p, "");
+        let id = p.board.archive_id().unwrap();
+        p.board.columns.retain(|c| c.id == id);
+        assert!(board_text(&mut p).contains("no columns yet"));
+    }
+
+    #[test]
+    fn nothing_walks_onto_the_archive_from_the_board() {
+        let mut p = seeded();
+        p.enter_dashboard();
+        archive(&mut p, "");
+        p.focus = Focus { col: 1, row: 0 };
+        p.dashboard_key(key(DashboardKeysym::Right));
+        assert_eq!(p.focus.col, 1, "right from the last real column stays put");
+    }
+
+    #[test]
+    fn move_right_from_the_last_column_cannot_reach_the_archive() {
+        let mut p = seeded();
+        p.enter_dashboard();
+        archive(&mut p, "");
+        p.leave_dashboard();
+        let key = row_key(&mut p, "Doing", "kanban ui");
+        assert!(!p.move_card_sideways(true, &key));
+        assert_eq!(cards(&p, 1), vec!["kanban ui"]);
+    }
+
+    #[test]
+    fn move_left_walks_a_card_back_out_of_the_archive() {
+        // The only route back, and why no `unarchive` command is needed.
+        let mut p = seeded();
+        p.enter_dashboard();
+        archive(&mut p, "");
+        p.leave_dashboard();
+        p.pop_path();
+        let key = row_key(&mut p, "Archive", "fix login");
+        assert!(p.move_card_sideways(false, &key));
+        assert_eq!(cards(&p, 1), vec!["kanban ui", "fix login"]);
+        assert_eq!(cards(&p, 2), Vec::<String>::new());
+    }
+
+    #[test]
+    fn no_column_can_be_reordered_past_the_archive() {
+        let mut p = seeded();
+        p.enter_dashboard();
+        archive(&mut p, "");
+        p.leave_dashboard();
+        p.pop_path();
+        let rows = p.fetch();
+        let doing = raw_of(&rows[1]).to_owned();
+        let arch = raw_of(&rows[2]).to_owned();
+        assert!(!p.move_row_in_list(true, &doing), "down past the archive");
+        assert!(!p.move_row_in_list(false, &arch), "and the archive itself");
+        assert_eq!(
+            p.board.columns.last().unwrap().id,
+            p.board.archive_id().unwrap()
+        );
+    }
+
+    #[test]
+    fn the_board_offers_only_the_archive_command() {
+        // The four move verbs act on the list cursor and return an element, which
+        // would drop the app out of the dashboard behind this provider's back.
+        let mut p = seeded();
+        assert_eq!(p.commands().len(), 5);
+        p.enter_dashboard();
+        assert_eq!(p.commands(), vec![CMD_ARCHIVE.to_owned()]);
+        p.leave_dashboard();
+        assert!(p.commands().contains(&CMD_MOVE_UP.to_owned()));
+        assert!(p.commands().contains(&CMD_ARCHIVE.to_owned()));
+    }
+
+    #[test]
+    fn an_empty_slot_is_said_aloud_rather_than_raised_as_an_error() {
+        // An error would take the app down a path that resets its coordinate
+        // without ever calling `leave_dashboard`, stranding the board.
+        let mut p = seeded();
+        p.board.columns.push(Column::new(9, "Done"));
+        p.enter_dashboard();
+        p.focus = Focus { col: 2, row: 0 }; // the placeholder
+        archive(&mut p, "");
+        assert_eq!(p.take_error(), None);
+        assert_eq!(
+            p.take_announcement(),
+            Some("nothing to archive, put the cursor on a card first".to_owned())
+        );
+        assert_eq!(p.board.columns.len(), 3, "and no archive was made for it");
+    }
+
+    #[test]
+    fn archiving_an_archived_card_says_so_and_stops() {
+        let mut p = seeded();
+        p.enter_dashboard();
+        archive(&mut p, "");
+        let _ = p.take_announcement();
+        p.focus = Focus { col: 2, row: 0 };
+        // `clamp_focus` keeps the board off the archive, so reach it as the list
+        // would: by the row's own key.
+        p.leave_dashboard();
+        p.pop_path();
+        let key = row_key(&mut p, "Archive", "fix login");
+        archive(&mut p, &key);
+        assert_eq!(p.take_announcement(), Some("already archived".to_owned()));
+        assert_eq!(cards(&p, 2), vec!["fix login"], "and nothing moved");
+    }
+
+    #[test]
+    fn an_archive_survives_a_restart() {
+        let dir = TempDir::new().unwrap();
+        let mut p = provider(&dir);
+        p.ensure_loaded();
+        p.board.columns.push(Column::new(1, "To do"));
+        p.board.columns[0].cards.push(Card::new(2, "fix login"));
+        p.board.reseat_counter();
+        p.enter_dashboard();
+        archive(&mut p, "");
+
+        let mut again = provider(&dir);
+        again.ensure_loaded();
+        assert_eq!(again.board.visible_len(), 1);
+        assert_eq!(
+            again
+                .board
+                .column(again.board.archive_id().unwrap())
+                .unwrap()
+                .cards[0]
+                .text,
+            "fix login"
         );
     }
 

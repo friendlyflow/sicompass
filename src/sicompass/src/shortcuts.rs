@@ -1456,12 +1456,18 @@ pub static SHORTCUTS: &[Shortcut] = &[
         is_available: git_browsing,
         handle: handlers::handle_colon,
     },
+    // Also in Dashboard: an interactive dashboard is a second view of the same
+    // provider, so the palette that reaches its commands should not vanish
+    // because the user is looking at the other view. Same shape as the `t` row
+    // further down. The dashboard fast-path in `dispatch_key` decides when `:`
+    // gets this far; the browse-then-session providers are excluded by
+    // `has_command_palette`, so a shell never loses the character.
     Shortcut {
         key: Keycode::Semicolon,
         key2: None,
         ctrl: false,
         shift: true,
-        modes: &[Coordinate::General],
+        modes: &[Coordinate::General, Coordinate::Dashboard],
         label: ":      Command",
         is_available: has_command_palette,
         handle: handlers::handle_colon,
@@ -1501,7 +1507,7 @@ pub static SHORTCUTS: &[Shortcut] = &[
         key2: None,
         ctrl: false,
         shift: false,
-        modes: &[Coordinate::General],
+        modes: &[Coordinate::General, Coordinate::Dashboard],
         label: ":      Command",
         is_available: has_command_palette,
         handle: handlers::handle_colon,
@@ -2401,12 +2407,23 @@ pub fn dispatch_key(r: &mut AppRenderer, keycode: Option<Keycode>, keymod: Mod) 
                 }
             }
         }
-        // Ctrl+T and `t` go to the program first: vim and readline use Ctrl+T,
-        // and the terminal consumes every key. Only a dashboard that declines
-        // them (the board) hands them back. A plain `t` is text while the
-        // dashboard shows a caret, even though the provider takes text through
-        // `dashboard_text` and so declines the key itself.
-        if !consumed && k == Keycode::T && !shift && !alt && (ctrl || !r.dashboard_has_caret) {
+        // Ctrl+T, `t` and `:` go to the program first: vim and readline use
+        // Ctrl+T, `:` is vim's own command line, and the terminal consumes every
+        // key. Only a dashboard that declines them (the board) hands them back.
+        // Any of the three is text while the dashboard shows a caret, even though
+        // the provider takes text through `dashboard_text` and so declines the
+        // key itself -- that is what keeps a colon typed into a card a colon.
+        //
+        // `:` is matched by shape rather than by one keycode, because SDL reports
+        // it as `Colon` on some layouts and shifted `Semicolon` on others, and
+        // `dispatch_table` compares `shift` exactly. A bare `;` matches no row and
+        // so dispatches nothing.
+        let is_colon = !ctrl
+            && !alt
+            && ((k == Keycode::Colon && !shift) || (k == Keycode::Semicolon && shift));
+        let hand_back = (k == Keycode::T && !shift && !alt && (ctrl || !r.dashboard_has_caret))
+            || (is_colon && !r.dashboard_has_caret);
+        if !consumed && hand_back {
             dispatch_table(r, k, ctrl, shift);
         }
         return false;

@@ -3755,6 +3755,14 @@ pub fn handle_escape(r: &mut AppRenderer) {
         }
         Coordinate::Command => {
             r.coordinate = r.previous_coordinate;
+            // Consume the baseline, the way `handle_escape_insert_palette` does.
+            // `handle_colon` saves whatever mode it was called from, so opening
+            // the palette from a dashboard leaves `previous_coordinate` pointing
+            // at Dashboard. `handle_dashboard_leave` reads the same field, so
+            // without this reset the next Escape puts the user straight back on
+            // the dashboard they were trying to leave, and double-Ctrl+C -- which
+            // goes through that same function -- stops working too.
+            r.previous_coordinate = Coordinate::General;
             r.speak_mode_change(None);
             r.input_buffer.clear();
             r.cursor_position = 0;
@@ -6559,7 +6567,16 @@ pub fn handle_dashboard_leave(r: &mut AppRenderer) {
         r.dashboard_cell_size = (0, 0);
     }
     r.dashboard_last_ctrl_c = 0;
-    r.coordinate = r.previous_coordinate;
+    // Never back into the dashboard we are leaving. `previous_coordinate` is a
+    // single slot that several modes write, so anything entered *from* the
+    // dashboard -- the colon palette, a search -- can leave it naming Dashboard
+    // itself. Honouring that would make Escape and double-Ctrl+C no-ops and trap
+    // the user on the board with no way out.
+    r.coordinate = if r.previous_coordinate == Coordinate::Dashboard {
+        rest_coordinate(r)
+    } else {
+        r.previous_coordinate
+    };
     r.speak_mode_change(None);
     r.caret.reset(sdl_ticks());
     r.needs_redraw = true;

@@ -55,6 +55,17 @@ impl Column {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Board {
     pub columns: Vec<Column>,
+    /// The column cards are archived into, if one has been made yet.
+    ///
+    /// Private, because two invariants hang off it and methods are the only
+    /// place they can be kept: the column it names is pinned **last**, and an id
+    /// naming nothing reads as no archive at all.
+    ///
+    /// An id and not a position, for the reason [`Id`] exists: the list view
+    /// reorders columns freely, so a position would name a different column the
+    /// moment one was inserted above. And not a title either, because the user
+    /// can rename the archive column and must still have an archive afterwards.
+    archive: Option<Id>,
     next_id: Id,
 }
 
@@ -62,7 +73,61 @@ impl Board {
     pub fn new() -> Self {
         Board {
             columns: Vec::new(),
+            archive: None,
             next_id: 1,
+        }
+    }
+
+    /// The archive column's id, or `None`.
+    ///
+    /// Self-healing: an id that no longer names a column on the board reads as
+    /// no archive. The user can delete the archive column in the list like any
+    /// other, and nothing should have to notice before the next read.
+    pub fn archive_id(&self) -> Option<Id> {
+        self.archive.filter(|id| self.column_index(*id).is_some())
+    }
+
+    pub fn is_archive(&self, id: Id) -> bool {
+        self.archive_id() == Some(id)
+    }
+
+    /// How many columns the board view draws.
+    ///
+    /// The archive is pinned last, so this is a prefix of [`Board::columns`] and
+    /// every index below it names a real column. That is what lets the board's
+    /// drawing and navigation stay plain index arithmetic: keep the cursor under
+    /// this number and the archive is unreachable, with no per-column test
+    /// anywhere.
+    pub fn visible_len(&self) -> usize {
+        self.columns.len() - usize::from(self.archive_id().is_some())
+    }
+
+    /// Adopt `id` as the archive, and pin it last.
+    pub fn set_archive(&mut self, id: Id) {
+        self.archive = Some(id);
+        self.pin_archive_last();
+    }
+
+    /// Re-establish both halves of the invariant: forget an id that names
+    /// nothing, and move the archive column to the end.
+    ///
+    /// Idempotent, and it has to run after anything that rebuilds `columns` from
+    /// the outside. `reconcile_columns` is the one that matters: it replaces the
+    /// whole vector with the rows the app hands back, in the app's order, so
+    /// without this a single edit anywhere in the list could leave the archive
+    /// sitting in the middle of the board, visible.
+    pub fn pin_archive_last(&mut self) {
+        let Some(id) = self.archive_id() else {
+            self.archive = None;
+            return;
+        };
+        let i = self
+            .column_index(id)
+            .expect("archive_id only answers for a column that is on the board");
+        let last = self.columns.len() - 1;
+        if i != last {
+            let col = self.columns.remove(i);
+            self.columns.push(col);
         }
     }
 
@@ -214,6 +279,82 @@ mod tests {
     #[test]
     fn card_count_spans_every_column() {
         assert_eq!(sample().card_count(), 3);
+    }
+
+    // ---- The archive ----------------------------------------------------
+
+    #[test]
+    fn the_archive_is_pinned_last_however_it_got_there() {
+        let mut b = sample();
+        b.columns.insert(0, Column::new(9, "Archive"));
+        b.set_archive(9);
+        assert_eq!(b.columns.last().unwrap().id, 9);
+        assert_eq!(b.visible_len(), 2, "the board sees only the real columns");
+
+        // As `reconcile_columns` would: the app hands the rows back in its own
+        // order, archive in the middle.
+        b.columns.swap(1, 2);
+        b.pin_archive_last();
+        assert_eq!(b.columns.last().unwrap().id, 9);
+    }
+
+    #[test]
+    fn pinning_is_idempotent() {
+        let mut b = sample();
+        b.columns.push(Column::new(9, "Archive"));
+        b.set_archive(9);
+        let once = b.columns.clone();
+        b.pin_archive_last();
+        assert_eq!(b.columns, once);
+    }
+
+    #[test]
+    fn an_archive_id_naming_a_deleted_column_reads_as_no_archive() {
+        // The user can delete the archive column in the list like any other, and
+        // nothing should have to notice before the next read.
+        let mut b = sample();
+        b.columns.push(Column::new(9, "Archive"));
+        b.set_archive(9);
+        b.columns.retain(|c| c.id != 9);
+        assert_eq!(b.archive_id(), None);
+        assert!(!b.is_archive(9));
+        assert_eq!(b.visible_len(), b.columns.len());
+        b.pin_archive_last(); // must not panic on the dangling id
+        assert_eq!(b.archive_id(), None);
+    }
+
+    #[test]
+    fn a_board_that_is_only_an_archive_has_nothing_visible() {
+        let mut b = Board::new();
+        b.columns.push(Column::new(9, "Archive"));
+        b.set_archive(9);
+        assert_eq!(b.visible_len(), 0);
+    }
+
+    #[test]
+    fn an_archived_cards_id_is_still_never_handed_out_again() {
+        // `max_id` deliberately spans the archive too. An id that went in there
+        // must not be re-minted and collide with a redo still holding it.
+        let mut b = sample();
+        let mut archive = Column::new(9, "Archive");
+        archive.cards.push(Card::new(42, "shipped"));
+        b.columns.push(archive);
+        b.set_archive(9);
+        b.reseat_counter();
+        assert!(b.mint_id() > 42);
+    }
+
+    #[test]
+    fn a_card_in_the_archive_is_located_like_any_other() {
+        // This is what makes `BoardOp`'s "lift it from wherever it is" reverse an
+        // archive for free.
+        let mut b = sample();
+        let mut archive = Column::new(9, "Archive");
+        archive.cards.push(Card::new(42, "shipped"));
+        b.columns.push(archive);
+        b.set_archive(9);
+        assert_eq!(b.locate_card(42), Some((2, 0)));
+        assert_eq!(b.card(42).map(|c| c.text.as_str()), Some("shipped"));
     }
 
     #[test]

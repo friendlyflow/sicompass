@@ -12,6 +12,7 @@ pm-cmd-move-up = déplacer vers le haut
 pm-cmd-move-down = déplacer vers le bas
 pm-cmd-move-left = déplacer vers la colonne précédente
 pm-cmd-move-right = déplacer vers la colonne suivante
+pm-cmd-archive-card = archiver la carte
 
 pm-error-unreadable = votre tableau n'a pas pu être lu, rien n'a donc été enregistré, les fichiers sur le disque sont intacts
 pm-error-save = votre tableau n'a pas pu être enregistré
@@ -20,6 +21,10 @@ pm-error-nothing-to-paste = rien n'a encore été copié
 
 pm-board-empty-slot = appuyez sur ctrl+a pour une première carte
 pm-board-no-columns = aucune colonne, ajoutez-en une dans la liste avec ctrl+a
+
+# Le titre de la colonne d'archives à sa création. Un nom seulement : la
+# colonne est identifiée par son id, la renommer n'y change rien.
+pm-archive-title = Archives
 
 pm-say-card = { $column }, carte { $index } sur { $total }, { $text }
 pm-say-column-empty = colonne { $index } sur { $total }, { $title }, vide
@@ -30,6 +35,9 @@ pm-say-deleted = supprimé, { $text }
 pm-say-copied = copié, { $text }
 pm-say-cut = coupé, { $text }
 pm-say-pasted = collé, { $text }
+pm-say-archived = archivé, { $text }
+pm-say-nothing-to-archive = rien à archiver, placez d'abord le curseur sur une carte
+pm-say-already-archived = déjà archivé
 pm-say-undone = annulé, { $what }
 pm-say-redone = rétabli, { $what }
 pm-say-edge = pas plus loin
@@ -38,3 +46,4 @@ pm-op-add-card = ajouter une carte
 pm-op-delete-card = supprimer une carte
 pm-op-rename-card = renommer une carte
 pm-op-move-card = déplacer une carte
+pm-op-archive-card = archiver une carte
