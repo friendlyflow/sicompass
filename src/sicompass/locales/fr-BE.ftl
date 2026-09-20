@@ -101,6 +101,7 @@ mode-search = mode recherche
 mode-extended-search = mode recherche étendue
 mode-command = mode commande
 mode-first-command = premier mode commande
+mode-session = mode session
 mode-second-command = second mode commande
 mode-controls = mode contrôles
 mode-scroll = mode défilement

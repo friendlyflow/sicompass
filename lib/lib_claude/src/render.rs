@@ -54,7 +54,7 @@ pub struct PartialAssistant {
 }
 
 impl PartialAssistant {
-    fn clear(&mut self) {
+    pub(crate) fn clear(&mut self) {
         *self = PartialAssistant::default();
     }
 
@@ -78,6 +78,9 @@ pub struct Conversation {
     pub busy: bool,
     /// Live token-level preview of the assistant message currently streaming.
     pub partial: PartialAssistant,
+    /// Set when a replayed transcript was too long to render whole and only its
+    /// newest turns are present. Never set for a live session.
+    pub truncated: bool,
 }
 
 impl Conversation {
@@ -258,7 +261,7 @@ fn push_capped_lines(obj: &mut sicompass_sdk::FfonObject, text: &str) {
 /// tool input, tool output, the prompt echo, the session's own metadata. The
 /// live input slot is deliberately *not* escaped: its `<input>` is real markup
 /// the app parses back out with `extract_input`.
-fn escape_markup(s: &str) -> String {
+pub(crate) fn escape_markup(s: &str) -> String {
     s.replace('<', "\\<").replace('>', "\\>")
 }
 

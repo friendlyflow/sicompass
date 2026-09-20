@@ -215,7 +215,10 @@ pub fn create_list_current_layer(renderer: &mut AppRenderer) {
     // entered — Insert, a search, a palette — is never clobbered.
     if matches!(
         renderer.coordinate,
-        Coordinate::General | Coordinate::SessionCommand | Coordinate::SessionFirstCommand
+        Coordinate::General
+            | Coordinate::SessionCommand
+            | Coordinate::SessionFirstCommand
+            | Coordinate::SessionList
     ) {
         renderer.coordinate = crate::handlers::rest_coordinate(renderer);
     }

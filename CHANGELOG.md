@@ -3,6 +3,43 @@
 cargo-dist parses this file and uses the matching version's section as the
 GitHub Release body, so entries here are what users read on the download page.
 
+## Unreleased
+
+### Claude keeps your sessions
+
+Pressing `:` in Claude used to start a conversation immediately, and that
+conversation existed only while you were looking at it. There was no way to see
+what you ran in a folder yesterday, no way to pick one back up, and no way to
+throw one away. Claude Code has been keeping a transcript of every session on
+disk the whole time, and Sicompass was ignoring all of it.
+
+`:` now opens a list instead. At the top is a `new session` button, and under it
+are the sessions you have already had in that folder, newest first, each named
+by the title Claude gave it. Sessions from folders below the one you are
+standing in are listed too, so a project root shows the work you did in its
+subdirectories.
+
+Press Enter on `new session` and a line opens underneath it to type your first
+question into. Enter sends it, starts Claude and drops you straight into the
+conversation, the way `:` used to. Right on any older session opens that one
+instead, with its transcript there to read and `--resume` armed, so the next
+thing you send continues it rather than starting over.
+
+Left steps back from a conversation to the list, landing on the session you were
+just in, and from the list out to the folders. Escape still leaves the whole
+thing in one press from wherever you are.
+The line above the list names the session you are inside, so you can always tell
+which conversation you are reading.
+
+Ctrl+D on a session asks whether to delete it, with `no, keep it` already under
+the cursor. Saying yes removes that transcript for good and nothing else.
+
+Two things follow from the list. Opening it starts no Claude process at all, so
+`:` is now free, and reading an old conversation costs nothing until you send
+something. And a session that fails to start leaves you in the conversation with
+the reason on screen and your prompt still in the box, rather than refusing with
+no explanation.
+
 ## 0.1.20
 
 ### No user-visible change

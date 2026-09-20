@@ -573,8 +573,135 @@ fn resolve_http_link(url: &str) -> Vec<FfonElement> {
     fetch_url_to_elements(url)
 }
 
+/// The raw key of the element the cursor is on, when it is an `Obj`.
+///
+/// Raw, not display text: the session list encodes each row's identity in an
+/// `<id>` tag, which `strip_display` would throw away.
+fn focused_obj_key(r: &AppRenderer) -> Option<String> {
+    // `get_ffon_at_id` with the item's own id yields the slice *containing* it,
+    // which is the idiom every other reader here uses.
+    let id = r.current_list_item_id()?;
+    let idx = id.last()?;
+    match get_ffon_at_id(&r.ffon, &id).and_then(|a| a.get(idx)) {
+        Some(sicompass_sdk::ffon::FfonElement::Obj(o)) => Some(o.key.clone()),
+        _ => None,
+    }
+}
+
+/// Put the cursor on the session row that `id` (or failing that `label`) names.
+///
+/// Called after swapping from a session back to its list, where
+/// `apply_view_command` has just snapped the cursor to row 0 — the `new session`
+/// button, which is not where the user was.
+///
+/// By id first, because two sessions can share a title. By label second, which
+/// is what covers a session started from the prompt row: it has no row to have
+/// come from, but the provider labels the live session with that same prompt
+/// until Claude titles it. Once it is titled neither matches and the cursor
+/// stays on the button, which is the old behaviour rather than a wrong row.
+fn focus_session_row(r: &mut AppRenderer, id: Option<&str>, label: Option<&str>) {
+    let Some(arr) = get_ffon_at_id(&r.ffon, &r.current_id) else {
+        return;
+    };
+    // Only the session rows are `Obj`s; the button and any confirmation are
+    // `Str`s, so this can never land on one of those.
+    let keys: Vec<String> = arr
+        .iter()
+        .map(|e| match e {
+            sicompass_sdk::ffon::FfonElement::Obj(o) => o.key.clone(),
+            sicompass_sdk::ffon::FfonElement::Str(_) => String::new(),
+        })
+        .collect();
+    let found = id
+        .and_then(|want| {
+            keys.iter().position(|k| {
+                !k.is_empty() && sicompass_sdk::tags::extract_id(k).as_deref() == Some(want)
+            })
+        })
+        .or_else(|| {
+            label.and_then(|want| {
+                keys.iter()
+                    .position(|k| !k.is_empty() && sicompass_sdk::tags::strip_display(k) == want)
+            })
+        });
+    let Some(idx) = found else {
+        return;
+    };
+    r.current_id.set_last(idx);
+    list::create_list_current_layer(r);
+    r.list_index = idx;
+    r.scroll_offset = 0;
+    r.needs_redraw = true;
+}
+
+/// True when the cursor is on an `Obj`.
+pub(crate) fn focused_is_obj(r: &AppRenderer) -> bool {
+    focused_obj_key(r).is_some()
+}
+
+/// Ctrl+D / Delete on a session row: ask the provider about it.
+///
+/// Removes nothing. The provider answers by rendering a yes/no confirmation in
+/// place of the row, and only the `yes` button deletes.
+pub fn handle_session_row_delete(r: &mut AppRenderer) {
+    let Some(key) = focused_obj_key(r) else {
+        return;
+    };
+    let row = r.current_id.last().unwrap_or(0);
+    r.error_message.clear();
+    crate::provider::handle_command(r, VIEW_CMD_DELETE_SESSION, &key, 1);
+    // Not `apply_view_command_on`: this is not a view swap. That one snaps the
+    // cursor to the top of the new list, which here would be the `new session`
+    // button — an Enter away from opening a prompt when the user meant to
+    // answer a question.
+    crate::provider::refresh_current_directory(r);
+    // The confirmation stands where the row did: question, `no`, `yes`. Land on
+    // `no`, so the answer already under the cursor is the safe one.
+    let len = get_ffon_at_id(&r.ffon, &r.current_id)
+        .map(|a| a.len())
+        .unwrap_or(0);
+    r.current_id.set_last((row + 1).min(len.saturating_sub(1)));
+    list::create_list_current_layer(r);
+    r.list_index = r.current_id.last().unwrap_or(0);
+    r.scroll_offset = 0;
+    r.needs_redraw = true;
+}
+
+/// Right on a session row: open that session.
+///
+/// A view swap, not a descent, and that is load-bearing rather than a
+/// convenience. `navigate_right_raw` would push a level, which makes
+/// [`below_session_level`] true and so stops `refresh_current_directory` ever
+/// refreshing the transcript again — the streaming output would freeze. Swapping
+/// in place keeps all three of the provider's lists at the depth every
+/// session-view helper in this module assumes.
+///
+/// Returns `true` when it handled the key.
+fn open_session_row(r: &mut AppRenderer) -> bool {
+    if !in_session_list(r) {
+        return false;
+    }
+    // Only the session rows are `Obj`s: the button and the new-session prompt
+    // are `Str`s and fall through to the ordinary Right, which refuses them.
+    let Some(key) = focused_obj_key(r) else {
+        return false;
+    };
+    // Remembered now because the FFON cannot say it afterwards: the transcript
+    // replaces this level, so the element above the cursor is the folder.
+    r.session_view_parent_label = Some(sicompass_sdk::tags::strip_display(&key));
+    r.session_view_row_id = sicompass_sdk::tags::extract_id(&key);
+    apply_view_command_on(r, VIEW_CMD_OPEN_SESSION, &key, 1);
+    true
+}
+
 /// Navigate into the selected item (Right key).
 pub fn handle_right(r: &mut AppRenderer) {
+    // Before `navigate_right_raw`, so a swap that leaves `current_id` alone does
+    // not record a `TimelineEntry::Navigate` describing a move that never
+    // happened.
+    if open_session_row(r) {
+        return;
+    }
     let item_id = match r.current_list_item_id() {
         Some(id) => id,
         None => return,
@@ -664,7 +791,31 @@ pub fn handle_left(r: &mut AppRenderer) {
     // deeper than the cursor and the next descent would double the segment.
     // Deeper in (inside the input slot's history) Left is unchanged.
     if at_session_input_level(r) {
+        // A session's parent is the list it was opened from, so Left goes there
+        // — one level, which is Left's job, where Escape's is the whole layer.
+        // Shape-gated, not name-gated: a provider with no such list (the
+        // terminal) never advertises the id and keeps the flat refusal, which
+        // is also what keeps `browse_path` honest there.
+        if session_list_available(r) {
+            // Taken, not cleared, and used *after* the swap: coming back to the
+            // list should land on the session you were just in, the way Left
+            // out of a folder lands on the folder you came from.
+            let id = r.session_view_row_id.take();
+            let label = r.session_view_parent_label.take();
+            apply_view_command(r, VIEW_CMD_SESSION_LIST);
+            focus_session_row(r, id.as_deref(), label.as_deref());
+            return;
+        }
         refuse_leaving_command_layer(r);
+        return;
+    }
+    // In the list itself, Left means the folder listing — fired as the view
+    // command rather than as a raw level pop, which would leave the provider's
+    // browse path a directory deeper than the cursor.
+    if r.coordinate == Coordinate::SessionList {
+        r.session_view_parent_label = None;
+        r.session_view_row_id = None;
+        apply_view_command(r, VIEW_CMD_BROWSE);
         return;
     }
     let pre_nav_id = r.current_id.clone();
@@ -1116,6 +1267,30 @@ pub fn handle_colon(r: &mut AppRenderer) {
 /// tell the two views apart.
 pub(crate) const VIEW_CMD_BROWSE: &str = "browse";
 
+/// Command id for the list of past sessions a browse-then-session provider can
+/// offer between its folder listing and a session.
+///
+/// Advertised in three different states, which is what makes it useful to the
+/// app rather than just to the provider: offered *alone* it is the transition
+/// `:` fires; offered *with* `browse` and nothing else it says "this level is
+/// the list"; offered alongside a further command it says "a session is up and
+/// there is a list to go back to", which is what lets Left be decided by the
+/// shape of `commands()` rather than by the provider's name. A provider with no
+/// such list never mentions it and every path below leaves it alone.
+pub(crate) const VIEW_CMD_SESSION_LIST: &str = "session list";
+
+/// Command id that opens one row of that list. Dispatched with the row's key,
+/// so unlike the swaps it is never fired blind.
+pub(crate) const VIEW_CMD_OPEN_SESSION: &str = "session";
+
+/// Command id asking to delete one row of that list. The provider answers by
+/// rendering a confirmation; nothing is removed until that is answered.
+pub(crate) const VIEW_CMD_DELETE_SESSION: &str = "delete session";
+
+/// Command id for Enter on a `<button>` row of that list. The provider owns the
+/// button vocabulary; the app only forwards the row.
+pub(crate) const VIEW_CMD_ACTIVATE_ROW: &str = "activate row";
+
 /// True for the providers laid out as "browse a folder tree, then `:` opens a
 /// live session in the folder being listed": the terminal (a shell) and claude
 /// (a `claude` child). Both expose the same two-view `commands()` contract, so
@@ -1197,6 +1372,34 @@ pub(crate) fn in_session_view(r: &AppRenderer) -> bool {
             .any(|c| c == VIEW_CMD_BROWSE)
 }
 
+/// True when the provider is showing its list of past sessions.
+///
+/// Read off `commands()` like [`in_session_view`]: the list is the one state
+/// that offers the session-list id *and* `browse` and nothing else.
+pub(crate) fn in_session_list(r: &AppRenderer) -> bool {
+    if !is_browse_then_session_provider(r) {
+        return false;
+    }
+    let cmds = crate::provider::get_commands(r);
+    cmds.iter().any(|c| c == VIEW_CMD_BROWSE)
+        && cmds.iter().any(|c| c == VIEW_CMD_SESSION_LIST)
+        && !cmds
+            .iter()
+            .any(|c| c != VIEW_CMD_BROWSE && c != VIEW_CMD_SESSION_LIST)
+}
+
+/// True when the provider advertises a session list — so a session has a parent
+/// level to step back to, and Left there means something.
+///
+/// Shape, not name: the terminal never offers the id and keeps Left inert in its
+/// shell, which is also what keeps its browse path in step with the cursor.
+pub(crate) fn session_list_available(r: &AppRenderer) -> bool {
+    in_session_view(r)
+        && crate::provider::get_commands(r)
+            .iter()
+            .any(|c| c == VIEW_CMD_SESSION_LIST)
+}
+
 /// The coordinate the app is *at rest* in right now: [`Coordinate::General`], or
 /// the session view's own name.
 ///
@@ -1242,8 +1445,16 @@ pub(crate) fn rest_coordinate(r: &AppRenderer) -> Coordinate {
     if !cmds.iter().any(|c| c == VIEW_CMD_BROWSE) {
         return Coordinate::General;
     }
-    if cmds.iter().any(|c| c != VIEW_CMD_BROWSE) {
+    // Order matters. A session offers the session-list id too (so Left knows
+    // where to go), so "has something beyond the two view sentinels" has to be
+    // asked first or a transcript would call itself the list.
+    if cmds
+        .iter()
+        .any(|c| c != VIEW_CMD_BROWSE && c != VIEW_CMD_SESSION_LIST)
+    {
         Coordinate::SessionFirstCommand
+    } else if cmds.iter().any(|c| c == VIEW_CMD_SESSION_LIST) {
+        Coordinate::SessionList
     } else {
         Coordinate::SessionCommand
     }
@@ -1282,9 +1493,14 @@ pub(crate) fn insert_palette_commands(r: &AppRenderer) -> Vec<String> {
     if !trailing_element_is_input_slot(r) {
         return Vec::new();
     }
+    // Both view sentinels are filtered, for the same reason: neither is
+    // something to *insert* into a prompt. Leaving the session-list id in would
+    // also hand `:` a one-item palette in a folder with no past sessions, where
+    // the new-session row is the level's last row and looks exactly like a live
+    // prompt.
     crate::provider::get_commands(r)
         .into_iter()
-        .filter(|c| c != VIEW_CMD_BROWSE)
+        .filter(|c| c != VIEW_CMD_BROWSE && c != VIEW_CMD_SESSION_LIST)
         .collect()
 }
 
@@ -1659,10 +1875,20 @@ pub(crate) fn open_session_view(r: &mut AppRenderer) {
 /// `current_path()` still reads `/home/nico/Projects` — the folder the session
 /// is actually running in.
 fn apply_view_command(r: &mut AppRenderer, cmd: &str) {
+    apply_view_command_on(r, cmd, "", 0);
+}
+
+/// [`apply_view_command`] with the row the command is about.
+///
+/// The two swaps need no payload, but opening and deleting one session do: they
+/// name a row. Everything after the dispatch is identical, which is the point of
+/// sharing one body — the refusal handling, the rebuild-from-root branch and the
+/// cursor snap all have to behave the same whichever command got here.
+fn apply_view_command_on(r: &mut AppRenderer, cmd: &str, element_key: &str, element_type: i32) {
     // Only an error the command itself raises is a refusal. One left over from
     // an earlier key (a Left refused in the shell, say) must not block Escape.
     r.error_message.clear();
-    crate::provider::handle_command(r, cmd, "", 0);
+    crate::provider::handle_command(r, cmd, element_key, element_type);
 
     // A view-swap command can refuse: the git client's `:` on a folder that is
     // not a repository has nothing to open. Every exit below rebuilds the list,
@@ -1864,49 +2090,7 @@ pub fn handle_enter_command(r: &mut AppRenderer) {
             let result = crate::provider::handle_command(r, &cmd, &element_key, element_type);
 
             if let Some(new_elem) = result {
-                let current_idx = r.current_id.last().unwrap_or(0);
-
-                // If the current element is an empty placeholder, replace it in-place;
-                // otherwise insert after the current position.
-                // (mirrors C handlers.c:2724-2751)
-                let current_is_placeholder = {
-                    let arr = get_ffon_at_id(&r.ffon, &r.current_id);
-                    match arr.and_then(|a| a.get(current_idx)) {
-                        Some(sicompass_sdk::ffon::FfonElement::Str(s)) => is_empty_placeholder(s),
-                        _ => false,
-                    }
-                };
-
-                // Stash cancel state before mutating so Escape can undo the insertion.
-                let return_id = r.current_id.clone();
-                if current_is_placeholder {
-                    // Clone the original placeholder so Escape can put it back.
-                    let orig = get_ffon_at_id(&r.ffon, &r.current_id)
-                        .and_then(|a| a.get(current_idx))
-                        .cloned();
-                    r.placeholder_cancel = Some(crate::app_state::PlaceholderCancel {
-                        insertion_id: r.current_id.clone(),
-                        replaced_element: orig,
-                        return_id,
-                    });
-                    replace_ffon_element(r, current_idx, new_elem);
-                } else {
-                    let insert_idx = current_idx + 1;
-                    insert_ffon_element(r, insert_idx, new_elem);
-                    r.current_id.set_last(insert_idx);
-                    r.placeholder_cancel = Some(crate::app_state::PlaceholderCancel {
-                        insertion_id: r.current_id.clone(),
-                        replaced_element: None,
-                        return_id,
-                    });
-                }
-                r.current_command = CommandPhase::None;
-                r.coordinate = rest_coordinate(r);
-                list::create_list_current_layer(r);
-                r.list_index = r.current_id.last().unwrap_or(0);
-                r.scroll_offset = 0;
-                // Enter insert mode on the new element
-                handle_i(r);
+                insert_returned_element(r, new_elem);
             } else if !r.error_message.is_empty() {
                 // Provider set an error
                 r.current_command = CommandPhase::None;
@@ -1993,6 +2177,58 @@ pub fn handle_insert(r: &mut AppRenderer) {
     r.needs_redraw = true;
 }
 
+/// Put a row a provider handed back into the tree, focus it, and start editing.
+///
+/// Shared by the `:` palette and by Enter on a session-list button, so both get
+/// the same Escape-undoes-the-insertion contract: `placeholder_cancel` is
+/// stashed *before* the mutation, and an empty placeholder is replaced in place
+/// rather than pushed down.
+fn insert_returned_element(r: &mut AppRenderer, new_elem: sicompass_sdk::ffon::FfonElement) {
+    let current_idx = r.current_id.last().unwrap_or(0);
+
+    // If the current element is an empty placeholder, replace it in-place;
+    // otherwise insert after the current position.
+    // (mirrors C handlers.c:2724-2751)
+    let current_is_placeholder = {
+        let arr = get_ffon_at_id(&r.ffon, &r.current_id);
+        match arr.and_then(|a| a.get(current_idx)) {
+            Some(sicompass_sdk::ffon::FfonElement::Str(s)) => is_empty_placeholder(s),
+            _ => false,
+        }
+    };
+
+    // Stash cancel state before mutating so Escape can undo the insertion.
+    let return_id = r.current_id.clone();
+    if current_is_placeholder {
+        // Clone the original placeholder so Escape can put it back.
+        let orig = get_ffon_at_id(&r.ffon, &r.current_id)
+            .and_then(|a| a.get(current_idx))
+            .cloned();
+        r.placeholder_cancel = Some(crate::app_state::PlaceholderCancel {
+            insertion_id: r.current_id.clone(),
+            replaced_element: orig,
+            return_id,
+        });
+        replace_ffon_element(r, current_idx, new_elem);
+    } else {
+        let insert_idx = current_idx + 1;
+        insert_ffon_element(r, insert_idx, new_elem);
+        r.current_id.set_last(insert_idx);
+        r.placeholder_cancel = Some(crate::app_state::PlaceholderCancel {
+            insertion_id: r.current_id.clone(),
+            replaced_element: None,
+            return_id,
+        });
+    }
+    r.current_command = CommandPhase::None;
+    r.coordinate = rest_coordinate(r);
+    list::create_list_current_layer(r);
+    r.list_index = r.current_id.last().unwrap_or(0);
+    r.scroll_offset = 0;
+    // Enter insert mode on the new element
+    handle_i(r);
+}
+
 /// Enter in General — toggle checkbox/radio, activate input, or open file.
 pub fn handle_enter_general(r: &mut AppRenderer) {
     use sicompass_sdk::ffon::{FfonElement, get_ffon_at_id};
@@ -2015,6 +2251,38 @@ pub fn handle_enter_general(r: &mut AppRenderer) {
             }
         }
     };
+
+    // Enter on a `<button>` row of a session list, routed through
+    // `handle_command` rather than `on_button_press`. `on_button_press` returns
+    // `()`, so it cannot hand back the row the `new session` button has to open
+    // for the first prompt. One command covers every button the list has, which
+    // keeps the button vocabulary entirely inside the provider.
+    if in_session_list(r) {
+        let key = match &elem_clone {
+            FfonElement::Str(s) => s.clone(),
+            FfonElement::Obj(o) => o.key.clone(),
+        };
+        if tags::has_button(&key) {
+            match crate::provider::handle_command(r, VIEW_CMD_ACTIVATE_ROW, &key, 0) {
+                Some(row) => insert_returned_element(r, row),
+                None => {
+                    // A confirmation answered: the list changed length under the
+                    // cursor, so refresh and clamp rather than leaving it past
+                    // the end.
+                    crate::provider::refresh_current_directory(r);
+                    let len = get_ffon_at_id(&r.ffon, &r.current_id)
+                        .map(|a| a.len())
+                        .unwrap_or(0);
+                    let idx = r.current_id.last().unwrap_or(0);
+                    r.current_id.set_last(idx.min(len.saturating_sub(1)));
+                    list::create_list_current_layer(r);
+                    r.list_index = r.current_id.last().unwrap_or(0);
+                    r.needs_redraw = true;
+                }
+            }
+            return;
+        }
+    }
 
     // Toggle checkbox
     if let Some(new_text) = toggle_checkbox(&elem_clone) {
@@ -3356,8 +3624,25 @@ pub fn handle_enter_insert(r: &mut AppRenderer) {
         None
     };
 
+    // Read before the commit: a successful one swaps the session list for the
+    // transcript, and afterwards there is no way to tell this was the
+    // new-session row.
+    let starting_a_session = in_session_list(r);
+
     // Try provider commit first
     let committed = crate::provider::commit_edit(r, &old_content, &new_content);
+
+    if committed && starting_a_session {
+        // Name the line above the list after the session that was just started.
+        // The typed prompt is the best label there is until Claude writes a
+        // title of its own, and it is what the row will fall back to anyway.
+        let typed = new_content.trim();
+        if !typed.is_empty() {
+            r.session_view_parent_label = Some(typed.to_owned());
+            // No row to have come from: this session was typed into being.
+            r.session_view_row_id = None;
+        }
+    }
 
     if prefix_path_pushed {
         crate::provider::pop_path(r);
@@ -3448,7 +3733,17 @@ pub fn handle_enter_insert(r: &mut AppRenderer) {
         // Skip the `+i` live input slot too — its children are recall history;
         // the cursor belongs on the fresh trailing input slot, set by
         // `snap_to_trailing_input`.
-        if !is_filebrowser_rename && !is_editor_commit && !is_live_slot && !is_structural_rename {
+        // Not in a session view either. A commit there has just replaced the
+        // whole level (the session list became a transcript), so "descend into
+        // the element you just edited" names nothing — and the row now at the
+        // cursor's index may well be an assistant message with children, which
+        // would descend a level and freeze the streaming refresh.
+        if !is_filebrowser_rename
+            && !is_editor_commit
+            && !is_live_slot
+            && !is_structural_rename
+            && !in_session_view(r)
+        {
             navigate_right_raw(r);
         }
 
@@ -3666,6 +3961,17 @@ pub fn handle_escape(r: &mut AppRenderer) {
     // scrollback intact. Only General mode — inside Insert, Escape still means
     // "cancel this edit".
     if r.coordinate.is_general() && at_session_input_level(r) {
+        r.session_view_parent_label = None;
+        r.session_view_row_id = None;
+        apply_view_command(r, VIEW_CMD_BROWSE);
+        return;
+    }
+    // The session list is the rung above the transcript, and Escape leaves the
+    // whole command layer from either one. Escape unwinds *modes*, so it goes
+    // all the way out in one press; Left is what steps down a single rung.
+    if r.coordinate == Coordinate::SessionList {
+        r.session_view_parent_label = None;
+        r.session_view_row_id = None;
         apply_view_command(r, VIEW_CMD_BROWSE);
         return;
     }

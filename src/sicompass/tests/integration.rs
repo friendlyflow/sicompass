@@ -35,6 +35,12 @@ fn ensure_builtins() {
     // and their counts would differ per machine. Project skills, written into a
     // tempdir by each test, are unaffected.
     sicompass_claude::_set_test_no_ambient_skills(true);
+    // And, for a much stronger reason, for claude's session list: it reads
+    // `~/.claude/projects`, and Ctrl+D there *deletes* a transcript. Without
+    // this the tests would list the developer's own sessions and could remove
+    // one. Tests that need sessions inject a fake root of their own with
+    // `_set_test_projects_root`, which is thread-local.
+    sicompass_claude::_set_test_no_ambient_projects(true);
     // And for the git client: `push`, `pull` and `fetch` contact a real
     // remote, so without this a fixture repository that happens to have one
     // configured would have the tests talking to it, hanging on a credential
@@ -11939,13 +11945,18 @@ fn claude_right_and_left_walk_the_folder_tree() {
 }
 
 #[test]
-fn claude_colon_starts_a_session_in_the_folder_being_listed() {
+fn claude_colon_lists_the_sessions_of_the_folder_being_listed() {
     // The cursor sits on `workspace`, but the folder the user is *in* is the
-    // root — that is the one whose contents the list is showing, and the one
+    // root — that is the one whose sessions the list has to show, and the one
     // claude has to resolve CLAUDE.md and .claude/skills/ from.
+    //
+    // `:` used to start a session here. It opens the list instead now, and
+    // starting one is a deliberate second step, so this also pins that no child
+    // is spawned on the way.
     let tmp = TempDir::new().unwrap();
     let root = tmp.path().canonicalize().unwrap();
     std::fs::create_dir(root.join("workspace")).unwrap();
+    let _sessions = fake_claude_sessions(&root, &[("s1", "An earlier session")]);
 
     ensure_builtins();
     let mut renderer = AppRenderer::new();
@@ -11957,7 +11968,25 @@ fn claude_colon_starts_a_session_in_the_folder_being_listed() {
     assert_eq!(
         renderer.providers[0].current_path(),
         root.to_str().unwrap(),
-        "the session runs in the listed folder, not the focused one",
+        "the list describes the listed folder, not the focused one",
+    );
+    assert_eq!(renderer.coordinate, Coordinate::SessionList);
+    assert_eq!(
+        labels(&renderer),
+        vec!["-b new session", "+ An earlier session"],
+    );
+    assert!(
+        renderer.providers[0].process_id().is_none(),
+        "opening the list starts no claude child",
+    );
+
+    // And the session it opens really does run in the listed folder.
+    press_down(&mut renderer);
+    press_right(&mut renderer);
+    assert_eq!(
+        renderer.providers[0].current_path(),
+        root.to_str().unwrap(),
+        "the session runs in the listed folder",
     );
     assert!(
         renderer.total_list.last().unwrap().label.starts_with("-i "),
@@ -12082,10 +12111,377 @@ fn project_skill(root: &std::path::Path, name: &str, frontmatter: &str) {
 /// The bogus `claudeBinary` means the spawn fails, but the session folder is
 /// recorded before the spawn is attempted — and skill discovery only reads the
 /// filesystem, so the palette works regardless of whether a child is running.
-fn register_claude_in_session(renderer: &mut AppRenderer, path: &std::path::Path) {
+/// Point claude's session scanning at a fake `~/.claude/projects` and write one
+/// transcript per entry, each recorded as having run in `cwd`.
+///
+/// The returned `TempDir` owns the root, so it has to outlive the renderer.
+/// `_set_test_projects_root` is thread-local, so this affects no other test.
+fn fake_claude_sessions(cwd: &std::path::Path, entries: &[(&str, &str)]) -> TempDir {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().join("projects");
+    let dashed: String = cwd
+        .to_string_lossy()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect();
+    let dir = root.join(dashed);
+    std::fs::create_dir_all(&dir).unwrap();
+    for (id, title) in entries {
+        // A `queue-operation` record carries the `cwd` the scan needs while
+        // being nothing the stream model recognises, so the replayed
+        // conversation is empty and the session renders as a bare input slot.
+        let body = format!(
+            "{{\"type\":\"queue-operation\",\"cwd\":{},\"sessionId\":\"{id}\"}}\n\
+             {{\"type\":\"ai-title\",\"aiTitle\":{},\"sessionId\":\"{id}\"}}\n",
+            serde_json::to_string(&cwd.to_string_lossy().into_owned()).unwrap(),
+            serde_json::to_string(title).unwrap(),
+        );
+        std::fs::write(dir.join(format!("{id}.jsonl")), body).unwrap();
+    }
+    sicompass_claude::_set_test_projects_root(Some(root));
+    tmp
+}
+
+/// Land in a claude session: folders, `:` to the session list, then Right onto
+/// the one session the fake root holds.
+///
+/// `:` used to reach the transcript directly. It now reaches the list, and
+/// opening a past session is a Right — which is also why this needs a fake
+/// projects root to have something to open.
+#[must_use]
+fn register_claude_in_session(renderer: &mut AppRenderer, path: &std::path::Path) -> TempDir {
+    let sessions = fake_claude_sessions(path, &[("fixture-session", "A fixture session")]);
     register_claude_rooted_at(renderer, path);
     press_right(renderer);
     press_colon(renderer);
+    press_down(renderer);
+    press_right(renderer);
+    sessions
+}
+
+// ---- The session list -----------------------------------------------------
+
+#[test]
+fn claude_session_list_covers_the_folder_and_below() {
+    // A project root should show the work done in its subdirectories too, so a
+    // session is matched on the `cwd` recorded in its transcript rather than on
+    // the folder it was listed from.
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    let sub = root.join("workspace");
+    std::fs::create_dir(&sub).unwrap();
+
+    let _a = fake_claude_sessions(&root, &[("top", "Work at the root")]);
+    // A second root would replace the first, so write the subfolder's session
+    // into the same fake projects directory.
+    let projects = _a.path().join("projects");
+    let dashed: String = sub
+        .to_string_lossy()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect();
+    std::fs::create_dir_all(projects.join(&dashed)).unwrap();
+    std::fs::write(
+        projects.join(&dashed).join("deep.jsonl"),
+        format!(
+            "{{\"type\":\"queue-operation\",\"cwd\":{},\"sessionId\":\"deep\"}}\n\
+             {{\"type\":\"ai-title\",\"aiTitle\":\"Work in a subfolder\",\"sessionId\":\"deep\"}}\n",
+            serde_json::to_string(&sub.to_string_lossy().into_owned()).unwrap()
+        ),
+    )
+    .unwrap();
+
+    ensure_builtins();
+    let mut renderer = AppRenderer::new();
+    register_claude_rooted_at(&mut renderer, &root);
+    press_right(&mut renderer);
+    press_colon(&mut renderer);
+
+    let mut rows = labels(&renderer);
+    rows.sort();
+    assert_eq!(
+        rows,
+        vec![
+            "+ Work at the root",
+            "+ Work in a subfolder",
+            "-b new session",
+        ],
+        "the folder and everything below it",
+    );
+}
+
+#[test]
+fn claude_right_on_a_session_row_opens_it_at_the_same_depth() {
+    // The load-bearing one. `refresh_current_directory` early-returns below the
+    // session's level, so opening a session by *descending* would silently stop
+    // the streaming refresh forever. Opening it is a view swap in place, and
+    // this pins the depth that makes that true.
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    std::fs::create_dir(root.join("workspace")).unwrap();
+    let _sessions = fake_claude_sessions(&root, &[("s1", "An earlier session")]);
+
+    ensure_builtins();
+    let mut renderer = AppRenderer::new();
+    register_claude_rooted_at(&mut renderer, &root);
+    press_right(&mut renderer);
+    press_colon(&mut renderer);
+    let list_depth = renderer.current_id.depth();
+
+    press_down(&mut renderer);
+    press_right(&mut renderer);
+
+    assert_eq!(
+        renderer.current_id.depth(),
+        list_depth,
+        "the transcript replaces the list rather than hanging under it",
+    );
+    assert_eq!(renderer.coordinate, Coordinate::SessionFirstCommand);
+    assert!(
+        renderer.total_list.last().unwrap().label.starts_with("-i "),
+        "and the cursor lands ready to type",
+    );
+}
+
+#[test]
+fn claude_the_line_above_the_list_names_the_session_you_are_in() {
+    // A session replaces the folder listing's level in place, so the element one
+    // level up is the folder. The app remembers which session was opened so the
+    // line between the header and the list can say that instead.
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    std::fs::create_dir(root.join("workspace")).unwrap();
+    let _sessions = fake_claude_sessions(&root, &[("s1", "Fix the wrap bug")]);
+
+    ensure_builtins();
+    let mut renderer = AppRenderer::new();
+    register_claude_rooted_at(&mut renderer, &root);
+    press_right(&mut renderer);
+    press_colon(&mut renderer);
+    assert!(
+        renderer.session_view_parent_label.is_none(),
+        "in the list, the folder above it is already the right answer",
+    );
+
+    press_down(&mut renderer);
+    press_right(&mut renderer);
+    assert_eq!(
+        renderer.session_view_parent_label.as_deref(),
+        Some("Fix the wrap bug"),
+    );
+
+    // And it does not outlive the session it described.
+    press_left(&mut renderer);
+    assert!(renderer.session_view_parent_label.is_none());
+}
+
+#[test]
+fn claude_escape_leaves_the_whole_layer_from_either_rung() {
+    // Escape unwinds modes, so it goes all the way out in one press from the
+    // transcript *and* from the list. Left is what steps down a single rung.
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    std::fs::create_dir(root.join("workspace")).unwrap();
+
+    ensure_builtins();
+    let mut renderer = AppRenderer::new();
+    let _sessions = register_claude_in_session(&mut renderer, &root);
+
+    press_escape(&mut renderer);
+    assert_eq!(renderer.coordinate, Coordinate::General);
+    assert_eq!(labels(&renderer), vec!["+ workspace"]);
+
+    // From the list, the same single press.
+    press_colon(&mut renderer);
+    assert_eq!(renderer.coordinate, Coordinate::SessionList);
+    press_escape(&mut renderer);
+    assert_eq!(renderer.coordinate, Coordinate::General);
+    assert_eq!(labels(&renderer), vec!["+ workspace"]);
+}
+
+#[test]
+fn claude_left_out_of_a_session_lands_on_that_session() {
+    // Coming back to the list should put the cursor where you were, the way Left
+    // out of a folder lands on the folder you came from. The row is found by the
+    // id it carries rather than by position, so a list that has reordered since
+    // (a session sent a prompt and moved to the top) still lands right.
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    std::fs::create_dir(root.join("workspace")).unwrap();
+    let _sessions = fake_claude_sessions(
+        &root,
+        &[
+            ("a", "The first one"),
+            ("b", "The second one"),
+            ("c", "The third one"),
+        ],
+    );
+
+    ensure_builtins();
+    let mut renderer = AppRenderer::new();
+    register_claude_rooted_at(&mut renderer, &root);
+    press_right(&mut renderer);
+    press_colon(&mut renderer);
+
+    // Walk past the button onto the *third* session, so landing on it again
+    // cannot be confused with landing on row 0 or row 1.
+    let target = labels(&renderer)[3].clone();
+    press_down(&mut renderer);
+    press_down(&mut renderer);
+    press_down(&mut renderer);
+    assert_eq!(renderer.total_list[renderer.list_index].label, target);
+
+    press_right(&mut renderer);
+    assert_eq!(renderer.coordinate, Coordinate::SessionFirstCommand);
+
+    press_left(&mut renderer);
+    assert_eq!(renderer.coordinate, Coordinate::SessionList);
+    assert_eq!(
+        renderer.total_list[renderer.list_index].label, target,
+        "back on the session that was open, not on the new-session button",
+    );
+}
+
+#[test]
+fn claude_new_session_opens_a_prompt_and_enter_jumps_into_the_session() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    std::fs::create_dir(root.join("workspace")).unwrap();
+    let _sessions = fake_claude_sessions(&root, &[]);
+
+    ensure_builtins();
+    let mut renderer = AppRenderer::new();
+    register_claude_rooted_at(&mut renderer, &root);
+    press_right(&mut renderer);
+    press_colon(&mut renderer);
+    assert_eq!(labels(&renderer), vec!["-b new session"]);
+
+    // Enter on the button opens a row to type into, and lands in it.
+    press_enter(&mut renderer);
+    assert_eq!(renderer.coordinate, Coordinate::Insert);
+    assert_eq!(
+        renderer.current_id.last(),
+        Some(1),
+        "directly under the button"
+    );
+    assert_eq!(
+        renderer.total_list[1].label, "-i Prompt: ",
+        "the label reads as a prompt, with a space before what you type",
+    );
+
+    type_text(&mut renderer, "what does this crate do?");
+    press_enter(&mut renderer);
+
+    // The spawn fails here (the binary cannot exist), but the swap is what this
+    // pins: the transcript replaced the list and the cursor is on the slot.
+    assert_eq!(renderer.coordinate, Coordinate::SessionFirstCommand);
+    assert!(
+        renderer.total_list.last().unwrap().label.starts_with("-i "),
+        "labels: {:?}",
+        labels(&renderer),
+    );
+    assert_eq!(
+        renderer.session_view_parent_label.as_deref(),
+        Some("what does this crate do?"),
+        "the line above names the session by the prompt that started it",
+    );
+}
+
+#[test]
+fn claude_an_empty_session_list_does_not_hand_colon_a_palette() {
+    // With no past sessions, the new-session row is the level's *last* row and
+    // looks exactly like a live prompt to the insert-palette shape test. Without
+    // the view sentinels being filtered out, `:` would open a one-item palette
+    // offering "session list" here.
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    std::fs::create_dir(root.join("workspace")).unwrap();
+    let _sessions = fake_claude_sessions(&root, &[]);
+
+    ensure_builtins();
+    let mut renderer = AppRenderer::new();
+    register_claude_rooted_at(&mut renderer, &root);
+    press_right(&mut renderer);
+    press_colon(&mut renderer);
+    press_enter(&mut renderer);
+    press_escape(&mut renderer);
+
+    press_colon(&mut renderer);
+
+    assert!(
+        renderer.suspended_input_edit.is_none(),
+        "no insert palette here",
+    );
+    assert!(
+        renderer.error_message.contains("Escape"),
+        "`:` says why it refuses rather than doing nothing: {:?}",
+        renderer.error_message,
+    );
+}
+
+#[test]
+fn claude_ctrl_d_confirms_before_deleting_a_session() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    std::fs::create_dir(root.join("workspace")).unwrap();
+    let sessions = fake_claude_sessions(&root, &[("doomed", "A throwaway session")]);
+    let file = {
+        let dashed: String = root
+            .to_string_lossy()
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+            .collect();
+        sessions
+            .path()
+            .join("projects")
+            .join(dashed)
+            .join("doomed.jsonl")
+    };
+
+    ensure_builtins();
+    let mut renderer = AppRenderer::new();
+    register_claude_rooted_at(&mut renderer, &root);
+    press_right(&mut renderer);
+    press_colon(&mut renderer);
+
+    // Inert on the button: only the session rows are deletable.
+    press_ctrl(&mut renderer, Keycode::D);
+    assert_eq!(
+        labels(&renderer),
+        vec!["-b new session", "+ A throwaway session"]
+    );
+
+    press_down(&mut renderer);
+    press_ctrl(&mut renderer, Keycode::D);
+    assert!(file.exists(), "asking removes nothing");
+    let rows = labels(&renderer);
+    assert_eq!(rows.len(), 4, "question plus two answers: {rows:?}");
+    assert!(rows[1].contains("A throwaway session"), "{rows:?}");
+    assert!(rows[2].starts_with("-b "), "{rows:?}");
+
+    // No keeps it.
+    press_enter(&mut renderer);
+    assert!(file.exists());
+    assert_eq!(
+        labels(&renderer),
+        vec!["-b new session", "+ A throwaway session"]
+    );
+
+    // Yes removes it, and says so.
+    press_ctrl(&mut renderer, Keycode::D);
+    press_down(&mut renderer);
+    press_enter(&mut renderer);
+    assert!(!file.exists(), "the transcript is gone");
+    assert_eq!(labels(&renderer), vec!["-b new session"]);
+    // The frame loop is what carries a provider announcement to the screen
+    // reader, which is also what makes it win over the list rebuild's mode
+    // speech rather than being clobbered by it.
+    sicompass::events::drain_provider_announcements(&mut renderer);
+    let spoken = announced_text(&renderer).expect("a deletion is announced");
+    assert!(
+        spoken.contains("A throwaway session"),
+        "naming what went: {spoken:?}",
+    );
 }
 
 fn labels(renderer: &AppRenderer) -> Vec<String> {
@@ -12105,7 +12501,7 @@ fn claude_second_colon_lists_the_projects_skills() {
 
     ensure_builtins();
     let mut renderer = AppRenderer::new();
-    register_claude_in_session(&mut renderer, &root);
+    let _sessions = register_claude_in_session(&mut renderer, &root);
 
     press_colon(&mut renderer);
 
@@ -12132,7 +12528,7 @@ fn claude_second_colon_enter_fills_the_prompt_without_sending() {
 
     ensure_builtins();
     let mut renderer = AppRenderer::new();
-    register_claude_in_session(&mut renderer, &root);
+    let _sessions = register_claude_in_session(&mut renderer, &root);
 
     press_colon(&mut renderer);
     press_enter(&mut renderer);
@@ -12159,7 +12555,7 @@ fn claude_second_colon_escape_leaves_the_prompt_untouched() {
 
     ensure_builtins();
     let mut renderer = AppRenderer::new();
-    register_claude_in_session(&mut renderer, &root);
+    let _sessions = register_claude_in_session(&mut renderer, &root);
     let before = slot_key_at(&renderer, &renderer.current_id.clone());
 
     press_colon(&mut renderer);
@@ -12182,7 +12578,7 @@ fn claude_skills_palette_filters_as_you_type() {
 
     ensure_builtins();
     let mut renderer = AppRenderer::new();
-    register_claude_in_session(&mut renderer, &root);
+    let _sessions = register_claude_in_session(&mut renderer, &root);
 
     press_colon(&mut renderer);
     assert_eq!(renderer.total_list.len(), 3);
@@ -12206,7 +12602,7 @@ fn claude_ctrl_colon_keeps_the_half_typed_message() {
 
     ensure_builtins();
     let mut renderer = AppRenderer::new();
-    register_claude_in_session(&mut renderer, &root);
+    let _sessions = register_claude_in_session(&mut renderer, &root);
     press(&mut renderer, Keycode::I);
     type_text(&mut renderer, "explain ");
 
@@ -12234,7 +12630,7 @@ fn claude_double_home_in_the_session_says_escape_first_instead_of_freezing() {
 
     ensure_builtins();
     let mut renderer = AppRenderer::new();
-    register_claude_in_session(&mut renderer, &root);
+    let _sessions = register_claude_in_session(&mut renderer, &root);
     assert!(renderer.coordinate.is_session_view());
     let before = renderer.current_id.clone();
 
@@ -12262,7 +12658,7 @@ fn claude_ctrl_colon_escape_keeps_the_half_typed_message() {
 
     ensure_builtins();
     let mut renderer = AppRenderer::new();
-    register_claude_in_session(&mut renderer, &root);
+    let _sessions = register_claude_in_session(&mut renderer, &root);
     press(&mut renderer, Keycode::I);
     type_text(&mut renderer, "explain ");
 
@@ -12287,7 +12683,7 @@ fn claude_escape_after_inserting_a_skill_clears_the_prompt() {
 
     ensure_builtins();
     let mut renderer = AppRenderer::new();
-    register_claude_in_session(&mut renderer, &root);
+    let _sessions = register_claude_in_session(&mut renderer, &root);
     press(&mut renderer, Keycode::I);
     type_text(&mut renderer, "explain ");
     press_ctrl_shift(&mut renderer, Keycode::Semicolon);
@@ -12323,7 +12719,7 @@ fn claude_escape_after_a_skill_clears_the_row_the_user_actually_sees() {
 
     ensure_builtins();
     let mut renderer = AppRenderer::new();
-    register_claude_in_session(&mut renderer, &root);
+    let _sessions = register_claude_in_session(&mut renderer, &root);
     press(&mut renderer, Keycode::I);
     type_text(&mut renderer, "explain ");
     press_ctrl_shift(&mut renderer, Keycode::Semicolon);
@@ -12366,7 +12762,7 @@ fn claude_second_colon_with_no_skills_is_inert() {
 
     ensure_builtins();
     let mut renderer = AppRenderer::new();
-    register_claude_in_session(&mut renderer, &root);
+    let _sessions = register_claude_in_session(&mut renderer, &root);
     let before = renderer.coordinate;
 
     press_colon(&mut renderer);
@@ -12414,9 +12810,7 @@ fn claude_right_in_the_session_never_grafts_a_copy_of_the_conversation() {
 
     ensure_builtins();
     let mut renderer = AppRenderer::new();
-    register_claude_rooted_at(&mut renderer, &root);
-    press_right(&mut renderer);
-    press_colon(&mut renderer);
+    let _sessions = register_claude_in_session(&mut renderer, &root);
 
     // The cursor lands on the `-i` slot, which has no recall history yet.
     let slot_id = renderer.current_id.clone();
@@ -12481,26 +12875,38 @@ fn claude_streaming_does_not_overwrite_the_level_being_read() {
 }
 
 #[test]
-fn claude_left_is_inert_in_the_session() {
-    // Left is a dead end inside the session; Escape is the one way out.
+fn claude_left_returns_to_the_session_list() {
+    // A session's parent is the list it was opened from, so Left goes there —
+    // one rung, which is Left's job, where Escape's is the whole layer. It must
+    // still not pop a level off the folder tree: the provider's path stays put.
     let tmp = TempDir::new().unwrap();
     let root = tmp.path().canonicalize().unwrap();
     std::fs::create_dir(root.join("workspace")).unwrap();
 
     ensure_builtins();
     let mut renderer = AppRenderer::new();
-    register_claude_rooted_at(&mut renderer, &root);
-    press_right(&mut renderer);
-    press_colon(&mut renderer);
-    let before = renderer.current_id.clone();
+    let _sessions = register_claude_in_session(&mut renderer, &root);
+    let depth = renderer.current_id.depth();
 
     press_left(&mut renderer);
 
+    assert_eq!(renderer.coordinate, Coordinate::SessionList);
+    assert_eq!(labels(&renderer)[0], "-b new session");
     assert_eq!(
-        renderer.current_id, before,
-        "Left must not leave the session"
+        renderer.total_list[renderer.list_index].label, "+ A fixture session",
+        "the cursor stays on the session you came out of, not on the button",
+    );
+    assert_eq!(
+        renderer.current_id.depth(),
+        depth,
+        "a rung is a view swap, not a level",
     );
     assert_eq!(renderer.providers[0].current_path(), root.to_str().unwrap());
+
+    // And from the list, out to the folders.
+    press_left(&mut renderer);
+    assert_eq!(renderer.coordinate, Coordinate::General);
+    assert_eq!(labels(&renderer), vec!["+ workspace"]);
 }
 
 #[test]
@@ -17131,7 +17537,7 @@ fn the_claude_session_says_first_command_mode() {
 
     ensure_builtins();
     let mut renderer = AppRenderer::new();
-    register_claude_in_session(&mut renderer, &root);
+    let _sessions = register_claude_in_session(&mut renderer, &root);
 
     // claude offers `skills` on top of the view swap, so this is the first of two.
     assert_eq!(renderer.coordinate, Coordinate::SessionFirstCommand);
@@ -17159,7 +17565,7 @@ fn the_claude_skills_palette_says_second_command_mode() {
 
     ensure_builtins();
     let mut renderer = AppRenderer::new();
-    register_claude_in_session(&mut renderer, &root);
+    let _sessions = register_claude_in_session(&mut renderer, &root);
 
     press_colon(&mut renderer);
 

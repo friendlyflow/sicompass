@@ -101,6 +101,7 @@ mode-search = zoekmodus
 mode-extended-search = uitgebreide zoekmodus
 mode-command = commandomodus
 mode-first-command = eerste commandomodus
+mode-session = sessiemodus
 mode-second-command = tweede commandomodus
 mode-controls = bedieningsmodus
 mode-scroll = scrolmodus

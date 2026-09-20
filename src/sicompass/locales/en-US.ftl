@@ -104,6 +104,7 @@ mode-search = search mode
 mode-extended-search = extended search mode
 mode-command = command mode
 mode-first-command = first command mode
+mode-session = session mode
 mode-second-command = second command mode
 mode-controls = controls mode
 mode-scroll = scroll mode

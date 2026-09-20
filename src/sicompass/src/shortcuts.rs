@@ -223,6 +223,11 @@ fn claude_browsing(r: &AppRenderer) -> bool {
     active_provider_name(r) == Some("claude") && !handlers::in_session_view(r)
 }
 
+/// True on a session list's own level.
+fn session_list_open(r: &AppRenderer) -> bool {
+    handlers::in_session_list(r)
+}
+
 /// True in a browse-then-session provider's session view, where Escape goes back
 /// to the folder listing.
 fn in_session_view(r: &AppRenderer) -> bool {
@@ -232,7 +237,14 @@ fn in_session_view(r: &AppRenderer) -> bool {
 /// True where Left steps out to the parent list. A session level is the
 /// exception: Left is inert there, leaving is Escape's job.
 fn left_goes_back(r: &AppRenderer) -> bool {
-    not_at_root(r) && !handlers::at_session_input_level(r)
+    // A session's own level used to be a flat dead end. It still is for a
+    // provider with nothing between its folders and its session (the terminal),
+    // but where a session list exists Left steps down to it, so the hint has to
+    // appear.
+    if handlers::at_session_input_level(r) {
+        return handlers::session_list_available(r);
+    }
+    not_at_root(r)
 }
 
 /// True in the git client's folder-browse view, where `:` opens the repository
@@ -337,6 +349,14 @@ fn avail_provider_has_delete(r: &AppRenderer) -> bool {
     crate::provider::get_commands(r)
         .iter()
         .any(|c| c == "delete")
+}
+
+/// True when the cursor is on a session row of a session list.
+///
+/// Gated on the row being an `Obj`, which is what excludes the `new session`
+/// button and the first-prompt row: only the sessions themselves are `Obj`s.
+fn avail_session_row_delete(r: &AppRenderer) -> bool {
+    handlers::in_session_list(r) && handlers::focused_is_obj(r)
 }
 
 /// True when the active provider's command list includes `"toggle bookmark"`.
@@ -1446,6 +1466,20 @@ pub static SHORTCUTS: &[Shortcut] = &[
         is_available: claude_browsing,
         handle: handlers::handle_colon,
     },
+    // In the session list `:` has nowhere left to go, and matching no row at
+    // all would make the key look broken. `handle_colon` routes to
+    // `open_session_view`, which refuses with the spoken "press Escape to
+    // leave" — the same answer `:` gives inside a session.
+    Shortcut {
+        key: Keycode::Semicolon,
+        key2: None,
+        ctrl: false,
+        shift: true,
+        modes: &[Coordinate::General],
+        label: "",
+        is_available: session_list_open,
+        handle: handlers::handle_colon,
+    },
     Shortcut {
         key: Keycode::Semicolon,
         key2: None,
@@ -1490,6 +1524,20 @@ pub static SHORTCUTS: &[Shortcut] = &[
         modes: &[Coordinate::General],
         label: ":      Claude",
         is_available: claude_browsing,
+        handle: handlers::handle_colon,
+    },
+    // In the session list `:` has nowhere left to go, and matching no row at
+    // all would make the key look broken. `handle_colon` routes to
+    // `open_session_view`, which refuses with the spoken "press Escape to
+    // leave" — the same answer `:` gives inside a session.
+    Shortcut {
+        key: Keycode::Colon,
+        key2: None,
+        ctrl: false,
+        shift: false,
+        modes: &[Coordinate::General],
+        label: "",
+        is_available: session_list_open,
         handle: handlers::handle_colon,
     },
     Shortcut {
@@ -1745,6 +1793,37 @@ pub static SHORTCUTS: &[Shortcut] = &[
         label: "Del    Delete",
         is_available: avail_provider_has_delete,
         handle: handlers::invoke_provider_delete,
+    },
+    // ---- Ctrl+D / Delete on a session row -------------------------
+    // Deliberately not routed through the reserved `"delete"` command id above:
+    // `invoke_provider_delete` unwinds the cursor to depth 3 before acting, and
+    // a session list sits at whatever depth the folder it describes does, so
+    // that would walk the user out of the list before deleting anything. The
+    // board provider and the git client avoid that id for the same reason.
+    //
+    // Nothing below could match anyway (claude declares neither editor
+    // semantics nor structural edit), so the position here is documentation
+    // rather than arbitration. The provider answers with a confirmation; this
+    // key removes nothing on its own.
+    Shortcut {
+        key: Keycode::D,
+        key2: None,
+        ctrl: true,
+        shift: false,
+        modes: &[Coordinate::General],
+        label: "Ctrl+D Delete",
+        is_available: avail_session_row_delete,
+        handle: handlers::handle_session_row_delete,
+    },
+    Shortcut {
+        key: Keycode::Delete,
+        key2: None,
+        ctrl: false,
+        shift: false,
+        modes: &[Coordinate::General],
+        label: "Del    Delete",
+        is_available: avail_session_row_delete,
+        handle: handlers::handle_session_row_delete,
     },
     // ---- Ctrl+D / Delete in General for editor provider -----------
     // Routes to handle_file_delete so the provider's delete_item is called (writes to disk).

@@ -174,6 +174,15 @@ pub enum Coordinate {
     /// command mode", which types into a live prompt), the git client's is the
     /// ordinary command palette ([`Coordinate::Command`], "command mode").
     SessionFirstCommand,
+    /// Claude's list of past sessions for the folder being browsed — the rung
+    /// between the folder listing and a session's transcript. Reached by `:`,
+    /// left by Escape (straight out to the folders) or by Left.
+    ///
+    /// Behaves exactly like [`Coordinate::General`], and is a session view, so
+    /// Left cannot pop the folder path out from under the list. Named apart
+    /// from the two above because the ladder has to read correctly by ear:
+    /// general mode, session mode, first command mode, second command mode.
+    SessionList,
     /// The second colon layer over a live prompt — claude's skills list, what
     /// the code still calls the insert palette. Behaves exactly like
     /// [`Coordinate::Command`].
@@ -206,7 +215,9 @@ impl Coordinate {
     /// only the base modes and needs no entry for the relabellings.
     pub fn base(self) -> Coordinate {
         match self {
-            Coordinate::SessionCommand | Coordinate::SessionFirstCommand => Coordinate::General,
+            Coordinate::SessionCommand
+            | Coordinate::SessionFirstCommand
+            | Coordinate::SessionList => Coordinate::General,
             Coordinate::SecondCommand => Coordinate::Command,
             other => other,
         }
@@ -217,14 +228,14 @@ impl Coordinate {
     pub fn is_session_view(self) -> bool {
         matches!(
             self,
-            Coordinate::SessionCommand | Coordinate::SessionFirstCommand
+            Coordinate::SessionCommand | Coordinate::SessionFirstCommand | Coordinate::SessionList
         )
     }
 
     /// Every variant. Exists so the locale-coverage test can assert that each
     /// mode resolves in all four bundles without a hand-maintained list that
     /// silently misses a new variant.
-    pub const ALL: [Coordinate; 19] = [
+    pub const ALL: [Coordinate; 20] = [
         Coordinate::General,
         Coordinate::Insert,
         Coordinate::Normal,
@@ -243,6 +254,7 @@ impl Coordinate {
         Coordinate::TabSwitcher,
         Coordinate::SessionCommand,
         Coordinate::SessionFirstCommand,
+        Coordinate::SessionList,
         Coordinate::SecondCommand,
     ];
 
@@ -277,6 +289,7 @@ impl Coordinate {
             Coordinate::TabSwitcher => "tab switcher mode",
             Coordinate::SessionCommand => "command mode",
             Coordinate::SessionFirstCommand => "first command mode",
+            Coordinate::SessionList => "session mode",
             Coordinate::SecondCommand => "second command mode",
         }
     }
@@ -308,6 +321,7 @@ impl Coordinate {
             // the point of the variant is the behaviour, not the wording.
             Coordinate::SessionCommand => "mode-command",
             Coordinate::SessionFirstCommand => "mode-first-command",
+            Coordinate::SessionList => "mode-session",
             Coordinate::SecondCommand => "mode-second-command",
         };
         let resolved = sicompass_sdk::localize::t(key);
@@ -834,6 +848,20 @@ pub struct AppRenderer {
     /// the cursor's last index is a position in the scrollback, which says
     /// nothing about which folder was focused before the swap.
     pub session_view_return_id: Option<IdArray>,
+    /// What the line between the header and the list should say while a session
+    /// view is up, when the FFON cannot say it.
+    ///
+    /// A session replaces the folder listing's level *in place*, so the element
+    /// one level up — which is what that line normally reads — is the folder,
+    /// not the session. The app knows the answer at the two moments a session
+    /// opens (the row Right was pressed on, and the prompt a new session was
+    /// started with) and remembers it here. Cleared on the way back out.
+    pub session_view_parent_label: Option<String>,
+    /// The `<id>` of the session row a session was opened from, so Left back to
+    /// the list can put the cursor on it rather than on the `new session`
+    /// button. `None` for a session started from the prompt row, which has no
+    /// row to have come from yet.
+    pub session_view_row_id: Option<String>,
 
     // ---- Current URI -------------------------------------------------------
     pub current_uri: String,
@@ -1054,6 +1082,8 @@ impl AppRenderer {
             save_as_return_id: IdArray::new(),
             save_folder_path: String::new(),
             session_view_return_id: None,
+            session_view_parent_label: None,
+            session_view_row_id: None,
             current_uri: String::new(),
             pending_announcement: None,
             announcement_parity: false,
@@ -1174,6 +1204,8 @@ impl AppRenderer {
         // belongs to the outgoing tab's tree, so it dies with the switch rather
         // than being consumed by an Escape over here.
         self.session_view_return_id = None;
+        self.session_view_parent_label = None;
+        self.session_view_row_id = None;
         self.active_tab = target;
         let cp = std::mem::take(&mut self.tabs[target].providers);
         let cf = std::mem::take(&mut self.tabs[target].ffon);
@@ -2132,6 +2164,7 @@ mod tests {
     fn base_maps_every_relabelled_coordinate_and_leaves_the_rest_alone() {
         assert_eq!(Coordinate::SessionCommand.base(), Coordinate::General);
         assert_eq!(Coordinate::SessionFirstCommand.base(), Coordinate::General);
+        assert_eq!(Coordinate::SessionList.base(), Coordinate::General);
         assert_eq!(Coordinate::SecondCommand.base(), Coordinate::Command);
         // Every other variant is its own base, so `base()` can be applied at a
         // dispatch site without changing what any existing mode matches.
@@ -2140,6 +2173,7 @@ mod tests {
                 c,
                 Coordinate::SessionCommand
                     | Coordinate::SessionFirstCommand
+                    | Coordinate::SessionList
                     | Coordinate::SecondCommand
             ) {
                 continue;
@@ -2157,18 +2191,25 @@ mod tests {
         for c in Coordinate::ALL {
             let want = matches!(
                 c,
-                Coordinate::General | Coordinate::SessionCommand | Coordinate::SessionFirstCommand
+                Coordinate::General
+                    | Coordinate::SessionCommand
+                    | Coordinate::SessionFirstCommand
+                    | Coordinate::SessionList
             );
             assert_eq!(c.is_general(), want, "{c:?}");
         }
     }
 
     #[test]
-    fn is_session_view_is_the_two_session_labels() {
+    fn is_session_view_is_the_three_session_labels() {
         for c in Coordinate::ALL {
+            // The session list is one too: it is inside the same escape-only
+            // layer, and Left must not pop the folder path out from under it.
             let want = matches!(
                 c,
-                Coordinate::SessionCommand | Coordinate::SessionFirstCommand
+                Coordinate::SessionCommand
+                    | Coordinate::SessionFirstCommand
+                    | Coordinate::SessionList
             );
             assert_eq!(c.is_session_view(), want, "{c:?}");
         }
@@ -2185,7 +2226,7 @@ mod tests {
             assert!(!seen.contains(&c), "{c:?} listed twice");
             seen.push(c);
         }
-        assert_eq!(Coordinate::ALL.len(), 19);
+        assert_eq!(Coordinate::ALL.len(), 20);
     }
 
     #[test]

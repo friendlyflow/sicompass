@@ -1394,6 +1394,26 @@ fn update_view(app: &mut AppState) {
         }
     };
 
+    // A session view replaces the folder listing's level *in place*, so the
+    // element one level up — which is what everything above reads — is the
+    // folder the session runs in, not the session. That is right for the folder
+    // listing and for the session list, and wrong for a transcript: the line
+    // should name the session you are inside.
+    //
+    // The FFON cannot say it, so the app remembers it at the two moments it
+    // knows: the row Right was pressed on, and the prompt a new session was
+    // started with. Cleared on every way back out, so a stale name cannot
+    // outlive the session it described.
+    let parent_info = match &app.renderer.session_view_parent_label {
+        Some(label) if !label.is_empty() && crate::handlers::in_session_view(&app.renderer) => {
+            ParentInfo {
+                display_text: label.clone(),
+                ..parent_info
+            }
+        }
+        _ => parent_info,
+    };
+
     // ---- Scroll-into-view: compute start_index from scroll_offset/list_index --
     // Pre-compute per-item line counts (needed before item_metrics so the scroll
     // algorithm can run first, matching the C render.c viewport logic).

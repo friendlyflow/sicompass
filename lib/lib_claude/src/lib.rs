@@ -39,8 +39,10 @@
 mod events;
 mod render;
 mod session;
+mod sessions;
 mod skills;
 
+pub use sessions::{_set_test_no_ambient_projects, _set_test_projects_root};
 pub use skills::_set_test_no_ambient_skills;
 
 use std::path::{Path, PathBuf};
@@ -70,24 +72,68 @@ pub fn register_translations() {
 /// Cap on remembered prompts for `<input>`-slot recall.
 const HISTORY_CAP: usize = 1000;
 
-/// Command id: swap from the folder listing to the session, running `claude` in
-/// the folder the user browsed to. The app binds `:` to this.
+/// Command id: open one past session's transcript. Carries the row's key, so
+/// unlike the other three this one is dispatched with a payload — the app's
+/// Right handler passes the session row it was standing on.
 ///
-/// Deliberately not the terminal's `"shell"`: there is no shell here, and the
-/// app no longer hardcodes the enter-command anyway — it fires whichever single
-/// transition [`Provider::commands`] is currently advertising.
+/// No longer advertised in [`Provider::commands`]: `:` opens the *list* now, and
+/// a command the app might fire blind must not be the one that needs an
+/// argument. `close repository` in the git client is dispatched the same way.
 pub const CMD_SESSION: &str = "session";
 
-/// Command id: swap from the session back to the folder listing. Idempotent, so
-/// the app can fire it without first asking which view is active.
+/// Command id: swap from the folder listing to the list of past sessions for
+/// that folder and the folders below it. The app binds `:` to this.
+///
+/// Advertised in all three views, doing a different job in each: in the folder
+/// listing it is the single transition `:` fires, in the list it marks "this
+/// level *is* the list", and in a session it tells the app there is a list to go
+/// back to — which is what lets Left be decided by shape rather than by name.
+pub const CMD_SESSIONS: &str = "session list";
+
+/// Command id: ask to delete the session row the cursor is on. Carries the row's
+/// key. Nothing is removed until the confirmation it renders is answered.
+///
+/// Deliberately **not** the reserved id `"delete"`. That one routes through
+/// `invoke_provider_delete`, which unwinds the cursor to depth 3 before acting —
+/// email-shaped surgery, and this list lives at whatever depth the folder it
+/// describes does. The git client and the board provider avoid it for the same
+/// reason.
+pub const CMD_DELETE_SESSION: &str = "delete session";
+
+/// Command id: press the `<button>` row the cursor is on. Carries the row's key.
+///
+/// Exists because `on_button_press` returns `()` and so cannot hand the app a
+/// row to insert, which the `new session` button has to do. Routing every
+/// session-list button through one command keeps the button vocabulary
+/// (`BTN_*`) entirely inside this crate.
+pub const CMD_ACTIVATE_ROW: &str = "activate row";
+
+/// Button id: start a session, typing its first prompt into the row this opens.
+const BTN_NEW_SESSION: &str = "new-session";
+/// Button id: confirm the pending deletion.
+const BTN_CONFIRM_DELETE: &str = "confirm-delete-yes";
+/// Button id: call the pending deletion off.
+const BTN_CANCEL_DELETE: &str = "confirm-delete-no";
+
+/// How much of a title or first prompt a session row shows.
+const SESSION_LABEL_CHARS: usize = 120;
+
+/// Command id: swap back to the folder listing, from either the session list or
+/// a session. Idempotent, so the app can fire it without first asking which view
+/// is active, and it always means the folder listing — Escape leaves the whole
+/// command layer in one press from any depth, which is the split the rest of the
+/// app keeps (Escape unwinds modes, Left unwinds one level).
 pub const CMD_BROWSE: &str = "browse";
 
 /// Command id: list the Claude Code skills the running session can invoke.
 ///
-/// Unlike the two above this is *not* a view swap. The app fills the prompt with
+/// Unlike the view swaps above this is *not* one. The app fills the prompt with
 /// `/name` and the session view stays exactly as it was, which is why it needs
-/// no third [`View`] variant — and must not have one, since the app reads
-/// "is this the session view?" as "does `commands()` offer `browse`?".
+/// no [`View`] variant of its own.
+///
+/// That restriction is about commands which are not view swaps. The session list
+/// *is* one, it is inside the same escape-only layer, and it does answer yes to
+/// the app's "is this the session view?" test, so it earns a variant.
 pub const CMD_SKILLS: &str = "skills";
 
 /// Which list the provider is currently serving from `fetch()`.
@@ -96,6 +142,10 @@ enum View {
     /// Subdirectories of `browse_path`. No `claude` process required.
     #[default]
     Browse,
+    /// Past sessions for `browse_path` and the folders below it, under a
+    /// `new session` button. No `claude` process required either: this list is
+    /// read from Claude Code's own transcripts.
+    Sessions,
     /// The conversation plus the live `<input>` slot.
     Session,
 }
@@ -156,6 +206,21 @@ pub struct ClaudeProvider {
     /// Last `session_id` seen — used for `--resume` on re-spawn.
     last_session_id: Option<String>,
     error: Option<String>,
+    /// Something worth saying that is not a failure, so it must not go through
+    /// `take_error` (which renders in the header as an error).
+    announcement: Option<String>,
+
+    // --- session list ---------------------------------------------------
+    /// Per-transcript metadata cache, so rebuilding the list costs one `stat`
+    /// per session rather than a re-read.
+    session_index: sessions::SessionIndex,
+    /// What the last `fetch()` of the session list showed, in the order it
+    /// showed it. The lookup table for the row keys the app hands back.
+    listed: Vec<sessions::SessionMeta>,
+    /// Session id awaiting a yes/no answer. The list renders the confirmation in
+    /// place of that row while this is set, and nothing is removed until the
+    /// `yes` button is pressed.
+    pending_delete: Option<String>,
 }
 
 impl Default for ClaudeProvider {
@@ -187,6 +252,10 @@ impl ClaudeProvider {
             skills: Vec::new(),
             last_session_id: None,
             error: None,
+            announcement: None,
+            session_index: sessions::SessionIndex::default(),
+            listed: Vec::new(),
+            pending_delete: None,
         }
     }
 
@@ -283,62 +352,6 @@ impl ClaudeProvider {
             .collect()
     }
 
-    /// Swap to the session view, running `claude` in the folder the browse view
-    /// is listing.
-    ///
-    /// Re-entering the folder the running child was already spawned in is a pure
-    /// view swap: the conversation, the child, and the recall history all
-    /// survive a trip back out to the folders.
-    ///
-    /// Entering from anywhere else respawns. `claude` fixes its working
-    /// directory at spawn — there is no `cd` to send it, unlike the terminal's
-    /// PTY — so a session started in one project cannot be walked over into
-    /// another. The transcript goes with the child, because it describes a tree
-    /// the new session cannot see.
-    fn enter_session(&mut self) {
-        self.view = View::Session;
-
-        // Compared before `session_path` is reassigned below, so a repeated `:`
-        // in the folder a failed spawn was attempted in is recognised as the
-        // same folder and does not re-attempt — that is the `init_attempted`
-        // latch's whole job. Only a genuinely different folder clears it.
-        let same_folder = !self.session_path.is_empty()
-            && Path::new(&self.session_path) == self.browse_path.as_path();
-
-        if self.session.is_some() && same_folder {
-            return;
-        }
-
-        if self.session.is_some() {
-            // Session::Drop kills the child.
-            self.session = None;
-            self.convo = Conversation::default();
-            self.pending_input.clear();
-            // Must not survive: `ensure_session` would hand it to `--resume` and
-            // reopen the *old* folder's transcript in the new folder.
-            self.last_session_id = None;
-            // `history` is deliberately kept — those are prompts the user typed,
-            // and ↑-recall outliving one session is the same contract the
-            // terminal gives its shell.
-        }
-
-        self.cwd = Some(self.browse_path.clone());
-        self.session_path = self.browse_path.to_string_lossy().into_owned();
-        if !same_folder {
-            // A respawn in a new folder is exactly the case the one-shot latch
-            // must not block.
-            self.init_attempted = false;
-            self.spawn_error = None;
-        }
-        // A failure leaves `init_attempted` set, so hammering `:` in the same
-        // folder does not spawn once per keypress. The cwd is user-chosen
-        // though, so a failure here (an unreadable directory, one deleted
-        // between listing and `:`) says nothing about the next folder — and the
-        // `!same_folder` reset above is what lets `:` elsewhere try again,
-        // instead of leaving the tab permanently session-less.
-        self.ensure_session();
-    }
-
     /// Swap back to the folder listing. The child keeps running: this is a view
     /// change, not a teardown, so `:` back into the same folder resumes the same
     /// conversation.
@@ -348,6 +361,269 @@ impl ClaudeProvider {
     /// `browse_path` is already the folder the session is running in.
     fn leave_session(&mut self) {
         self.view = View::Browse;
+        // A confirmation the user walked away from is a cancel.
+        self.pending_delete = None;
+    }
+
+    /// Swap to the list of past sessions for `browse_path` and below.
+    ///
+    /// Reached two ways, and both land here: `:` from the folder listing, and
+    /// Left out of a session. The child keeps running either way — like
+    /// [`Self::leave_session`] this is a view change, not a teardown.
+    ///
+    /// `pending_input` is deliberately left alone. It holds the draft in the
+    /// live prompt, and a draft surviving a trip out to the folders is the
+    /// contract the terminal gives its shell too. It cannot leak into the
+    /// new-session row, which the app inserts empty.
+    fn enter_sessions(&mut self) {
+        self.view = View::Sessions;
+        self.pending_delete = None;
+    }
+
+    /// Open one past session: render its transcript from disk and arm
+    /// `--resume` for the first thing the user sends.
+    ///
+    /// Deliberately does **not** spawn. Reading a past session costs no process
+    /// and no API call, and most of them are opened to be read, not continued.
+    /// `commit_edit` spawns on the first prompt, and `ensure_session` hands
+    /// `last_session_id` to `--resume` there.
+    fn open_session(&mut self, id: &str) -> bool {
+        // Re-opening the session that is already up is a pure view swap, the
+        // same bargain `enter_session` struck for a folder. Without this, Left
+        // out to the list and Right straight back in would kill a running child
+        // and replace the live conversation with whatever had reached disk.
+        if self.session.is_some() && self.last_session_id.as_deref() == Some(id) {
+            self.view = View::Session;
+            self.pending_delete = None;
+            return true;
+        }
+        let Some(meta) = self.listed.iter().find(|m| m.id == id).cloned() else {
+            return false;
+        };
+        self.view = View::Session;
+        // Session::Drop kills any child still attached to the old transcript.
+        self.session = None;
+        self.convo = sessions::replay(&meta.path);
+        self.convo.session_id = Some(meta.id.clone());
+        // The one thing `enter_session` clears and this must set: it is what
+        // makes the next spawn a `--resume` rather than a fresh session.
+        self.last_session_id = Some(meta.id.clone());
+        self.pending_input.clear();
+        self.pending_delete = None;
+        // From the transcript, not from `browse_path`: the "and below" scan
+        // turns up sessions belonging to subfolders, and `claude` fixes its
+        // working directory at spawn.
+        self.cwd = Some(meta.cwd.clone());
+        self.session_path = meta.cwd.to_string_lossy().into_owned();
+        self.init_attempted = false;
+        self.spawn_error = None;
+        true
+    }
+
+    /// Start a brand-new session in `browse_path`, dropping whatever was open.
+    ///
+    /// [`Self::enter_session`]'s same-folder reuse is deliberately absent: the
+    /// user asked for a *new* session, so an existing child in the same folder
+    /// is not something to rejoin. `last_session_id` is cleared for the same
+    /// reason — a new session must not be spawned with `--resume`.
+    fn start_new_session(&mut self) {
+        self.view = View::Session;
+        self.session = None;
+        self.convo = Conversation::default();
+        // A draft belongs to the session it was being typed into.
+        self.pending_input.clear();
+        self.last_session_id = None;
+        self.pending_delete = None;
+        self.cwd = Some(self.browse_path.clone());
+        self.session_path = self.browse_path.to_string_lossy().into_owned();
+        self.init_attempted = false;
+        self.spawn_error = None;
+        self.ensure_session();
+    }
+
+    /// Enter on a `<button>` row of the session list.
+    ///
+    /// Returns the row the app should insert and drop into Insert mode on —
+    /// only `new session` has one. The button vocabulary never leaves this
+    /// crate: the app forwards the row key and learns nothing about it.
+    fn activate_row(&mut self, element_key: &str) -> Option<FfonElement> {
+        register_translations();
+        let name = sicompass_sdk::tags::extract_button_function_name(element_key)?;
+        match name.as_str() {
+            BTN_NEW_SESSION => {
+                // A label prefix, not a bare `<input></input>`: an empty input
+                // with no prefix takes the app's create-file commit path, whose
+                // fallback calls `handle_escape` and strips the row right after
+                // a *successful* commit. It also gives the row something to say.
+                // The space lives here rather than in the bundles: Fluent trims
+                // trailing whitespace off a value, so a translator cannot put
+                // one there even if they wanted to.
+                Some(FfonElement::new_str(format!(
+                    "{} <input></input>",
+                    localize::t("claude-prompt-label")
+                )))
+            }
+            BTN_CANCEL_DELETE => {
+                self.pending_delete = None;
+                None
+            }
+            BTN_CONFIRM_DELETE => {
+                self.delete_pending();
+                None
+            }
+            _ => None,
+        }
+    }
+
+    /// Carry out the deletion the confirmation was asking about.
+    fn delete_pending(&mut self) {
+        register_translations();
+        let Some(id) = self.pending_delete.take() else {
+            return;
+        };
+        let Some(meta) = self.listed.iter().find(|m| m.id == id).cloned() else {
+            return;
+        };
+        let label = self.row_label(&meta);
+        if sessions::delete_transcript(&meta.path) {
+            self.session_index.forget(&meta.path);
+            self.announcement = Some(format!(
+                "{} {}",
+                localize::t("claude-session-deleted"),
+                label
+            ));
+        } else {
+            self.error = Some(localize::t("claude-session-delete-failed"));
+        }
+    }
+
+    /// A stand-in row for the session that is up right now, when the scan did
+    /// not turn it up. `None` once the real transcript is on disk, or when no
+    /// session has been started.
+    fn live_session_row(&self, listed: &[sessions::SessionMeta]) -> Option<sessions::SessionMeta> {
+        let id = self.last_session_id.as_deref()?;
+        if listed.iter().any(|m| m.id == id) {
+            return None;
+        }
+        // The first thing sent in this session is the best label available, and
+        // it is what the real row will fall back to anyway until Claude titles
+        // it.
+        let first_prompt = self.history.first().cloned();
+        let cwd = PathBuf::from(&self.session_path);
+        Some(sessions::SessionMeta {
+            id: id.to_owned(),
+            path: PathBuf::new(),
+            cwd,
+            title: None,
+            first_prompt,
+            modified: std::time::SystemTime::now(),
+        })
+    }
+
+    /// What one session row reads: Claude's own title, else the first prompt,
+    /// else a placeholder for a session that has neither yet.
+    fn row_label(&self, meta: &sessions::SessionMeta) -> String {
+        match meta.label() {
+            Some(l) => sessions::one_line(l, SESSION_LABEL_CHARS),
+            None => localize::t("claude-untitled-session"),
+        }
+    }
+
+    /// The session list: a `new session` button, then one row per past session,
+    /// most recent first.
+    ///
+    /// Each session is a **childless `Obj`**, which is the one place in this
+    /// crate that is allowed to be. The app renders every `Obj` with a `+`, and
+    /// here the `+` is honest — Right on the row really does open something —
+    /// but it opens it by swapping the view rather than by descending, so there
+    /// is nothing to hang underneath. `handlers::open_session_row` is what makes
+    /// it true; see `no_element_is_a_childless_obj` for the invariant that still
+    /// holds over the transcript.
+    fn fetch_sessions(&mut self) -> Vec<FfonElement> {
+        register_translations();
+        let mut listed = sessions::scan(&self.browse_path, &mut self.session_index);
+        // Claude Code writes the transcript as it goes, so a session started
+        // moments ago may have no file yet, or a file with no `ai-title`. Left
+        // out of it would then land on a list that does not contain the thing
+        // the user was just looking at. Synthesise the row from what is in
+        // memory until the real one turns up.
+        if let Some(live) = self.live_session_row(&listed) {
+            listed.insert(0, live);
+        }
+        let mut out = Vec::with_capacity(listed.len() + 3);
+        out.push(FfonElement::new_str(format!(
+            "<button>{BTN_NEW_SESSION}</button>{}",
+            localize::t("claude-new-session")
+        )));
+        for meta in &listed {
+            let label = self.row_label(meta);
+            if self.pending_delete.as_deref() == Some(meta.id.as_str()) {
+                // The confirmation stands in for the row it is about, so the
+                // session being deleted cannot be misread off a neighbouring
+                // line. `no` comes first: the list refresh clamps the cursor to
+                // the top of what replaced the row, so the safe answer is the
+                // one the cursor lands on.
+                out.push(FfonElement::new_str(render::escape_markup(&format!(
+                    "{} {}",
+                    localize::t("claude-confirm-delete"),
+                    label
+                ))));
+                out.push(FfonElement::new_str(format!(
+                    "<button>{BTN_CANCEL_DELETE}</button>{}",
+                    localize::t("claude-confirm-delete-no")
+                )));
+                out.push(FfonElement::new_str(format!(
+                    "<button>{BTN_CONFIRM_DELETE}</button>{}",
+                    localize::t("claude-confirm-delete-yes")
+                )));
+                continue;
+            }
+            // The id rides outside any other tag so the app can hand the raw key
+            // back and `open_session` can resolve the row by identity rather
+            // than by a label two sessions could share.
+            out.push(FfonElement::new_obj(format!(
+                "{}{}",
+                sicompass_sdk::tags::format_id(&meta.id),
+                render::escape_markup(&label)
+            )));
+        }
+        self.listed = listed;
+        out
+    }
+
+    /// Send one prompt to the child, spawning it first if need be.
+    ///
+    /// Shared by the live input slot and the session list's first-prompt row, so
+    /// a session started from the list logs, records and clears exactly like one
+    /// continued from inside.
+    fn send_prompt(&mut self, prompt: &str) -> bool {
+        self.ensure_session();
+        let Some(session) = self.session.as_mut() else {
+            // `ensure_session` already set a descriptive error.
+            tracing::error!(error = ?self.error, "claude: commit_edit — no session after ensure_session");
+            return false;
+        };
+        let msg = serde_json::json!({
+            "type": "user",
+            "message": {
+                "role": "user",
+                "content": [{ "type": "text", "text": prompt }],
+            },
+        });
+        let line = msg.to_string();
+        tracing::debug!(prompt = %prompt, "claude: writing user message to child");
+        if let Err(e) = session.write_user(&line) {
+            // Broken pipe → the child died; drop it so the next call re-spawns
+            // with `--resume`.
+            self.error = Some(format!("claude is not accepting input: {e}"));
+            self.session = None;
+            self.init_attempted = false;
+            return false;
+        }
+        self.convo.push_user(prompt);
+        self.record_history(prompt);
+        self.pending_input.clear();
+        true
     }
 
     /// The session view: the conversation, then the live `<input>` slot, with a
@@ -459,6 +735,7 @@ impl Provider for ClaudeProvider {
     fn fetch(&mut self) -> Vec<FfonElement> {
         match self.view {
             View::Browse => self.list_subdirectories(),
+            View::Sessions => self.fetch_sessions(),
             View::Session => self.fetch_session(),
         }
     }
@@ -497,7 +774,9 @@ impl Provider for ClaudeProvider {
     /// rebuild-from-root walk nowhere — fall back to the browse path.
     fn current_path(&self) -> &str {
         match self.view {
-            View::Browse => self.browse_path.to_str().unwrap_or("/"),
+            // The list describes the folder being browsed, so the app's
+            // rebuild-from-root walk still lands on that folder's level.
+            View::Browse | View::Sessions => self.browse_path.to_str().unwrap_or("/"),
             View::Session if self.session_path.is_empty() => {
                 self.browse_path.to_str().unwrap_or("/")
             }
@@ -519,6 +798,29 @@ impl Provider for ClaudeProvider {
 
     fn commit_edit(&mut self, old: &str, new: &str) -> bool {
         tracing::debug!(old_len = old.len(), new = %new, "claude: commit_edit called");
+        // The session list's first-prompt row, which the `new session` button
+        // opened. Ahead of both rejections below, and on purpose: the view is
+        // `Sessions` rather than `Session`, and a re-edit of the row arrives
+        // with a non-empty `old`. It is the only editable row that level has,
+        // so no further test is needed to recognise it.
+        if self.view == View::Sessions {
+            let prompt = new.trim().to_owned();
+            if prompt.is_empty() {
+                // Refusing leaves the cursor in the row to try again, rather
+                // than starting a session with nothing to say.
+                return false;
+            }
+            self.start_new_session();
+            if !self.send_prompt(&prompt) {
+                // The child did not start. The swap still happened and
+                // `spawn_error` is already on screen above the slot, so report
+                // success: landing in the session with the reason showing beats
+                // leaving the user in a list with an unexplained refusal. The
+                // prompt goes back into the slot rather than being thrown away.
+                self.pending_input = prompt;
+            }
+            return true;
+        }
         // Browsing is read-only: reject the `i` placeholder the app seeds into
         // an empty directory rather than turning it into a file-creation path.
         if self.view != View::Session {
@@ -532,38 +834,12 @@ impl Provider for ClaudeProvider {
             tracing::debug!("claude: commit_edit rejected — non-empty `old`");
             return false;
         }
-        let prompt = new.trim();
+        let prompt = new.trim().to_owned();
         if prompt.is_empty() {
             tracing::debug!("claude: commit_edit rejected — empty prompt");
             return false;
         }
-        self.ensure_session();
-        let Some(session) = self.session.as_mut() else {
-            // `ensure_session` already set a descriptive error.
-            tracing::error!(error = ?self.error, "claude: commit_edit — no session after ensure_session");
-            return false;
-        };
-        let msg = serde_json::json!({
-            "type": "user",
-            "message": {
-                "role": "user",
-                "content": [{ "type": "text", "text": prompt }],
-            },
-        });
-        let line = msg.to_string();
-        tracing::debug!(prompt = %prompt, "claude: writing user message to child");
-        if let Err(e) = session.write_user(&line) {
-            // Broken pipe → the child died; drop it so the next call re-spawns
-            // with `--resume`.
-            self.error = Some(format!("claude is not accepting input: {e}"));
-            self.session = None;
-            self.init_attempted = false;
-            return false;
-        }
-        self.convo.push_user(prompt);
-        self.record_history(prompt);
-        self.pending_input.clear();
-        true
+        self.send_prompt(&prompt)
     }
 
     fn set_input_value(&mut self, value: &str) {
@@ -584,6 +860,13 @@ impl Provider for ClaudeProvider {
 
     fn take_error(&mut self) -> Option<String> {
         self.error.take()
+    }
+
+    /// Deleting a session is worth saying out loud but is not a failure, so it
+    /// goes here rather than through `take_error`, which renders in the header
+    /// as an error and would read as one.
+    fn take_announcement(&mut self) -> Option<String> {
+        self.announcement.take()
     }
 
     fn no_cache(&self) -> bool {
@@ -608,8 +891,13 @@ impl Provider for ClaudeProvider {
     /// and removes the trap.
     fn commands(&self) -> Vec<String> {
         match self.view {
-            View::Browse => vec![CMD_SESSION.to_owned()],
-            View::Session => vec![CMD_BROWSE.to_owned(), CMD_SKILLS.to_owned()],
+            View::Browse => vec![CMD_SESSIONS.to_owned()],
+            View::Sessions => vec![CMD_BROWSE.to_owned(), CMD_SESSIONS.to_owned()],
+            View::Session => vec![
+                CMD_BROWSE.to_owned(),
+                CMD_SESSIONS.to_owned(),
+                CMD_SKILLS.to_owned(),
+            ],
         }
     }
 
@@ -617,6 +905,8 @@ impl Provider for ClaudeProvider {
         register_translations();
         match cmd {
             CMD_SESSION => localize::t("claude-command-session"),
+            CMD_SESSIONS => localize::t("claude-command-sessions"),
+            CMD_DELETE_SESSION => localize::t("claude-command-delete-session"),
             CMD_BROWSE => localize::t("claude-command-browse"),
             CMD_SKILLS => localize::t("claude-command-skills"),
             other => other.to_owned(),
@@ -626,12 +916,36 @@ impl Provider for ClaudeProvider {
     fn handle_command(
         &mut self,
         command: &str,
-        _element_key: &str,
+        element_key: &str,
         _element_type: i32,
         _error: &mut String,
     ) -> Option<FfonElement> {
         match command {
-            CMD_SESSION => self.enter_session(),
+            CMD_SESSION => {
+                // Carries the row it was fired on, unlike every other command
+                // here. An id that no longer resolves (a list rebuilt under a
+                // stale key) leaves the view alone rather than opening the
+                // wrong transcript.
+                if let Some(id) = sicompass_sdk::tags::extract_id(element_key) {
+                    self.open_session(&id);
+                }
+            }
+            CMD_SESSIONS => self.enter_sessions(),
+            CMD_DELETE_SESSION => {
+                if let Some(id) = sicompass_sdk::tags::extract_id(element_key) {
+                    // Only arms the confirmation. The transcript is still there.
+                    // The stand-in row for a just-started session has no file
+                    // behind it yet, so there is nothing to offer to delete.
+                    let real = self
+                        .listed
+                        .iter()
+                        .any(|m| m.id == id && !m.path.as_os_str().is_empty());
+                    if real {
+                        self.pending_delete = Some(id);
+                    }
+                }
+            }
+            CMD_ACTIVATE_ROW => return self.activate_row(element_key),
             CMD_BROWSE => self.leave_session(),
             CMD_SKILLS => {
                 // Scanned here, in the `&mut self` hook, because
@@ -798,12 +1112,23 @@ mod tests {
         let mut p = ClaudeProvider::new();
         p.program = "definitely-not-claude-xyz-9000".to_owned();
         // Spawning is what `:` does now, not what opening the provider does.
-        p.enter_session();
+        p.start_new_session();
         let err = p.take_error().expect("spawn failure should set an error");
         assert!(err.contains("could not start"), "got: {err}");
-        // Re-entering the *same* folder must not retry (init_attempted guard).
-        p.enter_session();
-        assert!(p.take_error().is_none());
+
+        // Asking for another new session *does* retry, and should: it takes a
+        // deliberate button press and a typed prompt to get here, so a failure
+        // is something to try again rather than something to latch.
+        //
+        // The hazard the one-shot latch used to cover — `:` spawning once per
+        // keypress — is gone by construction now: `:` opens the session list,
+        // which starts nothing at all. `the_session_list_is_reached_and_left_
+        // without_spawning` pins that.
+        p.start_new_session();
+        let again = p
+            .take_error()
+            .expect("a fresh attempt reports its own failure");
+        assert!(again.contains("could not start"), "got: {again}");
     }
 
     #[test]
@@ -1020,7 +1345,7 @@ mod tests {
             cand.set_current_path(root.to_str().unwrap());
             // Walk one level in, exactly as Right does, then press `:`.
             cand.push_path("workspace");
-            cand.enter_session();
+            cand.start_new_session();
             if cand.session.is_some() {
                 p = Some(cand);
                 break;
@@ -1083,6 +1408,40 @@ mod tests {
 
     // ---- Skills palette ---------------------------------------------------
 
+    /// Point this thread at a fake projects root and write one transcript into
+    /// it for `cwd`. Returns the tempdir, which must outlive the test.
+    fn with_fake_sessions(cwd: &std::path::Path, entries: &[(&str, &str)]) -> tempfile::TempDir {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("projects");
+        let dir = root.join(sessions::dashify(cwd));
+        std::fs::create_dir_all(&dir).unwrap();
+        for (id, title) in entries {
+            let body = format!(
+                concat!(
+                    r#"{{"type":"user","cwd":{},"message":{{"role":"user","content":"first prompt of {}"}}}}"#,
+                    "\n",
+                    r#"{{"type":"ai-title","aiTitle":{},"sessionId":"{}"}}"#,
+                    "\n"
+                ),
+                serde_json::to_string(&cwd.to_string_lossy().into_owned()).unwrap(),
+                id,
+                serde_json::to_string(title).unwrap(),
+                id
+            );
+            std::fs::write(dir.join(format!("{id}.jsonl")), body).unwrap();
+        }
+        _set_test_projects_root(Some(root));
+        tmp
+    }
+
+    /// Key of the row at `idx`, raw markup and all.
+    fn row_key(out: &[FfonElement], idx: usize) -> String {
+        match &out[idx] {
+            FfonElement::Obj(o) => o.key.clone(),
+            FfonElement::Str(s) => s.clone(),
+        }
+    }
+
     /// Write `<root>/.claude/skills/<name>/SKILL.md`.
     fn project_skill(root: &std::path::Path, name: &str, contents: &str) {
         let dir = root.join(".claude").join("skills").join(name);
@@ -1097,17 +1456,39 @@ mod tests {
         // safe because it early-returns in a session. Leading with the swap
         // keeps that true regardless.
         let mut p = ClaudeProvider::new();
-        assert_eq!(p.commands(), vec![CMD_SESSION.to_owned()]);
+        assert_eq!(p.commands(), vec![CMD_SESSIONS.to_owned()]);
+
+        p.view = View::Sessions;
+        assert_eq!(
+            p.commands(),
+            vec![CMD_BROWSE.to_owned(), CMD_SESSIONS.to_owned()]
+        );
+
         p.view = View::Session;
         assert_eq!(
             p.commands(),
-            vec![CMD_BROWSE.to_owned(), CMD_SKILLS.to_owned()]
+            vec![
+                CMD_BROWSE.to_owned(),
+                CMD_SESSIONS.to_owned(),
+                CMD_SKILLS.to_owned()
+            ],
+            "the session also advertises the list, so the app knows Left has \
+             somewhere to go without being told which provider this is"
         );
-        assert_eq!(
-            p.commands().iter().filter(|c| *c == CMD_BROWSE).count(),
-            1,
-            "exactly one `browse`, or the session-view check breaks"
-        );
+
+        for view in [View::Sessions, View::Session] {
+            p.view = view;
+            assert_eq!(
+                p.commands().iter().filter(|c| *c == CMD_BROWSE).count(),
+                1,
+                "exactly one `browse`, or the session-view check breaks"
+            );
+            assert_eq!(
+                p.commands().first().map(String::as_str),
+                Some(CMD_BROWSE),
+                "`browse` stays first in every view that offers it"
+            );
+        }
     }
 
     #[test]
@@ -1117,7 +1498,7 @@ mod tests {
         project_skill(&root, "review", "---\ndescription: Review the diff\n---\n");
 
         let mut p = browsing(&root);
-        p.enter_session();
+        p.start_new_session();
         let mut err = String::new();
         let out = p.handle_command(CMD_SKILLS, "", 0, &mut err);
 
@@ -1140,7 +1521,7 @@ mod tests {
 
         let mut p = browsing(&root);
         p.push_path("workspace");
-        p.enter_session();
+        p.start_new_session();
         assert!(p.session.is_none(), "the bogus binary cannot spawn");
         p.handle_command(CMD_SKILLS, "", 0, &mut String::new());
         assert_eq!(p.skills.len(), 1, "found despite the failed spawn");
@@ -1155,7 +1536,7 @@ mod tests {
         project_skill(&root, "review", "---\ndescription: Review the diff\n---\n");
 
         let mut p = browsing(&root);
-        p.enter_session();
+        p.start_new_session();
         p.handle_command(CMD_SKILLS, "", 0, &mut String::new());
 
         let items = p.command_list_items(CMD_SKILLS);
@@ -1203,13 +1584,34 @@ mod tests {
 
     #[test]
     fn handle_command_swaps_the_view_both_ways() {
+        // `:` reaches the session list now, not the session. `browse` is still
+        // the one way back and still means the folder listing from either view,
+        // which is what lets Escape leave the whole layer in one press.
         let dir = tempfile::tempdir().unwrap();
         let mut p = browsing(dir.path());
         let mut err = String::new();
-        p.handle_command(CMD_SESSION, "", 0, &mut err);
-        assert_eq!(p.view, View::Session);
+        p.handle_command(CMD_SESSIONS, "", 0, &mut err);
+        assert_eq!(p.view, View::Sessions);
         p.handle_command(CMD_BROWSE, "", 0, &mut err);
         assert_eq!(p.view, View::Browse);
+
+        // And from a session, in one step rather than down the ladder.
+        p.view = View::Session;
+        p.handle_command(CMD_BROWSE, "", 0, &mut err);
+        assert_eq!(p.view, View::Browse);
+    }
+
+    #[test]
+    fn the_session_list_is_reached_and_left_without_spawning() {
+        // The whole point of the list: opening it costs no process. Enabling
+        // claude is free until a session is actually started.
+        let dir = tempfile::tempdir().unwrap();
+        let mut p = browsing(dir.path());
+        p.program = "definitely-not-claude-xyz-9000".to_owned();
+        let mut err = String::new();
+        p.handle_command(CMD_SESSIONS, "", 0, &mut err);
+        assert!(p.process_id().is_none(), "no child was started");
+        assert!(p.take_error().is_none(), "and nothing failed to start");
     }
 
     #[test]
@@ -1219,7 +1621,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().canonicalize().unwrap();
         let mut p = browsing(&root);
-        p.enter_session();
+        p.start_new_session();
         p.leave_session();
         assert_eq!(p.browse_path, root);
     }
@@ -1233,15 +1635,18 @@ mod tests {
         let mut p = ClaudeProvider::new();
         p.program = "cat".to_owned();
         p.set_current_path(path.to_str().unwrap());
-        p.enter_session();
+        p.start_new_session();
         assert!(p.session.is_some(), "test needs a live child");
         p
     }
 
     #[test]
     #[cfg(unix)]
-    fn entering_from_the_same_folder_keeps_the_conversation() {
-        // Stepping out to the folders and back is a view swap, not a restart.
+    fn reopening_the_live_session_keeps_the_conversation() {
+        // Stepping out to the session list and back in is a view swap, not a
+        // restart. The route changed when the list landed (Left out, Right back
+        // in, on the session's own row) but the guarantee did not: a running
+        // child and its transcript must survive the round trip.
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().canonicalize().unwrap();
 
@@ -1249,8 +1654,8 @@ mod tests {
         p.convo.push_user("a question about this project");
         p.last_session_id = Some("live-session".to_owned());
 
-        p.leave_session();
-        p.enter_session();
+        p.enter_sessions();
+        assert!(p.open_session("live-session"), "the live session reopens");
 
         assert_eq!(p.convo.turns.len(), 1, "the transcript survives");
         assert_eq!(p.last_session_id.as_deref(), Some("live-session"));
@@ -1259,7 +1664,7 @@ mod tests {
 
     #[test]
     #[cfg(unix)]
-    fn entering_from_a_different_folder_drops_the_conversation_and_the_resume_id() {
+    fn starting_a_new_session_drops_the_conversation_and_the_resume_id() {
         // claude fixes its cwd at spawn, so a session cannot be walked into
         // another project. Carrying `last_session_id` over would reopen the old
         // folder's transcript via `--resume` — the exact thing to avoid.
@@ -1274,9 +1679,9 @@ mod tests {
         p.record_history("a question about this project");
         p.pending_input = "half-typed".to_owned();
 
-        p.leave_session();
+        p.enter_sessions();
         p.browse_path = other.clone();
-        p.enter_session();
+        p.start_new_session();
 
         assert!(p.convo.turns.is_empty(), "the old transcript is dropped");
         assert!(
@@ -1302,13 +1707,13 @@ mod tests {
         std::fs::create_dir(root.join("other")).unwrap();
 
         let mut p = browsing(&root);
-        p.enter_session();
+        p.start_new_session();
         assert!(p.take_error().is_some(), "first attempt reports");
         assert!(p.spawn_error.is_some());
 
         p.leave_session();
         p.browse_path = root.join("other");
-        p.enter_session();
+        p.start_new_session();
         assert!(
             p.take_error().is_some(),
             "a different folder must try again rather than fail silently"
@@ -1320,7 +1725,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().canonicalize().unwrap();
         let mut p = browsing(&root);
-        p.enter_session();
+        p.start_new_session();
 
         let out = p.fetch();
         let rows = names(&out);
@@ -1364,5 +1769,261 @@ mod tests {
         let p = sicompass_sdk::create_provider_by_name("claude");
         assert!(p.is_some());
         assert_eq!(p.unwrap().name(), "claude");
+    }
+
+    // ---- The session list ------------------------------------------------
+
+    #[test]
+    fn the_session_list_leads_with_the_new_session_button() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        let _fake = with_fake_sessions(&root, &[("s1", "Fix search wrap layout")]);
+
+        let mut p = browsing(&root);
+        p.enter_sessions();
+        let out = p.fetch();
+
+        assert_eq!(out.len(), 2, "the button and one session, got {out:?}");
+        assert!(
+            sicompass_sdk::tags::has_button(&row_key(&out, 0)),
+            "the button is first, so the cursor lands on it"
+        );
+        assert_eq!(
+            sicompass_sdk::tags::strip_display(&row_key(&out, 1)),
+            "Fix search wrap layout"
+        );
+        _set_test_projects_root(None);
+    }
+
+    #[test]
+    fn a_session_row_is_a_childless_obj_on_purpose() {
+        // The app renders every Obj with `+`, and the `+` is honest here: Right
+        // on the row opens the session. It opens it by swapping the view rather
+        // than by descending, so there is deliberately nothing underneath —
+        // the one place in this crate exempt from `no_element_is_a_childless_obj`.
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        let _fake = with_fake_sessions(&root, &[("s1", "Some title")]);
+
+        let mut p = browsing(&root);
+        p.enter_sessions();
+        let out = p.fetch();
+        match &out[1] {
+            FfonElement::Obj(o) => assert!(o.children.is_empty()),
+            other => panic!("a session row must be an Obj, got {other:?}"),
+        }
+        _set_test_projects_root(None);
+    }
+
+    #[test]
+    fn a_session_row_carries_its_id_so_two_alike_titles_stay_apart() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        let _fake = with_fake_sessions(&root, &[("s1", "Same title"), ("s2", "Same title")]);
+
+        let mut p = browsing(&root);
+        p.enter_sessions();
+        let out = p.fetch();
+        let mut ids: Vec<String> = out
+            .iter()
+            .skip(1)
+            .filter_map(|e| sicompass_sdk::tags::extract_id(&row_key(&[e.clone()], 0)))
+            .collect();
+        ids.sort();
+        assert_eq!(ids, vec!["s1", "s2"], "identity travels with the row");
+        _set_test_projects_root(None);
+    }
+
+    #[test]
+    fn the_new_session_button_opens_a_labelled_input_row() {
+        // A bare `<input></input>` would take the app's create-file commit path,
+        // whose fallback strips the row right after a successful commit. The
+        // prefix is what keeps it on the ordinary path, and what gives the row
+        // something to say.
+        let mut p = ClaudeProvider::new();
+        p.view = View::Sessions;
+        let mut err = String::new();
+        let key = format!("<button>{BTN_NEW_SESSION}</button>new session");
+        let row = p
+            .handle_command(CMD_ACTIVATE_ROW, &key, 0, &mut err)
+            .expect("the button hands back a row to type into");
+        let text = row_key(&[row], 0);
+        assert!(sicompass_sdk::tags::has_input(&text));
+        assert!(
+            !text.starts_with("<input>"),
+            "the row needs a label before the input, got {text:?}"
+        );
+    }
+
+    #[test]
+    fn committing_the_first_prompt_starts_a_fresh_session() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        let mut p = browsing(&root);
+        p.program = "definitely-not-claude-xyz-9000".to_owned();
+        p.last_session_id = Some("some-old-session".to_owned());
+        p.enter_sessions();
+
+        assert!(!p.commit_edit("", "  "), "a blank prompt is refused");
+        assert_eq!(p.view, View::Sessions, "and leaves the cursor in the row");
+
+        // The spawn fails (the binary cannot exist). The swap still reports
+        // success, so the user lands in the session with the reason on screen
+        // rather than being refused in the list with no explanation.
+        assert!(p.commit_edit("", "what does this crate do?"));
+        assert_eq!(p.view, View::Session);
+        assert!(p.spawn_error.is_some(), "and the reason is on screen");
+        assert_eq!(
+            p.pending_input, "what does this crate do?",
+            "the prompt goes back in the slot rather than being thrown away"
+        );
+        assert!(
+            p.last_session_id.is_none(),
+            "a new session must not be spawned with --resume"
+        );
+    }
+
+    #[test]
+    fn opening_a_past_session_resumes_it_without_spawning() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        let _fake = with_fake_sessions(&root, &[("s7", "An older session")]);
+
+        let mut p = browsing(&root);
+        p.program = "definitely-not-claude-xyz-9000".to_owned();
+        p.enter_sessions();
+        let out = p.fetch();
+        let key = row_key(&out, 1);
+
+        let mut err = String::new();
+        p.handle_command(CMD_SESSION, &key, 1, &mut err);
+
+        assert_eq!(p.view, View::Session);
+        assert_eq!(
+            p.last_session_id.as_deref(),
+            Some("s7"),
+            "armed for --resume on the first thing sent"
+        );
+        assert!(
+            p.process_id().is_none(),
+            "reading a past session costs no process and no API call"
+        );
+        assert!(
+            !p.convo.turns.is_empty(),
+            "the transcript is rendered from disk, not left blank"
+        );
+        assert!(p.take_error().is_none());
+        _set_test_projects_root(None);
+    }
+
+    #[test]
+    fn tick_is_silent_in_the_session_list() {
+        // A `true` tick makes the app re-fetch the level every frame, which here
+        // would be a directory scan per frame for a list nothing is changing.
+        let mut p = ClaudeProvider::new();
+        p.view = View::Sessions;
+        assert!(!p.tick());
+    }
+
+    #[test]
+    fn delete_confirms_before_it_removes_anything() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        let fake = with_fake_sessions(&root, &[("doomed", "Throwaway")]);
+        let file = fake
+            .path()
+            .join("projects")
+            .join(sessions::dashify(&root))
+            .join("doomed.jsonl");
+
+        let mut p = browsing(&root);
+        p.enter_sessions();
+        let key = row_key(&p.fetch(), 1);
+        let mut err = String::new();
+
+        p.handle_command(CMD_DELETE_SESSION, &key, 1, &mut err);
+        let asked = p.fetch();
+        assert!(file.exists(), "arming the confirmation removes nothing");
+        assert_eq!(asked.len(), 4, "question plus two answers, got {asked:?}");
+        assert!(
+            row_key(&asked, 2).contains(BTN_CANCEL_DELETE),
+            "the safe answer comes first, where the cursor lands"
+        );
+
+        // Saying no puts the list back untouched.
+        let no = format!("<button>{BTN_CANCEL_DELETE}</button>x");
+        p.handle_command(CMD_ACTIVATE_ROW, &no, 0, &mut err);
+        assert_eq!(p.fetch().len(), 2);
+        assert!(file.exists());
+
+        // Saying yes removes the transcript and says so.
+        p.handle_command(CMD_DELETE_SESSION, &key, 1, &mut err);
+        let yes = format!("<button>{BTN_CONFIRM_DELETE}</button>x");
+        p.handle_command(CMD_ACTIVATE_ROW, &yes, 0, &mut err);
+        assert!(!file.exists(), "the transcript is gone");
+        assert_eq!(p.fetch().len(), 1, "and so is its row");
+        let said = p.take_announcement().expect("a deletion is announced");
+        assert!(said.contains("Throwaway"), "naming what went, got {said:?}");
+        assert!(
+            p.take_error().is_none(),
+            "a deletion is not a failure and must not read as one"
+        );
+        _set_test_projects_root(None);
+    }
+
+    #[test]
+    fn a_just_started_session_has_a_row_before_its_transcript_lands() {
+        // Claude Code writes the transcript as it goes, so Left out of a session
+        // started moments ago would otherwise land on a list that does not
+        // contain the thing the user was just looking at.
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        let _fake = with_fake_sessions(&root, &[]);
+
+        let mut p = browsing(&root);
+        p.last_session_id = Some("brand-new".to_owned());
+        p.session_path = root.to_string_lossy().into_owned();
+        p.record_history("the thing I just asked");
+        p.enter_sessions();
+
+        let out = p.fetch();
+        assert_eq!(out.len(), 2, "the button and the live session, got {out:?}");
+        assert_eq!(
+            sicompass_sdk::tags::strip_display(&row_key(&out, 1)),
+            "the thing I just asked"
+        );
+        _set_test_projects_root(None);
+    }
+
+    #[test]
+    fn the_stand_in_row_cannot_be_deleted() {
+        // It has no file behind it yet, so there is nothing to offer to remove —
+        // and `delete_transcript` would be handed an empty path.
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        let _fake = with_fake_sessions(&root, &[]);
+
+        let mut p = browsing(&root);
+        p.last_session_id = Some("brand-new".to_owned());
+        p.session_path = root.to_string_lossy().into_owned();
+        p.enter_sessions();
+        let key = row_key(&p.fetch(), 1);
+
+        let mut err = String::new();
+        p.handle_command(CMD_DELETE_SESSION, &key, 1, &mut err);
+        assert!(p.pending_delete.is_none(), "no confirmation is offered");
+        assert_eq!(p.fetch().len(), 2, "the list is unchanged");
+        _set_test_projects_root(None);
+    }
+
+    #[test]
+    fn the_session_list_is_empty_without_a_projects_root() {
+        // The guard that keeps `cargo test` away from the developer's own
+        // transcripts: no injected root means nothing is read at all.
+        _set_test_projects_root(None);
+        let dir = tempfile::tempdir().unwrap();
+        let mut p = browsing(dir.path());
+        p.enter_sessions();
+        assert_eq!(p.fetch().len(), 1, "just the new-session button");
     }
 }
