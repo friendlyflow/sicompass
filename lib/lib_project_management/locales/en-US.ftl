@@ -19,6 +19,9 @@ pm-cmd-move-left = move to previous column
 pm-cmd-move-right = move to next column
 pm-cmd-archive-card = archive card
 
+# The settings checkbox that turns on mirroring the board to the server.
+pm-checkbox-cloud-backup = enable cloud backup
+
 pm-error-unreadable = your board could not be read, so nothing has been saved, the files on disk are untouched
 pm-error-save = your board could not be saved
 pm-error-no-column = add a column first, a card has to live in one

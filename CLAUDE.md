@@ -28,6 +28,10 @@ produce the installable Linux package. It reads the version from
   and `lib/lib_project_management` is `sicompass-project-management`, whose
   provider *name* is the space-free `projectmanagement` so that
   `display_name().replace(' ', "")` still equals it).
+  `lib/lib_payments` is `sicompass-payments`, and is the one `lib/lib_*` that
+  is not a provider: it registers no factory and hosts the commercial client
+  (checkout, license certificates, cloud backup) that `lib_settings`,
+  `lib_notes` and `lib_project_management` share.
   Crates under `src/` keep their directory name. `cargo test -p` takes the
   package name.
 - The dev shell is platform-split. `aarch64-darwin` gets MoltenVK,
@@ -110,6 +114,33 @@ nothing verifies (`include` in `dist-workspace.toml` reaches the archives only,
 plus the cargo-packager `resources`, the `generate-rpm` assets and
 `wix/main.wxs`). That is what made every release up to 0.1.8 unable to start.
 See [docs/releasing.md](docs/releasing.md).
+
+## Architecture: paid cloud backup
+
+The commercial client lives in `lib/lib_payments` (`sicompass-payments`), and
+the server is the **separate, private** repo `../server` (the Ed25519 signing
+key must never sit in GPL client code). Notes and the kanban board mirror their
+store directories to `PUT /plugins/{notes,kanban}` when the user ticks "enable
+cloud backup" in that provider's settings section.
+
+Three things are easy to get wrong here:
+
+- **The paywall is on the service, never on the data.** `store/cert.rs` says
+  verification is display-only, and that stays true: with the switch on and
+  nothing paid, the provider still lists the user's notes and board and still
+  saves them to disk. Only the copy on our server is gated.
+- **A tier tree is grafted into whichever provider the user followed the link
+  from**, and the app dispatches `<button>` presses, `<radio>` changes and list
+  edits to *that* provider. Hence `payments::tier_input` (shared handlers) and
+  `payments::cloud::is_grafted_page` (which keeps an edit on the payment page
+  from being reconciled into the user's store). Both are load-bearing; the
+  tests that cover them fail loudly if either is removed.
+- **A provider's save path runs on the UI thread, once per keystroke.**
+  `CloudBackup::mark_dirty` only queues; the upload is a worker thread with a
+  debounce.
+
+Restoring never runs over a store that already has files in it. A backup is not
+a sync, and the machine in front of the user wins.
 
 ## Architecture: text fields
 

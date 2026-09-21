@@ -9,6 +9,11 @@
 //! never gates a feature. The full app is free under GPLv3 regardless of what
 //! `verify()` returns. See memory `project_licensing_model`.
 //!
+//! The one caller that acts on the result rather than displaying it is
+//! [`crate::entitlement`], and it decides a single thing: whether to send the
+//! user's files to our server. Storage is a service we are paid for. What the
+//! user may do with their own copy is never in question.
+//!
 //! ## Schema contract
 //!
 //! [`Payload`] is signed by serializing it with `serde_json` (field order is
@@ -26,15 +31,20 @@ use std::time::{SystemTime, UNIX_EPOCH};
 /// Ed25519 public key (base64 of 32 raw bytes) that certificates are verified
 /// against. The matching **private** key lives only on the license server.
 ///
-/// Replace this for a production release: in the `server/` repo run
-/// `cargo run --bin keygen`, paste the printed public key here, and put the
-/// printed private key in the server's `.env` as `SICOMPASS_SIGNING_KEY`.
-pub(crate) const LICENSE_PUBLIC_KEY_B64: &str = "BXZk+tykjgJhV/TJeW8vnf7BVXrGdQEyELMvOxLAoJ4=";
+/// This is a real key, not a placeholder: it matches the signing key in the
+/// `server/` repo's `.env`, and `lib/lib_payments/tests/live_server.rs` checks
+/// that a certificate that server signs verifies here.
+///
+/// To confirm, or after moving the server: run `cargo run --bin pubkey` there
+/// and paste the result here. Do **not** run `cargo run --bin keygen` against
+/// a server that already has a key, because it mints a new keypair and
+/// invalidates every license already issued.
+pub const LICENSE_PUBLIC_KEY_B64: &str = "BXZk+tykjgJhV/TJeW8vnf7BVXrGdQEyELMvOxLAoJ4=";
 
 /// The signed portion of a certificate. Field order is the signing order —
 /// it must stay identical to the server's `Payload`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub(crate) struct Payload {
+pub struct Payload {
     /// Always `"sicompass"`. Guards against a certificate minted for a
     /// different product being accepted here.
     pub product: String,
@@ -58,7 +68,7 @@ pub(crate) struct Payload {
 
 /// A full certificate: the signed [`Payload`] plus its detached signature.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub(crate) struct Certificate {
+pub struct Certificate {
     pub payload: Payload,
     /// base64 of the 64-byte Ed25519 signature over [`signing_message`].
     pub signature: String,
@@ -66,7 +76,7 @@ pub(crate) struct Certificate {
 
 /// Outcome of verifying a certificate. Display-only — never a feature gate.
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) enum LicenseStatus {
+pub enum LicenseStatus {
     /// No certificate file present.
     None,
     /// Valid signature, not yet expired.
@@ -87,7 +97,7 @@ impl LicenseStatus {
     /// One-line summary suffixed onto a tier link title. `label` names the
     /// license ("Cloud and store" / "Support"). Kept plain (no em dash) so a
     /// screen reader reads it cleanly.
-    pub(crate) fn summary_line(&self, label: &str) -> String {
+    pub fn summary_line(&self, label: &str) -> String {
         match self {
             LicenseStatus::None => {
                 format!("{label} license: none. sicompass is free under GPLv3.")
@@ -111,7 +121,7 @@ impl LicenseStatus {
 ///
 /// `serde_json` serializes struct fields in declaration order, so this is
 /// deterministic given a fixed [`Payload`] definition.
-pub(crate) fn signing_message(payload: &Payload) -> Vec<u8> {
+pub fn signing_message(payload: &Payload) -> Vec<u8> {
     serde_json::to_vec(payload).expect("Payload always serializes")
 }
 
@@ -124,7 +134,7 @@ fn now_unix() -> i64 {
 
 /// Verify `cert` against an explicit base64 public key. The public entry point
 /// [`verify`] calls this with [`LICENSE_PUBLIC_KEY_B64`]; tests pass their own.
-pub(crate) fn verify_against(cert: &Certificate, public_key_b64: &str) -> LicenseStatus {
+pub fn verify_against(cert: &Certificate, public_key_b64: &str) -> LicenseStatus {
     let key_bytes = match STANDARD.decode(public_key_b64) {
         Ok(b) => b,
         Err(_) => return LicenseStatus::Invalid("public key is not valid base64".to_owned()),
@@ -177,24 +187,24 @@ pub(crate) fn verify_against(cert: &Certificate, public_key_b64: &str) -> Licens
 }
 
 /// Verify a certificate against the embedded production public key.
-pub(crate) fn verify(cert: &Certificate) -> LicenseStatus {
+pub fn verify(cert: &Certificate) -> LicenseStatus {
     verify_against(cert, LICENSE_PUBLIC_KEY_B64)
 }
 
 /// On-disk location of the saved certificate for license `slug`
 /// (`"store-license"` for cloud and store, `"support-license"` for support).
-pub(crate) fn cert_path(slug: &str) -> Option<PathBuf> {
+pub fn cert_path(slug: &str) -> Option<PathBuf> {
     sicompass_sdk::platform::provider_config_path(slug)
 }
 
 /// Load and parse the certificate from `path` (no verification).
-pub(crate) fn load_from(path: &Path) -> Option<Certificate> {
+pub fn load_from(path: &Path) -> Option<Certificate> {
     let text = std::fs::read_to_string(path).ok()?;
     serde_json::from_str(&text).ok()
 }
 
 /// Persist a certificate to `path`, atomically. Returns `false` on failure.
-pub(crate) fn save_to(path: &Path, cert: &Certificate) -> bool {
+pub fn save_to(path: &Path, cert: &Certificate) -> bool {
     if let Some(dir) = path.parent() {
         sicompass_sdk::platform::make_dirs(dir);
     }
@@ -205,12 +215,12 @@ pub(crate) fn save_to(path: &Path, cert: &Certificate) -> bool {
 }
 
 /// Load the saved certificate for license `slug`, if present.
-pub(crate) fn load(slug: &str) -> Option<Certificate> {
+pub fn load(slug: &str) -> Option<Certificate> {
     load_from(&cert_path(slug)?)
 }
 
 /// Save a certificate for license `slug`.
-pub(crate) fn save(slug: &str, cert: &Certificate) -> bool {
+pub fn save(slug: &str, cert: &Certificate) -> bool {
     match cert_path(slug) {
         Some(p) => save_to(&p, cert),
         None => false,

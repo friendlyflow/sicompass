@@ -2,6 +2,7 @@
 members = [
     "lib/lib_tutorial",
     "lib/lib_settings",
+    "lib/lib_payments",
     "lib/lib_filebrowser",
     "lib/lib_webbrowser",
     "lib/lib_chatclient",
@@ -50,6 +51,7 @@ license = "GPL-3.0-only"
 sicompass-sdk = "0.8.0"
 sicompass-tutorial = { path = "lib/lib_tutorial" }
 sicompass-settings = { path = "lib/lib_settings" }
+sicompass-payments = { path = "lib/lib_payments" }
 sicompass-filebrowser = { path = "lib/lib_filebrowser" }
 sicompass-webbrowser = { path = "lib/lib_webbrowser" }
 sicompass-chatclient = { path = "lib/lib_chatclient" }

@@ -5,6 +5,13 @@
 //! link resolver (a `<link>` Obj per tier). This module only handles the
 //! "for payment" button action: ask the server for a hosted checkout and
 //! open it in the user's browser.
+//!
+//! The browser, not an in-app render, on purpose. A hosted checkout wants the
+//! user's real session, their password manager and their bank's 3-D Secure
+//! page, and none of those belong inside a keyboard-driven FFON tree.
+//!
+//! [`crate::tier_input`] is what calls this; a provider should go through
+//! there rather than building a checkout itself.
 
 use std::time::Duration;
 
@@ -15,7 +22,7 @@ use std::time::Duration;
 /// failure returns `Err(message)`; for a non-2xx response the server's
 /// plain-text body is returned verbatim so the caller can show it in the
 /// header.
-pub(crate) fn request_checkout(
+pub fn request_checkout(
     base_url: &str,
     item: &str,
     amount: &str,
@@ -72,7 +79,7 @@ pub(crate) fn request_checkout(
 
 /// Open `url` in the user's external browser. Returns `Err` (with the URL
 /// still in the message) when the platform opener cannot be launched.
-pub(crate) fn open_url(url: &str) -> Result<(), String> {
+pub fn open_url(url: &str) -> Result<(), String> {
     let (program, args): (&str, Vec<&str>) = if cfg!(target_os = "macos") {
         ("open", vec![url])
     } else if cfg!(target_os = "windows") {

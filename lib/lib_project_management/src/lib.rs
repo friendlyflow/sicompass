@@ -73,8 +73,8 @@ use sicompass_sdk::input::{self, InputLine, InputState};
 use sicompass_sdk::timeline::TimelineEntry;
 use sicompass_sdk::{
     BuiltinManifest, DashboardFrame, DashboardKey, DashboardKeysym, DashboardKind,
-    DashboardRequest, NavigationRequest, Provider, localize, register_builtin_manifest,
-    register_provider_factory, tags,
+    DashboardRequest, NavigationRequest, Provider, SettingDecl, localize,
+    register_builtin_manifest, register_provider_factory, tags,
 };
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -154,6 +154,13 @@ pub const CMD_MOVE_RIGHT: &str = "move right";
 /// `src/sicompass/src/list.rs`). Lowercase, like every other command id in the
 /// app.
 pub const CMD_ARCHIVE: &str = "archive card";
+pub const CMD_RESTORE_BACKUP: &str = "restore cloud backup";
+
+/// Server-side name of this store, and the `settings.json` key for its cloud
+/// backup switch. The store is called "kanban" on the server because that is
+/// what it holds; the provider keeps its longer name.
+const CLOUD_PLUGIN: &str = "kanban";
+const CLOUD_ENABLE_KEY: &str = "kanbanCloudBackup";
 
 // ---------------------------------------------------------------------------
 // Board operations, as they cross the timeline
@@ -294,6 +301,9 @@ pub struct ProjectManagementProvider {
     timeline: Vec<TimelineEntry>,
     /// Text taken by `commit_edit` for a row the app has not told us about yet.
     pending_create: Option<String>,
+    /// Opt-in mirror of the board to the license server. Inert until the user
+    /// ticks "enable cloud backup" in settings; see `lib_payments::cloud`.
+    cloud: sicompass_payments::cloud::CloudBackup,
 
     // ---- Dashboard ------------------------------------------------------
     mode: BoardMode,
@@ -350,6 +360,7 @@ impl ProjectManagementProvider {
             refresh: false,
             timeline: Vec::new(),
             pending_create: None,
+            cloud: sicompass_payments::cloud::CloudBackup::new(CLOUD_PLUGIN, CLOUD_ENABLE_KEY),
             mode: BoardMode::Board,
             focus: Focus::default(),
             edit: None,
@@ -415,6 +426,30 @@ impl ProjectManagementProvider {
         }
     }
 
+    /// Pull the cloud backup back over an empty board.
+    ///
+    /// The outcome is spoken rather than returned: "nothing was restored" and
+    /// "restored" both need saying, and only one of them is an error.
+    fn restore_cloud_backup(&mut self) {
+        let Some(root) = self.root() else {
+            return;
+        };
+        match self.cloud.restore(&root) {
+            Ok((restored, message)) => {
+                if restored {
+                    // The board in memory is now stale: re-read what was just
+                    // written.
+                    self.loaded = false;
+                    self.load_failed = false;
+                    self.ensure_loaded();
+                    self.refresh = true;
+                }
+                self.say(message);
+            }
+            Err(e) => self.error = Some(e),
+        }
+    }
+
     fn persist(&mut self) {
         if self.load_failed {
             return;
@@ -424,7 +459,12 @@ impl ProjectManagementProvider {
         };
         if store::save_board(&root, &self.board).is_err() {
             self.error = Some(localize::t("pm-error-save"));
+            // The disk write failed, so there is no new state worth mirroring.
+            return;
         }
+        // Queues only. Every board edit lands here, so the upload itself
+        // belongs to the worker in `lib_payments::cloud`.
+        self.cloud.mark_dirty(&root);
     }
 
     // ---- Row rendering --------------------------------------------------
@@ -468,7 +508,16 @@ impl ProjectManagementProvider {
             },
         };
 
-        let mut out = Vec::with_capacity(rows.len().max(1));
+        let rows_len = rows.len();
+        let mut out = Vec::with_capacity(rows_len.max(1) + 1);
+        // Only on the columns level, and only when the switch is on: one row
+        // per provider, in one place. The board itself is listed below it
+        // whether or not the subscription is paid for.
+        if level.is_none()
+            && let Some(row) = self.cloud.row()
+        {
+            out.push(row);
+        }
         for (id, text, is_column) in rows {
             let label = Self::row_label(id, &text);
             self.remember(level, &label, id);
@@ -481,7 +530,11 @@ impl ProjectManagementProvider {
 
         // Never empty. The app seeds its own insert placeholder into an empty
         // level, which would then look like a row this provider had rendered.
-        if out.is_empty() {
+        //
+        // Counted against the board's own rows, not against `out`: with cloud
+        // backup on, `out` already holds the cloud row, and an empty board
+        // would otherwise lose its "no columns yet" line.
+        if rows_len == 0 {
             out.push(FfonElement::new_str(localize::t(if level.is_none() {
                 "pm-empty-columns"
             } else {
@@ -508,6 +561,10 @@ impl ProjectManagementProvider {
     fn reconcile(&mut self, children: &[FfonElement]) {
         if self.load_failed {
             self.error = Some(localize::t("pm-error-unreadable"));
+            return;
+        }
+        // Not our list: see `is_grafted_page`.
+        if sicompass_payments::cloud::is_grafted_page(children) {
             return;
         }
 
@@ -554,6 +611,14 @@ impl ProjectManagementProvider {
         for elem in children {
             let raw = raw_of(elem);
             if rendered_only.iter().any(|r| r == raw) {
+                continue;
+            }
+            // The cloud row is rendered, never stored. Matched by "carries a
+            // link" rather than by text, because its wording changes with the
+            // subscription and with the user's language. Safe here because
+            // `escape` puts a card's own angle brackets beyond reach, so no
+            // column and no card can ever carry a real `<link>`.
+            if sicompass_payments::cloud::CloudBackup::is_row(raw) {
                 continue;
             }
             let text = column_title(&row_text(raw));
@@ -1592,20 +1657,44 @@ impl Provider for ProjectManagementProvider {
             .map(|c| Self::row_label(c.id, &c.title))
     }
 
+    /// Cloud backup settings. The app broadcasts every setting to every
+    /// provider, so this only claims the three that are ours.
+    fn on_setting_change(&mut self, key: &str, value: &str) {
+        self.cloud.on_setting_change(key, value);
+    }
+
+    /// The controls inside the cloud tier tree, which the app grafts into
+    /// *this* provider's tree when the user follows the cloud row. The board
+    /// itself has no buttons or radios of its own.
+    fn on_button_press(&mut self, function_name: &str) {
+        self.cloud.on_button_press(function_name);
+    }
+
+    fn on_radio_change(&mut self, group: &str, value: &str) {
+        self.cloud.on_radio_change(group, value);
+    }
+
     fn needs_refresh(&self) -> bool {
-        self.refresh
+        // The backup worker runs on its own thread, so a finished upload (or a
+        // failed one) has to ask for the row to be redrawn.
+        self.refresh || self.cloud.needs_refresh()
     }
 
     fn clear_needs_refresh(&mut self) {
         self.refresh = false;
+        self.cloud.clear_needs_refresh();
     }
 
     fn take_error(&mut self) -> Option<String> {
-        self.error.take()
+        // The board's own error leads: a board that could not be saved matters
+        // more than a backup that could not be uploaded.
+        self.error.take().or_else(|| self.cloud.take_error())
     }
 
     fn take_announcement(&mut self) -> Option<String> {
-        self.announcement.take()
+        self.announcement
+            .take()
+            .or_else(|| self.cloud.take_announcement())
     }
 
     fn take_timeline_entries(&mut self) -> Vec<TimelineEntry> {
@@ -1641,13 +1730,19 @@ impl Provider for ProjectManagementProvider {
         if self.in_dashboard {
             return vec![CMD_ARCHIVE.to_owned()];
         }
-        vec![
+        let mut out = vec![
             CMD_MOVE_UP.to_owned(),
             CMD_MOVE_DOWN.to_owned(),
             CMD_MOVE_LEFT.to_owned(),
             CMD_MOVE_RIGHT.to_owned(),
             CMD_ARCHIVE.to_owned(),
-        ]
+        ];
+        // Offered only when cloud backup is on: restoring is meaningless
+        // otherwise, and an inert command in the palette is noise.
+        if self.cloud.is_enabled() {
+            out.push(CMD_RESTORE_BACKUP.to_owned());
+        }
+        out
     }
 
     fn command_label(&self, cmd: &str) -> String {
@@ -1658,6 +1753,7 @@ impl Provider for ProjectManagementProvider {
             CMD_MOVE_LEFT => localize::t("pm-cmd-move-left"),
             CMD_MOVE_RIGHT => localize::t("pm-cmd-move-right"),
             CMD_ARCHIVE => localize::t("pm-cmd-archive-card"),
+            CMD_RESTORE_BACKUP => localize::t("payments-command-restore"),
             other => other.to_owned(),
         }
     }
@@ -1678,6 +1774,10 @@ impl Provider for ProjectManagementProvider {
         // instead, which returns to whichever mode the palette was opened from.
         if cmd == CMD_ARCHIVE {
             self.archive_card(elem_key);
+            return None;
+        }
+        if cmd == CMD_RESTORE_BACKUP {
+            self.restore_cloud_backup();
             return None;
         }
         let ok = match cmd {
@@ -2005,13 +2105,25 @@ pub fn register() {
         Box::new(ProjectManagementProvider::new())
     });
     register_builtin_manifest(
-        BuiltinManifest::new("projectmanagement", "project management").enable_by_default(),
+        BuiltinManifest::new("projectmanagement", "project management")
+            .enable_by_default()
+            .with_settings(vec![SettingDecl::checkbox(
+                // The section is the display name, which is how the app finds
+                // and removes a provider's settings block.
+                "project management",
+                "pm-checkbox-cloud-backup",
+                CLOUD_ENABLE_KEY,
+                // Off by default: sending a board anywhere is something the
+                // user asks for.
+                false,
+            )]),
     );
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sicompass_payments::cert::LicenseStatus;
     use tempfile::TempDir;
 
     /// A provider backed by a real, disposable directory.
@@ -2021,9 +2133,35 @@ mod tests {
     /// somewhere real to look.
     fn provider(dir: &TempDir) -> ProjectManagementProvider {
         register_translations();
+        // This binary compiles `sicompass-payments` without `cfg(test)`, so its
+        // own `cfg!(test)` default is off here and the guard has to be set
+        // explicitly. Without it these tests would read the developer's real
+        // settings and could write a token into their live config.
+        sicompass_payments::config::_set_test_no_persist(true);
         let mut p = ProjectManagementProvider::new();
         p.root_override = Some(dir.path().join("board"));
         p
+    }
+
+    /// A seeded board with cloud backup switched on and a known subscription.
+    ///
+    /// The status is forced rather than read off disk: `cloud_status()` looks
+    /// in the real user config directory, so without this a developer who
+    /// actually holds a subscription would see different rows than CI does.
+    fn seeded_with_cloud(status: LicenseStatus) -> ProjectManagementProvider {
+        sicompass_payments::config::_set_test_no_persist(true);
+        sicompass_payments::cloud::_set_test_status(Some(status));
+        let mut p = seeded();
+        p.on_setting_change("storeUrl", "http://127.0.0.1:1");
+        p.on_setting_change(CLOUD_ENABLE_KEY, "true");
+        p
+    }
+
+    fn active_licence() -> LicenseStatus {
+        LicenseStatus::Active {
+            licensee: "Acme Corp".to_owned(),
+            renews_in_days: 342,
+        }
     }
 
     /// Two columns and three cards, and no disk at all.
@@ -3563,5 +3701,167 @@ mod tests {
         ] {
             assert_eq!(keys(src), en, "{name} has drifted from en-US");
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // Cloud backup
+    // -----------------------------------------------------------------------
+
+    /// `localize::t` hands back the key when a string is missing, so a
+    /// forgotten entry would show in Settings as `pm-checkbox-cloud-backup`.
+    #[test]
+    fn the_cloud_backup_checkbox_label_resolves() {
+        register_translations();
+        let label = localize::t("pm-checkbox-cloud-backup");
+        assert_ne!(label, "pm-checkbox-cloud-backup");
+        assert!(label.contains("cloud"), "{label}");
+    }
+
+    /// With the switch off, nothing about payment appears anywhere. A user who
+    /// never asked for cloud backup should not be able to tell it exists.
+    #[test]
+    fn no_cloud_row_until_the_setting_is_on() {
+        let mut p = seeded();
+        let shown = labels(&p.fetch());
+        assert!(
+            !shown.iter().any(|l| l.contains("cloud")),
+            "nothing about cloud backup while the switch is off: {shown:?}"
+        );
+    }
+
+    #[test]
+    fn the_cloud_row_leads_the_columns_level_once_switched_on() {
+        let mut p = seeded_with_cloud(LicenseStatus::None);
+        let rendered = p.fetch();
+        let FfonElement::Obj(first) = &rendered[0] else {
+            panic!("the cloud row must be an Obj so the app will follow it");
+        };
+        assert!(
+            first.key.contains("<link>http://127.0.0.1:1/cloud</link>"),
+            "{}",
+            first.key
+        );
+        // And the board is still there, below it.
+        let shown = labels(&rendered);
+        assert!(shown.iter().any(|l| l == "To do"), "{shown:?}");
+        assert!(shown.iter().any(|l| l == "Doing"), "{shown:?}");
+    }
+
+    #[test]
+    fn the_cloud_row_wording_changes_once_it_is_paid_for() {
+        let unpaid = labels(&seeded_with_cloud(LicenseStatus::None).fetch())[0].clone();
+        let paid = labels(&seeded_with_cloud(active_licence()).fetch())[0].clone();
+        assert_ne!(unpaid, paid);
+        assert!(paid.contains("342"), "{paid}");
+    }
+
+    /// Cards are not a place to put a subscription notice.
+    #[test]
+    fn the_cloud_row_appears_on_the_columns_level_only() {
+        let mut p = seeded_with_cloud(active_licence());
+        p.fetch();
+        p.push_path("To do");
+        let inside = labels(&p.fetch());
+        assert!(!inside.iter().any(|l| l.contains("cloud")), "{inside:?}");
+    }
+
+    /// An empty board with backup on must still offer its "no columns yet"
+    /// line: the cloud row is not board content.
+    #[test]
+    fn an_empty_board_keeps_its_placeholder_beside_the_cloud_row() {
+        sicompass_payments::config::_set_test_no_persist(true);
+        sicompass_payments::cloud::_set_test_status(Some(active_licence()));
+        let mut p = ProjectManagementProvider::new();
+        p.loaded = true;
+        p.on_setting_change(CLOUD_ENABLE_KEY, "true");
+
+        let shown = labels(&p.fetch());
+        assert_eq!(shown.len(), 2, "{shown:?}");
+        assert_eq!(shown[1], localize::t("pm-empty-columns"), "{shown:?}");
+    }
+
+    /// The one that would eat a user's board. The app hands back whatever it
+    /// was displaying, so a cloud row that survives `reconcile` becomes a
+    /// column the moment anything else is typed.
+    #[test]
+    fn the_cloud_row_is_never_stored_as_a_column() {
+        let mut p = seeded_with_cloud(LicenseStatus::None);
+        let unchanged = p.fetch();
+        assert!(matches!(&unchanged[0],
+            FfonElement::Obj(o) if sicompass_payments::cloud::CloudBackup::is_row(&o.key)));
+        p.sync_ffon_body_children(&unchanged);
+
+        let titles: Vec<String> = p.board.columns.iter().map(|c| c.title.clone()).collect();
+        assert_eq!(
+            titles,
+            vec!["To do".to_owned(), "Doing".to_owned()],
+            "{titles:?}"
+        );
+    }
+
+    /// An edit made on the grafted payment page must not rewrite the board.
+    #[test]
+    fn an_edit_on_the_payment_page_does_not_touch_the_board() {
+        let mut p = seeded_with_cloud(active_licence());
+        p.fetch();
+
+        // What the server's /cloud tree looks like once the app has grafted it
+        // into this provider and the user has typed into one of its inputs.
+        let tier_page = vec![
+            FfonElement::new_str("Enable 'cloud and store' per month"),
+            FfonElement::new_str("Lemonsqueezy setup: <input>acct-1</input>"),
+            FfonElement::new_obj("<radio>monthly or yearly"),
+            FfonElement::new_str("<button>checkout:cloud</button>for payment"),
+            FfonElement::new_str("License redeem token: <input>tok-42</input>"),
+        ];
+        p.sync_ffon_body_children(&tier_page);
+
+        let titles: Vec<String> = p.board.columns.iter().map(|c| c.title.clone()).collect();
+        assert_eq!(
+            titles,
+            vec!["To do".to_owned(), "Doing".to_owned()],
+            "the checkout form must never become the board: {titles:?}"
+        );
+    }
+
+    #[test]
+    fn switching_on_without_a_subscription_is_announced() {
+        sicompass_payments::config::_set_test_no_persist(true);
+        sicompass_payments::cloud::_set_test_status(Some(LicenseStatus::None));
+        let mut p = seeded();
+        p.on_setting_change(CLOUD_ENABLE_KEY, "true");
+        let spoken = p
+            .take_announcement()
+            .expect("the screen reader must say why");
+        assert!(spoken.contains("cloud and store"), "{spoken}");
+    }
+
+    #[test]
+    fn the_restore_command_is_offered_only_with_backup_on() {
+        let p = seeded();
+        assert!(!p.commands().contains(&CMD_RESTORE_BACKUP.to_owned()));
+        let p = seeded_with_cloud(active_licence());
+        assert!(p.commands().contains(&CMD_RESTORE_BACKUP.to_owned()));
+    }
+
+    /// Restoring must never run over a board that already has columns.
+    #[test]
+    fn restore_refuses_to_overwrite_an_existing_board() {
+        let dir = TempDir::new().unwrap();
+        sicompass_payments::cloud::_set_test_status(Some(active_licence()));
+        let mut p = provider(&dir);
+        p.on_setting_change("storeUrl", "http://127.0.0.1:1");
+        p.on_setting_change(CLOUD_ENABLE_KEY, "true");
+        p.on_setting_change("licenseRedeemToken", "tok-42");
+        p.ensure_loaded();
+        p.board.columns.push(Column::new(1, "To do"));
+        p.persist();
+
+        let mut err = String::new();
+        p.handle_command(CMD_RESTORE_BACKUP, "", 0, &mut err);
+
+        assert!(p.take_error().is_some(), "the refusal has to be reported");
+        assert_eq!(p.board.columns.len(), 1);
+        assert_eq!(p.board.columns[0].title, "To do");
     }
 }

@@ -18,6 +18,9 @@ notes-cmd-move-up = nach oben verschieben
 notes-cmd-move-down = nach unten verschieben
 notes-cmd-duplicate = duplizieren
 
+# The settings checkbox that turns on mirroring the notes to the server.
+notes-checkbox-cloud-backup = Cloud-Sicherung aktivieren
+
 notes-error-meta-undeletable = die Listeninfo gehört zur Liste und kann nicht gelöscht werden
 notes-error-meta-readonly = die Listeninfo kann nicht bearbeitet werden, ändern Sie die Sichtbarkeit darin
 notes-error-unreadable = Ihre Notizen konnten nicht gelesen werden, es wurde nichts gespeichert, die Dateien auf der Festplatte sind unverändert

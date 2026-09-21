@@ -8,7 +8,11 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
-mod store;
+// The commercial client (checkout, license certificates, the tier-tree
+// handlers) lives in its own crate: the tier trees are grafted into whichever
+// provider the user followed the link from, so notes and project management
+// need the same code. See `lib/lib_payments`.
+use sicompass_payments as payments;
 
 /// Version of the `sicompass-sdk` crate this build links against, resolved from
 /// the workspace `Cargo.lock` by [`build.rs`](../build.rs).
@@ -127,7 +131,7 @@ impl SettingsProvider {
             apply_fn: Some(Box::new(apply_fn)),
             config_path_override: None,
             pending_timeline_entries: Vec::new(),
-            store_url: store::DEFAULT_STORE_URL.to_owned(),
+            store_url: payments::DEFAULT_STORE_URL.to_owned(),
             license_redeem_token: String::new(),
             support_redeem_token: String::new(),
             server_form_state: HashMap::new(),
@@ -151,7 +155,7 @@ impl SettingsProvider {
             apply_fn: None,
             config_path_override: None,
             pending_timeline_entries: Vec::new(),
-            store_url: store::DEFAULT_STORE_URL.to_owned(),
+            store_url: payments::DEFAULT_STORE_URL.to_owned(),
             license_redeem_token: String::new(),
             support_redeem_token: String::new(),
             server_form_state: HashMap::new(),
@@ -592,10 +596,7 @@ impl SettingsProvider {
         let base = self.store_url.trim_end_matches('/');
 
         let status = |slug: &str, label_key: &str| -> String {
-            store::cert::load(slug)
-                .map(|c| store::cert::verify(&c))
-                .unwrap_or(store::cert::LicenseStatus::None)
-                .summary_line(&localize::t(label_key))
+            payments::tier_input::status_line(slug, &localize::t(label_key))
         };
 
         // Display text first, then the `<link>` tag — same shape the web
@@ -691,7 +692,7 @@ impl SettingsProvider {
     fn commit_redeem_token(&mut self, token: &str, slug: &str, config_key: &str, label: &str) {
         let trimmed = token.trim();
         if !trimmed.is_empty() {
-            if let Err(msg) = store::redeem_license(&self.store_url, trimmed, slug) {
+            if let Err(msg) = payments::redeem_license(&self.store_url, trimmed, slug) {
                 self.store_error = Some(msg);
             }
         }
@@ -1222,9 +1223,10 @@ impl Provider for SettingsProvider {
             ),
             other => (other.to_owned(), String::new(), String::new()),
         };
-        match store::tiers::request_checkout(&self.store_url, &resolved, &amount, &recurring) {
+        match payments::checkout::request_checkout(&self.store_url, &resolved, &amount, &recurring)
+        {
             Ok(url) => {
-                if let Err(e) = store::tiers::open_url(&url) {
+                if let Err(e) = payments::checkout::open_url(&url) {
                     self.store_error = Some(e);
                 }
             }
@@ -3062,8 +3064,9 @@ mod tests {
             .clone()
     }
 
-    /// A syntactically valid certificate body; the placeholder public key
-    /// rejects its signature, so redeeming it yields a "rejected" error.
+    /// A syntactically valid certificate body carrying a made-up signature,
+    /// which the embedded public key rejects. That is the point: redeeming it
+    /// must yield a "rejected" error rather than being saved.
     fn sample_cert_json() -> serde_json::Value {
         serde_json::json!({
             "payload": {

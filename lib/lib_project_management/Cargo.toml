@@ -8,6 +8,8 @@ description = "Sicompass project-management provider (a kanban board, in a list 
 
 [dependencies]
 sicompass-sdk = { workspace = true }
+# Cloud backup, and the tier-tree controls that come with it.
+sicompass-payments = { workspace = true }
 # `undo` / `redo` are `#[async_trait]` methods. Nothing here awaits — a board
 # edit is memory plus one write — but overriding them still needs the macro.
 async-trait = { workspace = true }

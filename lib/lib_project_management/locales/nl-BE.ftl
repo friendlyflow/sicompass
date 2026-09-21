@@ -14,6 +14,9 @@ pm-cmd-move-left = naar vorige kolom verplaatsen
 pm-cmd-move-right = naar volgende kolom verplaatsen
 pm-cmd-archive-card = kaart archiveren
 
+# The settings checkbox that turns on mirroring the board to the server.
+pm-checkbox-cloud-backup = cloudback-up inschakelen
+
 pm-error-unreadable = je bord kon niet gelezen worden, er is dus niets opgeslagen, de bestanden op schijf blijven ongewijzigd
 pm-error-save = je bord kon niet opgeslagen worden
 pm-error-no-column = voeg eerst een kolom toe, een kaart hoort in een kolom

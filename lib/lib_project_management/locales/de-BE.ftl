@@ -14,6 +14,9 @@ pm-cmd-move-left = in die vorige spalte verschieben
 pm-cmd-move-right = in die nächste spalte verschieben
 pm-cmd-archive-card = karte archivieren
 
+# The settings checkbox that turns on mirroring the board to the server.
+pm-checkbox-cloud-backup = Cloud-Sicherung aktivieren
+
 pm-error-unreadable = ihr board konnte nicht gelesen werden, daher wurde nichts gespeichert, die dateien auf der festplatte bleiben unberührt
 pm-error-save = ihr board konnte nicht gespeichert werden
 pm-error-no-column = fügen sie zuerst eine spalte hinzu, eine karte gehört in eine spalte

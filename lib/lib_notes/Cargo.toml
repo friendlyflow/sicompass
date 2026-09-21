@@ -8,6 +8,8 @@ description = "Sicompass notes provider (a hashed tree of the user's own writing
 
 [dependencies]
 sicompass-sdk = { workspace = true }
+# Cloud backup, and the tier-tree controls that come with it.
+sicompass-payments = { workspace = true }
 # `undo` / `redo` are `#[async_trait]` methods, so overriding them needs the
 # macro even though nothing here awaits.
 async-trait = { workspace = true }

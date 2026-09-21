@@ -14,6 +14,9 @@ pm-cmd-move-left = déplacer vers la colonne précédente
 pm-cmd-move-right = déplacer vers la colonne suivante
 pm-cmd-archive-card = archiver la carte
 
+# The settings checkbox that turns on mirroring the board to the server.
+pm-checkbox-cloud-backup = activer la sauvegarde cloud
+
 pm-error-unreadable = votre tableau n'a pas pu être lu, rien n'a donc été enregistré, les fichiers sur le disque sont intacts
 pm-error-save = votre tableau n'a pas pu être enregistré
 pm-error-no-column = ajoutez d'abord une colonne, une carte doit vivre dans une colonne

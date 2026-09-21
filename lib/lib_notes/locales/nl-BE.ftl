@@ -18,6 +18,9 @@ notes-cmd-move-up = omhoog verplaatsen
 notes-cmd-move-down = omlaag verplaatsen
 notes-cmd-duplicate = dupliceren
 
+# The settings checkbox that turns on mirroring the notes to the server.
+notes-checkbox-cloud-backup = cloudback-up inschakelen
+
 notes-error-meta-undeletable = de lijstinfo hoort bij de lijst en kan niet verwijderd worden
 notes-error-meta-readonly = de lijstinfo kan niet bewerkt worden, wijzig de zichtbaarheid erbinnen
 notes-error-unreadable = je notities konden niet gelezen worden, er is niets opgeslagen, de bestanden op schijf zijn ongewijzigd

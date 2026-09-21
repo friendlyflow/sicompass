@@ -30,6 +30,9 @@ notes-cmd-move-up = move up
 notes-cmd-move-down = move down
 notes-cmd-duplicate = duplicate
 
+# The settings checkbox that turns on mirroring the notes to the server.
+notes-checkbox-cloud-backup = enable cloud backup
+
 notes-error-meta-undeletable = the list meta row belongs to the list and cannot be deleted
 notes-error-meta-readonly = the list meta row cannot be edited, change visibility from inside it
 notes-error-unreadable = your notes could not be read, so nothing has been saved, the files on disk are untouched
