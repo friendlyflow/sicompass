@@ -225,7 +225,13 @@
               # curl.out, not curl: curl's *default* output is `bin`, which
               # holds no lib directory at all, so a bare ${curl}/lib here was
               # a path that has never existed.
-              # libGL and mesa are here for desicompass, not for the app. This
+              # libGL (libglvnd) and libgbm are here for desicompass, not for
+              # the app. Note what is *not* here: nixpkgs' `mesa`. These two
+              # are dispatch libraries, which is exactly why they are safe to
+              # take from the shell — they load a vendor at runtime and the
+              # vendor has to be the system's, see the block below.
+              #
+              # This
               # variable is an assignment with no ":$LD_LIBRARY_PATH" tail, so
               # anything missing from it is excluded outright rather than
               # falling back to the system: smithay's backend_egl dlopens
@@ -233,14 +239,34 @@
               # these two entries the compositor builds and links fine and then
               # dies at startup. libGL is libglvnd (the dispatch library that
               # owns those sonames); mesa is the vendor behind it.
-              export LD_LIBRARY_PATH="${libwebp}/lib:${freetype}/lib:${vulkan-loader}/lib:${vulkan-validation-layers}/lib:${curl.out}/lib:${sdl3}/lib:${libxkbcommon}/lib:${wayland}/lib:${libGL}/lib:${mesa}/lib:${libinput}/lib:${seatd}/lib:${udev}/lib:${libgbm}/lib";
+              export LD_LIBRARY_PATH="${libwebp}/lib:${freetype}/lib:${vulkan-loader}/lib:${vulkan-validation-layers}/lib:${curl.out}/lib:${sdl3}/lib:${libxkbcommon}/lib:${wayland}/lib:${libGL}/lib:${libinput}/lib:${seatd}/lib:${udev}/lib:${libgbm}/lib";
               export VK_LAYER_PATH="${vulkan-validation-layers}/share/vulkan/explicit_layer.d";
 
-              # EGL vendor discovery, the glvnd counterpart of the Vulkan ICD
-              # block below. libglvnd looks in /usr/share/glvnd/egl_vendor.d,
-              # which on NixOS does not exist, so without this it finds no
-              # vendor at all and eglInitialize fails with EGL_NOT_INITIALIZED.
-              export __EGL_VENDOR_LIBRARY_DIRS="${mesa}/share/glvnd/egl_vendor.d";
+              # The GL/EGL/GBM *vendor*, as opposed to the dispatch libraries
+              # above.
+              #
+              # On NixOS this must be /run/opengl-driver, the driver the rest
+              # of the running system uses, and never nixpkgs' own `mesa`.
+              # Taking the vendor from the shell instead puts two Mesa builds
+              # in one process: GBM loads its backend and DRI driver from the
+              # system while libEGL resolves to the shell's, and the first
+              # call across that boundary segfaults. Observed exactly that on
+              # the TTY backend - eglQueryDmaBufModifiersEXT entered
+              # dri_query_dma_buf_modifiers in libgallium-26.2.3 and landed in
+              # si_memobj_destroy in libgallium-26.1.8.
+              #
+              # These three cover the three lookups Mesa does: which EGL
+              # vendor glvnd loads, where the DRI driver comes from, and which
+              # GBM backend libgbm dlopens.
+              if [ -d /run/opengl-driver/lib ]; then
+                export __EGL_VENDOR_LIBRARY_DIRS="/run/opengl-driver/share/glvnd/egl_vendor.d";
+                export LIBGL_DRIVERS_PATH="/run/opengl-driver/lib/dri";
+                export GBM_BACKENDS_PATH="/run/opengl-driver/lib/gbm";
+              else
+                # Not NixOS: no system driver tree, so the shell's own Mesa is
+                # the only one in play and mixing cannot happen.
+                export __EGL_VENDOR_LIBRARY_DIRS="${mesa}/share/glvnd/egl_vendor.d";
+              fi
 
               # Vulkan ICD discovery on non-NixOS distros.
               #
