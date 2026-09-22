@@ -432,6 +432,7 @@ fn handle_input(state: &mut State, event: InputEvent<LibinputInputBackend>) {
             return;
         };
         let serial = smithay::utils::SERIAL_COUNTER.next_serial();
+        let pressed = event.state() == smithay::backend::input::KeyState::Pressed;
         keyboard.input(
             state,
             event.key_code(),
@@ -448,6 +449,11 @@ fn handle_input(state: &mut State, event: InputEvent<LibinputInputBackend>) {
                 // level of the function keys, and the raw Latin sym used for
                 // our own bindings would only ever see plain F1.
                 if let Some(vt) = keybindings::vt_switch_target(keysym.modified_sym().raw()) {
+                    if !pressed {
+                        // Swallow the release; switching twice is harmless but
+                        // the client must not see a stray key either.
+                        return FilterResult::Intercept(());
+                    }
                     if let Gpu::Tty(tty) = &mut app_state.backend {
                         match tty.session.change_vt(vt) {
                             Ok(()) => info!("switching to vt {vt}"),
@@ -464,7 +470,7 @@ fn handle_input(state: &mut State, event: InputEvent<LibinputInputBackend>) {
                     logo: modifiers.logo,
                     shift: modifiers.shift,
                 };
-                crate::state::apply_keybinding(app_state, mods, sym.raw())
+                crate::state::apply_keybinding(app_state, mods, sym.raw(), pressed)
             },
         );
     }

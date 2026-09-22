@@ -377,8 +377,27 @@ impl State {
 ///
 /// Returns `FilterResult::Intercept` when the compositor consumed the key and
 /// `FilterResult::Forward` when it belongs to the focused client.
-pub fn apply_keybinding(state: &mut State, mods: Mods, keysym: u32) -> FilterResult<()> {
+pub fn apply_keybinding(
+    state: &mut State,
+    mods: Mods,
+    keysym: u32,
+    pressed: bool,
+) -> FilterResult<()> {
     let action = keybindings::evaluate(mods, keysym);
+
+    // Intercept both edges of a bound chord, but act on the press only.
+    //
+    // smithay calls this filter for the release as well, so without this
+    // every binding fired twice: the quit chord armed on the press and
+    // confirmed itself on the release 72ms later, and a focus motion jumped
+    // two windows. Swallowing the release too keeps the client from seeing
+    // half a chord it never saw the start of.
+    if !pressed {
+        return match action {
+            BindingAction::PassThrough => FilterResult::Forward,
+            _ => FilterResult::Intercept(()),
+        };
+    }
 
     // Any binding other than the quit chord disarms a pending quit, so the
     // two presses have to be consecutive.

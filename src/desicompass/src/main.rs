@@ -21,7 +21,7 @@
 //! | `Super+M` | toggle Columns / Monocle |
 //! | `Super+Return` | spawn the terminal |
 //! | `Super+Shift+Q` | close the focused window |
-//! | `Super+Shift+E` | end the session (press twice) |
+//! | `Super+Shift+E` | end the session (press twice, on separate presses) |
 
 #[cfg(target_os = "linux")]
 mod focus;
@@ -43,21 +43,18 @@ mod linux {
     use clap::Parser;
     use smithay::{
         backend::{
-            input::{InputEvent, KeyboardKeyEvent},
+            egl::EGLDevice,
+            input::{InputEvent, KeyState, KeyboardKeyEvent},
             renderer::{
                 damage::OutputDamageTracker,
                 element::surface::WaylandSurfaceRenderElement,
                 gles::GlesRenderer,
+                ImportDma,
             },
             winit::{self, WinitEvent},
         },
         desktop::space::render_output,
-        backend::{
-            egl::EGLDevice,
-            renderer::ImportDma,
-        },
         input::keyboard::{FilterResult, XkbConfig},
-        wayland::dmabuf::DmabufFeedbackBuilder,
         output::{Mode, Output, PhysicalProperties, Scale, Subpixel},
         reexports::{
             calloop::{
@@ -66,7 +63,7 @@ mod linux {
             wayland_server::Display,
         },
         utils::Transform,
-        wayland::socket::ListeningSocketSource,
+        wayland::{dmabuf::DmabufFeedbackBuilder, socket::ListeningSocketSource},
     };
     use tracing::{error, info, warn};
 
@@ -342,6 +339,7 @@ mod linux {
                     state.relayout();
                 }
                 WinitEvent::Input(InputEvent::Keyboard { event }) => {
+                    let pressed = event.state() == KeyState::Pressed;
                     keyboard.input(
                         &mut state,
                         event.key_code(),
@@ -361,7 +359,7 @@ mod linux {
                                 logo: modifiers.logo,
                                 shift: modifiers.shift,
                             };
-                            crate::state::apply_keybinding(app_state, mods, sym.raw())
+                            crate::state::apply_keybinding(app_state, mods, sym.raw(), pressed)
                         },
                     );
                 }

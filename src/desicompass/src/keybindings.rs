@@ -258,6 +258,59 @@ mod tests {
         }
     }
 
+    /// Ctrl+Alt+F1 really does produce XF86Switch_VT_1 on this keymap.
+    ///
+    /// The whole VT-switch path rests on this: the keysym exists only at the
+    /// Ctrl+Alt level of the function keys, so if the level lookup does not
+    /// behave as assumed, `vt_switch_target` is matched against plain `F1`
+    /// forever and the compositor silently traps the user. Checked against
+    /// the Belgian layout specifically, since a non-US layout is exactly
+    /// where a level assumption tends to fall over.
+    #[test]
+    fn ctrl_alt_f1_resolves_to_a_vt_switch_keysym() {
+        use smithay::input::keyboard::xkb;
+
+        // xkb keycodes are evdev codes plus 8.
+        const CTRL: u32 = 29 + 8;
+        const ALT: u32 = 56 + 8;
+        const F1: u32 = 59 + 8;
+        const F2: u32 = 60 + 8;
+
+        let context = xkb::Context::new(xkb::CONTEXT_NO_FLAGS);
+        let keymap = xkb::Keymap::new_from_names(
+            &context,
+            "",
+            "",
+            "be",
+            "",
+            None,
+            xkb::KEYMAP_COMPILE_NO_FLAGS,
+        )
+        .expect("the be layout should compile");
+        let mut state = xkb::State::new(&keymap);
+
+        // Unmodified, F1 is just F1 and must reach the client.
+        assert_eq!(
+            vt_switch_target(state.key_get_one_sym(F1.into()).raw()),
+            None,
+            "plain F1 must not be treated as a VT switch"
+        );
+
+        state.update_key(CTRL.into(), xkb::KeyDirection::Down);
+        state.update_key(ALT.into(), xkb::KeyDirection::Down);
+
+        assert_eq!(
+            vt_switch_target(state.key_get_one_sym(F1.into()).raw()),
+            Some(1),
+            "Ctrl+Alt+F1 should ask for vt 1"
+        );
+        assert_eq!(
+            vt_switch_target(state.key_get_one_sym(F2.into()).raw()),
+            Some(2),
+            "Ctrl+Alt+F2 should ask for vt 2"
+        );
+    }
+
     #[test]
     fn vt_keysyms_map_to_their_vt_number() {
         assert_eq!(vt_switch_target(keysyms::KEY_XF86Switch_VT_1), Some(1));
