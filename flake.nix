@@ -664,11 +664,20 @@
               libGL
             ];
 
-            # Only the dispatch libraries. The GL/EGL/GBM *vendor* is found
-            # through /run/opengl-driver, which nixpkgs' libglvnd and mesa are
-            # already patched to look in — putting nixpkgs' own mesa here
-            # instead is what loaded two incompatible Mesa builds into one
-            # process and segfaulted the first TTY run.
+            # Only the dispatch libraries go on LD_LIBRARY_PATH, and the
+            # GL/EGL/GBM *vendor* is pointed at /run/opengl-driver.
+            #
+            # Both halves are required. Assuming the first was enough is what
+            # made the session die instantly when launched from the greeter:
+            # the wrapper put nixpkgs' libgbm (26.1.3) on the path while EGL
+            # resolved to the system driver (26.1.8), so on the GBM path -
+            # which only the TTY backend takes, which is why it survived
+            # nested - two incompatible Mesa builds ended up in one process
+            # and it segfaulted inside libEGL_mesa.
+            #
+            # `--set-default` rather than `--set`: on a non-NixOS host, or for
+            # someone deliberately testing another driver, the environment
+            # should still win.
             postInstall = ''
               wrapProgram $out/bin/desicompass \
                 --prefix LD_LIBRARY_PATH : "${pkgs.lib.makeLibraryPath (with pkgs; [
@@ -679,7 +688,10 @@
                   libinput
                   seatd
                   udev
-                ])}"
+                ])}" \
+                --set-default __EGL_VENDOR_LIBRARY_DIRS /run/opengl-driver/share/glvnd/egl_vendor.d \
+                --set-default LIBGL_DRIVERS_PATH /run/opengl-driver/lib/dri \
+                --set-default GBM_BACKENDS_PATH /run/opengl-driver/lib/gbm
             '';
 
             meta = with pkgs.lib; {
