@@ -3,6 +3,10 @@
 //! Rust port of `src/desicompass-c/main.c` using smithay instead of wlroots.
 //! Linux-only.
 //!
+//! Unlike the tinywl original this compositor is **cursorless**: it advertises
+//! no `wl_pointer`, windows are placed by the compositor, and every
+//! interaction is a key.
+//!
 //! ## Keybindings (Alt held)
 //! * `Alt+Esc`  — quit the compositor
 //! * `Alt+F1`   — cycle to the next window
@@ -16,27 +20,38 @@ mod state;
 
 #[cfg(target_os = "linux")]
 mod linux {
+    use std::{sync::Arc, time::Duration};
+
     use clap::Parser;
     use smithay::{
         backend::{
             input::{InputEvent, KeyboardKeyEvent},
-            renderer::{gles::GlesRenderer, Color32F, Frame, Renderer},
+            renderer::{
+                damage::OutputDamageTracker,
+                element::surface::WaylandSurfaceRenderElement,
+                gles::GlesRenderer,
+            },
             winit::{self, WinitEvent},
         },
+        desktop::space::render_output,
         input::keyboard::FilterResult,
+        output::{Mode, Output, PhysicalProperties, Scale, Subpixel},
         reexports::{
-            wayland_server::{Display, ListeningSocket},
-            winit::platform::pump_events::PumpStatus,
+            calloop::{
+                generic::Generic, EventLoop, Interest, Mode as CalloopMode, PostAction,
+            },
+            wayland_server::Display,
         },
-        utils::{Rectangle, Transform},
+        utils::Transform,
+        wayland::socket::ListeningSocketSource,
     };
-    use crate::state::{ClientState, State};
-    use std::sync::Arc;
-    use tracing::{error, info};
+    use tracing::{error, info, warn};
 
-    // ---------------------------------------------------------------------------
+    use crate::state::{ClientState, State};
+
+    // -----------------------------------------------------------------------
     // CLI
-    // ---------------------------------------------------------------------------
+    // -----------------------------------------------------------------------
 
     /// desicompass Wayland compositor.
     #[derive(Parser, Debug)]
@@ -59,44 +74,101 @@ mod linux {
     }
 
     fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
-        let mut display: Display<State> = Display::new()?;
+        let mut event_loop: EventLoop<State> = EventLoop::try_new()?;
+        let display: Display<State> = Display::new()?;
         let dh = display.handle();
 
-        let mut state = State::new(&dh);
-
-        // Add keyboard and pointer to the seat.
-        let keyboard = state.seat.add_keyboard(Default::default(), 200, 25)?;
-        state.seat.add_pointer();
-
-        // Winit backend: creates an OS window we render into.
+        // Winit backend first.
         //
-        // This must happen *before* the socket name reaches the environment.
-        // winit reads WAYLAND_DISPLAY to find the host compositor to open that
-        // window on, so exporting our own socket name first makes winit
-        // connect to us — and we cannot answer it, because we only start
-        // accepting clients once this call returns. The result is a compositor
-        // that looks healthy (process alive, socket present) and serves
-        // nobody: every client hangs in the registry roundtrip with no error
-        // on either side.
+        // This must happen before the socket name reaches any child's
+        // environment. winit reads WAYLAND_DISPLAY to find the host
+        // compositor to open its window on, so pointing that at our own
+        // socket makes winit connect to us — and we only start serving
+        // clients once this returns. The compositor then looks healthy,
+        // process alive and socket present, and answers nobody.
         let (mut backend, mut winit) = winit::init::<GlesRenderer>()?;
 
-        // Open the Wayland socket.
-        let socket_name = "wayland-desicompass";
-        let listener = ListeningSocket::bind(socket_name)?;
+        // One output, sized to the winit window.
+        //
+        // An output global is not optional even nested: a client built on
+        // smithay-client-toolkit (loginsicompass is) waits on `wl_output`
+        // before it will draw anything at all.
+        let mode = Mode {
+            size: backend.window_size(),
+            refresh: 60_000,
+        };
+        let output = Output::new(
+            "desicompass-0".to_string(),
+            PhysicalProperties {
+                size: (0, 0).into(),
+                subpixel: Subpixel::Unknown,
+                make: "desicompass".into(),
+                model: "winit".into(),
+            },
+        );
+        let _output_global = output.create_global::<State>(&dh);
+        // Flipped180 is what the winit backend renders with; the output has
+        // to agree or everything lands upside down.
+        output.change_current_state(
+            Some(mode),
+            Some(Transform::Flipped180),
+            Some(Scale::Integer(1)),
+            Some((0, 0).into()),
+        );
+        output.set_preferred(mode);
+
+        let mut damage_tracker = OutputDamageTracker::from_output(&output);
+        let mut state = State::new(&dh, event_loop.get_signal(), output.clone());
+
+        let keyboard = state.seat.add_keyboard(Default::default(), 200, 25)?;
+        // No `add_pointer()`. A seat with no wl_pointer is the honest
+        // advertisement of a cursorless compositor, and it means a client's
+        // pointer-driven paths (sicompass's SDL hit test, for one) can never
+        // fire in the first place.
+
+        // Wayland socket, as a calloop source.
+        //
+        // `new_auto` picks the first free wayland-N rather than a fixed name,
+        // so a leftover socket file from a killed run cannot block startup.
+        let socket = ListeningSocketSource::new_auto()?;
+        let socket_name = socket.socket_name().to_string_lossy().into_owned();
+        event_loop
+            .handle()
+            .insert_source(socket, |stream, _, state: &mut State| {
+                if let Err(err) = state
+                    .display_handle
+                    .insert_client(stream, Arc::new(ClientState::default()))
+                {
+                    warn!("failed to insert client: {err}");
+                }
+            })?;
+
+        // Client requests, as a calloop source.
+        event_loop.handle().insert_source(
+            Generic::new(display, Interest::READ, CalloopMode::Level),
+            |_, display, state: &mut State| {
+                // SAFETY: the display is never dropped or moved out of the
+                // source for as long as the loop runs.
+                unsafe {
+                    display.get_mut().dispatch_clients(state)?;
+                }
+                Ok(PostAction::Continue)
+            },
+        )?;
+
         info!("WAYLAND_DISPLAY={socket_name}");
 
         // Optionally launch a startup program.
         //
         // The socket name is handed to the child explicitly instead of being
-        // exported into our own environment. A process-wide `set_var` is
-        // `unsafe` under edition 2024, it repoints every library in *this*
-        // process at our socket (which is what broke winit above), and the
-        // child is the only thing that needs it.
+        // exported into our own environment: a process-wide `set_var` is
+        // `unsafe` under edition 2024 and would repoint every library in
+        // *this* process at our socket.
         if let Some(cmd) = &args.startup_cmd {
             info!("launching startup command: {cmd}");
             match std::process::Command::new("/bin/sh")
                 .args(["-c", cmd])
-                .env("WAYLAND_DISPLAY", socket_name)
+                .env("WAYLAND_DISPLAY", &socket_name)
                 .spawn()
             {
                 Ok(child) => info!("startup command running as pid {}", child.id()),
@@ -106,82 +178,92 @@ mod linux {
             }
         }
 
-        let start_time = std::time::Instant::now();
-
-        while state.running {
+        let mut running = true;
+        while running {
             let status = winit.dispatch_new_events(|event| match event {
-                WinitEvent::Resized { .. } => {}
-                WinitEvent::Input(input_event) => match input_event {
-                    InputEvent::Keyboard { event } => {
-                        use smithay::backend::input::KeyboardKeyEvent;
-                        keyboard.input(
-                            &mut state,
-                            event.key_code(),
-                            event.state(),
-                            0.into(),
-                            0,
-                            |app_state, modifiers, keysym| {
-                                if modifiers.alt {
-                                    let sym = keysym.modified_sym().raw();
-                                    return crate::state::apply_keybinding(app_state, sym);
-                                }
-                                FilterResult::Forward
-                            },
-                        );
-                    }
-                    InputEvent::PointerMotionAbsolute { .. } => {
-                        // Focus the first available toplevel on pointer activity.
-                        if let Some(surface) = state
-                            .xdg_shell_state
-                            .toplevel_surfaces()
-                            .iter()
-                            .next()
-                            .cloned()
-                        {
-                            let wl_surface = surface.wl_surface().clone();
-                            keyboard.set_focus(&mut state, Some(wl_surface), 0.into());
-                        }
-                    }
-                    _ => {}
-                },
+                WinitEvent::Resized { size, .. } => {
+                    let mode = Mode {
+                        size,
+                        refresh: 60_000,
+                    };
+                    state.output.change_current_state(Some(mode), None, None, None);
+                    state.output.set_preferred(mode);
+                    state.relayout();
+                }
+                WinitEvent::Input(InputEvent::Keyboard { event }) => {
+                    keyboard.input(
+                        &mut state,
+                        event.key_code(),
+                        event.state(),
+                        0.into(),
+                        0,
+                        |app_state, modifiers, keysym| {
+                            if modifiers.alt {
+                                let sym = keysym.modified_sym().raw();
+                                return crate::state::apply_keybinding(app_state, sym);
+                            }
+                            FilterResult::Forward
+                        },
+                    );
+                }
                 WinitEvent::CloseRequested => {
-                    state.running = false;
+                    running = false;
                 }
                 _ => {}
             });
 
-            match status {
-                PumpStatus::Continue => {}
-                PumpStatus::Exit(_) => break,
+            if let smithay::reexports::winit::platform::pump_events::PumpStatus::Exit(_) = status {
+                break;
             }
 
-            // ---- Render frame ----
-            let size = backend.window_size();
-            let damage = Rectangle::from_size(size);
-
-            {
+            // ---- Render ----
+            let age = backend.buffer_age().unwrap_or(0);
+            let render_result = {
                 let (renderer, mut framebuffer) = backend.bind()?;
-                let mut frame = renderer.render(&mut framebuffer, size, Transform::Flipped180)?;
-                // Black background.
-                frame.clear(Color32F::new(0.0, 0.0, 0.0, 1.0), &[damage])?;
-                frame.finish()?;
+                render_output::<_, WaylandSurfaceRenderElement<GlesRenderer>, _, _>(
+                    &state.output,
+                    renderer,
+                    &mut framebuffer,
+                    1.0,
+                    age,
+                    [&state.space],
+                    &[],
+                    &mut damage_tracker,
+                    [0.0, 0.0, 0.0, 1.0],
+                )
+                .map(|res| res.damage.cloned())
+            };
+
+            match render_result {
+                Ok(damage) => {
+                    backend.submit(damage.as_deref())?;
+
+                    // Frame callbacks. Without these a client draws exactly
+                    // one frame and then waits forever for permission to draw
+                    // the next — the compositor looks like it has frozen
+                    // every window on screen.
+                    let now = state.start_time.elapsed();
+                    let output = state.output.clone();
+                    state.space.elements().for_each(|window| {
+                        window.send_frame(&output, now, Some(Duration::ZERO), |_, _| {
+                            Some(output.clone())
+                        });
+                    });
+                }
+                Err(err) => error!("render failed: {err}"),
             }
 
-            // Accept new Wayland clients.
-            if let Some(stream) = listener.accept()? {
-                info!("new client connected");
-                display
-                    .handle()
-                    .insert_client(stream, Arc::new(ClientState::default()))
-                    .unwrap();
+            state.space.refresh();
+            state.popups.cleanup();
+            state.display_handle.flush_clients()?;
+
+            // Wayland sources: new clients and client requests.
+            event_loop.dispatch(Some(Duration::from_millis(16)), &mut state)?;
+
+            // The quit binding clears this from inside a key handler.
+            if !state.running {
+                running = false;
             }
-
-            // Dispatch + flush Wayland events.
-            display.dispatch_clients(&mut state)?;
-            display.flush_clients()?;
-
-            // Submit the rendered frame.
-            backend.submit(Some(&[damage]))?;
         }
 
         info!("desicompass exiting");
