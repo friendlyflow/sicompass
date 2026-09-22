@@ -56,7 +56,7 @@ sicompass-ui = { workspace = true }
 
 # Wiping the password buffer once it has been handed to greetd. See the
 # module docs in src/provider.rs for what this does and does not buy.
-zeroize = "1"
+zeroize = { workspace = true }
 
 # `localtime_r`, for the clock's UTC offset.
 libc = { workspace = true }

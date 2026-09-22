@@ -9,11 +9,9 @@
 #[cfg(target_os = "linux")]
 mod auth;
 #[cfg(target_os = "linux")]
-mod color;
-#[cfg(target_os = "linux")]
 mod fakegreetd;
 #[cfg(target_os = "linux")]
-mod entry;
+mod fallback;
 #[cfg(target_os = "linux")]
 mod greetd;
 #[cfg(target_os = "linux")]
@@ -27,19 +25,17 @@ mod provider;
 #[cfg(target_os = "linux")]
 mod sessions;
 #[cfg(target_os = "linux")]
+mod supervisor;
+#[cfg(target_os = "linux")]
 mod users;
-#[cfg(target_os = "linux")]
-mod renderer;
-#[cfg(target_os = "linux")]
-mod state;
 
 #[cfg(target_os = "linux")]
 mod linux {
     use clap::Parser;
-    use crate::state::AppState;
+    use crate::fallback::state::AppState;
     use wayland_client::{globals::registry_queue_init, Connection};
 
-    use crate::{color::parse_hex, renderer::RenderConfig};
+    use crate::fallback::{color::parse_hex, renderer::RenderConfig};
 
     // ---------------------------------------------------------------------------
     // CLI
@@ -149,10 +145,19 @@ mod linux {
             // `shm` is the software fallback: today's tiny-skia password box,
             // reached when the Vulkan path could not start.
             Some(crate::Backend::Shm) => return run_shm(args),
-            // No flag yet means the software path, until `supervisor.rs`
-            // lands and makes the default role the supervisor.
-            None => return run_shm(args),
+            // No flag: this process is the supervisor. It re-execs itself as
+            // `gpu`, and falls back to `shm` once if that dies without having
+            // started a session.
+            None => std::process::exit(crate::supervisor::run(&supervisor_argv())),
         }
+    }
+
+    /// The arguments to hand a supervised child: everything this process was
+    /// given, minus its own name. `--render-backend` is added by the
+    /// supervisor, so it must not already be there — and it cannot be, because
+    /// the supervisor role is the one with no `--render-backend`.
+    fn supervisor_argv() -> Vec<String> {
+        std::env::args().skip(1).collect()
     }
 
     /// The sicompass-stack greeter.
@@ -168,9 +173,12 @@ mod linux {
             ),
         };
         let started = crate::gui::run(&opts)?;
-        if !started {
-            // greetd never took the session. The supervisor reads this as
-            // "try the other renderer".
+        if started {
+            // Tell the supervisor before exiting, so it does not read this as
+            // a crash and start the fallback over the top of the session that
+            // is now coming up.
+            crate::supervisor::signal_done();
+        } else {
             tracing::warn!("the greeter exited without starting a session");
         }
         Ok(())

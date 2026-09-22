@@ -132,6 +132,10 @@ whatlang = "0.18"
 # Unicode
 unicode-normalization = "0.1"
 
+# Wiping a typed password out of the buffers that held it, rather than only
+# setting their length to zero. Used by sicompass-ui and loginsicompass.
+zeroize = "1"
+
 # Fuzzy search
 nucleo-matcher = "0.3"
 

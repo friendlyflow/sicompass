@@ -5489,6 +5489,7 @@ dependencies = [
  "unicode-normalization",
  "whatlang",
  "windows",
+ "zeroize",
 ]
 
 [[package]]

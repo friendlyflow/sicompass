@@ -36,9 +36,9 @@ use wayland_client::{
 };
 use xkeysym::Keysym;
 
-use crate::{
+use crate::greetd::{AuthMessageType, GreetdClient, Response};
+use super::{
     entry::{InputMode, PasswordEntry},
-    greetd::{AuthMessageType, GreetdClient, Response},
     renderer::{render_frame, RenderConfig},
 };
 

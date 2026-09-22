@@ -43,6 +43,13 @@ pub struct Options {
 /// Build and run the login screen. Returns once greetd has taken the session
 /// (or the user powered the machine off).
 pub fn run(opts: &Options) -> Result<bool, String> {
+    // A way to exercise the supervisor's fallback without breaking a driver.
+    // Debug builds only: it must not be possible to talk a release greeter out
+    // of starting. See `supervisor::decide`.
+    if cfg!(debug_assertions) && std::env::var("SICOMPASS_FORCE_VULKAN_FAILURE").is_ok() {
+        return Err("refusing to start: SICOMPASS_FORCE_VULKAN_FAILURE is set".to_owned());
+    }
+
     let mut users = users::enumerate();
     for name in &opts.extra_users {
         if !users.iter().any(|u| &u.name == name) {

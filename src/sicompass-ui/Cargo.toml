@@ -66,6 +66,7 @@ accesskit = { workspace = true }
 whatlang = { workspace = true }
 
 unicode-normalization = { workspace = true }
+zeroize = { workspace = true }
 
 nucleo-matcher = { workspace = true }
 

@@ -144,3 +144,73 @@ fn the_field_starts_empty_so_a_failed_attempt_leaves_nothing_behind() {
     let row = rows(&r)[2].clone();
     assert_eq!(row.trim_end(), "-i Password:", "got {row:?}");
 }
+
+/// Leaving a password edit must wipe the buffer's bytes, not merely reset its
+/// length. `String::clear` does the latter, which leaves the secret sitting in
+/// the allocation until something else happens to reuse it.
+///
+/// Checked through the raw capacity rather than the string's contents, because
+/// the contents are what `clear` already makes look right.
+#[test]
+fn leaving_a_password_edit_wipes_the_buffer_not_just_its_length() {
+    const SECRET: &str = "hunter2";
+    let mut r = renderer();
+
+    dispatch_key(&mut r, Some(Keycode::Down), Mod::NOMOD);
+    dispatch_key(&mut r, Some(Keycode::Down), Mod::NOMOD);
+    dispatch_key(&mut r, Some(Keycode::I), Mod::NOMOD);
+    sicompass_ui::handlers::handle_input(&mut r, SECRET);
+    assert_eq!(r.input_buffer, SECRET);
+
+    // Remember where the bytes live, so we can look at them after the edit
+    // ends. The buffer must not reallocate in between for this to mean
+    // anything, which `clear`/`zeroize` both guarantee (neither shrinks).
+    let ptr = r.input_buffer.as_ptr();
+    let cap = r.input_buffer.capacity();
+    assert!(cap >= SECRET.len());
+
+    // Escape out of the edit.
+    dispatch_key(&mut r, Some(Keycode::Escape), Mod::NOMOD);
+    assert!(r.input_buffer.is_empty());
+    assert_eq!(
+        r.input_buffer.as_ptr(),
+        ptr,
+        "the buffer reallocated, so this test proves nothing"
+    );
+
+    // SAFETY: `ptr`/`cap` came from this still-live `String`, which has not
+    // reallocated (asserted above), so the whole capacity is readable.
+    let raw = unsafe { std::slice::from_raw_parts(ptr, cap) };
+    assert!(
+        !raw.windows(SECRET.len()).any(|w| w == SECRET.as_bytes()),
+        "the password is still in the freed part of the buffer"
+    );
+}
+
+/// The same wipe must happen when the next edit starts on top of the old one.
+#[test]
+fn starting_another_edit_wipes_the_previous_password() {
+    const SECRET: &str = "hunter2";
+    let mut r = renderer();
+
+    dispatch_key(&mut r, Some(Keycode::Down), Mod::NOMOD);
+    dispatch_key(&mut r, Some(Keycode::Down), Mod::NOMOD);
+    dispatch_key(&mut r, Some(Keycode::I), Mod::NOMOD);
+    sicompass_ui::handlers::handle_input(&mut r, SECRET);
+
+    let ptr = r.input_buffer.as_ptr();
+    let cap = r.input_buffer.capacity();
+
+    // Escape, then start a fresh edit on the same field.
+    dispatch_key(&mut r, Some(Keycode::Escape), Mod::NOMOD);
+    dispatch_key(&mut r, Some(Keycode::I), Mod::NOMOD);
+
+    if r.input_buffer.as_ptr() == ptr {
+        // SAFETY: as above — same live allocation, unchanged capacity.
+        let raw = unsafe { std::slice::from_raw_parts(ptr, cap) };
+        assert!(
+            !raw.windows(SECRET.len()).any(|w| w == SECRET.as_bytes()),
+            "the previous password survived into the next edit"
+        );
+    }
+}

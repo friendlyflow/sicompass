@@ -3776,7 +3776,7 @@ pub fn handle_enter_insert(r: &mut AppRenderer) {
     } else {
         handle_escape(r);
     }
-    r.input_buffer.clear();
+    wipe_input_buffer(r);
     r.cursor_position = 0;
     r.input_is_password = false;
 
@@ -3951,6 +3951,12 @@ pub fn handle_escape(r: &mut AppRenderer) {
     clear_selection(r);
     // Leaving any edit clears the password-masking flag; the next field edit
     // re-derives it in `populate_input_buffer`.
+    //
+    // The buffer is deliberately NOT wiped here: `handle_escape` also ends an
+    // in-input *search*, which must return to Insert with what was typed still
+    // in place. The wipe belongs on the paths that actually discard the edit,
+    // below and in `handle_enter`.
+    let was_password = r.input_is_password;
     r.input_is_password = false;
     // Terminal: Escape backs out of the shell view to the folder listing. The
     // shell itself keeps running, so `:` resumes the same session with its
@@ -4026,7 +4032,9 @@ pub fn handle_escape(r: &mut AppRenderer) {
                 r.coordinate = Coordinate::General;
                 r.speak_mode_change(None);
                 r.previous_coordinate = Coordinate::General;
-                r.input_buffer.clear();
+                r.input_is_password = was_password;
+                wipe_input_buffer(r);
+                r.input_is_password = false;
                 r.cursor_position = 0;
                 list::create_list_current_layer(r);
                 r.list_index = r.current_id.last().unwrap_or(0);
@@ -4040,7 +4048,11 @@ pub fn handle_escape(r: &mut AppRenderer) {
             }
             // Discard the input buffer (Esc cancels) and return to General.
             r.placeholder_insert_mode = false;
-            r.input_buffer.clear();
+            // Restore the flag just long enough for the wipe to know whether
+            // these bytes were a secret.
+            r.input_is_password = was_password;
+            wipe_input_buffer(r);
+            r.input_is_password = false;
             r.cursor_position = 0;
             r.coordinate = rest_coordinate(r);
             // Rebuild, because `cancel_insert_session` above may have put a
@@ -5138,11 +5150,38 @@ pub fn handle_f5(r: &mut AppRenderer) {
 // Input buffer population
 // ---------------------------------------------------------------------------
 
+
+/// Empty the insert buffer, wiping its bytes first when it held a password.
+///
+/// `String::clear` only sets the length to zero; the bytes stay in the
+/// allocation until something else happens to reuse it. For a `<password>`
+/// that is the difference between the secret surviving in freed memory and
+/// being gone now.
+///
+/// Called from every path that ends an edit, because any of them can be the
+/// one that ends a password edit: committing it, escaping out of it, and
+/// starting the next edit on top of it.
+///
+/// What this does **not** buy, stated plainly so nobody assumes more: the live
+/// FFON element holds the typed value while the field is being edited (that is
+/// how the provider is handed it on commit), the OS may have paged it out, and
+/// PAM keeps its own copy. It closes the "same process, freed allocation"
+/// window, which is the one worth closing.
+pub(crate) fn wipe_input_buffer(r: &mut AppRenderer) {
+    if r.input_is_password {
+        use zeroize::Zeroize;
+        r.input_buffer.zeroize();
+    }
+    r.input_buffer.clear();
+}
+
 /// Populate `input_buffer`, `input_prefix`, `input_suffix` from the current element.
 ///
 /// Called by `handle_i` and `handle_a` before entering insert mode.
 fn populate_input_buffer(r: &mut AppRenderer) {
-    r.input_buffer.clear();
+    // The previous edit's bytes are still in here, and it may have been a
+    // password field.
+    wipe_input_buffer(r);
     r.input_prefix.clear();
     r.input_suffix.clear();
     r.input_is_password = false;

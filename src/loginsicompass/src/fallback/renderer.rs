@@ -10,8 +10,8 @@
 
 use tiny_skia::{FillRule, Paint, PathBuilder, Pixmap, Transform};
 
-use crate::color::Color;
-use crate::entry::{InputMode, PasswordEntry};
+use super::color::Color;
+use super::entry::{InputMode, PasswordEntry};
 
 // ---------------------------------------------------------------------------
 // RenderConfig
@@ -231,7 +231,7 @@ pub fn entry_box_height(cfg: &RenderConfig) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::entry::PasswordEntry;
+    use crate::fallback::entry::PasswordEntry;
 
     fn default_entry() -> PasswordEntry {
         PasswordEntry::new()
@@ -293,7 +293,7 @@ mod tests {
             ..Default::default()
         };
         let mut entry = PasswordEntry::new();
-        for _ in 0..crate::entry::MAX_PASSWORD_LENGTH {
+        for _ in 0..crate::fallback::entry::MAX_PASSWORD_LENGTH {
             entry.push('x');
         }
         render_frame(&cfg, &entry); // must not panic
