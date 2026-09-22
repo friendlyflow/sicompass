@@ -13,9 +13,10 @@
 //! `Arc<Mutex<Vec<...>>>` queue that the main loop drains each frame via
 //! [`apply_pending_settings`].
 
-use crate::app_state::AppRenderer;
+use sicompass_ui::app_state::AppRenderer;
 use crate::plugin_manifest::{DiscoveredPlugin, PluginManifest, PluginType, discover_user_plugins};
 use sicompass_sdk::ffon::{FfonElement, IdArray};
+pub use sicompass_ui::registry::{SettingsQueue, init_provider_root, register_provider};
 use sicompass_sdk::provider::Provider;
 use sicompass_updater::UpdateEvent;
 use std::path::{Path, PathBuf};
@@ -27,9 +28,6 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 /// A pending setting event from the settings apply callback.
 pub type SettingEvent = (String, String); // (key, value)
-
-/// Shared queue populated by the settings `ApplyFn`.
-pub type SettingsQueue = Arc<Mutex<Vec<SettingEvent>>>;
 
 // ---------------------------------------------------------------------------
 // User plugin cache (mirrors C's s_userPlugins)
@@ -57,41 +55,6 @@ pub(crate) fn _reset_user_plugin_cache(plugins: Vec<DiscoveredPlugin>) {
     *cache.lock().unwrap() = plugins;
 }
 
-// ---------------------------------------------------------------------------
-// Register a provider
-// ---------------------------------------------------------------------------
-
-/// Register a `Box<dyn Provider>` into the renderer: calls `init()`, fetches
-/// the initial tree, and creates the root `FfonElement::Obj`.
-pub fn register_provider(renderer: &mut AppRenderer, provider: Box<dyn Provider>) {
-    let (provider, root) = init_provider_root(provider, &mut renderer.error_message);
-    renderer.ffon.push(root);
-    renderer.providers.push(provider);
-}
-
-/// `init()` a provider and build its FFON root Obj (key = display name,
-/// children = first `fetch()`). Any fetch error is surfaced through `err_sink`.
-/// Shared by `register_provider` and the per-tab content rebuild.
-fn init_provider_root(
-    mut provider: Box<dyn Provider>,
-    err_sink: &mut String,
-) -> (Box<dyn Provider>, FfonElement) {
-    provider.init();
-    let children = provider.fetch();
-    if let Some(err) = provider.take_error() {
-        eprintln!(
-            "provider '{}' fetch error on register: {err}",
-            provider.display_name()
-        );
-        *err_sink = err;
-    }
-    let display_name = provider.display_name().to_owned();
-    let mut root = FfonElement::new_obj(&display_name);
-    for child in children {
-        root.as_obj_mut().unwrap().push(child);
-    }
-    (provider, root)
-}
 
 /// Re-instantiate a fresh provider instance by name, mirroring `enable_provider`'s
 /// resolution order: built-ins first, then the user-plugin cache, then a remote
@@ -115,7 +78,7 @@ fn reinstantiate_provider(name: &str) -> Option<Box<dyn Provider>> {
     }
     if let Some((remote_url, api_key)) = read_remote_config(name) {
         if !api_key.is_empty() {
-            crate::provider::register_auth(&remote_url, &api_key);
+            sicompass_ui::provider::register_auth(&remote_url, &api_key);
         }
         return Some(sicompass_builtins::create_remote(name, remote_url, api_key));
     }
@@ -868,7 +831,7 @@ pub fn write_maximized(value: bool) {
 /// Tabs whose first index points to a provider that is no longer registered
 /// (e.g. the program was disabled) are dropped; if everything is filtered out,
 /// the existing default is preserved.
-pub fn load_tabs_state(r: &mut crate::app_state::AppRenderer) {
+pub fn load_tabs_state(r: &mut sicompass_ui::app_state::AppRenderer) {
     let Some(path) = sicompass_sdk::platform::main_config_path() else {
         return;
     };
@@ -888,10 +851,10 @@ pub fn load_tabs_state(r: &mut crate::app_state::AppRenderer) {
 /// [`load_tabs_state`] so tests can exercise the reconciliation logic without
 /// depending on the global config path.
 pub fn apply_tabs_section(
-    r: &mut crate::app_state::AppRenderer,
+    r: &mut sicompass_ui::app_state::AppRenderer,
     sec: &serde_json::Map<String, serde_json::Value>,
 ) {
-    use crate::app_state::TabSnapshot;
+    use sicompass_ui::app_state::TabSnapshot;
     use sicompass_sdk::ffon::IdArray;
 
     // The bootstrap live set is `[content…, settings]`; every tab shares the
@@ -963,7 +926,7 @@ pub fn apply_tabs_section(
             // `rebuild_on_path` leaves the provider at `path` on success, and at
             // the deepest level it could reach when a directory has gone missing,
             // so read the live value back rather than re-storing what was saved.
-            let provider_path = crate::app_state::active_provider_path(r);
+            let provider_path = sicompass_ui::app_state::active_provider_path(r);
             let (cp, cf) = r.detach_content();
             tabs.push(TabSnapshot {
                 current_id,
@@ -977,7 +940,7 @@ pub fn apply_tabs_section(
         // Keep `tab_timelines` parallel to `tabs` (invariant relied on by
         // `active_timeline_mut()`).
         r.tab_timelines
-            .resize_with(r.tabs.len(), crate::app_state::Timeline::new);
+            .resize_with(r.tabs.len(), sicompass_ui::app_state::Timeline::new);
 
         // Resolve the active tab and make its parked content the live set.
         let mut active = 0;
@@ -1003,7 +966,7 @@ pub fn apply_tabs_section(
     // No persisted tabs: keep the single bootstrap tab. Keep timelines parallel
     // and apply the active tab's saved nav (path is empty by default → no-op).
     r.tab_timelines
-        .resize_with(r.tabs.len(), crate::app_state::Timeline::new);
+        .resize_with(r.tabs.len(), sicompass_ui::app_state::Timeline::new);
     if r.active_tab >= r.tabs.len() {
         r.active_tab = 0;
     }
@@ -1116,7 +1079,7 @@ fn load_remote_programs(renderer: &mut AppRenderer, mut settings: Option<&mut dy
         };
 
         if !api_key.is_empty() {
-            crate::provider::register_auth(&remote_url, &api_key);
+            sicompass_ui::provider::register_auth(&remote_url, &api_key);
         }
 
         let provider: Box<dyn Provider> =
@@ -1195,7 +1158,7 @@ pub fn enable_provider(renderer: &mut AppRenderer, name: &str) {
     // loadProgram remote branch in src/sicompass/programs.c:247-273.
     if let Some((remote_url, api_key)) = read_remote_config(name) {
         if !api_key.is_empty() {
-            crate::provider::register_auth(&remote_url, &api_key);
+            sicompass_ui::provider::register_auth(&remote_url, &api_key);
         }
         let provider: Box<dyn Provider> =
             sicompass_builtins::create_remote(name, remote_url, api_key);
@@ -1315,9 +1278,17 @@ fn insert_provider_alphabetically(
 /// and the Ctrl+U keybind downstream stay unchanged — only this
 /// rendering site moves. Grep for "FUTURE NOTIFICATION SYSTEM" to find
 /// all interim shims.
-pub fn process_update_events(renderer: &mut AppRenderer) {
+///
+/// The updater's channel and status snapshot are passed in rather than read
+/// off the renderer: they are `sicompass-updater` types, and the renderer is
+/// shared with a greeter that must not link an updater at all.
+pub fn process_update_events(
+    renderer: &mut AppRenderer,
+    update_state: Option<&Arc<Mutex<sicompass_updater::UpdateStatus>>>,
+    update_event_rx: Option<&std::sync::mpsc::Receiver<UpdateEvent>>,
+) {
     // ---- Drain HotReload events ----
-    let events: Vec<UpdateEvent> = match renderer.update_event_rx.as_ref() {
+    let events: Vec<UpdateEvent> = match update_event_rx {
         Some(rx) => rx.try_iter().collect(),
         None => Vec::new(),
     };
@@ -1344,14 +1315,19 @@ pub fn process_update_events(renderer: &mut AppRenderer) {
     }
 
     // ---- Refresh banner ----
-    let state = match renderer.update_state.as_ref() {
+    let state = match update_state {
         Some(s) => Arc::clone(s),
-        None => return,
+        None => {
+            renderer.app_update_pending = false;
+            return;
+        }
     };
     let snap = state.lock().unwrap().clone();
 
     let plugin_applied: Vec<_> = snap.plugin_updates.iter().filter(|p| p.applied).collect();
     let app_pending = snap.app_update.is_some();
+    // What `shortcuts` reads to decide whether to advertise Ctrl+U.
+    renderer.app_update_pending = app_pending;
     let has_news = app_pending || !plugin_applied.is_empty();
 
     // FUTURE NOTIFICATION SYSTEM: this is the interim surface for update
@@ -1400,8 +1376,11 @@ pub fn process_update_events(renderer: &mut AppRenderer) {
 /// Apply the staged app update (Ctrl+U). Spawns the platform installer
 /// and, on Windows, terminates the process. Surfaces failures via
 /// `error_message`.
-pub fn handle_apply_app_update(renderer: &mut AppRenderer) {
-    let Some(state) = renderer.update_state.as_ref() else {
+pub fn handle_apply_app_update(
+    renderer: &mut AppRenderer,
+    update_state: Option<&Arc<Mutex<sicompass_updater::UpdateStatus>>>,
+) {
+    let Some(state) = update_state else {
         return;
     };
     let snap = state.lock().unwrap().clone();
@@ -1698,9 +1677,9 @@ fn apply_setting(renderer: &mut AppRenderer, key: &str, value: &str, skip_enable
     match key {
         "colorScheme" => {
             renderer.palette_theme = if value == "light" {
-                crate::app_state::PaletteTheme::Light
+                sicompass_ui::app_state::PaletteTheme::Light
             } else {
-                crate::app_state::PaletteTheme::Dark
+                sicompass_ui::app_state::PaletteTheme::Dark
             };
         }
         "maximized" => {
@@ -1732,7 +1711,7 @@ fn apply_setting(renderer: &mut AppRenderer, key: &str, value: &str, skip_enable
             // and would otherwise never re-translate, so collapse those inactive
             // providers back to a lazy root.
             sicompass_sdk::localize::set_locale(value);
-            crate::provider::refresh_all_provider_root_keys(renderer);
+            sicompass_ui::provider::refresh_all_provider_root_keys(renderer);
             // The re-fetch + inactive-collapse below are RUNTIME-only relocalize
             // steps: they re-translate an already-expanded, now-stale FFON tree
             // after the user flips the language radio. During the startup drain
@@ -1744,8 +1723,8 @@ fn apply_setting(renderer: &mut AppRenderer, key: &str, value: &str, skip_enable
             // depth 2) without re-navigating, its list renders blank until a
             // manual refresh. So gate these on a live (non-startup) change.
             if !skip_enable {
-                crate::provider::refresh_current_directory(renderer);
-                crate::provider::collapse_inactive_for_relocalize(renderer);
+                sicompass_ui::provider::refresh_current_directory(renderer);
+                sicompass_ui::provider::collapse_inactive_for_relocalize(renderer);
                 // Re-announce in the new locale so the screen reader switches
                 // voice even when the focused control's text is unchanged.
                 renderer.speak_language_change();
@@ -1820,7 +1799,7 @@ fn enabled_programs() -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app_state::AppRenderer;
+    use sicompass_ui::app_state::AppRenderer;
     use crate::plugin_manifest::{PluginManifest, PluginType};
     use sicompass_sdk::ffon::FfonElement;
     use sicompass_sdk::provider::Provider;
@@ -2139,34 +2118,34 @@ mod tests {
     fn apply_setting_color_scheme_light() {
         let mut r = AppRenderer::new();
         apply_setting(&mut r, "colorScheme", "light", false);
-        assert_eq!(r.palette_theme, crate::app_state::PaletteTheme::Light);
+        assert_eq!(r.palette_theme, sicompass_ui::app_state::PaletteTheme::Light);
     }
 
     #[test]
     fn apply_setting_color_scheme_dark() {
         let mut r = AppRenderer::new();
-        r.palette_theme = crate::app_state::PaletteTheme::Light;
+        r.palette_theme = sicompass_ui::app_state::PaletteTheme::Light;
         apply_setting(&mut r, "colorScheme", "dark", false);
-        assert_eq!(r.palette_theme, crate::app_state::PaletteTheme::Dark);
+        assert_eq!(r.palette_theme, sicompass_ui::app_state::PaletteTheme::Dark);
     }
 
     #[test]
     fn apply_setting_color_scheme_unknown_defaults_dark() {
         let mut r = AppRenderer::new();
         apply_setting(&mut r, "colorScheme", "solarized", false);
-        assert_eq!(r.palette_theme, crate::app_state::PaletteTheme::Dark);
+        assert_eq!(r.palette_theme, sicompass_ui::app_state::PaletteTheme::Dark);
     }
 
     #[test]
     fn palette_dark_background_is_black() {
-        use crate::app_state::{PALETTE_DARK, PALETTE_LIGHT};
+        use sicompass_ui::app_state::{PALETTE_DARK, PALETTE_LIGHT};
         assert_eq!(PALETTE_DARK.background, 0x000000FF);
         assert_eq!(PALETTE_LIGHT.background, 0xFFFFFFFF);
     }
 
     #[test]
     fn palette_accessor_returns_dark_by_default() {
-        use crate::app_state::{PALETTE_DARK, PaletteTheme};
+        use sicompass_ui::app_state::{PALETTE_DARK, PaletteTheme};
         let r = AppRenderer::new();
         assert_eq!(r.palette_theme, PaletteTheme::Dark);
         assert_eq!(r.palette().background, PALETTE_DARK.background);
@@ -2209,7 +2188,7 @@ mod tests {
         let mut r = AppRenderer::new();
         apply_setting(&mut r, "unknownKey", "someValue", false);
         assert_eq!(r.pending_maximized, None);
-        assert_eq!(r.palette_theme, crate::app_state::PaletteTheme::Dark);
+        assert_eq!(r.palette_theme, sicompass_ui::app_state::PaletteTheme::Dark);
     }
 
     // --- migrate_programs_to_load ---

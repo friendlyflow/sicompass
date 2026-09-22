@@ -93,8 +93,8 @@ derivation, and on every contributor's machine.
 ## Architecture: standalone binary
 
 Shaders, fonts and every provider asset are compiled into the executable
-(`src/sicompass/src/shaders.rs`, `fonts.rs`, and `include_bytes!` in each
-provider crate). There is no runtime resource tree and nothing is located
+(`src/sicompass-ui/src/shaders.rs`, `fonts.rs`, and `include_bytes!` in
+each provider crate). There is no runtime resource tree and nothing is located
 relative to the executable, which is what makes one binary work from an archive,
 a `.deb`, an `.rpm`, an AppImage, a macOS `.app`, the Windows MSI and Nix
 without a wrapper script. The top-level `assets/` holds packaging inputs only
@@ -178,8 +178,9 @@ hooks, the irreversibility caveats, and the legacy-stack migration state.
 
 ## Architecture: SDK boundary (hard rule)
 
-The `sicompass` app crate (`src/sicompass/src/**`) must not import any `lib_*`
-crate directly. All communication flows through `sicompass-sdk` (the `Provider`
+Neither the `sicompass` app crate (`src/sicompass/src/**`) nor the renderer
+crate `sicompass-ui` (`src/sicompass-ui/src/**`) may import any `lib_*` crate
+directly. All communication flows through `sicompass-sdk` (the `Provider`
 trait, the factory registry, setting-injection hooks) plus the thin registration
 crate `sicompass-builtins`. No exceptions — this includes `sicompass-settings`,
 which is reached via `sdk::create_provider_by_name("settings")` and configured
@@ -189,7 +190,45 @@ through the `Provider` trait, and `sicompass-remote`, which is reached via
 Tests (`src/sicompass/tests/**` and `#[cfg(test)]` blocks) may import concrete
 lib crates for mock injection — these deps live in `[dev-dependencies]`.
 
-A Stop hook enforces this rule automatically at the end of each Claude turn.
+A Stop hook (`.claude/hooks/check-sdk-boundary.sh`) enforces this automatically
+at the end of each Claude turn.
+
+## Architecture: the sicompass-ui split (hard rule)
+
+The renderer lives in `src/sicompass-ui` (package `sicompass-ui`) and is shared
+by two binaries: the `sicompass` application and the `loginsicompass` greetd
+greeter. It holds the SDL3 window, the Vulkan device, font rasterisation, the
+list layout, the key handlers and the AccessKit bridge. `src/sicompass` keeps
+what only an *application* has: the provider catalogue and the `settings.json`
+that selects from it (`programs`), the WASM plugin host, the self-updater and
+the Windows Start Menu entry.
+
+**`sicompass-ui` must not depend on `sicompass-builtins`, `sicompass-updater`,
+`wasmtime` or `reqwest`.** That is the rule the split exists to enforce: linking
+the application into a login screen cost 465 crates, including a bundled SQLite,
+a headless-Chromium driver, an IMAP client and an SMTP client, none of which a
+login screen ever calls. The same Stop hook checks this.
+
+Where the renderer needs something only the embedder can answer, it asks:
+
+- `registry::HostHooks` — six methods, every one defaulting to a no-op, stored
+  on `AppRenderer`. The app installs `boot::ProgramsHooks`; the greeter takes
+  the defaults, which are all correct for something with no settings file, no
+  updater and no tabs. Integration tests must install the app's hooks too (see
+  `app_renderer()` in `tests/integration.rs`), or opening a tab silently builds
+  an empty provider set.
+- `http::register_body_fetcher` — an HTTP client for following `<link>` and for
+  `<image>` values that are URLs. Same shape as
+  `sicompass_sdk::register_url_fetcher`. Unregistered, an HTTP link reports that
+  it cannot be followed and the node still renders.
+- `app_state::AppConfig` — everything the window used to hardcode (title,
+  `app_id`, size, custom titlebar, maximized, fullscreen, icon, font scale).
+  `Default` reproduces the application exactly, and a test asserts it, so a
+  field added here must default to whatever the line it replaced did.
+
+Because `AppState` now belongs to another crate, Rust's orphan rule stops the
+app adding an inherent `AppState::new()`. Application startup is the free
+function `boot::app_state()` instead.
 
 ## graphify
 

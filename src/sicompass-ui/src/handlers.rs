@@ -544,20 +544,14 @@ fn resolve_asset_link(uri: &str) -> Vec<FfonElement> {
 
 /// Resolve an HTTP(S) link.
 ///
-/// The body is fetched with `reqwest` and inspected: if it parses as JSON and
-/// passes `is_ffon` it is a server-hosted FFON tree (parsed directly, no
-/// browser). Otherwise it is treated as an HTML page and rendered through the
+/// The body comes from whatever HTTP client the embedder registered (see
+/// [`crate::http`]) and is then inspected: if it parses as JSON and passes
+/// `is_ffon` it is a server-hosted FFON tree (parsed directly, no browser).
+/// Otherwise it is treated as an HTML page and rendered through the
 /// headless-Chromium fetcher. A real network error is reported in place — the
 /// browser would not do better — so the link node still renders.
 fn resolve_http_link(url: &str) -> Vec<FfonElement> {
-    let client = match reqwest::blocking::Client::builder()
-        .timeout(std::time::Duration::from_secs(15))
-        .build()
-    {
-        Ok(c) => c,
-        Err(e) => return vec![FfonElement::new_str(format!("Error loading {url}: {e}"))],
-    };
-    let body = match client.get(url).send().and_then(|r| r.text()) {
+    let body = match crate::http::fetch_body(url) {
         Ok(b) => b,
         Err(e) => return vec![FfonElement::new_str(format!("Error loading {url}: {e}"))],
     };
@@ -3896,7 +3890,9 @@ pub fn handle_redo(r: &mut AppRenderer) {
 /// installer and terminates the process on Windows; on other platforms
 /// opens the release URL in the browser.
 pub fn handle_apply_update(r: &mut AppRenderer) {
-    crate::programs::handle_apply_app_update(r);
+    let hooks = std::mem::replace(&mut r.hooks, Box::new(crate::registry::NoHooks));
+    hooks.handle_apply_app_update(r);
+    r.hooks = hooks;
     r.needs_redraw = true;
 }
 
@@ -6027,12 +6023,7 @@ fn load_clipboard_image(value: &str) -> Result<::image::DynamicImage, String> {
             .ok_or_else(|| format!("no such asset: {value}"))?
             .into_owned()
     } else if value.starts_with("http://") || value.starts_with("https://") {
-        let client = reqwest::blocking::Client::builder()
-            .timeout(std::time::Duration::from_secs(15))
-            .build()
-            .map_err(|e| e.to_string())?;
-        let resp = client.get(value).send().map_err(|e| e.to_string())?;
-        resp.bytes().map_err(|e| e.to_string())?.to_vec()
+        crate::http::fetch_bytes(value)?
     } else {
         std::fs::read(value).map_err(|e| e.to_string())?
     };
@@ -7693,7 +7684,12 @@ pub fn handle_tab_new(r: &mut AppRenderer) {
 
     // Build a fresh content-provider set mirroring the source tab and make it
     // the live working set.
-    let (np, nf) = crate::programs::build_content_set_from_names(r, &content_names);
+    let (np, nf) = {
+        let hooks = std::mem::replace(&mut r.hooks, Box::new(crate::registry::NoHooks));
+        let built = hooks.build_content_set(r, &content_names);
+        r.hooks = hooks;
+        built
+    };
     r.attach_content(np, nf);
 
     // Open the new tab on the same provider AND location as the source tab

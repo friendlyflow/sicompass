@@ -175,10 +175,7 @@ fn more_than_one_tab(r: &AppRenderer) -> bool {
 /// `Ctrl+U` to apply. Keeps the keybind invisible at all other times so
 /// the help text doesn't advertise a command that does nothing.
 fn update_pending(r: &AppRenderer) -> bool {
-    r.update_state
-        .as_ref()
-        .map(|s| s.lock().unwrap().app_update.is_some())
-        .unwrap_or(false)
+    r.app_update_pending
 }
 
 fn not_at_root(r: &AppRenderer) -> bool {

@@ -38,6 +38,67 @@ pub const WINDOW_WIDTH: u32 = 800;
 pub const WINDOW_HEIGHT: u32 = 600;
 
 // ---------------------------------------------------------------------------
+// AppConfig
+// ---------------------------------------------------------------------------
+
+/// Everything `build_app` used to hardcode.
+///
+/// [`Default`] reproduces the application exactly, and that is the contract
+/// this type exists to make checkable: a reviewer reads one `impl Default`
+/// rather than diffing `render::build_app`. A field added here must default to
+/// whatever the line it replaced did.
+///
+/// It is an explicit argument rather than an ambient mode (compare
+/// [`crate::session_mode`], which is a process-wide fact read out of the air):
+/// two embedders can want different windows in the same process image, and
+/// threading a struct says so.
+#[derive(Debug, Clone)]
+pub struct AppConfig {
+    /// Window title bar text.
+    pub title: String,
+    /// SDL app metadata name and identifier. The identifier becomes the
+    /// Wayland `app_id`, which the compositor resolves to `<app_id>.desktop`
+    /// to find an icon.
+    pub app_name: String,
+    pub app_id: String,
+    /// Vulkan `pApplicationName`. Separate from `title` because drivers key
+    /// their app profiles off it.
+    pub vulkan_app_name: String,
+    pub width: u32,
+    pub height: u32,
+    /// Draw our own min/max/close controls and install the drag/resize hit
+    /// test. A greeter has no titlebar and nothing to minimise to.
+    pub custom_titlebar: bool,
+    /// Start maximised. The application passes what it remembered; an embedder
+    /// with no settings file passes `false`.
+    pub maximized: bool,
+    pub fullscreen: bool,
+    /// Set the embedded window icon.
+    pub window_icon: bool,
+    /// Interface scale, before the display's own content scale is applied.
+    pub font_scale: f32,
+}
+
+impl Default for AppConfig {
+    fn default() -> Self {
+        Self {
+            title: window_title().to_owned(),
+            app_name: crate::icon::APP_NAME.to_owned(),
+            app_id: crate::icon::APP_ID.to_owned(),
+            vulkan_app_name: WINDOW_TITLE.to_owned(),
+            width: WINDOW_WIDTH,
+            height: WINDOW_HEIGHT,
+            custom_titlebar: true,
+            maximized: false,
+            fullscreen: false,
+            window_icon: true,
+            font_scale: crate::registry::DEFAULT_FONT_SCALE,
+        }
+    }
+}
+
+
+// ---------------------------------------------------------------------------
 // Error type
 // ---------------------------------------------------------------------------
 
@@ -922,12 +983,28 @@ pub struct AppRenderer {
     pub in_history_action: bool,
 
     // ---- Self-update state -------------------------------------------------
-    /// Latest snapshot from the background `sicompass-updater` thread.
-    /// `None` when the check is disabled or has not run yet.
-    pub update_state: Option<std::sync::Arc<std::sync::Mutex<sicompass_updater::UpdateStatus>>>,
-    /// Receives `HotReload` events from the updater thread. The main loop
-    /// drains this each frame (see `crate::programs::hot_reload_plugin`).
-    pub update_event_rx: Option<std::sync::mpsc::Receiver<sicompass_updater::UpdateEvent>>,
+    //
+    // The updater itself belongs to the embedder: its channel and its status
+    // snapshot live in the app's `HostHooks` implementation, because a greeter
+    // has no updater at all and must not link one. What the renderer keeps is
+    // the part it actually draws with.
+    // ---- Settings apply queue ----------------------------------------------
+    /// Receives (key, value) events fired by the settings provider's ApplyFn.
+    /// Drained each frame in the main loop via
+    /// [`crate::registry::HostHooks::apply_pending_settings`]. The renderer
+    /// only carries it; what the pairs mean is the embedder's business.
+    pub settings_queue: Option<crate::registry::SettingsQueue>,
+
+    // ---- Embedder callbacks ------------------------------------------------
+    /// What the render loop calls when it needs something only the embedder
+    /// knows. Defaults to [`crate::registry::NoHooks`], which is correct for an
+    /// embedder with no settings file, no updater and no tabs.
+    pub hooks: Box<dyn crate::registry::HostHooks>,
+
+    /// True while an application update is staged and `Ctrl+U` would apply it.
+    /// Maintained by [`crate::registry::HostHooks::process_update_events`];
+    /// `shortcuts` reads it to decide whether to advertise the keybind.
+    pub app_update_pending: bool,
     /// True after `error_message` has been clobbered with an "Update
     /// available" banner so the per-frame writer doesn't re-clobber real
     /// errors. Reset whenever the underlying status changes.
@@ -1098,8 +1175,9 @@ impl AppRenderer {
             close_confirm_switcher_return: None,
             pending_close_busy: false,
             in_history_action: false,
-            update_state: None,
-            update_event_rx: None,
+            settings_queue: None,
+            hooks: Box::new(crate::registry::NoHooks),
+            app_update_pending: false,
             update_message_active: false,
         }
     }
@@ -1913,10 +1991,6 @@ pub struct AppState {
     // ---- Accessibility -----------------------------------------------------
     pub accesskit_adapter: Option<crate::accesskit_sdl::AccessKitAdapter>,
 
-    // ---- Settings apply queue ----------------------------------------------
-    /// Receives (key, value) events fired by the settings provider's ApplyFn.
-    /// Drained each frame in the main loop via `programs::apply_pending_settings`.
-    pub settings_queue: Option<crate::programs::SettingsQueue>,
 
     // ---- Startup guard -----------------------------------------------------
     /// Set to `true` once the initial `pending_maximized` has been applied.
@@ -1935,19 +2009,22 @@ pub struct AppState {
 }
 
 impl AppState {
-    /// Initialise SDL3, create a Vulkan window and device, set up the
-    /// render pipeline, then load providers into the AppRenderer.
-    pub fn new() -> Result<Self, SiError> {
-        let mut state = render::build_app()?;
+    /// Window, Vulkan, fonts, rectangles, images, AccessKit — everything up to
+    /// but not including "what goes in it".
+    ///
+    /// Both constructors below are this plus a way of filling the renderer.
+    pub fn init_stack(cfg: &AppConfig) -> Result<Self, SiError> {
+        let mut state = render::build_app_with(cfg)?;
 
-        // Compute effective DPI: OS display scale × user font_scale override.
+        // Effective DPI: the display's own scale times the interface scale.
         let content_scale = state
             .window
             .get_display()
             .and_then(|d| d.get_content_scale())
             .unwrap_or(1.0);
-        let font_scale = crate::programs::read_font_scale();
-        let effective_dpi = (96.0_f32 * content_scale * font_scale).round().max(48.0) as u32;
+        let effective_dpi = (96.0_f32 * content_scale * cfg.font_scale)
+            .round()
+            .max(48.0) as u32;
 
         // Initialise rendering sub-systems
         unsafe {
@@ -1985,30 +2062,24 @@ impl AppState {
         state.accesskit_adapter =
             crate::accesskit_sdl::AccessKitAdapter::new(&state.window, &state.renderer);
 
-        // First launch = no settings.json yet. Captured before `load_programs`,
-        // whose settings-provider `init()` seeds the file (after which it exists).
-        let first_run = sicompass_sdk::platform::main_config_path()
-            .map(|p| !p.exists())
-            .unwrap_or(false);
+        Ok(state)
+    }
 
-        // Load providers (tutorial + settings by default)
-        let queue = crate::programs::load_programs(&mut state.renderer);
-        // Apply initial settings (skip enable_* — providers already loaded above)
-        crate::programs::apply_pending_settings(&mut state.renderer, &queue, true);
-        state.settings_queue = Some(queue);
-
-        // Restore persisted tab layout (no-op if none stored).
-        // Must run AFTER providers are loaded so provider-index validation works.
-        crate::programs::load_tabs_state(&mut state.renderer);
-
-        // On first run, land the cursor on the onboarding line so a new (screen
-        // reader) user is read the onboarding guide immediately. Must run AFTER
-        // load_tabs_state, which otherwise resets the cursor to the bootstrap
-        // tab's default (the first program in the root list).
-        if first_run {
-            crate::programs::focus_onboarding(&mut state.renderer);
+    /// The same stack, filled with providers the caller supplies.
+    ///
+    /// Deliberately touches no settings file, restores no tabs and runs no
+    /// first-run check: an embedder that brings its own providers owns its own
+    /// persistence. The login greeter is the caller this exists for.
+    pub fn with_providers(
+        cfg: &AppConfig,
+        providers: Vec<Box<dyn sicompass_sdk::provider::Provider>>,
+        hooks: Box<dyn crate::registry::HostHooks>,
+    ) -> Result<Self, SiError> {
+        let mut state = Self::init_stack(cfg)?;
+        state.renderer.hooks = hooks;
+        for p in providers {
+            crate::registry::register_provider(&mut state.renderer, p);
         }
-
         crate::list::create_list_current_layer(&mut state.renderer);
         Ok(state)
     }
@@ -2017,6 +2088,7 @@ impl AppState {
     pub fn run(&mut self) {
         view::main_loop(self);
     }
+
 }
 
 impl Drop for AppState {

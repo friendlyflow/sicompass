@@ -7,11 +7,27 @@
 //! launches the configured session command on success.
 
 #[cfg(target_os = "linux")]
+mod auth;
+#[cfg(target_os = "linux")]
 mod color;
+#[cfg(target_os = "linux")]
+mod fakegreetd;
 #[cfg(target_os = "linux")]
 mod entry;
 #[cfg(target_os = "linux")]
 mod greetd;
+#[cfg(target_os = "linux")]
+mod gui;
+#[cfg(target_os = "linux")]
+mod lastlogin;
+#[cfg(target_os = "linux")]
+mod power;
+#[cfg(target_os = "linux")]
+mod provider;
+#[cfg(target_os = "linux")]
+mod sessions;
+#[cfg(target_os = "linux")]
+mod users;
 #[cfg(target_os = "linux")]
 mod renderer;
 #[cfg(target_os = "linux")]
@@ -88,6 +104,34 @@ mod linux {
         /// Window height in pixels.
         #[arg(long, default_value_t = 480)]
         height: u32,
+
+        // ---- The sicompass-stack greeter ---------------------------------
+        /// Which renderer to use.
+        ///
+        /// Omitted, the process is the *supervisor*: it re-execs itself as
+        /// `gpu` and falls back to `shm` if that dies. See `supervisor.rs`.
+        #[arg(long, value_enum)]
+        render_backend: Option<crate::Backend>,
+
+        /// Directory for `last.json` (the remembered user and session).
+        #[arg(long, default_value = "/var/lib/loginsicompass")]
+        state_dir: std::path::PathBuf,
+
+        /// Extra directory to scan for session `.desktop` files. Repeatable.
+        #[arg(long)]
+        sessions_dir: Vec<std::path::PathBuf>,
+
+        /// Offer this user in addition to those found in /etc/passwd.
+        /// Repeatable; for hosts whose accounts are not in the passwd file.
+        #[arg(long = "user-extra")]
+        user_extra: Vec<String>,
+
+        #[arg(long, default_value = "systemctl suspend")]
+        suspend_command: String,
+        #[arg(long, default_value = "systemctl reboot")]
+        reboot_command: String,
+        #[arg(long, default_value = "systemctl poweroff")]
+        poweroff_command: String,
     }
 
     pub fn main_impl() -> Result<(), Box<dyn std::error::Error>> {
@@ -98,10 +142,41 @@ mod linux {
         }
 
         let args = Args::parse();
-        run(args)
+
+        // Three roles in one binary, selected by one flag. See `crate::Backend`.
+        match args.render_backend {
+            Some(crate::Backend::Gpu) => return run_gpu(&args),
+            // `shm` is the software fallback: today's tiny-skia password box,
+            // reached when the Vulkan path could not start.
+            Some(crate::Backend::Shm) => return run_shm(args),
+            // No flag yet means the software path, until `supervisor.rs`
+            // lands and makes the default role the supervisor.
+            None => return run_shm(args),
+        }
     }
 
-    fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
+    /// The sicompass-stack greeter.
+    fn run_gpu(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
+        let opts = crate::gui::Options {
+            state_dir: args.state_dir.clone(),
+            session_dirs: args.sessions_dir.clone(),
+            extra_users: args.user_extra.clone(),
+            power: crate::power::Commands::from_args(
+                &args.suspend_command,
+                &args.reboot_command,
+                &args.poweroff_command,
+            ),
+        };
+        let started = crate::gui::run(&opts)?;
+        if !started {
+            // greetd never took the session. The supervisor reads this as
+            // "try the other renderer".
+            tracing::warn!("the greeter exited without starting a session");
+        }
+        Ok(())
+    }
+
+    fn run_shm(args: Args) -> Result<(), Box<dyn std::error::Error>> {
         // ---- Wayland connection ----
         let conn = Connection::connect_to_env()?;
         let (globals, mut event_queue) = registry_queue_init(&conn)?;
@@ -181,6 +256,17 @@ mod linux {
         tracing::info!("loginsicompass exiting");
         Ok(())
     }
+}
+
+/// Which renderer a child process should use.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum Backend {
+    /// `sicompass-ui`: SDL3 + Vulkan, radio lists, AccessKit, embedded fonts.
+    Gpu,
+    /// Shared-memory software rendering: the original tiny-skia password box.
+    /// No text, no accessibility — a last resort so a Vulkan failure at boot
+    /// is not a black screen.
+    Shm,
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

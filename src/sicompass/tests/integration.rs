@@ -15,6 +15,19 @@ use sicompass_sdk::provider::Provider;
 use std::path::Path;
 use tempfile::TempDir;
 
+/// An `AppRenderer` set up the way the application sets one up.
+///
+/// The renderer itself lives in `sicompass-ui` and defaults to
+/// `registry::NoHooks`, which is right for an embedder with no settings file
+/// and no provider catalogue — the login greeter. These are tests of the
+/// *application*, so they get the application's hooks; without them opening a
+/// tab silently builds an empty provider set.
+fn app_renderer() -> AppRenderer {
+    let mut r = AppRenderer::new();
+    r.hooks = Box::new(sicompass::boot::ProgramsHooks::default());
+    r
+}
+
 /// Call once per test binary to populate the SDK factory registry.
 fn ensure_builtins() {
     sicompass_builtins::register_all();
@@ -94,7 +107,7 @@ impl Harness {
         std::fs::create_dir(root.join("subdir")).unwrap();
         std::fs::write(root.join("subdir/nested.txt"), "test content").unwrap();
 
-        let mut renderer = AppRenderer::new();
+        let mut renderer = app_renderer();
 
         // File browser rooted at temp dir (set path AFTER init which resets to "/")
         register(
@@ -139,7 +152,7 @@ impl Harness {
         let root = tmp.path();
         std::fs::write(root.join("alpha.txt"), "test content").unwrap();
 
-        let mut renderer = AppRenderer::new();
+        let mut renderer = app_renderer();
 
         // Filebrowser: init resets path to "/", so set path after init
         register(
@@ -1977,7 +1990,7 @@ fn editor_renderer_in(coord: Coordinate) -> AppRenderer {
         }
     }
 
-    let mut r = AppRenderer::new();
+    let mut r = app_renderer();
     r.providers.push(Box::new(EditorMock));
     let mut root = FfonElement::new_obj("buffer");
     root.as_obj_mut()
@@ -2482,7 +2495,7 @@ fn navigate_right_empty_dir_shows_placeholder() {
     std::fs::write(root.join("file.txt"), "").unwrap();
     std::fs::create_dir(root.join("emptydir")).unwrap();
 
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     register(
         &mut renderer,
         sicompass_sdk::create_provider_by_name("filebrowser").unwrap(),
@@ -2550,7 +2563,7 @@ fn navigate_right_updates_parent_key() {
     std::fs::create_dir(root.join("subdir")).unwrap();
     std::fs::write(root.join("subdir/file.txt"), "").unwrap();
 
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     register(
         &mut renderer,
         sicompass_sdk::create_provider_by_name("filebrowser").unwrap(),
@@ -2631,7 +2644,7 @@ fn delete_last_item_leaves_placeholder() {
     std::fs::create_dir(root.join("mydir")).unwrap();
     std::fs::write(root.join("mydir/only.txt"), "").unwrap();
 
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     register(
         &mut renderer,
         sicompass_sdk::create_provider_by_name("filebrowser").unwrap(),
@@ -2698,7 +2711,7 @@ fn create_file_on_placeholder_replaces_in_place() {
     let root = tmp.path();
     std::fs::create_dir(root.join("emptydir")).unwrap();
 
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     register(
         &mut renderer,
         sicompass_sdk::create_provider_by_name("filebrowser").unwrap(),
@@ -2776,7 +2789,7 @@ fn filebrowser_i_placeholder_creates_file() {
     let root = tmp.path();
     std::fs::create_dir(root.join("emptydir")).unwrap();
 
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     register(
         &mut renderer,
         sicompass_sdk::create_provider_by_name("filebrowser").unwrap(),
@@ -2841,7 +2854,7 @@ fn filebrowser_i_placeholder_creates_subdirectory() {
     let root = tmp.path();
     std::fs::create_dir(root.join("emptydir")).unwrap();
 
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     register(
         &mut renderer,
         sicompass_sdk::create_provider_by_name("filebrowser").unwrap(),
@@ -2901,7 +2914,7 @@ fn ctrl_a_after_prefixed_creation_no_panic() {
 
     let settings_tmp = TempDir::new().unwrap();
     let mut h = Harness {
-        renderer: AppRenderer::new(),
+        renderer: app_renderer(),
         tmp,
         settings_tmp,
     };
@@ -3689,7 +3702,7 @@ impl Provider for NestedButtonProvider {
 /// the matched button re-fetches the search layer and snaps focus back up a level.
 #[test]
 fn search_enter_on_deep_button_syncs_provider_path() {
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     register(&mut renderer, Box::new(NestedButtonProvider::new()));
     sicompass::list::create_list_current_layer(&mut renderer);
 
@@ -3761,7 +3774,7 @@ fn search_enter_on_deep_button_syncs_provider_path() {
 /// - Left from inside the new element returns to it in the parent list
 #[test]
 fn button_press_creates_element_without_corrupting_path() {
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     register(&mut renderer, Box::new(ButtonTestProvider::new()));
     sicompass::list::create_list_current_layer(&mut renderer);
 
@@ -3873,7 +3886,7 @@ fn button_press_creates_element_without_corrupting_path() {
 /// - Path and cursor are correct after creating subwidget and navigating into/out of it
 #[test]
 fn button_press_two_level_nested_creates_element() {
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     register(&mut renderer, Box::new(ButtonTestProvider::new()));
     sicompass::list::create_list_current_layer(&mut renderer);
 
@@ -4167,7 +4180,7 @@ fn test_d_key_noop_without_dashboard_image() {
 /// The cursor should land on the clone and stay in General (not Insert).
 #[test]
 fn ctrl_a_general_clones_add_element_section_for_create_element_provider() {
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     register(&mut renderer, Box::new(ButtonTestProvider::new()));
     sicompass::list::create_list_current_layer(&mut renderer);
 
@@ -4228,7 +4241,7 @@ fn ctrl_a_general_clones_add_element_section_for_create_element_provider() {
 /// "Add element:" section before the current item (same logic as Ctrl+A but different index).
 #[test]
 fn ctrl_i_general_clones_add_element_section_for_create_element_provider() {
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     register(&mut renderer, Box::new(ButtonTestProvider::new()));
     sicompass::list::create_list_current_layer(&mut renderer);
 
@@ -4296,7 +4309,7 @@ fn ctrl_a_in_general_double_tap_does_append_append() {
     }
 
     // Set up a renderer with two items in an obj (depth-2 General context).
-    let mut r = AppRenderer::new();
+    let mut r = app_renderer();
     r.providers.push(Box::new(EditorMock));
     let mut root = FfonElement::new_obj("section");
     root.as_obj_mut()
@@ -4414,7 +4427,7 @@ fn harness_with_config_provider() -> (AppRenderer, TempDir) {
         .prefix("sicompass-test")
         .tempdir()
         .expect("temp dir");
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
 
     // ConfigProvider at index 0
     register(&mut renderer, Box::new(ConfigProvider::new()));
@@ -5103,7 +5116,7 @@ fn announced_text(r: &AppRenderer) -> Option<String> {
 
 #[test]
 fn editor_insert_left_announces_char() {
-    let mut r = AppRenderer::new();
+    let mut r = app_renderer();
     r.coordinate = Coordinate::Insert;
     r.input_buffer = "hello".to_string();
     r.cursor_position = 5;
@@ -5144,7 +5157,7 @@ fn ctrl_w_speaks_focus_position() {
     }
 
     // Files > home > [main.rs, lib.rs], cursor on main.rs (depth 3, layer 2).
-    let mut r = AppRenderer::new();
+    let mut r = app_renderer();
     r.providers.push(Box::new(NavMock));
     let mut home = FfonElement::new_obj("home");
     home.as_obj_mut()
@@ -5196,7 +5209,7 @@ fn ctrl_w_speaks_focus_position() {
 
 #[test]
 fn editor_insert_right_announces_char() {
-    let mut r = AppRenderer::new();
+    let mut r = app_renderer();
     r.coordinate = Coordinate::Insert;
     r.input_buffer = "hello".to_string();
     r.cursor_position = 0;
@@ -5211,7 +5224,7 @@ fn editor_insert_right_announces_char() {
 
 #[test]
 fn editor_insert_shift_left_announces_and_extends_selection() {
-    let mut r = AppRenderer::new();
+    let mut r = app_renderer();
     r.coordinate = Coordinate::Insert;
     r.input_buffer = "abc".to_string();
     r.cursor_position = 3;
@@ -5235,7 +5248,7 @@ fn editor_insert_shift_left_announces_and_extends_selection() {
 
 #[test]
 fn editor_insert_shift_right_announces_and_extends_selection() {
-    let mut r = AppRenderer::new();
+    let mut r = app_renderer();
     r.coordinate = Coordinate::Insert;
     r.input_buffer = "abc".to_string();
     r.cursor_position = 0;
@@ -5251,7 +5264,7 @@ fn editor_insert_shift_right_announces_and_extends_selection() {
 
 #[test]
 fn editor_insert_left_no_announcement_on_selection_collapse() {
-    let mut r = AppRenderer::new();
+    let mut r = app_renderer();
     r.coordinate = Coordinate::Insert;
     r.input_buffer = "abc".to_string();
     r.cursor_position = 3;
@@ -5302,7 +5315,7 @@ fn simple_search_right_announces_char() {
 fn command_mode_left_announces_char() {
     // Set up Command mode directly — entering via ':' requires depth > 1 in the
     // tree, so we skip the entry ceremony and test the key-dispatch logic alone.
-    let mut r = AppRenderer::new();
+    let mut r = app_renderer();
     r.coordinate = Coordinate::Command;
     r.input_buffer = "abc".to_string();
     r.cursor_position = 3;
@@ -5318,7 +5331,7 @@ fn command_mode_left_announces_char() {
 
 #[test]
 fn command_mode_right_announces_char() {
-    let mut r = AppRenderer::new();
+    let mut r = app_renderer();
     r.coordinate = Coordinate::Command;
     r.input_buffer = "abc".to_string();
     r.cursor_position = 0;
@@ -5452,7 +5465,7 @@ fn root_child_keys(renderer: &AppRenderer) -> Vec<String> {
 /// tree), then pressing Left must leave the node intact.
 #[test]
 fn added_empty_leaf_survives_right_then_left() {
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     register(&mut renderer, Box::new(InMemoryFormProvider::new()));
     sicompass::list::create_list_current_layer(&mut renderer);
 
@@ -5532,7 +5545,7 @@ fn added_empty_leaf_survives_right_then_left() {
 /// provider selection — every level must remain intact throughout.
 #[test]
 fn nested_added_nodes_survive_deep_navigation() {
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     register(&mut renderer, Box::new(InMemoryFormProvider::new()));
     sicompass::list::create_list_current_layer(&mut renderer);
 
@@ -5862,7 +5875,7 @@ fn make_placeholder_harness() -> AppRenderer {
         .unwrap()
         .push(FfonElement::new_str("second"));
 
-    let mut r = AppRenderer::new();
+    let mut r = app_renderer();
     r.ffon = vec![root];
     r.current_id = sicompass_sdk::ffon::IdArray::new();
     r.current_id.push(0);
@@ -6000,7 +6013,7 @@ fn make_star_prefix_harness() -> AppRenderer {
         .unwrap()
         .push(FfonElement::new_str("other item".to_owned()));
 
-    let mut r = AppRenderer::new();
+    let mut r = app_renderer();
     r.ffon = vec![root];
     r.current_id = sicompass_sdk::ffon::IdArray::new();
     r.current_id.push(0);
@@ -6093,7 +6106,7 @@ fn navigate_into_empty_compose_body_shows_i_placeholder() {
     ensure_builtins();
     use sicompass_sdk::ffon::{FfonElement, FfonObject, IdArray};
 
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     // Use register_no_init to avoid loading real OAuth config from disk,
     // which would cause fetch() to return "Loading…" on machines with an expired token.
     register_no_init(
@@ -6162,7 +6175,7 @@ fn delete_last_compose_body_element_keeps_i_placeholder() {
     ensure_builtins();
     use sicompass_sdk::ffon::{FfonElement, IdArray};
 
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     register_no_init(
         &mut renderer,
         sicompass_sdk::create_provider_by_name("emailclient").unwrap(),
@@ -6223,7 +6236,7 @@ fn delete_body_element_str_with_obj_sibling_integration() {
     ensure_builtins();
     use sicompass_sdk::ffon::IdArray;
 
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     register_no_init(
         &mut renderer,
         sicompass_sdk::create_provider_by_name("emailclient").unwrap(),
@@ -6286,7 +6299,7 @@ fn delete_body_element_str_with_obj_sibling_integration() {
 #[test]
 fn is_in_email_compose_body_true_for_reply_from_message() {
     ensure_builtins();
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     register_no_init(
         &mut renderer,
         sicompass_sdk::create_provider_by_name("emailclient").unwrap(),
@@ -6312,7 +6325,7 @@ fn navigate_into_reply_from_message_body_shows_i_placeholder() {
     ensure_builtins();
     use sicompass_sdk::ffon::{FfonElement, FfonObject, IdArray};
 
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     register_no_init(
         &mut renderer,
         sicompass_sdk::create_provider_by_name("emailclient").unwrap(),
@@ -6373,7 +6386,7 @@ fn navigate_into_nested_body_obj_shows_i_placeholder() {
     ensure_builtins();
     use sicompass_sdk::ffon::{FfonElement, FfonObject, IdArray};
 
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     register_no_init(
         &mut renderer,
         sicompass_sdk::create_provider_by_name("emailclient").unwrap(),
@@ -6439,7 +6452,7 @@ fn navigate_into_nested_body_obj_shows_i_placeholder() {
 #[test]
 fn commit_in_nested_compose_body_creates_child_there() {
     ensure_builtins();
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     register_no_init(
         &mut renderer,
         sicompass_sdk::create_provider_by_name("emailclient").unwrap(),
@@ -6486,7 +6499,7 @@ fn commit_in_nested_compose_body_creates_child_there() {
 #[test]
 fn commit_trailing_colon_in_nested_body_creates_obj_with_i_placeholder() {
     ensure_builtins();
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     register_no_init(
         &mut renderer,
         sicompass_sdk::create_provider_by_name("emailclient").unwrap(),
@@ -6538,7 +6551,7 @@ fn editing_leaf_in_nested_compose_body_does_not_empty_list() {
     ensure_builtins();
     use sicompass_sdk::ffon::{FfonElement, FfonObject, IdArray};
 
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     register_no_init(
         &mut renderer,
         sicompass_sdk::create_provider_by_name("emailclient").unwrap(),
@@ -6715,7 +6728,7 @@ fn email_renderer_inside_message() -> AppRenderer {
             removed_uids: vec![],
         }));
 
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     register_no_init(&mut renderer, Box::new(provider));
 
     // Populate message_cache (needed by lookup_uid during delete).
@@ -6919,7 +6932,7 @@ fn ctrl_d_from_message_list_removes_message() {
             removed_uids: vec![],
         }));
 
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     register_no_init(&mut renderer, Box::new(provider));
 
     // Simulate being at the message list: path = "/INBOX", flat FFON with 2 messages.
@@ -7111,7 +7124,7 @@ fn compose_body_delete_undo_syncs_draft_body() {
     use sicompass_emailclient::EmailClientProvider;
     use sicompass_sdk::ffon::{FfonElement, FfonObject, IdArray};
 
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     let mut p = EmailClientProvider::new();
 
     // Set up compose path so refresh_on_navigate returns false.
@@ -7201,7 +7214,7 @@ fn compose_body_delete_undo_redo_syncs_draft_body() {
     use sicompass_emailclient::EmailClientProvider;
     use sicompass_sdk::ffon::{FfonElement, FfonObject, IdArray};
 
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     let mut p = EmailClientProvider::new();
     p.set_current_path("compose/Body: [text]");
 
@@ -7264,7 +7277,7 @@ fn compose_body_insert_undo_redo_syncs_draft_body() {
     use sicompass_emailclient::EmailClientProvider;
     use sicompass_sdk::ffon::{FfonElement, FfonObject, IdArray};
 
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     let mut p = EmailClientProvider::new();
     p.set_current_path("compose/Body: [text]");
     // Seed one body line via commit so compose.draft.body is non-empty.
@@ -7426,7 +7439,7 @@ fn compose_body_insert_records_only_text_chunks() {
     use sicompass_sdk::ffon::{FfonElement, FfonObject, IdArray};
     use sicompass_sdk::timeline::TimelineEntry;
 
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     let mut p = EmailClientProvider::new();
     p.set_current_path("compose/Body: [text]");
     p.commit_edit("", "line1");
@@ -7482,7 +7495,7 @@ fn compose_body_insert_into_empty_undo_syncs_draft_body() {
     use sicompass_emailclient::EmailClientProvider;
     use sicompass_sdk::ffon::{FfonElement, FfonObject, IdArray};
 
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     let mut p = EmailClientProvider::new();
     p.set_current_path("compose/Body: [text]");
     // Draft body starts empty.
@@ -7591,7 +7604,7 @@ fn compose_body_undo_last_element_restores_i_placeholder() {
     use sicompass_emailclient::EmailClientProvider;
     use sicompass_sdk::ffon::{FfonElement, FfonObject, IdArray};
 
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     let mut p = EmailClientProvider::new();
     p.set_current_path("compose/Body: [text]");
     // Draft body starts empty.
@@ -7711,7 +7724,7 @@ fn compose_body_delete_undo_single_element_no_extra_placeholder() {
     use sicompass_emailclient::EmailClientProvider;
     use sicompass_sdk::ffon::{FfonElement, FfonObject, IdArray};
 
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     let mut p = EmailClientProvider::new();
     p.set_current_path("compose/Body: [text]");
     p.commit_edit("", "only");
@@ -7803,7 +7816,7 @@ fn chat_client_needs_refresh_drives_renderer_redraw() {
     chat.test_set_needs_refresh();
 
     // Register: init() + fetch() populates the FFON tree from cache.
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     let display_name = chat.display_name().to_owned();
     let children = chat.fetch();
     let mut root = FfonElement::new_obj(&display_name);
@@ -7905,7 +7918,7 @@ impl Provider for RefreshTrackingProvider {
 fn f5_dispatches_refresh_command_when_provider_exposes_it() {
     let (p, last_cmd) = RefreshTrackingProvider::new();
 
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     let mut root = FfonElement::new_obj("tracking");
     root.as_obj_mut()
         .unwrap()
@@ -8048,7 +8061,7 @@ fn chat_navigate_right_loads_room_without_f5() {
     chat.test_set_credentials("https://matrix.org", "test_token");
     chat.test_seed_room("!abc:matrix.org", "Matrix.org");
 
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     let display_name = chat.display_name().to_owned();
     let children = chat.fetch();
     let mut root = FfonElement::new_obj(&display_name);
@@ -8147,7 +8160,7 @@ fn empty_input_enter_calls_commit_edit() {
         }
     }
 
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     let mut root = FfonElement::new_obj("capture");
     root.as_obj_mut()
         .unwrap()
@@ -8308,7 +8321,7 @@ fn email_compose_commit_to_field_keeps_cursor_on_to() {
     use sicompass_emailclient::EmailClientProvider;
     use sicompass_sdk::ffon::{FfonElement, FfonObject, IdArray};
 
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     let mut p = EmailClientProvider::new();
     p.push_path("compose");
     let items = p.fetch();
@@ -8489,7 +8502,7 @@ fn harness_with_text_editor() -> (AppRenderer, TempDir) {
     let root = tmp.path();
     std::fs::write(root.join("hello.txt"), "fn main() {}").unwrap();
 
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
 
     // Filebrowser at "/" so it doesn't depend on a real directory.
     register(
@@ -10136,7 +10149,7 @@ fn language_change_collapses_inactive_tutorial_and_announces() {
 
     ensure_builtins();
     let settings_tmp = TempDir::new().expect("settings temp dir");
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
 
     // Provider 0: tutorial (will be inactive). Provider 1: settings (active).
     register(
@@ -10399,7 +10412,7 @@ fn switcher_delete_busy_tab_confirms_and_returns_to_switcher() {
 #[test]
 fn ctrl_t_blocked_only_where_the_prompt_would_send() {
     ensure_builtins();
-    let mut r = AppRenderer::new();
+    let mut r = app_renderer();
     register_terminal_in_shell(&mut r);
     sicompass::list::create_list_current_layer(&mut r);
     press(&mut r, Keycode::I);
@@ -11095,7 +11108,7 @@ fn terminal_auto_enters_and_leaves_dashboard_on_alt_screen() {
     use std::time::{Duration, Instant};
 
     ensure_builtins();
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     register_terminal_in_shell(&mut renderer);
     sicompass::list::create_list_current_layer(&mut renderer);
 
@@ -11162,7 +11175,7 @@ fn auto_leave_lands_back_in_the_shells_own_mode_even_if_user_was_in_insert() {
     use std::time::{Duration, Instant};
 
     ensure_builtins();
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     register_terminal_in_shell(&mut renderer);
     sicompass::list::create_list_current_layer(&mut renderer);
 
@@ -11231,7 +11244,7 @@ fn terminal_manual_d_keypress_is_blocked() {
     // would have no clean exit (every key, including Esc and Ctrl+C, is
     // forwarded to the program).
     ensure_builtins();
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     register_terminal_in_shell(&mut renderer);
     sicompass::list::create_list_current_layer(&mut renderer);
 
@@ -11258,7 +11271,7 @@ fn esc_in_interactive_dashboard_does_not_exit() {
     // Esc must pass through to the program (vim normal mode etc.). The
     // dashboard must stay open so the program receives the byte.
     ensure_builtins();
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     register_terminal_in_shell(&mut renderer);
     sicompass::list::create_list_current_layer(&mut renderer);
 
@@ -11291,7 +11304,7 @@ fn ctrl_c_in_interactive_dashboard_does_not_exit() {
     // from the dashboard left it running on the PTY and re-launching it
     // failed silently.
     ensure_builtins();
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     register_terminal_in_shell(&mut renderer);
     sicompass::list::create_list_current_layer(&mut renderer);
 
@@ -11342,7 +11355,7 @@ fn terminal_opens_on_a_folder_listing() {
     std::fs::write(root.join("notes.txt"), "x").unwrap();
 
     ensure_builtins();
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     register_terminal_rooted_at(&mut renderer, &root);
     press_right(&mut renderer);
 
@@ -11372,7 +11385,7 @@ fn terminal_colon_opens_a_shell_in_the_folder_being_listed() {
     std::fs::create_dir(&ws).unwrap();
 
     ensure_builtins();
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     register_terminal_rooted_at(&mut renderer, &root);
     press_right(&mut renderer); // into the provider, cursor on `workspace`
     assert_eq!(renderer.providers[0].current_path(), root.to_str().unwrap());
@@ -11427,7 +11440,7 @@ fn terminal_right_then_colon_opens_a_shell_one_folder_down() {
     std::fs::create_dir(ws.join("inner")).unwrap();
 
     ensure_builtins();
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     register_terminal_rooted_at(&mut renderer, &root);
     press_right(&mut renderer); // into the provider
     press_right(&mut renderer); // into `workspace`
@@ -11452,7 +11465,7 @@ fn restart_terminal(renderer: &AppRenderer) -> AppRenderer {
         &renderer.current_id,
         renderer.providers[0].current_path(),
     );
-    let mut restarted = AppRenderer::new();
+    let mut restarted = app_renderer();
     register(
         &mut restarted,
         sicompass_sdk::create_provider_by_name("terminal").unwrap(),
@@ -11479,7 +11492,7 @@ fn terminal_restart_with_a_shell_open_lands_inside_the_shells_folder() {
     std::fs::create_dir(ws.join("inner")).unwrap();
 
     ensure_builtins();
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     register_terminal_rooted_at(&mut renderer, &root);
     press_right(&mut renderer); // into the provider
     press_right(&mut renderer); // into `workspace`
@@ -11533,7 +11546,7 @@ fn terminal_restart_follows_a_cd_typed_before_closing() {
     std::fs::create_dir(other.join("inner")).unwrap();
 
     ensure_builtins();
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     register_terminal_rooted_at(&mut renderer, &root);
     press_right(&mut renderer);
     press_down(&mut renderer); // sorted: `elsewhere` leads, `workspace` follows
@@ -11594,7 +11607,7 @@ fn terminal_escape_follows_a_cd_typed_in_the_shell() {
     std::fs::create_dir(other.join("inner")).unwrap();
 
     ensure_builtins();
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     register_terminal_rooted_at(&mut renderer, &root);
     press_right(&mut renderer);
     // The listing is sorted, so `elsewhere` leads and `workspace` follows.
@@ -11639,7 +11652,7 @@ fn terminal_folder_without_subfolders_is_still_enterable() {
     std::fs::write(ws.join("notes.txt"), "x").unwrap();
 
     ensure_builtins();
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     register_terminal_rooted_at(&mut renderer, &root);
     press_right(&mut renderer); // into the provider
     let before = renderer.current_id.clone();
@@ -11673,7 +11686,7 @@ fn terminal_colon_on_an_empty_folder_opens_a_shell_where_it_stands() {
     let root = tmp.path().canonicalize().unwrap();
 
     ensure_builtins();
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     register_terminal_rooted_at(&mut renderer, &root);
     press_right(&mut renderer);
     assert_eq!(
@@ -11697,7 +11710,7 @@ fn terminal_escape_returns_to_the_folder_listing() {
     std::fs::create_dir(ws.join("sub")).unwrap();
 
     ensure_builtins();
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     register_terminal_rooted_at(&mut renderer, &root);
     press_right(&mut renderer);
     press_colon(&mut renderer); // shell, running in the root being listed
@@ -11752,7 +11765,7 @@ fn terminal_left_is_inert_in_the_shell_and_escape_keeps_the_path() {
     std::fs::create_dir(&ws).unwrap();
 
     ensure_builtins();
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     register_terminal_rooted_at(&mut renderer, &root);
     press_right(&mut renderer); // into the provider, cursor on `workspace`
     press_right(&mut renderer); // into `workspace`
@@ -11802,7 +11815,7 @@ fn terminal_history_children_are_still_reachable_and_escapable() {
     std::fs::create_dir(root.join("workspace")).unwrap();
 
     ensure_builtins();
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     register_terminal_rooted_at(&mut renderer, &root);
     press_right(&mut renderer);
     press_colon(&mut renderer);
@@ -11826,7 +11839,7 @@ fn terminal_history_children_are_still_reachable_and_escapable() {
 fn colon_still_opens_the_command_palette_for_other_providers() {
     // The terminal branch in `handle_colon` must not leak to anyone else.
     ensure_builtins();
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     register(
         &mut renderer,
         sicompass_sdk::create_provider_by_name("filebrowser").unwrap(),
@@ -11849,7 +11862,7 @@ fn terminal_input_slot_renders_as_plus_i() {
     // are `<button>` history Strs), so the trailing rendered list item carries
     // the `+i` prefix.
     ensure_builtins();
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     // Descend into the terminal provider and press `:` to reach the shell.
     register_terminal_in_shell(&mut renderer);
 
@@ -11897,7 +11910,7 @@ fn claude_opens_on_a_folder_listing() {
     std::fs::write(root.join("notes.txt"), "x").unwrap();
 
     ensure_builtins();
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     register_claude_rooted_at(&mut renderer, &root);
     press_right(&mut renderer);
 
@@ -11925,7 +11938,7 @@ fn claude_right_and_left_walk_the_folder_tree() {
     std::fs::create_dir(ws.join("sub")).unwrap();
 
     ensure_builtins();
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     register_claude_rooted_at(&mut renderer, &root);
     press_right(&mut renderer); // into the provider
     press_right(&mut renderer); // into `workspace`
@@ -11959,7 +11972,7 @@ fn claude_colon_lists_the_sessions_of_the_folder_being_listed() {
     let _sessions = fake_claude_sessions(&root, &[("s1", "An earlier session")]);
 
     ensure_builtins();
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     register_claude_rooted_at(&mut renderer, &root);
     press_right(&mut renderer);
 
@@ -12004,7 +12017,7 @@ fn claude_right_then_colon_starts_a_session_one_folder_down() {
     std::fs::create_dir(ws.join("sub")).unwrap();
 
     ensure_builtins();
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     register_claude_rooted_at(&mut renderer, &root);
     press_right(&mut renderer); // into the provider
     press_right(&mut renderer); // into `workspace`
@@ -12028,7 +12041,7 @@ fn claude_folder_without_subfolders_is_still_enterable() {
     std::fs::write(ws.join("notes.txt"), "x").unwrap();
 
     ensure_builtins();
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     register_claude_rooted_at(&mut renderer, &root);
     press_right(&mut renderer); // into the provider
     let before = renderer.current_id.clone();
@@ -12059,7 +12072,7 @@ fn claude_placeholder_cannot_be_turned_into_a_file() {
     std::fs::create_dir(&ws).unwrap();
 
     ensure_builtins();
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     register_claude_rooted_at(&mut renderer, &root);
     press_right(&mut renderer); // into the provider
     press_right(&mut renderer); // into `workspace`, empty
@@ -12079,7 +12092,7 @@ fn claude_escape_returns_to_the_folder_listing() {
     std::fs::create_dir(root.join("workspace")).unwrap();
 
     ensure_builtins();
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     register_claude_rooted_at(&mut renderer, &root);
     press_right(&mut renderer);
     press_colon(&mut renderer);
@@ -12192,7 +12205,7 @@ fn claude_session_list_covers_the_folder_and_below() {
     .unwrap();
 
     ensure_builtins();
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     register_claude_rooted_at(&mut renderer, &root);
     press_right(&mut renderer);
     press_colon(&mut renderer);
@@ -12222,7 +12235,7 @@ fn claude_right_on_a_session_row_opens_it_at_the_same_depth() {
     let _sessions = fake_claude_sessions(&root, &[("s1", "An earlier session")]);
 
     ensure_builtins();
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     register_claude_rooted_at(&mut renderer, &root);
     press_right(&mut renderer);
     press_colon(&mut renderer);
@@ -12254,7 +12267,7 @@ fn claude_the_line_above_the_list_names_the_session_you_are_in() {
     let _sessions = fake_claude_sessions(&root, &[("s1", "Fix the wrap bug")]);
 
     ensure_builtins();
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     register_claude_rooted_at(&mut renderer, &root);
     press_right(&mut renderer);
     press_colon(&mut renderer);
@@ -12284,7 +12297,7 @@ fn claude_escape_leaves_the_whole_layer_from_either_rung() {
     std::fs::create_dir(root.join("workspace")).unwrap();
 
     ensure_builtins();
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     let _sessions = register_claude_in_session(&mut renderer, &root);
 
     press_escape(&mut renderer);
@@ -12318,7 +12331,7 @@ fn claude_left_out_of_a_session_lands_on_that_session() {
     );
 
     ensure_builtins();
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     register_claude_rooted_at(&mut renderer, &root);
     press_right(&mut renderer);
     press_colon(&mut renderer);
@@ -12350,7 +12363,7 @@ fn claude_new_session_opens_a_prompt_and_enter_jumps_into_the_session() {
     let _sessions = fake_claude_sessions(&root, &[]);
 
     ensure_builtins();
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     register_claude_rooted_at(&mut renderer, &root);
     press_right(&mut renderer);
     press_colon(&mut renderer);
@@ -12399,7 +12412,7 @@ fn claude_an_empty_session_list_does_not_hand_colon_a_palette() {
     let _sessions = fake_claude_sessions(&root, &[]);
 
     ensure_builtins();
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     register_claude_rooted_at(&mut renderer, &root);
     press_right(&mut renderer);
     press_colon(&mut renderer);
@@ -12439,7 +12452,7 @@ fn claude_ctrl_d_confirms_before_deleting_a_session() {
     };
 
     ensure_builtins();
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     register_claude_rooted_at(&mut renderer, &root);
     press_right(&mut renderer);
     press_colon(&mut renderer);
@@ -12500,7 +12513,7 @@ fn claude_second_colon_lists_the_projects_skills() {
     project_skill(&root, "deploy", "---\ndescription: Ship it\n---\n");
 
     ensure_builtins();
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     let _sessions = register_claude_in_session(&mut renderer, &root);
 
     press_colon(&mut renderer);
@@ -12527,7 +12540,7 @@ fn claude_second_colon_enter_fills_the_prompt_without_sending() {
     project_skill(&root, "review", "---\ndescription: Review the diff\n---\n");
 
     ensure_builtins();
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     let _sessions = register_claude_in_session(&mut renderer, &root);
 
     press_colon(&mut renderer);
@@ -12554,7 +12567,7 @@ fn claude_second_colon_escape_leaves_the_prompt_untouched() {
     project_skill(&root, "review", "");
 
     ensure_builtins();
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     let _sessions = register_claude_in_session(&mut renderer, &root);
     let before = slot_key_at(&renderer, &renderer.current_id.clone());
 
@@ -12577,7 +12590,7 @@ fn claude_skills_palette_filters_as_you_type() {
     }
 
     ensure_builtins();
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     let _sessions = register_claude_in_session(&mut renderer, &root);
 
     press_colon(&mut renderer);
@@ -12601,7 +12614,7 @@ fn claude_ctrl_colon_keeps_the_half_typed_message() {
     project_skill(&root, "review", "");
 
     ensure_builtins();
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     let _sessions = register_claude_in_session(&mut renderer, &root);
     press(&mut renderer, Keycode::I);
     type_text(&mut renderer, "explain ");
@@ -12629,7 +12642,7 @@ fn claude_double_home_in_the_session_says_escape_first_instead_of_freezing() {
     let root = tmp.path().canonicalize().unwrap();
 
     ensure_builtins();
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     let _sessions = register_claude_in_session(&mut renderer, &root);
     assert!(renderer.coordinate.is_session_view());
     let before = renderer.current_id.clone();
@@ -12657,7 +12670,7 @@ fn claude_ctrl_colon_escape_keeps_the_half_typed_message() {
     project_skill(&root, "review", "");
 
     ensure_builtins();
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     let _sessions = register_claude_in_session(&mut renderer, &root);
     press(&mut renderer, Keycode::I);
     type_text(&mut renderer, "explain ");
@@ -12682,7 +12695,7 @@ fn claude_escape_after_inserting_a_skill_clears_the_prompt() {
     project_skill(&root, "review", "");
 
     ensure_builtins();
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     let _sessions = register_claude_in_session(&mut renderer, &root);
     press(&mut renderer, Keycode::I);
     type_text(&mut renderer, "explain ");
@@ -12718,7 +12731,7 @@ fn claude_escape_after_a_skill_clears_the_row_the_user_actually_sees() {
     project_skill(&root, "review", "");
 
     ensure_builtins();
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     let _sessions = register_claude_in_session(&mut renderer, &root);
     press(&mut renderer, Keycode::I);
     type_text(&mut renderer, "explain ");
@@ -12761,7 +12774,7 @@ fn claude_second_colon_with_no_skills_is_inert() {
     let root = tmp.path().canonicalize().unwrap();
 
     ensure_builtins();
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     let _sessions = register_claude_in_session(&mut renderer, &root);
     let before = renderer.coordinate;
 
@@ -12780,7 +12793,7 @@ fn terminal_second_colon_stays_inert() {
     std::fs::create_dir(root.join("workspace")).unwrap();
 
     ensure_builtins();
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     register_terminal_rooted_at(&mut renderer, &root);
     press_right(&mut renderer);
     press_colon(&mut renderer); // into the shell
@@ -12809,7 +12822,7 @@ fn claude_right_in_the_session_never_grafts_a_copy_of_the_conversation() {
     std::fs::create_dir(root.join("workspace")).unwrap();
 
     ensure_builtins();
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     let _sessions = register_claude_in_session(&mut renderer, &root);
 
     // The cursor lands on the `-i` slot, which has no recall history yet.
@@ -12847,7 +12860,7 @@ fn claude_streaming_does_not_overwrite_the_level_being_read() {
     std::fs::create_dir(root.join("workspace")).unwrap();
 
     ensure_builtins();
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     register_claude_rooted_at(&mut renderer, &root);
     press_right(&mut renderer);
     press_colon(&mut renderer);
@@ -12884,7 +12897,7 @@ fn claude_left_returns_to_the_session_list() {
     std::fs::create_dir(root.join("workspace")).unwrap();
 
     ensure_builtins();
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     let _sessions = register_claude_in_session(&mut renderer, &root);
     let depth = renderer.current_id.depth();
 
@@ -12915,7 +12928,7 @@ fn enter_on_history_button_fills_input() {
     // that command, moves focus onto the slot, and the value survives a
     // re-fetch (the provider persists it as `pending_input`).
     ensure_builtins();
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     let slot_id = register_terminal_in_shell(&mut renderer);
     set_history_buttons(&mut renderer, &slot_id, &["git status"]);
 
@@ -12950,7 +12963,7 @@ fn general_enter_on_live_input_slot_does_not_descend_into_history() {
     // Enter on the `+i` slot itself runs/commits the command — it must NOT
     // navigate into the history buttons (that is what Right arrow does).
     ensure_builtins();
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     let slot_id = register_terminal_in_shell(&mut renderer);
     // Give the slot a history button so descending *would* be possible.
     set_history_buttons(&mut renderer, &slot_id, &["ls"]);
@@ -12972,7 +12985,7 @@ fn search_enter_on_history_button_fills_input() {
     // Enter on a `+i` history button while in SimpleSearch (Tab / Ctrl-F)
     // behaves like General-mode Enter: it fills the slot's <input>.
     ensure_builtins();
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     let slot_id = register_terminal_in_shell(&mut renderer);
     set_history_buttons(&mut renderer, &slot_id, &["git log"]);
 
@@ -15187,7 +15200,7 @@ impl Provider for SilentRadioProvider {
 /// reach a child element without relying on key-based navigation.
 fn harness_with_silent(provider: Box<dyn Provider>) -> AppRenderer {
     ensure_builtins();
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     register(&mut renderer, provider);
     sicompass::list::create_list_current_layer(&mut renderer);
     renderer
@@ -15624,7 +15637,7 @@ fn renderer_with_settings_checkbox(
     settings.set_config_path(tmp.path().join("settings.json"));
     settings.add_section(section);
     settings.add_checkbox(section, label, key, initial);
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     register(&mut renderer, Box::new(settings));
     set_cursor(&mut renderer, &[0, 1, 0]);
     (renderer, tmp)
@@ -15676,7 +15689,7 @@ fn renderer_with_settings_radio() -> (AppRenderer, TempDir) {
         &["north", "south"],
         "north",
     );
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     register(&mut renderer, Box::new(settings));
     set_cursor(&mut renderer, &[0, 1, 0, 1]);
     (renderer, tmp)
@@ -15720,7 +15733,7 @@ fn settings_text_input_commit_keeps_section_intact() {
     settings.set_config_path(tmp.path().join("settings.json"));
     settings.add_section("test");
     settings.add_text("test", "Host", "test.host", "");
-    let mut r = AppRenderer::new();
+    let mut r = app_renderer();
     register(&mut r, Box::new(settings));
     // fetch() → [sicompass(0), test(1)]; the text input is test's first child.
     set_cursor(&mut r, &[0, 1, 0]);
@@ -15943,7 +15956,7 @@ fn settings_password_field_masks_value_everywhere() {
     settings.set_config_path(tmp.path().join("settings.json"));
     settings.add_section("test");
     settings.add_password("test", "API key", "test.apiKey", "");
-    let mut r = AppRenderer::new();
+    let mut r = app_renderer();
     register(&mut r, Box::new(settings));
     set_cursor(&mut r, &[0, 1, 0]);
 
@@ -16017,7 +16030,7 @@ fn tutorial_input_renderer(initial: &str) -> AppRenderer {
     ensure_builtins();
     use sicompass_sdk::ffon::IdArray;
 
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     let mut provider = sicompass_sdk::create_provider_by_name("tutorial").unwrap();
     provider.init();
     let display_name = provider.display_name().to_owned();
@@ -16241,7 +16254,7 @@ fn tutorial_placeholder_renderer() -> AppRenderer {
     use sicompass_sdk::ffon::{FfonObject, IdArray};
     use sicompass_sdk::placeholders::I_PLACEHOLDER;
 
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     let mut provider = sicompass_sdk::create_provider_by_name("tutorial").unwrap();
     provider.init();
     let display_name = provider.display_name().to_owned();
@@ -16592,7 +16605,7 @@ impl Provider for QuietProvider {
 fn background_provider_tick_does_not_signal_active_refresh() {
     use sicompass_sdk::ffon::IdArray;
 
-    let mut r = AppRenderer::new();
+    let mut r = app_renderer();
     // index 0 = background ticker (stand-in for the terminal),
     // index 1 = the quiet provider the user is focused on.
     r.providers.push(Box::new(AlwaysTickProvider));
@@ -16668,7 +16681,7 @@ impl Provider for SlowLoadProvider {
 }
 
 fn slow_load_renderer() -> AppRenderer {
-    let mut r = AppRenderer::new();
+    let mut r = app_renderer();
     r.providers.push(Box::new(SlowLoadProvider {
         loaded: false,
         request: None,
@@ -16760,7 +16773,7 @@ fn navigation_request_ignored_for_background_provider() {
 fn dashboard_request_ignored_for_background_provider() {
     use sicompass_sdk::ffon::IdArray;
 
-    let mut r = AppRenderer::new();
+    let mut r = app_renderer();
     // index 0 = the grabby provider, index 1 = what the user is looking at.
     r.providers.push(Box::new(GrabbyDashboardProvider));
     r.providers.push(Box::new(QuietProvider));
@@ -16793,7 +16806,7 @@ fn dashboard_request_ignored_for_background_provider() {
 fn background_provider_error_never_reaches_the_status_line() {
     use sicompass_sdk::ffon::IdArray;
 
-    let mut r = AppRenderer::new();
+    let mut r = app_renderer();
     // index 0 = the shouty provider, index 1 = what the user is looking at.
     r.providers.push(Box::new(ShoutyProvider));
     r.providers.push(Box::new(QuietProvider));
@@ -16827,7 +16840,7 @@ fn background_provider_error_never_reaches_the_status_line() {
 fn dashboard_request_honored_for_active_provider() {
     use sicompass_sdk::ffon::IdArray;
 
-    let mut r = AppRenderer::new();
+    let mut r = app_renderer();
     r.providers.push(Box::new(GrabbyDashboardProvider));
     r.ffon.push(FfonElement::new_obj("grabby"));
     r.current_id = {
@@ -16989,7 +17002,7 @@ fn redo_of_filebrowser_delete_removes_disk_and_ffon() {
 /// the machine's config.
 fn setup_texteditor(root: &Path) -> AppRenderer {
     ensure_builtins();
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     let mut te = sicompass_sdk::create_provider_by_name("texteditor")
         .expect("texteditor factory registered");
     te.on_setting_change("textEditorPath", root.to_str().unwrap());
@@ -17427,7 +17440,7 @@ fn texteditor_undo_of_delete_keeps_dir_file_prefix() {
 #[test]
 fn c_opens_controls_palette_with_three_buttons() {
     use sicompass::app_state::CommandPhase;
-    let mut r = AppRenderer::new();
+    let mut r = app_renderer();
     assert_eq!(r.coordinate, Coordinate::General);
 
     dispatch_key(&mut r, Some(Keycode::C), Mod::empty());
@@ -17456,7 +17469,7 @@ fn c_opens_controls_palette_with_three_buttons() {
 #[test]
 fn controls_palette_close_sets_pending_window_action() {
     use sicompass::app_state::{CommandPhase, WindowAction};
-    let mut r = AppRenderer::new();
+    let mut r = app_renderer();
     dispatch_key(&mut r, Some(Keycode::C), Mod::empty());
     assert_eq!(r.current_command, CommandPhase::Controls);
 
@@ -17471,7 +17484,7 @@ fn controls_palette_close_sets_pending_window_action() {
 
 #[test]
 fn controls_palette_maximize_label_tracks_state() {
-    let mut r = AppRenderer::new();
+    let mut r = app_renderer();
     r.window_is_maximized = true;
     dispatch_key(&mut r, Some(Keycode::C), Mod::empty());
     // Middle button reads "restore" when the window is maximized.
@@ -17493,7 +17506,7 @@ fn controls_palette_maximize_label_tracks_state() {
 #[test]
 fn the_shell_view_says_command_mode_in_the_header_and_on_ctrl_w() {
     ensure_builtins();
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     register_terminal_in_shell(&mut renderer);
 
     // One colon layer on offer, so the name carries no ordinal.
@@ -17517,7 +17530,7 @@ fn entering_and_leaving_the_shell_announces_the_mode() {
     // `:` into the shell used to speak only the prompt row, so the view you had
     // just entered never named itself.
     ensure_builtins();
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     register_terminal_in_shell(&mut renderer);
 
     let entered = announced_text(&renderer).expect("entering the shell announces");
@@ -17536,7 +17549,7 @@ fn the_claude_session_says_first_command_mode() {
     project_skill(&root, "review", "---\ndescription: Review the diff\n---\n");
 
     ensure_builtins();
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     let _sessions = register_claude_in_session(&mut renderer, &root);
 
     // claude offers `skills` on top of the view swap, so this is the first of two.
@@ -17564,7 +17577,7 @@ fn the_claude_skills_palette_says_second_command_mode() {
     project_skill(&root, "review", "---\ndescription: Review the diff\n---\n");
 
     ensure_builtins();
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     let _sessions = register_claude_in_session(&mut renderer, &root);
 
     press_colon(&mut renderer);
@@ -17596,7 +17609,7 @@ fn the_file_browser_palette_still_says_command_mode() {
     // `<input>`, so a listing ending in a subdirectory looks exactly like a live
     // prompt — which used to send `:` to the insert palette instead of here.
     ensure_builtins();
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     register(
         &mut renderer,
         sicompass_sdk::create_provider_by_name("filebrowser").unwrap(),
@@ -17630,7 +17643,7 @@ fn no_general_mode_key_goes_silent_inside_a_shell() {
     // widened makes its key inert *only here*, which is silent rather than loud,
     // so check the keys that matter one by one.
     ensure_builtins();
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     register_terminal_in_shell(&mut renderer);
     let at_rest = Coordinate::SessionCommand;
     assert_eq!(renderer.coordinate, at_rest);
@@ -17757,7 +17770,7 @@ fn gitclient_colon_opens_the_repository_without_entering_command_mode() {
     git_fixture(&root);
 
     ensure_builtins();
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     register_gitclient_rooted_at(&mut renderer, &root);
     press_right(&mut renderer);
     press_colon(&mut renderer);
@@ -17783,7 +17796,7 @@ fn gitclient_colon_inside_the_repository_opens_the_command_palette() {
     git_fixture(&root);
 
     ensure_builtins();
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     register_gitclient_rooted_at(&mut renderer, &root);
     press_right(&mut renderer);
     press_colon(&mut renderer); // opens the repository
@@ -17811,7 +17824,7 @@ fn gitclient_colon_on_a_folder_that_is_not_a_repository_says_so() {
     std::fs::create_dir(root.join("plain")).unwrap();
 
     ensure_builtins();
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     register_gitclient_rooted_at(&mut renderer, &root);
     press_right(&mut renderer);
     let before = row_labels(&renderer);
@@ -17838,7 +17851,7 @@ fn gitclient_lists_the_git_folder_like_any_other() {
     git_fixture(&root);
 
     ensure_builtins();
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     register_gitclient_rooted_at(&mut renderer, &root);
     press_right(&mut renderer);
     let labels = row_labels(&renderer);
@@ -17859,7 +17872,7 @@ fn gitclient_opening_from_a_deep_folder_lands_at_the_repository_root() {
     std::fs::create_dir_all(root.join("a/b")).unwrap();
 
     ensure_builtins();
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     register_gitclient_rooted_at(&mut renderer, &root);
     press_right(&mut renderer); // into the provider
     move_to_row(&mut renderer, "a");
@@ -17903,7 +17916,7 @@ fn gitclient_changes_leads_with_the_message_row_and_the_commit_buttons() {
     std::fs::write(root.join("tracked.txt"), "two\n").unwrap();
 
     ensure_builtins();
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     register_gitclient_rooted_at(&mut renderer, &root);
     press_right(&mut renderer);
     press_colon(&mut renderer);
@@ -17934,7 +17947,7 @@ fn gitclient_a_diff_line_that_looks_like_markup_stays_a_plain_row() {
     std::fs::write(root.join("page.html"), "<input type=\"text\">\n").unwrap();
 
     ensure_builtins();
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     register_gitclient_rooted_at(&mut renderer, &root);
     press_right(&mut renderer);
     press_colon(&mut renderer);
@@ -17964,7 +17977,7 @@ fn terminal_still_swaps_views_on_colon_from_a_deep_folder() {
     std::fs::create_dir_all(root.join("a/b")).unwrap();
 
     ensure_builtins();
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     register_terminal_rooted_at(&mut renderer, &root);
     press_right(&mut renderer);
     press_right(&mut renderer);
@@ -17993,7 +18006,7 @@ fn gitclient_the_mode_names_itself_once_the_repository_is_open() {
     git_fixture(&root);
 
     ensure_builtins();
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     register_gitclient_rooted_at(&mut renderer, &root);
     press_right(&mut renderer);
     assert_eq!(
@@ -18023,7 +18036,7 @@ fn restart_gitclient(renderer: &AppRenderer) -> AppRenderer {
         &renderer.current_id,
         renderer.providers[0].current_path(),
     );
-    let mut restarted = AppRenderer::new();
+    let mut restarted = app_renderer();
     register(
         &mut restarted,
         sicompass_sdk::create_provider_by_name("gitclient").unwrap(),
@@ -18049,7 +18062,7 @@ fn gitclient_a_restored_tab_comes_back_in_the_repository_folder() {
     git_fixture(&root);
 
     ensure_builtins();
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     register_gitclient_rooted_at(&mut renderer, &root);
     // Exactly the reported case: `:` in the repository's folder, then quit.
     press_right(&mut renderer);
@@ -18096,7 +18109,7 @@ fn gitclient_one_colon_after_a_restart_reopens_the_same_repository() {
     git_fixture(&repo);
 
     ensure_builtins();
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     register_gitclient_rooted_at(&mut renderer, &root);
     press_right(&mut renderer); // into the provider
     press_right(&mut renderer); // into `project`
@@ -18147,7 +18160,7 @@ fn gitclient_leaving_a_repository_can_still_be_browsed_up_out_of() {
     git_fixture(&repo);
 
     ensure_builtins();
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     register_gitclient_rooted_at(&mut renderer, &repo);
     press_right(&mut renderer);
     press_colon(&mut renderer);
@@ -18185,7 +18198,7 @@ fn gitclient_the_three_colon_layers_each_name_themselves() {
     git_fixture(&root);
 
     ensure_builtins();
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     register_gitclient_rooted_at(&mut renderer, &root);
     press_right(&mut renderer);
 
@@ -18232,7 +18245,7 @@ fn gitclient_escape_unwinds_the_colon_layers_one_at_a_time() {
     git_fixture(&root);
 
     ensure_builtins();
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     register_gitclient_rooted_at(&mut renderer, &root);
     press_right(&mut renderer);
     press_colon(&mut renderer);
@@ -18288,7 +18301,7 @@ fn gitclient_escape_leaves_the_repository_from_any_depth_inside_it() {
     std::fs::write(root.join("tracked.txt"), "two\n").unwrap();
 
     ensure_builtins();
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     register_gitclient_rooted_at(&mut renderer, &root);
     press_right(&mut renderer);
     press_colon(&mut renderer);
@@ -18322,7 +18335,7 @@ fn gitclient_left_still_steps_one_level_at_a_time_inside_the_repository() {
     std::fs::write(root.join("tracked.txt"), "two\n").unwrap();
 
     ensure_builtins();
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     register_gitclient_rooted_at(&mut renderer, &root);
     press_right(&mut renderer);
     press_colon(&mut renderer);
@@ -18359,7 +18372,7 @@ fn harness_with_notes() -> (AppRenderer, TempDir) {
 /// A second app over the same store — what a restart looks like.
 fn notes_app_at(dir: &std::path::Path) -> AppRenderer {
     ensure_builtins();
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     let mut notes = sicompass_sdk::create_provider_by_name("notes").expect("notes provider");
     notes.set_config_path(dir.join("notes"));
     register(&mut renderer, notes);
@@ -18539,7 +18552,7 @@ fn ctrl_d_in_the_file_browser_still_deletes_the_file() {
     let tmp = TempDir::new().unwrap();
     std::fs::write(tmp.path().join("doomed.txt"), "x").unwrap();
 
-    let mut r = AppRenderer::new();
+    let mut r = app_renderer();
     let fb = sicompass_sdk::create_provider_by_name("filebrowser").unwrap();
     register(&mut r, fb);
     // After `register`, because it runs `init()`, which resets the path.
@@ -18981,7 +18994,7 @@ fn deleting_a_file_lands_on_the_one_below_it() {
         std::fs::write(tmp.path().join(n), "x").unwrap();
     }
 
-    let mut r = AppRenderer::new();
+    let mut r = app_renderer();
     let fb = sicompass_sdk::create_provider_by_name("filebrowser").unwrap();
     register(&mut r, fb);
     r.providers[0].set_current_path(tmp.path().to_str().unwrap());
@@ -19019,7 +19032,7 @@ fn deleting_a_file_lands_on_the_one_below_it() {
 fn harness_with_board() -> (AppRenderer, TempDir) {
     ensure_builtins();
     let tmp = TempDir::new().expect("tempdir");
-    let mut renderer = AppRenderer::new();
+    let mut renderer = app_renderer();
     let mut board =
         sicompass_sdk::create_provider_by_name("projectmanagement").expect("board provider");
     board.set_config_path(tmp.path().join("board"));
@@ -19149,7 +19162,7 @@ fn ctrl_z_is_still_forwarded_to_a_provider_that_does_not_ask_for_the_apps_undo()
     // The terminal needs Ctrl+Z to reach the running program as SIGTSTP, which is
     // why the routing is opt-in rather than unconditional.
     ensure_builtins();
-    let mut r = AppRenderer::new();
+    let mut r = app_renderer();
     let term = sicompass_sdk::create_provider_by_name("terminal").expect("terminal provider");
     assert!(
         !term.dashboard_uses_app_undo(),
@@ -19582,7 +19595,7 @@ impl Provider for ConsumeAllDashboard {
 #[test]
 fn a_dashboard_that_consumes_every_key_keeps_t_and_ctrl_t() {
     let keys = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
-    let mut r = AppRenderer::new();
+    let mut r = app_renderer();
     register(&mut r, Box::new(ConsumeAllDashboard { keys: keys.clone() }));
     r.current_id = IdArray::new();
     r.current_id.push(0);

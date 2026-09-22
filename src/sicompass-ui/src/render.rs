@@ -888,31 +888,39 @@ unsafe fn create_framebuffers(
 // Public: full app construction
 // ---------------------------------------------------------------------------
 
-/// Build the complete `AppState`.  Called by `AppState::new()`.
+/// Build the complete `AppState` with the default (application) window.
 pub fn build_app() -> Result<AppState, SiError> {
+    build_app_with(&crate::app_state::AppConfig::default())
+}
+
+/// Build the complete `AppState`, with everything the window used to hardcode
+/// supplied by the caller. See [`crate::app_state::AppConfig`].
+pub fn build_app_with(cfg: &crate::app_state::AppConfig) -> Result<AppState, SiError> {
     // ---- SDL init -----------------------------------------------------------
     // Before `init`, not after: the video backends read the app id when they
-    // start, and it is what the desktop matches against `sicompass.desktop` to
-    // find the window's icon. See `icon::set_app_metadata`.
-    crate::icon::set_app_metadata();
+    // start, and it is what the desktop matches against `<app_id>.desktop` to
+    // find the window's icon. See `icon::set_app_metadata_with`.
+    crate::icon::set_app_metadata_with(&cfg.app_name, &cfg.app_id);
 
     let sdl = sdl3::init().map_err(|e| SiError::Sdl(e.to_string()))?;
     let video = sdl.video().map_err(|e| SiError::Sdl(e.to_string()))?;
 
-    let mut wb = video.window(
-        crate::app_state::window_title(),
-        WINDOW_WIDTH,
-        WINDOW_HEIGHT,
-    );
+    let mut wb = video.window(&cfg.title, cfg.width, cfg.height);
     // Borderless: the app draws its own min/max/close controls (see
     // `app_state::WindowAction` and the renderer's titlebar buttons) and
     // restores drag/resize via `set_hit_test` below. `resizable()` is kept so
     // SDL still honours the resize hit-test results.
-    wb.vulkan().resizable().borderless().hidden();
+    wb.vulkan().resizable().hidden();
+    if cfg.custom_titlebar {
+        wb.borderless();
+    }
+    if cfg.fullscreen {
+        wb.fullscreen();
+    }
     // In session mode the compositor owns the geometry and configures every
     // window itself, so a remembered "maximized" is both meaningless and a
     // second opinion about size that it would immediately override.
-    if crate::programs::read_maximized() && !crate::session_mode::is_session_mode() {
+    if cfg.maximized && !crate::session_mode::is_session_mode() {
         wb.maximized();
     }
     // Enable high-pixel-density backbuffer so SDL honours the OS display
@@ -927,19 +935,21 @@ pub fn build_app() -> Result<AppState, SiError> {
     // `nix run`, the release archives, the `curl | sh` installer, and an
     // AppImage the user has not integrated. A failure here is cosmetic, so it
     // is logged and stepped over rather than taking the app down with it.
-    match crate::icon::window_icon() {
-        Ok((mut pixels, w, h)) => match crate::icon::icon_surface(&mut pixels, w, h) {
-            Ok(surface) => {
-                if !window.set_icon(&*surface) {
-                    eprintln!(
-                        "warning: could not set the window icon: {}",
-                        sdl3::get_error()
-                    );
+    if cfg.window_icon {
+        match crate::icon::window_icon() {
+            Ok((mut pixels, w, h)) => match crate::icon::icon_surface(&mut pixels, w, h) {
+                Ok(surface) => {
+                    if !window.set_icon(&*surface) {
+                        eprintln!(
+                            "warning: could not set the window icon: {}",
+                            sdl3::get_error()
+                        );
+                    }
                 }
-            }
-            Err(e) => eprintln!("warning: could not build the window icon surface: {e}"),
-        },
-        Err(e) => eprintln!("warning: could not decode the embedded window icon: {e}"),
+                Err(e) => eprintln!("warning: could not build the window icon surface: {e}"),
+            },
+            Err(e) => eprintln!("warning: could not decode the embedded window icon: {e}"),
+        }
     }
 
     // ---- Custom-titlebar hit-test ------------------------------------------
@@ -1303,7 +1313,6 @@ pub fn build_app() -> Result<AppState, SiError> {
         rect_renderer: None,
         image_renderer: None,
         accesskit_adapter: None,
-        settings_queue: None,
         maximized_ready: false,
         hit_test_win_pt,
     })

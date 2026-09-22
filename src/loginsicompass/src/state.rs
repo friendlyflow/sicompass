@@ -214,8 +214,13 @@ impl AppState {
         match resp {
             Response::Success => {
                 // Auth passed — start the session.
-                let command = self.command.clone();
-                match greetd.start_session(&command) {
+                // `--command` is a single string, so it is split into an argv here.
+                // The GPU path builds its argv from the session desktop file
+                // instead (see `sessions::split_exec`), which handles quoting;
+                // this fallback only ever receives a plain command line.
+                let argv: Vec<String> =
+                    self.command.split_whitespace().map(str::to_owned).collect();
+                match greetd.start_session_argv(argv, Vec::new()) {
                     Ok(Response::Success) => {
                         self.exit = true;
                     }

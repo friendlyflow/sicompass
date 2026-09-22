@@ -196,7 +196,7 @@ pub fn main_loop(app: &mut AppState) {
                             // value is unchanged, so it never needlessly rewrites
                             // settings.json.
                             if app.maximized_ready {
-                                crate::programs::write_maximized(is_maximized);
+                                app.renderer.hooks.write_maximized(is_maximized);
                             }
                         }
                         WindowEvent::CloseRequested => {
@@ -277,21 +277,35 @@ pub fn main_loop(app: &mut AppState) {
             }
         }
 
-        if !app.running {
+        if !app.running || app.renderer.hooks.should_quit() {
             break;
         }
 
         // ---- Drain settings apply-callback events ---------------------------
-        if let Some(q) = app.settings_queue.clone() {
-            crate::programs::apply_pending_settings(&mut app.renderer, &q, false);
+        // The queue itself lives on AppState; what to do with its contents is
+        // the embedder's business, so the hook reads it back off the renderer.
+        if app.renderer.settings_queue.is_some() {
+            let hooks = std::mem::replace(
+                &mut app.renderer.hooks,
+                Box::new(crate::registry::NoHooks),
+            );
+            hooks.apply_pending_settings(&mut app.renderer, false);
+            app.renderer.hooks = hooks;
         }
 
         // ---- Drain updater events + refresh "update available" banner ------
         // Hot-reload events run between frames so no provider call is in
         // flight when we drop the old library and load the new one.
         // FUTURE NOTIFICATION SYSTEM: the banner write inside this call is
-        // interim — see programs::process_update_events.
-        crate::programs::process_update_events(&mut app.renderer);
+        // interim.
+        {
+            let hooks = std::mem::replace(
+                &mut app.renderer.hooks,
+                Box::new(crate::registry::NoHooks),
+            );
+            hooks.process_update_events(&mut app.renderer);
+            app.renderer.hooks = hooks;
+        }
 
         // ---- Rebuild font renderer when fontScale changes -------------------
         if app.renderer.rebuild_font_renderer {
@@ -306,7 +320,7 @@ pub fn main_loop(app: &mut AppState) {
                     .get_display()
                     .and_then(|d| d.get_content_scale())
                     .unwrap_or(1.0);
-                let font_scale = crate::programs::read_font_scale();
+                let font_scale = app.renderer.hooks.read_font_scale();
                 let effective_dpi =
                     (96.0_f32 * content_scale * font_scale).round().max(48.0) as u32;
                 match crate::text::FontRenderer::new(

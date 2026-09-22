@@ -10,7 +10,7 @@
 )]
 
 // All modules are declared in lib.rs; the binary just re-uses them.
-use sicompass::app_state;
+use sicompass::boot;
 use sicompass::render;
 use sicompass::start_menu;
 use std::process;
@@ -63,6 +63,10 @@ fn main() {
     // window/Vulkan setup. The status Arc is wired into AppRenderer below.
     // Anything that fails (no network, no plugins dir, malformed manifest)
     // is logged and swallowed — startup never blocks.
+    // The renderer has no HTTP client of its own, so give it ours before any
+    // `<link>` can be followed. See `boot::register_http_client`.
+    boot::register_http_client();
+
     let auto_update_enabled = read_auto_update_check_setting();
     let (update_state, update_rx) = if auto_update_enabled {
         let state = Arc::new(Mutex::new(sicompass_updater::UpdateStatus::default()));
@@ -89,12 +93,12 @@ fn main() {
         (None, None)
     };
 
-    match app_state::AppState::new() {
-        Ok(mut app) => {
-            app.renderer.update_state = update_state;
-            app.renderer.update_event_rx = update_rx;
-            app.run()
-        }
+    let hooks = boot::ProgramsHooks {
+        update_state,
+        update_event_rx: update_rx,
+    };
+    match boot::app_state(hooks) {
+        Ok(mut app) => app.run(),
         Err(e) => {
             eprintln!("sicompass: {e}");
             process::exit(1);

@@ -44,9 +44,30 @@ calloop-wayland-source = "0.3"
 # CLI
 clap = { version = "4", features = ["derive"] }
 
+# The renderer, and the element model it draws. This is the whole reason the
+# greeter looks and speaks like the app: `<radio>`, `<password>`, the insert
+# mode and the AccessKit tree are the app's, not a second implementation.
+#
+# Note what is NOT here: `sicompass`, the application crate. Linking it would
+# drag wasmtime, a bundled SQLite, a headless-Chromium driver, an IMAP client
+# and an SMTP client into a login screen. See src/sicompass-ui/Cargo.toml.
+sicompass-sdk = { workspace = true }
+sicompass-ui = { workspace = true }
+
+# Wiping the password buffer once it has been handed to greetd. See the
+# module docs in src/provider.rs for what this does and does not buy.
+zeroize = "1"
+
+# `localtime_r`, for the clock's UTC offset.
+libc = { workspace = true }
+
 # Logging
 tracing          = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+# Driving the real renderer headlessly in tests/greeter_ui.rs. `sdl3` comes in
+# through sicompass-ui already; this is only for the `Keycode`/`Mod` types the
+# key dispatcher takes.
+sdl3 = { workspace = true }

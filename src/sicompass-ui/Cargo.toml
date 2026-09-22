@@ -1,0 +1,90 @@
+[package]
+publish = false  # internal crate, never published to crates.io
+name = "sicompass-ui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "sicompass-ui — the Vulkan/SDL3 list renderer, shared by the app and the greeter"
+repository = "https://github.com/friendlyflow/sicompass"
+authors = ["Nico Verrijdt <nico@friendlyflow.com>"]
+
+# ---------------------------------------------------------------------------
+# Why this crate exists
+# ---------------------------------------------------------------------------
+#
+# The login greeter (`src/loginsicompass`) draws the same lists, in the same
+# font, with the same AccessKit tree as the app. Linking the *app* to get them
+# cost 465 crates: wasmtime, a bundled SQLite, a headless-Chromium driver, an
+# IMAP client and an SMTP client, all linked into a login screen and none of
+# them ever called.
+#
+# So the renderer lives here and both binaries depend on it. Measured at the
+# time of the split: the greeter's dependency closure went from 465 crates to
+# about 202.
+#
+# The rule that keeps it that way: **nothing in this crate may depend on
+# `sicompass-builtins`, `sicompass-updater`, `wasmtime` or `reqwest`.** Where
+# the renderer needs something only the app can answer, it asks through
+# `HostHooks` (see `src/lib.rs`) rather than reaching for the app.
+#
+# Like the app crate, this one must not import any `lib_*` provider crate
+# either; everything goes through `sicompass-sdk`.
+
+[lib]
+name = "sicompass_ui"
+path = "src/lib.rs"
+
+[features]
+# Compile SDL3 from source rather than linking the system one. Used by the
+# packaging build, and by the greeter so that an SDL3 upgrade elsewhere on the
+# system cannot stop the login screen from starting.
+bundled-sdl3 = ["sdl3/build-from-source-static"]
+
+[dependencies]
+sicompass-sdk = { workspace = true }
+async-trait = { workspace = true }
+
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+ash = { workspace = true }
+glam = { workspace = true }
+
+freetype = { workspace = true }
+
+image = { workspace = true }
+base64 = { workspace = true }
+
+sdl3 = { workspace = true }
+# Pulled in transitively by `sdl3`; declared here so the Windows-only
+# `no-sdl-libc` knob below has something to attach to. Version constraint
+# matches `sdl3`'s own pin so Cargo unifies to one copy.
+sdl3-sys = "0.6.7"
+
+accesskit = { workspace = true }
+
+whatlang = { workspace = true }
+
+unicode-normalization = { workspace = true }
+
+nucleo-matcher = { workspace = true }
+
+tokio = { workspace = true }
+
+tracing = { workspace = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+accesskit_unix = { workspace = true }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+accesskit_windows = { workspace = true }
+windows = { workspace = true }
+# See the long note on this same key in `src/sicompass/Cargo.toml`: it must
+# stay Windows-only, because `-DSDL_LIBC=OFF` breaks SDL's own build on Linux.
+sdl3-sys = { version = "0.6.7", features = ["no-sdl-libc"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+accesskit_macos = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

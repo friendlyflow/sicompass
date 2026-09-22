@@ -52,7 +52,7 @@ use sdl3::surface::Surface;
 pub const APP_ID: &str = "sicompass";
 
 /// Human-readable name, shown by some compositors next to the icon.
-const APP_NAME: &str = "Sicompass";
+pub const APP_NAME: &str = "Sicompass";
 
 /// Source PNG for the window icon.
 ///
@@ -75,10 +75,16 @@ const ICON_PNG: &[u8] = include_bytes!(concat!(
 /// start up, and setting it afterwards is too late for the window that has
 /// already been created.
 pub fn set_app_metadata() {
+    set_app_metadata_with(APP_NAME, APP_ID);
+}
+
+/// As [`set_app_metadata`], for an embedder that is not the application and so
+/// wants its own name and `app_id`.
+pub fn set_app_metadata_with(app_name: &str, app_id: &str) {
     // `SDL_SetAppMetadata` takes the three common fields at once. The version
     // is `None` rather than a lie; SDL treats a null as "unset".
-    let name = std::ffi::CString::new(APP_NAME).expect("APP_NAME has no interior nul");
-    let identifier = std::ffi::CString::new(APP_ID).expect("APP_ID has no interior nul");
+    let name = std::ffi::CString::new(app_name).expect("app name has no interior nul");
+    let identifier = std::ffi::CString::new(app_id).expect("app id has no interior nul");
 
     // SAFETY: both pointers are valid `CStr`s for the duration of the call,
     // and SDL copies the strings it is given.

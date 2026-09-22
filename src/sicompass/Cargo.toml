@@ -327,6 +327,7 @@ sicompass-sdk = { workspace = true }
 async-trait = { workspace = true }
 sicompass-builtins = { workspace = true }
 sicompass-updater = { workspace = true }
+sicompass-ui = { workspace = true }
 
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -337,7 +338,6 @@ ash = { workspace = true }
 glam = { workspace = true }
 
 freetype = { workspace = true }
-rustybuzz = { workspace = true }
 
 image = { workspace = true }
 base64 = { workspace = true }

@@ -1,35 +1,31 @@
-//! sicompass library interface — re-exports modules for integration tests.
+//! sicompass — the application.
 //!
-//! The binary (`main.rs`) declares all modules.  This library crate re-exports
-//! them so that `tests/integration.rs` can access `sicompass::events`,
-//! `sicompass::app_state`, etc. without duplicating module declarations.
+//! The renderer itself lives in the `sicompass-ui` crate; what is left here is
+//! everything an *application* has and a login screen does not: the provider
+//! catalogue and the settings file that selects from it (`programs`), the WASM
+//! plugin host (`wasm_host`, `plugin_manifest`), the self-updater, and the
+//! Windows Start Menu entry (`start_menu`).
+//!
+//! That split is what keeps `loginsicompass` from linking wasmtime, a bundled
+//! SQLite and a headless-Chromium driver. See `src/sicompass-ui/Cargo.toml`.
+//!
+//! The renderer calls back into this crate through
+//! [`sicompass_ui::registry::HostHooks`], implemented by [`boot::ProgramsHooks`].
 
 #![allow(dead_code, unused_imports)]
 
-pub mod app_state;
-pub mod render;
-pub mod view;
-
-pub mod accesskit_sdl;
-pub mod caret;
-pub mod checkmark;
-pub mod events;
-pub mod fonts;
-pub mod handlers;
-pub mod icon;
-pub mod image;
-pub mod list;
+pub mod boot;
 pub mod plugin_manifest;
 pub mod programs;
-pub mod provider;
-pub mod rectangle;
-pub mod shaders;
-pub mod session_mode;
-pub mod shortcuts;
 pub mod start_menu;
-pub mod state;
-pub mod text;
-pub mod unicode_search;
 /// Host for sandboxed WASM plugins — the replacement for `dlopen`ed native plugins
 /// and `bun`-spawned script plugins, neither of which can ship on Apple's stores.
 pub mod wasm_host;
+
+// The renderer, re-exported so `tests/integration.rs` and the binary can reach
+// it by the same paths they used before the split.
+pub use sicompass_ui::{
+    accesskit_sdl, app_state, caret, checkmark, events, fonts, handlers, http, icon, image, list,
+    provider, rectangle, registry, render, session_mode, shaders, shortcuts, state, text,
+    unicode_search, view,
+};

@@ -19,6 +19,7 @@ members = [
     "lib/lib_builtins",
     "lib/lib_updater",
     "src/sicompass",
+    "src/sicompass-ui",
     # Linux-only binaries: the Wayland compositor and its greetd greeter. Every
     # dependency of both sits behind `[target.'cfg(target_os = "linux")'.dependencies]`,
     # so on macOS and Windows they build an empty `main()` and the workspace-wide
@@ -73,6 +74,7 @@ sicompass-notes = { path = "lib/lib_notes" }
 sicompass-project-management = { path = "lib/lib_project_management" }
 sicompass-builtins = { path = "lib/lib_builtins" }
 sicompass-updater = { path = "lib/lib_updater" }
+sicompass-ui = { path = "src/sicompass-ui" }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
@@ -97,8 +99,11 @@ glam = "0.33"
 # system freetype). 0.8 pulls freetype-sys 0.23, whose default build needs
 # pkg-config and whose `bundled` feature has a broken libpng/zlib include path
 # on MSVC. Revisit when freetype-sys fixes the bundled build.
+#
+# `rustybuzz` used to sit beside this and was removed in the sicompass-ui
+# split: text is laid out per-codepoint through FreeType (see `text.rs`), and
+# nothing in the workspace had ever called it.
 freetype = "0.7"
-rustybuzz = "0.20"
 
 # Image loading
 image = { version = "0.25", features = ["jpeg", "png", "webp"] }
