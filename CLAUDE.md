@@ -193,6 +193,15 @@ lib crates for mock injection — these deps live in `[dev-dependencies]`.
 A Stop hook (`.claude/hooks/check-sdk-boundary.sh`) enforces this automatically
 at the end of each Claude turn.
 
+## Architecture: the greeter
+
+The greetd login screen is `src/loginsicompass`, a separate binary that draws
+with the app's own renderer. See [docs/greeter.md](docs/greeter.md) for the
+page it shows, the greetd conversation (including the native-byte-order framing
+that must not regress), user and session enumeration, the password's lifetime,
+the GPU-failure supervisor, and how to run the whole thing nested without
+touching the boot path.
+
 ## Architecture: the sicompass-ui split (hard rule)
 
 The renderer lives in `src/sicompass-ui` (package `sicompass-ui`) and is shared
