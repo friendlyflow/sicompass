@@ -783,6 +783,14 @@
               # added by hand to the deb, the rpm, the MSI and the Nix
               # install before it reaches anyone.
               #
+              # systemd-cat is what makes a failure visible at all. greetd
+              # captures neither stdout nor stderr of the session it starts,
+              # so a session dying on startup leaves behind only "session
+              # opened" and "session closed" a second apart and nothing about
+              # why - which is exactly how this first presented. The journal
+              # is where a session's output belongs anyway:
+              # `journalctl -t desicompass -b` reads it.
+              #
               # dbus-run-session is load-bearing. accesskit_unix speaks
               # AT-SPI2 over the session bus, so without one sicompass stalls
               # 400ms at startup waiting for a registration that never
@@ -793,7 +801,7 @@
                 [Desktop Entry]
                 Name=Desicompass
                 Comment=Use your whole computer from the keyboard, with no mouse needed
-                Exec=${pkgs.dbus}/bin/dbus-run-session ${packages.desicompass}/bin/desicompass --backend tty --xkb-layout ${cfg.xkbLayout} --startup-cmd '${packages.default}/bin/sicompass --session'
+                Exec=${pkgs.systemd}/bin/systemd-cat --identifier=desicompass ${pkgs.dbus}/bin/dbus-run-session ${packages.desicompass}/bin/desicompass --backend tty --xkb-layout ${cfg.xkbLayout} --startup-cmd '${packages.default}/bin/sicompass --session'
                 Type=Application
                 DesktopNames=Desicompass
               '' // {
