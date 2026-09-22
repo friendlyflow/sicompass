@@ -158,6 +158,22 @@
               dbus
               accerciser
 
+              # desicompass's TTY backend (the `tty` cargo feature): libinput
+              # for input devices, seatd for libseat (nixpkgs has no
+              # `libseat` attribute; the daemon package is what ships the
+              # library, and the logind backend is what actually gets used
+              # here), udev for device enumeration. libdrm and mesa's gbm are
+              # already above. All Linux-only, which is why they sit in this
+              # branch: nixpkgs marks several of them bad on darwin and a
+              # stray reference breaks `nix develop` at eval time there.
+              libinput
+              seatd
+              udev
+              # gbm is its own package in this nixpkgs (mesa-libgbm); it is no
+              # longer part of the mesa output, so `gbm.pc` is only found with
+              # this listed explicitly.
+              libgbm
+
               # Test clients for desicompass, the Wayland compositor in
               # src/desicompass. They are how you tell a compositor bug from a
               # client bug, cheapest first: wayland-info dumps the registry so
@@ -193,7 +209,7 @@
             ''
             + lib.optionalString stdenv.hostPlatform.isLinux ''
               export PKG_CONFIG_PATH="${libxkbcommon.dev}/lib/pkgconfig:$PKG_CONFIG_PATH";
-              export LIBRARY_PATH="${sdl3}/lib:${libxkbcommon}/lib:${wayland}/lib:${libGL}/lib:${mesa}/lib:$LIBRARY_PATH";
+              export LIBRARY_PATH="${sdl3}/lib:${libxkbcommon}/lib:${wayland}/lib:${libGL}/lib:${mesa}/lib:${libinput}/lib:${seatd}/lib:${udev}/lib:${libgbm}/lib:$LIBRARY_PATH";
 
               # Library path for Vulkan and other runtime deps.
               #
@@ -217,7 +233,7 @@
               # these two entries the compositor builds and links fine and then
               # dies at startup. libGL is libglvnd (the dispatch library that
               # owns those sonames); mesa is the vendor behind it.
-              export LD_LIBRARY_PATH="${libwebp}/lib:${freetype}/lib:${vulkan-loader}/lib:${vulkan-validation-layers}/lib:${curl.out}/lib:${sdl3}/lib:${libxkbcommon}/lib:${wayland}/lib:${libGL}/lib:${mesa}/lib";
+              export LD_LIBRARY_PATH="${libwebp}/lib:${freetype}/lib:${vulkan-loader}/lib:${vulkan-validation-layers}/lib:${curl.out}/lib:${sdl3}/lib:${libxkbcommon}/lib:${wayland}/lib:${libGL}/lib:${mesa}/lib:${libinput}/lib:${seatd}/lib:${udev}/lib:${libgbm}/lib";
               export VK_LAYER_PATH="${vulkan-validation-layers}/share/vulkan/explicit_layer.d";
 
               # EGL vendor discovery, the glvnd counterpart of the Vulkan ICD

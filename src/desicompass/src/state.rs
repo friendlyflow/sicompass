@@ -10,11 +10,7 @@ use std::time::Instant;
 
 use smithay::{
     backend::renderer::utils::on_commit_buffer_handler,
-    backend::{
-        allocator::dmabuf::Dmabuf,
-        renderer::{gles::GlesRenderer, ImportDma},
-        winit::WinitGraphicsBackend,
-    },
+    backend::{allocator::dmabuf::Dmabuf, renderer::ImportDma},
     delegate_compositor, delegate_data_device, delegate_dmabuf, delegate_output, delegate_seat,
     delegate_shm, delegate_xdg_shell,
     desktop::{PopupKind, PopupManager, Space, Window},
@@ -54,6 +50,7 @@ use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel;
 use tracing::{debug, error, info, warn};
 
 use crate::focus::{FocusStack, WindowId};
+use crate::gpu::Gpu;
 use crate::keybindings::{self, BindingAction, Mods};
 use crate::layout::{Dir, Tiler};
 
@@ -121,7 +118,7 @@ pub struct State {
     /// The GPU side. It lives here rather than in the main loop because
     /// `DmabufHandler::dmabuf_imported` is handed only `&mut State` and has
     /// to reach the renderer to validate a client's buffer.
-    pub backend: WinitGraphicsBackend<GlesRenderer>,
+    pub backend: Gpu,
     pub dmabuf_state: DmabufState,
 
     // ---- Spawning ----
@@ -136,7 +133,7 @@ impl State {
         display: &DisplayHandle,
         loop_signal: LoopSignal,
         output: Output,
-        backend: WinitGraphicsBackend<GlesRenderer>,
+        backend: Gpu,
     ) -> Self {
         let compositor_state = CompositorState::new::<Self>(display);
         let xdg_shell_state = XdgShellState::new::<Self>(display);

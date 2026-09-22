@@ -26,11 +26,15 @@
 #[cfg(target_os = "linux")]
 mod focus;
 #[cfg(target_os = "linux")]
+mod gpu;
+#[cfg(target_os = "linux")]
 mod keybindings;
 #[cfg(target_os = "linux")]
 mod layout;
 #[cfg(target_os = "linux")]
 mod state;
+#[cfg(all(target_os = "linux", feature = "tty"))]
+mod tty;
 
 #[cfg(target_os = "linux")]
 mod linux {
@@ -66,6 +70,7 @@ mod linux {
     };
     use tracing::{error, info, warn};
 
+    use crate::gpu::{BackendChoice, Gpu, ResolvedBackend};
     use crate::keybindings::Mods;
     use crate::state::{ClientState, State};
 
@@ -98,6 +103,14 @@ mod linux {
         /// Command launched by the spawn binding (Super+Return).
         #[arg(long, default_value = "foot")]
         terminal: String,
+
+        /// Which backend to run: nested in a session, or the real display.
+        ///
+        /// `auto` nests when WAYLAND_DISPLAY or DISPLAY is set and takes the
+        /// display otherwise, which is what lets one fixed command line work
+        /// both from a desktop while developing and from a TTY at boot.
+        #[arg(long, value_enum, default_value_t = BackendChoice::Auto)]
+        backend: BackendChoice,
     }
 
     pub fn main_impl() -> Result<(), Box<dyn std::error::Error>> {
@@ -112,6 +125,35 @@ mod linux {
     }
 
     fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
+        match args
+            .backend
+            .resolve(|name| std::env::var_os(name).is_some())
+        {
+            ResolvedBackend::Winit => run_winit(args),
+            #[cfg(feature = "tty")]
+            ResolvedBackend::Tty => crate::tty::run(args_to_tty(&args)),
+            #[cfg(not(feature = "tty"))]
+            ResolvedBackend::Tty => Err(
+                "this build has no TTY backend: rebuild with `--features tty`, \
+                 or pass `--backend winit` to run nested in an existing session"
+                    .into(),
+            ),
+        }
+    }
+
+    /// The shared settings both backends need, so the TTY module does not
+    /// have to depend on the `Args` type.
+    #[cfg(feature = "tty")]
+    fn args_to_tty(args: &Args) -> crate::tty::TtyArgs {
+        crate::tty::TtyArgs {
+            startup_cmd: args.startup_cmd.clone(),
+            xkb_layout: args.xkb_layout.clone(),
+            xkb_variant: args.xkb_variant.clone(),
+            terminal: args.terminal.clone(),
+        }
+    }
+
+    fn run_winit(args: Args) -> Result<(), Box<dyn std::error::Error>> {
         let mut event_loop: EventLoop<State> = EventLoop::try_new()?;
         let display: Display<State> = Display::new()?;
         let dh = display.handle();
@@ -156,7 +198,7 @@ mod linux {
         output.set_preferred(mode);
 
         let mut damage_tracker = OutputDamageTracker::from_output(&output);
-        let mut state = State::new(&dh, event_loop.get_signal(), output.clone(), backend);
+        let mut state = State::new(&dh, event_loop.get_signal(), output.clone(), Gpu::Winit(backend));
 
         // Advertise zwp_linux_dmabuf_v1 with per-surface feedback.
         //
@@ -347,6 +389,13 @@ mod linux {
                     ..
                 } = &mut state;
 
+                // Irrefutable without the `tty` feature, where `Gpu` has a
+                // single variant — but not with it.
+                #[allow(irrefutable_let_patterns)]
+                let Gpu::Winit(backend) = backend
+                else {
+                    unreachable!("run_winit only ever builds Gpu::Winit")
+                };
                 let age = backend.buffer_age().unwrap_or(0);
                 let render_result = {
                     let (renderer, mut framebuffer) = backend.bind()?;

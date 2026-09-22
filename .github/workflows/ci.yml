@@ -112,7 +112,8 @@ jobs:
             libxrandr-dev libxss-dev libxfixes-dev libxrender-dev \
             libxtst-dev libxcb1-dev \
             libpulse-dev libasound2-dev libdbus-1-dev libatspi2.0-dev \
-            libdrm-dev libgbm-dev libegl-dev libssl-dev
+            libdrm-dev libgbm-dev libegl-dev libssl-dev \
+            libinput-dev libseat-dev libudev-dev
 
       - name: Install system dependencies (macOS)
         if: runner.os == 'macOS'
@@ -192,6 +193,15 @@ jobs:
       - name: Build (host target)
         if: ${{ !matrix.full && matrix.triple == '' }}
         run: cargo build -p sicompass --release --features bundled-sdl3
+
+      # desicompass's TTY backend, which is off by default because it needs
+      # libinput, libseat and libudev — installed above on Linux and on no
+      # other runner. Deliberately its own step rather than a flag added to
+      # the clippy line below: that one runs on macOS and Windows too, where
+      # none of this exists.
+      - name: Build desicompass with the TTY backend (Linux)
+        if: runner.os == 'Linux'
+        run: cargo clippy -p desicompass --all-targets --features tty
 
       - name: Clippy
         run: cargo clippy --workspace --all-targets --features bundled-sdl3 ${{ matrix.flags }}
