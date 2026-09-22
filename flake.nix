@@ -839,6 +839,21 @@
                 # the entry visible to a greeter that ignores it.
                 sessionPackage
               ];
+
+              # ...and systemPackages alone is still not enough.
+              #
+              # NixOS links only the subdirectories named in pathsToLink into
+              # /run/current-system/sw, and share/wayland-sessions is not one
+              # of the ~50 defaults. Without this the .desktop file sits in
+              # the store, referenced by the system closure, reachable by
+              # nothing: the package is installed and the session is still
+              # invisible, with no error anywhere to say so.
+              #
+              # Three layers had to line up for a greeter to see this entry -
+              # sessionPackages for display managers that use it,
+              # systemPackages for cosmic-greeter which does not, and this to
+              # make the directory exist at all.
+              environment.pathsToLink = [ "/share/wayland-sessions" ];
             }
 
             (lib.mkIf cfg.greeter.enable {
