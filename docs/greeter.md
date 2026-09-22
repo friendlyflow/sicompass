@@ -130,6 +130,13 @@ down the instant `start_session` succeeds, so a successful child is often
 (`--render-backend shm`) has no text, no accessibility and no pickers — it is a
 way to get in and fix things, not a greeter anyone should meet twice.
 
+Because it draws no text it cannot *show* a picker, so it has to be told who to
+log in and what to start. It resolves that through the same enumeration the
+graphical greeter uses — the remembered user and session, else the first of
+each. It used to read `--user` and `--command`, whose defaults were `nobody` and
+`false`; falling back should change how the login screen looks, not who it logs
+in.
+
 ## Running it without touching the boot path
 
 Nothing below needs `services.desicompass.greeter.enable`. That switch is the

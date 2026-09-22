@@ -13,11 +13,13 @@
 //!   username is not shown, and a failure message is not shown. A wrong
 //!   password looks exactly like a right one except that the dots clear.
 //! * **No accessibility.** No AccessKit, no AT-SPI. Mute to a screen reader.
-//! * **No user or session picker.** One username and one command, both from
-//!   the command line.
+//! * **No user or session picker.** It cannot show one, so it is told: the
+//!   remembered user and session, else the first of each, resolved by
+//!   `resolve_fallback_target` through the same enumeration the graphical
+//!   greeter uses.
 //!
 //! So it is a way to get in and fix things, not a greeter anybody should meet
-//! twice. Everything here predates the split and is unchanged by it.
+//! twice.
 
 pub mod color;
 pub mod entry;

@@ -547,3 +547,63 @@ Type=Application
         assert_eq!(v[2].name, "Sway", "a unique name is left alone");
     }
 }
+
+/// Tests for the contract the *software fallback* depends on.
+///
+/// The fallback draws no text, so it cannot show a picker and has to be told
+/// who to log in and what to start. It used to be told by `--user` and
+/// `--command`, whose defaults were `nobody` and `false` — so with nothing
+/// passing them it authenticated an account that cannot log in and then
+/// launched `/bin/false`. It now resolves through the same enumeration the
+/// graphical greeter uses, and these pin the pieces that has to rest on.
+#[cfg(test)]
+mod fallback_target_tests {
+    use super::*;
+
+    fn entry(id: &str, name: &str) -> SessionEntry {
+        parse_desktop_entry(
+            &format!(
+                "[Desktop Entry]\nName={name}\nExec=/bin/{id} --flag\nType=Application\nDesktopNames={name}\n"
+            ),
+            id,
+            SessionType::Wayland,
+            None,
+        )
+        .expect("fixture must parse")
+    }
+
+    /// A session always yields a runnable argv and a non-empty environment —
+    /// the two things `start_session` needs and the old code could not supply.
+    #[test]
+    fn a_resolved_session_gives_an_argv_and_an_environment() {
+        let s = entry("desicompass", "Desicompass");
+        assert_eq!(s.exec, vec!["/bin/desicompass", "--flag"]);
+        assert!(!s.env().is_empty());
+        assert!(s.env().iter().any(|v| v.starts_with("XDG_SESSION_TYPE=")));
+        // Never a single joined string: greetd would execve a file by that name.
+        assert!(s.exec.len() > 1);
+    }
+
+    /// The remembered session is picked by *id*, and a stale one falls back to
+    /// the first rather than to nothing.
+    #[test]
+    fn the_remembered_session_is_chosen_by_id_and_degrades_to_the_first() {
+        let sessions = vec![entry("cosmic", "COSMIC"), entry("desicompass", "Desicompass")];
+        let ids: Vec<String> = sessions.iter().map(|s| s.id.clone()).collect();
+
+        assert_eq!(crate::lastlogin::index_of(&ids, Some("desicompass")), 1);
+        // Uninstalled since last boot.
+        assert_eq!(crate::lastlogin::index_of(&ids, Some("plasma")), 0);
+        // Never logged in here before.
+        assert_eq!(crate::lastlogin::index_of(&ids, None), 0);
+    }
+
+    /// Whatever the fallback is handed, it must never be the old defaults.
+    #[test]
+    fn the_old_nobody_and_false_defaults_are_gone() {
+        let sessions = vec![entry("desicompass", "Desicompass")];
+        let s = &sessions[0];
+        assert_ne!(s.exec, vec!["false".to_owned()]);
+        assert!(!s.exec.iter().any(|a| a == "false"));
+    }
+}

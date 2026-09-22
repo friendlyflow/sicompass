@@ -73,7 +73,11 @@ pub struct AppState {
     pub entry: PasswordEntry,
     pub greetd: Option<GreetdClient>,
     pub username: String,
-    pub command: String,
+    /// The session argv, already split. Resolved the same way the graphical
+    /// greeter resolves it, so the fallback starts the same session.
+    pub command: Vec<String>,
+    /// The session environment (`XDG_SESSION_TYPE` and friends).
+    pub env: Vec<String>,
 
     /// Set to `true` when Enter is pressed — auth submission happens in the
     /// next event loop iteration outside the keyboard handler.
@@ -93,7 +97,8 @@ impl AppState {
         qh: &QueueHandle<Self>,
         render_config: RenderConfig,
         username: String,
-        command: String,
+        command: Vec<String>,
+        env: Vec<String>,
     ) -> Self {
         let compositor_state =
             CompositorState::bind(globals, qh).expect("wl_compositor not available");
@@ -129,6 +134,7 @@ impl AppState {
             greetd: None,
             username,
             command,
+            env,
             submit_pending: false,
             exit: false,
             error: None,
@@ -214,13 +220,7 @@ impl AppState {
         match resp {
             Response::Success => {
                 // Auth passed — start the session.
-                // `--command` is a single string, so it is split into an argv here.
-                // The GPU path builds its argv from the session desktop file
-                // instead (see `sessions::split_exec`), which handles quoting;
-                // this fallback only ever receives a plain command line.
-                let argv: Vec<String> =
-                    self.command.split_whitespace().map(str::to_owned).collect();
-                match greetd.start_session_argv(argv, Vec::new()) {
+                match greetd.start_session_argv(self.command.clone(), self.env.clone()) {
                     Ok(Response::Success) => {
                         self.exit = true;
                     }

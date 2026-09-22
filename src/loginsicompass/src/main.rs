@@ -45,13 +45,12 @@ mod linux {
     #[derive(Parser, Debug)]
     #[command(version, about)]
     pub struct Args {
-        /// Username to authenticate.
-        #[arg(short = 'u', long, default_value = "nobody")]
-        user: String,
-
-        /// Shell command to run after successful login.
-        #[arg(short = 'c', long, default_value = "false")]
-        command: String,
+        // `--user` and `--command` used to live here, defaulting to `nobody`
+        // and `false`. Nothing passed them, so the greeter authenticated an
+        // account that cannot log in and then launched `/bin/false`. Both the
+        // graphical greeter and the software fallback now enumerate users and
+        // sessions themselves; `--user-extra` below is the escape hatch for a
+        // host whose accounts are not in /etc/passwd.
 
         /// Path to a PNG/JPEG background image.
         #[arg(short = 'b', long)]
@@ -184,6 +183,39 @@ mod linux {
         Ok(())
     }
 
+    /// Who the software fallback should log in, and into what.
+    ///
+    /// The fallback cannot show a picker (it draws no text at all), so it has to
+    /// be *told*. Before this existed it read `--user` and `--command`, whose
+    /// defaults were `nobody` and `false` — which is precisely the bug that
+    /// made the old greeter unable to log anyone in. It now resolves the same
+    /// way the graphical greeter does, so falling back changes how the login
+    /// screen looks and not who it logs in.
+    fn resolve_fallback_target(args: &Args) -> (String, Vec<String>, Vec<String>) {
+        let last = crate::lastlogin::Store::load(&args.state_dir);
+
+        let users = crate::users::enumerate();
+        let names: Vec<String> = users.iter().map(|u| u.name.clone()).collect();
+        let username = args
+            .user_extra
+            .first()
+            .cloned()
+            .or_else(|| names.get(crate::lastlogin::index_of(&names, last.user())).cloned())
+            .unwrap_or_default();
+
+        let sessions = crate::sessions::enumerate(&args.sessions_dir);
+        let ids: Vec<String> = sessions.iter().map(|s| s.id.clone()).collect();
+        let session = sessions.get(crate::lastlogin::index_of(&ids, last.session()));
+
+        match session {
+            Some(s) => (username, s.exec.clone(), s.env()),
+            None => {
+                tracing::error!("no session to start; the fallback can only show a prompt");
+                (username, Vec::new(), Vec::new())
+            }
+        }
+    }
+
     fn run_shm(args: Args) -> Result<(), Box<dyn std::error::Error>> {
         // ---- Wayland connection ----
         let conn = Connection::connect_to_env()?;
@@ -224,13 +256,28 @@ mod linux {
             }
         }
 
+        // ---- Who to log in, and into what ----
+        let (username, session_cmd, session_env) = resolve_fallback_target(&args);
+        tracing::info!(
+            "software fallback will authenticate {username:?} into {:?}",
+            session_cmd.first()
+        );
+
         // ---- Build app state ----
-        let mut app = AppState::new(&conn, &globals, &qh, cfg, args.user.clone(), args.command.clone());
+        let mut app = AppState::new(
+            &conn,
+            &globals,
+            &qh,
+            cfg,
+            username.clone(),
+            session_cmd,
+            session_env,
+        );
 
         // ---- Connect to greetd ----
         match crate::greetd::GreetdClient::connect() {
             Ok(mut client) => {
-                match client.create_session(&args.user) {
+                match client.create_session(&username) {
                     Ok(resp) => {
                         app.greetd = Some(client);
                         app.handle_response_pub(resp);
