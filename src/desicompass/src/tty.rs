@@ -343,22 +343,17 @@ pub fn run(args: TtyArgs) -> Result<(), Box<dyn std::error::Error>> {
         })?;
 
     // ---- Startup command ------------------------------------------------
-    if let Some(cmd) = &args.startup_cmd {
-        info!("launching startup command: {cmd}");
-        match std::process::Command::new("/bin/sh")
-            .args(["-c", cmd])
-            .env("WAYLAND_DISPLAY", &socket_name)
-            .env("SICOMPASS_SESSION", "1")
-            .env_remove("DISPLAY")
-            .spawn()
-        {
-            Ok(child) => info!("startup command running as pid {}", child.id()),
-            Err(e) => error!("startup command {cmd:?} failed to start: {e}"),
-        }
-    }
+    // Spawned through `StartupChild` so the compositor comes down when its
+    // client does - see that module for the five seconds this used to cost at
+    // every login.
+    let mut startup =
+        crate::startup::StartupChild::spawn(args.startup_cmd.as_deref(), &socket_name);
 
     // ---- Main loop ------------------------------------------------------
     while state.running {
+        if startup.has_exited() {
+            state.running = false;
+        }
         render(&mut state);
         state.space.refresh();
         state.popups.cleanup();

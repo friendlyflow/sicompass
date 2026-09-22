@@ -32,6 +32,8 @@ mod keybindings;
 #[cfg(target_os = "linux")]
 mod layout;
 #[cfg(target_os = "linux")]
+mod startup;
+#[cfg(target_os = "linux")]
 mod state;
 #[cfg(all(target_os = "linux", feature = "tty"))]
 mod tty;
@@ -295,39 +297,17 @@ mod linux {
 
         // Optionally launch a startup program.
         //
-        // The socket name is handed to the child explicitly instead of being
-        // exported into our own environment: a process-wide `set_var` is
-        // `unsafe` under edition 2024 and would repoint every library in
-        // *this* process at our socket.
-        if let Some(cmd) = &args.startup_cmd {
-            info!("launching startup command: {cmd}");
-            match std::process::Command::new("/bin/sh")
-                .args(["-c", cmd])
-                .env("WAYLAND_DISPLAY", &socket_name)
-                // sicompass checks this and drops its self-drawn titlebar,
-                // which is unreachable here: no pointer exists to click it.
-                // Any other client ignores it.
-                .env("SICOMPASS_SESSION", "1")
-                // Drop the *host* session's DISPLAY. Without this a
-                // toolkit that can speak both protocols may quietly pick X11
-                // and render into the desktop we are nested in, instead of
-                // into us: the client looks healthy, the compositor stays
-                // empty, and nothing anywhere reports an error. SDL3 does
-                // exactly this. On a real TTY session there is no DISPLAY to
-                // begin with, so this only ever matters while developing
-                // nested - which is when it costs the most time.
-                .env_remove("DISPLAY")
-                .spawn()
-            {
-                Ok(child) => info!("startup command running as pid {}", child.id()),
-                // Never silent: on a bare TTY a startup command that failed to
-                // exec is a black screen with no other diagnosis available.
-                Err(e) => error!("startup command {cmd:?} failed to start: {e}"),
-            }
-        }
+        // Spawned through `StartupChild` so the compositor comes down when
+        // its client does - see that module for the five seconds this used to
+        // cost at every login.
+        let mut startup =
+            crate::startup::StartupChild::spawn(args.startup_cmd.as_deref(), &socket_name);
 
         let mut running = true;
         while running {
+            if startup.has_exited() {
+                running = false;
+            }
             let status = winit.dispatch_new_events(|event| match event {
                 WinitEvent::Resized { size, .. } => {
                     let mode = Mode {
