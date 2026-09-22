@@ -106,6 +106,27 @@ pub fn evaluate(mods: Mods, keysym: u32) -> BindingAction {
     }
 }
 
+/// The VT a keysym asks to switch to, if it is a VT-switch keysym.
+///
+/// `Ctrl+Alt+F1..F12` produce `XF86Switch_VT_1..12`, which is how every
+/// Wayland compositor is told to hand the display to another session. The
+/// compositor has to act on it: unlike on X, nothing below us implements the
+/// chord, so a compositor that ignores these keysyms simply traps the user.
+///
+/// Note for the caller: this must be matched against the **modified** keysym,
+/// not the raw Latin one used for the bindings above. `XF86Switch_VT_n` only
+/// exists at the Ctrl+Alt level of the function keys; the raw sym is plain
+/// `F1`, which would never match here.
+pub fn vt_switch_target(keysym: u32) -> Option<i32> {
+    const FIRST: u32 = keysyms::KEY_XF86Switch_VT_1;
+    const LAST: u32 = keysyms::KEY_XF86Switch_VT_12;
+    if (FIRST..=LAST).contains(&keysym) {
+        Some((keysym - FIRST) as i32 + 1)
+    } else {
+        None
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -235,6 +256,34 @@ mod tests {
         for sym in [keysyms::KEY_a, keysyms::KEY_z, keysyms::KEY_5] {
             assert_eq!(evaluate(sup(), sym), BindingAction::PassThrough);
         }
+    }
+
+    #[test]
+    fn vt_keysyms_map_to_their_vt_number() {
+        assert_eq!(vt_switch_target(keysyms::KEY_XF86Switch_VT_1), Some(1));
+        assert_eq!(vt_switch_target(keysyms::KEY_XF86Switch_VT_2), Some(2));
+        assert_eq!(vt_switch_target(keysyms::KEY_XF86Switch_VT_12), Some(12));
+    }
+
+    #[test]
+    fn ordinary_keysyms_are_not_vt_switches() {
+        for sym in [
+            keysyms::KEY_F1,
+            keysyms::KEY_F2,
+            keysyms::KEY_j,
+            keysyms::KEY_Escape,
+            0,
+        ] {
+            assert_eq!(vt_switch_target(sym), None, "{sym:#x}");
+        }
+    }
+
+    #[test]
+    fn the_vt_range_is_closed_at_both_ends() {
+        // One below VT_1 and one above VT_12 must not be mistaken for a
+        // switch: the neighbouring keysyms are other XF86 keys.
+        assert_eq!(vt_switch_target(keysyms::KEY_XF86Switch_VT_1 - 1), None);
+        assert_eq!(vt_switch_target(keysyms::KEY_XF86Switch_VT_12 + 1), None);
     }
 
     #[test]

@@ -68,6 +68,7 @@ use tracing::{error, info, warn};
 
 use crate::{
     gpu::Gpu,
+    keybindings,
     state::{ClientState, State},
 };
 
@@ -81,6 +82,9 @@ pub struct TtyArgs {
 
 /// The DRM side, owned by [`crate::gpu::Gpu::Tty`].
 pub struct TtyGpu {
+    /// Kept here so the keyboard handler can reach it: VT switching is a
+    /// session operation and the handler is only handed `&mut State`.
+    session: LibSeatSession,
     renderer: GlesRenderer,
     compositor: GbmDrmCompositor,
     damage_tracker: OutputDamageTracker,
@@ -194,6 +198,7 @@ pub fn run(args: TtyArgs) -> Result<(), Box<dyn std::error::Error>> {
 
     let damage_tracker = OutputDamageTracker::from_output(&output);
     let tty = TtyGpu {
+        session: session.clone(),
         renderer,
         compositor,
         damage_tracker,
@@ -434,10 +439,28 @@ fn handle_input(state: &mut State, event: InputEvent<LibinputInputBackend>) {
             serial,
             event.time_msec(),
             |app_state, modifiers, keysym| {
+                // Ctrl+Alt+F1..F12: hand the display to another session.
+                //
+                // Nothing below a Wayland compositor implements this, so a
+                // compositor that does not act on it leaves the user with no
+                // way off the screen but killing it. Matched on the
+                // *modified* sym: XF86Switch_VT_n exists only at the Ctrl+Alt
+                // level of the function keys, and the raw Latin sym used for
+                // our own bindings would only ever see plain F1.
+                if let Some(vt) = keybindings::vt_switch_target(keysym.modified_sym().raw()) {
+                    if let Gpu::Tty(tty) = &mut app_state.backend {
+                        match tty.session.change_vt(vt) {
+                            Ok(()) => info!("switching to vt {vt}"),
+                            Err(err) => warn!("could not switch to vt {vt}: {err}"),
+                        }
+                    }
+                    return FilterResult::Intercept(());
+                }
+
                 let Some(sym) = keysym.raw_latin_sym_or_raw_current_sym() else {
                     return FilterResult::Forward;
                 };
-                let mods = crate::keybindings::Mods {
+                let mods = keybindings::Mods {
                     logo: modifiers.logo,
                     shift: modifiers.shift,
                 };
