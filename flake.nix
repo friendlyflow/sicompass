@@ -728,26 +728,26 @@
       # Two steps on purpose, and the order matters on a machine someone
       # depends on:
       #
-      #   services.sicompass.enable = true;
-      #     Adds "Sicompass" to the session list the *existing* greeter
+      #   services.desicompass.enable = true;
+      #     Adds "Desicompass" to the session list the *existing* greeter
       #     offers. If the session fails to start you are returned to that
       #     greeter, so a broken session costs a login attempt and nothing
       #     more.
       #
-      #   services.sicompass.greeter.enable = true;
+      #   services.desicompass.greeter.enable = true;
       #     Replaces the greeter itself with loginsicompass. Only worth
       #     turning on once the session above is known to work, because a
       #     greeter that fails to start leaves no graphical way in at all -
       #     recovery is a VT and `nixos-rebuild --rollback`.
       nixosModules.default = { config, lib, pkgs, ... }:
         let
-          cfg = config.services.sicompass;
+          cfg = config.services.desicompass;
           packages = self.packages.${pkgs.stdenv.hostPlatform.system};
         in
         {
-          options.services.sicompass = {
+          options.services.desicompass = {
             enable = lib.mkEnableOption
-              "the sicompass session, offered by whichever greeter is configured";
+              "the desicompass session, offered by whichever greeter is configured";
 
             greeter.enable = lib.mkEnableOption
               "loginsicompass as the greetd greeter, replacing the current one";
@@ -789,13 +789,13 @@
               # arrives and is then mute to screen readers - for an
               # accessibility-first shell, a failure rather than a
               # degradation.
-              sessionPackage = pkgs.writeTextDir "share/wayland-sessions/sicompass.desktop" ''
+              sessionPackage = pkgs.writeTextDir "share/wayland-sessions/desicompass.desktop" ''
                 [Desktop Entry]
-                Name=Sicompass
+                Name=Desicompass
                 Comment=Use your whole computer from the keyboard, with no mouse needed
                 Exec=${pkgs.dbus}/bin/dbus-run-session ${packages.desicompass}/bin/desicompass --backend tty --xkb-layout ${cfg.xkbLayout} --startup-cmd '${packages.default}/bin/sicompass --session'
                 Type=Application
-                DesktopNames=Sicompass
+                DesktopNames=Desicompass
               '' // {
                 # NixOS requires anything in sessionPackages to declare the
                 # sessions it provides, and the name must match the .desktop
@@ -804,7 +804,7 @@
                 # is only lifted to the top level by mkDerivation - adding it
                 # with `//` to an already-built derivation leaves it nested
                 # where nothing looks for it.
-                providedSessions = [ "sicompass" ];
+                providedSessions = [ "desicompass" ];
               };
             in
             lib.mkIf cfg.enable (lib.mkMerge [
@@ -820,6 +820,24 @@
               environment.systemPackages = [
                 packages.desicompass
                 packages.default
+
+                # The session entry has to be here, not only in
+                # sessionPackages above.
+                #
+                # `services.displayManager.sessionPackages` collects entries
+                # into `sessionData.desktops`, a store path each display
+                # manager is expected to be pointed at. cosmic-greeter is not
+                # pointed at it: its nixpkgs module contains no reference to
+                # sessionData, sessionPackages or wayland-sessions at all. It
+                # scans a fixed list of directories instead, and the only one
+                # of those under our control is
+                # /run/current-system/sw/share/wayland-sessions - which is
+                # exactly what environment.systemPackages populates.
+                #
+                # Both are kept. sessionPackages is the correct mechanism and
+                # is what GDM, SDDM and LightDM consume; this is what makes
+                # the entry visible to a greeter that ignores it.
+                sessionPackage
               ];
             }
 
