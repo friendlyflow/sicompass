@@ -7,14 +7,28 @@
 //! no `wl_pointer`, windows are placed by the compositor, and every
 //! interaction is a key.
 //!
-//! ## Keybindings (Alt held)
-//! * `Alt+Esc`  — quit the compositor
-//! * `Alt+F1`   — cycle to the next window
+//! ## Keybindings (Super held)
+//!
+//! Super, not Alt: sicompass consumes Alt itself, and the right Alt is AltGr
+//! on most non-US layouts. See [`keybindings`] for the full reasoning.
+//!
+//! | Binding | Action |
+//! |---|---|
+//! | `Super+J` / `Super+K` | focus next / previous window |
+//! | `Super+H` / `Super+L` | focus left / right |
+//! | `Super+Shift+{H,J,K,L}` | move the focused window |
+//! | `Super+Tab` | focus the least recently used window |
+//! | `Super+M` | toggle Columns / Monocle |
+//! | `Super+Return` | spawn the terminal |
+//! | `Super+Shift+Q` | close the focused window |
+//! | `Super+Shift+E` | end the session (press twice) |
 
 #[cfg(target_os = "linux")]
 mod focus;
 #[cfg(target_os = "linux")]
 mod keybindings;
+#[cfg(target_os = "linux")]
+mod layout;
 #[cfg(target_os = "linux")]
 mod state;
 
@@ -34,7 +48,7 @@ mod linux {
             winit::{self, WinitEvent},
         },
         desktop::space::render_output,
-        input::keyboard::FilterResult,
+        input::keyboard::{FilterResult, XkbConfig},
         output::{Mode, Output, PhysicalProperties, Scale, Subpixel},
         reexports::{
             calloop::{
@@ -47,6 +61,7 @@ mod linux {
     };
     use tracing::{error, info, warn};
 
+    use crate::keybindings::Mods;
     use crate::state::{ClientState, State};
 
     // -----------------------------------------------------------------------
@@ -60,6 +75,24 @@ mod linux {
         /// Command to execute after the compositor starts (like tinywl -s).
         #[arg(short = 's', long)]
         startup_cmd: Option<String>,
+
+        /// XKB layout handed to every client, e.g. `be`, `us`, `fr`.
+        ///
+        /// Defaults to XKB_DEFAULT_LAYOUT, then to `us`. This is not
+        /// cosmetic: the compositor owns the keymap, so getting it wrong
+        /// leaves every client on a US layout no matter what the console or
+        /// the desktop is set to, and on a Belgian keyboard that costs you
+        /// `@`, `#`, `[`, `]`, `{` and `}`.
+        #[arg(long)]
+        xkb_layout: Option<String>,
+
+        /// XKB variant to pair with the layout.
+        #[arg(long)]
+        xkb_variant: Option<String>,
+
+        /// Command launched by the spawn binding (Super+Return).
+        #[arg(long, default_value = "foot")]
+        terminal: String,
     }
 
     pub fn main_impl() -> Result<(), Box<dyn std::error::Error>> {
@@ -120,7 +153,29 @@ mod linux {
         let mut damage_tracker = OutputDamageTracker::from_output(&output);
         let mut state = State::new(&dh, event_loop.get_signal(), output.clone());
 
-        let keyboard = state.seat.add_keyboard(Default::default(), 200, 25)?;
+        // The keymap the compositor compiles is the keymap every client
+        // gets; `XkbConfig::default()` means US, silently, on any machine.
+        let layout = args
+            .xkb_layout
+            .clone()
+            .or_else(|| std::env::var("XKB_DEFAULT_LAYOUT").ok())
+            .unwrap_or_default();
+        let variant = args
+            .xkb_variant
+            .clone()
+            .or_else(|| std::env::var("XKB_DEFAULT_VARIANT").ok())
+            .unwrap_or_default();
+        let xkb_config = XkbConfig {
+            layout: &layout,
+            variant: &variant,
+            ..Default::default()
+        };
+        info!(
+            "xkb layout={:?} variant={:?}",
+            if layout.is_empty() { "us (default)" } else { &layout },
+            variant
+        );
+        let keyboard = state.seat.add_keyboard(xkb_config, 200, 25)?;
         // No `add_pointer()`. A seat with no wl_pointer is the honest
         // advertisement of a cursorless compositor, and it means a client's
         // pointer-driven paths (sicompass's SDL hit test, for one) can never
@@ -157,6 +212,8 @@ mod linux {
         )?;
 
         info!("WAYLAND_DISPLAY={socket_name}");
+        state.socket_name = socket_name.clone();
+        state.spawn_cmd = args.terminal.clone();
 
         // Optionally launch a startup program.
         //
@@ -198,11 +255,19 @@ mod linux {
                         0.into(),
                         0,
                         |app_state, modifiers, keysym| {
-                            if modifiers.alt {
-                                let sym = keysym.modified_sym().raw();
-                                return crate::state::apply_keybinding(app_state, sym);
-                            }
-                            FilterResult::Forward
+                            // The *Latin* sym for the physical key, not the
+                            // modified one: Shift would turn `j` into `J`,
+                            // and a non-Latin layout into something else
+                            // again, so matching the modified sym would make
+                            // every binding layout-dependent.
+                            let Some(sym) = keysym.raw_latin_sym_or_raw_current_sym() else {
+                                return FilterResult::Forward;
+                            };
+                            let mods = Mods {
+                                logo: modifiers.logo,
+                                shift: modifiers.shift,
+                            };
+                            crate::state::apply_keybinding(app_state, mods, sym.raw())
                         },
                     );
                 }

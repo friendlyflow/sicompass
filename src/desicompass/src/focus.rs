@@ -45,10 +45,12 @@ impl FocusStack {
     }
 
     /// Number of windows in the stack.
+    #[allow(dead_code)] // part of the tested API; no caller needs it yet
     pub fn len(&self) -> usize {
         self.windows.len()
     }
 
+    #[allow(dead_code)] // part of the tested API; no caller needs it yet
     pub fn is_empty(&self) -> bool {
         self.windows.is_empty()
     }
@@ -69,6 +71,7 @@ impl FocusStack {
     }
 
     /// Ordered view of the stack, frontmost first.
+    #[allow(dead_code)] // part of the tested API; no caller needs it yet
     pub fn as_slice(&self) -> &[WindowId] {
         &self.windows
     }

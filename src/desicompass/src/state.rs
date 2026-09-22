@@ -23,7 +23,7 @@ use smithay::{
             Client, DisplayHandle, Resource,
         },
     },
-    utils::{Logical, Serial, Size},
+    utils::{Logical, Rectangle, Serial, Size},
     wayland::{
         buffer::BufferHandler,
         compositor::{
@@ -45,9 +45,11 @@ use smithay::{
     },
 };
 use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel;
-use tracing::debug;
+use tracing::{debug, error, info, warn};
 
-use crate::keybindings::{self, BindingAction};
+use crate::focus::{FocusStack, WindowId};
+use crate::keybindings::{self, BindingAction, Mods};
+use crate::layout::{Dir, Tiler};
 
 // ---------------------------------------------------------------------------
 // ClientState
@@ -96,6 +98,24 @@ pub struct State {
     pub space: Space<Window>,
     pub popups: PopupManager,
     pub output: Output,
+
+    // ---- Window management ----
+    /// Compositor-assigned ids, paired with their window. The id is what the
+    /// layout and the focus stack speak in; the `Window` never leaves here.
+    pub windows: Vec<(WindowId, Window)>,
+    /// Stable spatial order and geometry.
+    pub tiler: Tiler,
+    /// Most-recently-used order, for "what gets focus now" questions.
+    pub focus: FocusStack,
+    next_id: usize,
+    /// Set by the first quit chord, cleared by any other binding.
+    quit_armed: bool,
+
+    // ---- Spawning ----
+    /// Command run by the spawn binding.
+    pub spawn_cmd: String,
+    /// Our socket name, handed to spawned children.
+    pub socket_name: String,
 }
 
 impl State {
@@ -125,6 +145,13 @@ impl State {
             running: true,
             space,
             popups: PopupManager::default(),
+            windows: Vec::new(),
+            tiler: Tiler::new(),
+            focus: FocusStack::new(),
+            next_id: 0,
+            quit_armed: false,
+            spawn_cmd: String::new(),
+            socket_name: String::new(),
             output,
         }
     }
@@ -159,23 +186,76 @@ impl State {
             .cloned()
     }
 
-    /// Give every mapped window the whole output.
+    /// The window owning `id`.
+    pub fn window(&self, id: WindowId) -> Option<&Window> {
+        self.windows.iter().find(|(w, _)| *w == id).map(|(_, win)| win)
+    }
+
+    /// The id of the window owning `surface`.
+    pub fn id_for_surface(&self, surface: &WlSurface) -> Option<WindowId> {
+        self.windows
+            .iter()
+            .find(|(_, w)| w.toplevel().is_some_and(|t| t.wl_surface() == surface))
+            .map(|(id, _)| *id)
+    }
+
+    /// Register a freshly created toplevel and give it the focus.
+    pub fn add_window(&mut self, window: Window) -> WindowId {
+        let id = WindowId(self.next_id);
+        self.next_id += 1;
+
+        self.tiler.insert_after_focused(id, self.focus.focused());
+        self.windows.push((id, window.clone()));
+        self.space.map_element(window, (0, 0), false);
+
+        self.relayout();
+        self.focus_id(id);
+        id
+    }
+
+    /// Forget a window that has gone away, and hand focus to the next in the
+    /// most-recently-used order.
+    pub fn remove_window(&mut self, id: WindowId) {
+        if let Some(window) = self.window(id).cloned() {
+            self.space.unmap_elem(&window);
+        }
+        self.windows.retain(|(w, _)| *w != id);
+        self.tiler.remove(id);
+        self.focus.remove(id);
+
+        self.relayout();
+        if let Some(next) = self.focus.focused() {
+            self.focus_id(next);
+        }
+    }
+
+    /// Give every window the geometry the layout assigns it.
     ///
-    /// Phase 2 is deliberately monocle: one window fills the screen and the
-    /// rest sit behind it. The real layout arrives with `layout.rs`; what
-    /// matters here is that a configure is always sent and is always
-    /// non-zero.
+    /// Every configure this compositor sends passes through here, which is
+    /// why the size can never be zero: sicompass's `recreate_swapchain`
+    /// loops on `size_in_pixels()` with a 16ms sleep and no exit condition,
+    /// so a 0x0 configure would spin its main thread forever.
     pub fn relayout(&mut self) {
-        let size = self.output_size();
-        let windows: Vec<Window> = self.space.elements().cloned().collect();
-        for window in windows {
+        if self.tiler.is_empty() {
+            return;
+        }
+        let area = Rectangle::new((0, 0).into(), self.output_size());
+        debug!(
+            "relayout: {:?}, {} window(s), order {:?}",
+            self.tiler.layout(),
+            self.tiler.len(),
+            self.tiler.order()
+        );
+        for (id, rect) in self.tiler.arrange(area) {
+            let Some(window) = self.window(id).cloned() else {
+                continue;
+            };
             if let Some(toplevel) = window.toplevel() {
                 toplevel.with_pending_state(|state| {
-                    state.size = Some(size);
-                    state.bounds = Some(size);
-                    // Tell the client its edges are not its own. Without
-                    // this a well-behaved client assumes it may pick its own
-                    // size and draws decorations for edges it cannot move.
+                    state.size = Some(rect.size);
+                    state.bounds = Some(area.size);
+                    // Tell the client its edges are not its own, which is the
+                    // standard way to say "do not draw resize handles here".
                     state.states.set(xdg_toplevel::State::TiledLeft);
                     state.states.set(xdg_toplevel::State::TiledRight);
                     state.states.set(xdg_toplevel::State::TiledTop);
@@ -183,35 +263,86 @@ impl State {
                 });
                 toplevel.send_pending_configure();
             }
-            self.space.map_element(window, (0, 0), false);
+            self.space.map_element(window, rect.loc, false);
         }
     }
 
-    /// Focus `window`: raise it, mark it active, hand it the keyboard.
-    pub fn focus_window(&mut self, window: &Window) {
-        for other in self.space.elements() {
-            if let Some(toplevel) = other.toplevel() {
-                let active = other == window;
+    /// Focus a window: mark it active, raise it, hand it the keyboard.
+    pub fn focus_id(&mut self, id: WindowId) {
+        let Some(target) = self.window(id).cloned() else {
+            return;
+        };
+
+        let windows: Vec<(WindowId, Window)> = self.windows.clone();
+        for (other_id, window) in &windows {
+            if let Some(toplevel) = window.toplevel() {
                 toplevel.with_pending_state(|state| {
-                    if active {
+                    if *other_id == id {
                         state.states.set(xdg_toplevel::State::Activated);
                     } else {
                         state.states.unset(xdg_toplevel::State::Activated);
                     }
                 });
-            }
-        }
-        let pending: Vec<Window> = self.space.elements().cloned().collect();
-        for w in pending {
-            if let Some(toplevel) = w.toplevel() {
                 toplevel.send_pending_configure();
             }
         }
 
-        self.space.raise_element(window, true);
+        self.space.raise_element(&target, true);
+        self.focus.push_front(id);
+
         if let Some(keyboard) = self.seat.get_keyboard() {
-            let surface = window.toplevel().map(|t| t.wl_surface().clone());
+            let surface = target.toplevel().map(|t| t.wl_surface().clone());
             keyboard.set_focus(self, surface, Serial::from(0));
+        }
+    }
+
+    /// Ask the focused window to close. The client decides what that means,
+    /// and may refuse.
+    fn close_focused(&mut self) {
+        if let Some(toplevel) = self
+            .focus
+            .focused()
+            .and_then(|id| self.window(id))
+            .and_then(|w| w.toplevel())
+        {
+            toplevel.send_close();
+        }
+    }
+
+    /// Launch the configured command as a new client.
+    fn spawn(&self) {
+        if self.spawn_cmd.is_empty() {
+            warn!("spawn binding pressed but no command is configured");
+            return;
+        }
+        info!("spawning {}", self.spawn_cmd);
+        match std::process::Command::new("/bin/sh")
+            .args(["-c", &self.spawn_cmd])
+            .env("WAYLAND_DISPLAY", &self.socket_name)
+            .spawn()
+        {
+            Ok(child) => debug!("spawned pid {}", child.id()),
+            Err(e) => error!("failed to spawn {:?}: {e}", self.spawn_cmd),
+        }
+    }
+
+    /// Two-step quit: the first chord arms, the second ends the session.
+    ///
+    /// A single chord is too easy to hit by accident on a keyboard-only
+    /// shell, where an accidental logout costs the user everything unsaved
+    /// and there is no pointer to undo with.
+    ///
+    /// The arming is currently only logged. On a real session the user needs
+    /// to *hear* it, which needs the announcement channel that arrives with
+    /// the accessibility work.
+    fn request_quit(&mut self) {
+        if self.quit_armed {
+            info!("quit confirmed");
+            self.running = false;
+            self.loop_signal.stop();
+        } else {
+            self.quit_armed = true;
+            warn!("press the quit chord again to end the session");
         }
     }
 }
@@ -220,33 +351,86 @@ impl State {
 // Keybinding handling
 // ---------------------------------------------------------------------------
 
-/// Process a compositor-level keybinding.  Returns `FilterResult::Intercept`
-/// when the compositor consumed the key, `FilterResult::Forward` otherwise.
-pub fn apply_keybinding(state: &mut State, keysym: u32) -> FilterResult<()> {
-    match keybindings::evaluate(keysym) {
-        BindingAction::Quit => {
-            state.running = false;
-            state.loop_signal.stop();
-            FilterResult::Intercept(())
-        }
-        BindingAction::CycleWindows => {
-            cycle_focus(state);
-            FilterResult::Intercept(())
-        }
-        BindingAction::PassThrough => FilterResult::Forward,
+/// Process a compositor-level keybinding.
+///
+/// Returns `FilterResult::Intercept` when the compositor consumed the key and
+/// `FilterResult::Forward` when it belongs to the focused client.
+pub fn apply_keybinding(state: &mut State, mods: Mods, keysym: u32) -> FilterResult<()> {
+    let action = keybindings::evaluate(mods, keysym);
+
+    // Any binding other than the quit chord disarms a pending quit, so the
+    // two presses have to be consecutive.
+    if !matches!(action, BindingAction::Quit | BindingAction::PassThrough) {
+        state.quit_armed = false;
     }
+
+    let focused = state.focus.focused();
+
+    match action {
+        BindingAction::PassThrough => return FilterResult::Forward,
+
+        BindingAction::FocusNext => {
+            if let Some(next) = focused.and_then(|id| state.tiler.next(id)) {
+                state.focus_id(next);
+            }
+        }
+        BindingAction::FocusPrev => {
+            if let Some(prev) = focused.and_then(|id| state.tiler.prev(id)) {
+                state.focus_id(prev);
+            }
+        }
+        BindingAction::FocusLeft => {
+            if let Some(id) = focused.and_then(|id| state.tiler.neighbour(id, Dir::Left)) {
+                state.focus_id(id);
+            }
+        }
+        BindingAction::FocusRight => {
+            if let Some(id) = focused.and_then(|id| state.tiler.neighbour(id, Dir::Right)) {
+                state.focus_id(id);
+            }
+        }
+
+        BindingAction::MoveNext => swap_focused_with(state, focused.and_then(|id| state.tiler.next(id))),
+        BindingAction::MovePrev => swap_focused_with(state, focused.and_then(|id| state.tiler.prev(id))),
+        BindingAction::MoveLeft => {
+            swap_focused_with(state, focused.and_then(|id| state.tiler.neighbour(id, Dir::Left)))
+        }
+        BindingAction::MoveRight => {
+            swap_focused_with(state, focused.and_then(|id| state.tiler.neighbour(id, Dir::Right)))
+        }
+
+        BindingAction::CycleRecent => {
+            if let Some(id) = state.focus.cycle() {
+                state.focus_id(id);
+            }
+        }
+
+        BindingAction::ToggleLayout => {
+            let layout = state.tiler.toggle_layout();
+            info!("layout: {layout:?}");
+            state.relayout();
+            // Monocle stacks every window in the same place, so the focused
+            // one has to come back to the top.
+            if let Some(id) = state.focus.focused() {
+                state.focus_id(id);
+            }
+        }
+
+        BindingAction::CloseWindow => state.close_focused(),
+        BindingAction::Spawn => state.spawn(),
+        BindingAction::Quit => state.request_quit(),
+    }
+
+    FilterResult::Intercept(())
 }
 
-/// Rotate focus to the window that was least recently focused.
-fn cycle_focus(state: &mut State) {
-    // `elements()` is bottom-to-top, so the first entry is the window that
-    // has been buried longest.
-    let target = state.space.elements().next().cloned();
-    if state.space.elements().len() < 2 {
+/// Exchange the focused window with `other`, then re-tile.
+fn swap_focused_with(state: &mut State, other: Option<WindowId>) {
+    let (Some(focused), Some(other)) = (state.focus.focused(), other) else {
         return;
-    }
-    if let Some(window) = target {
-        state.focus_window(&window);
+    };
+    if state.tiler.swap(focused, other) {
+        state.relayout();
     }
 }
 
@@ -335,19 +519,12 @@ impl XdgShellHandler for State {
 
     fn new_toplevel(&mut self, surface: ToplevelSurface) {
         let window = Window::new_wayland_window(surface);
-        self.space.map_element(window.clone(), (0, 0), false);
-        self.relayout();
-        self.focus_window(&window);
+        self.add_window(window);
     }
 
     fn toplevel_destroyed(&mut self, surface: ToplevelSurface) {
-        if let Some(window) = self.window_for_surface(surface.wl_surface()) {
-            self.space.unmap_elem(&window);
-        }
-        self.relayout();
-        // Hand focus to whatever is left on top.
-        if let Some(next) = self.space.elements().last().cloned() {
-            self.focus_window(&next);
+        if let Some(id) = self.id_for_surface(surface.wl_surface()) {
+            self.remove_window(id);
         }
     }
 
