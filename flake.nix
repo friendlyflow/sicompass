@@ -797,9 +797,14 @@
                 Type=Application
                 DesktopNames=Sicompass
               '' // {
-                # NixOS asserts that anything in sessionPackages declares the
-                # sessions it provides, and the name must match the .desktop.
-                passthru.providedSessions = [ "sicompass" ];
+                # NixOS requires anything in sessionPackages to declare the
+                # sessions it provides, and the name must match the .desktop
+                # file. Set at the top level, not under `passthru`: the option
+                # type tests `p ? providedSessions` directly, and `passthru`
+                # is only lifted to the top level by mkDerivation - adding it
+                # with `//` to an already-built derivation leaves it nested
+                # where nothing looks for it.
+                providedSessions = [ "sicompass" ];
               };
             in
             lib.mkIf cfg.enable (lib.mkMerge [
