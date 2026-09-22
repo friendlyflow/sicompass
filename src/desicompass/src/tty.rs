@@ -64,7 +64,7 @@ use smithay::{
     utils::{DeviceFd, Transform},
     wayland::dmabuf::DmabufFeedbackBuilder,
 };
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 use crate::{
     gpu::Gpu,
@@ -440,6 +440,26 @@ fn handle_input(state: &mut State, event: InputEvent<LibinputInputBackend>) {
             serial,
             event.time_msec(),
             |app_state, modifiers, keysym| {
+                // Diagnostics for chords only — never for ordinary typing.
+                //
+                // A TTY has no debugger and no scrollback, so when a chord
+                // does nothing the log is the only way to tell "the key never
+                // arrived" from "it arrived as a different keysym". Gated on
+                // a modifier combination that could be a compositor binding,
+                // so that passwords and prose are never written to a log.
+                if modifiers.logo || (modifiers.ctrl && modifiers.alt) {
+                    debug!(
+                        "chord: raw={:?} modified={:?} logo={} ctrl={} alt={} shift={} pressed={}",
+                        keysym.raw_latin_sym_or_raw_current_sym().map(|s| s.raw()),
+                        keysym.modified_sym().raw(),
+                        modifiers.logo,
+                        modifiers.ctrl,
+                        modifiers.alt,
+                        modifiers.shift,
+                        pressed,
+                    );
+                }
+
                 // Ctrl+Alt+F1..F12: hand the display to another session.
                 //
                 // Nothing below a Wayland compositor implements this, so a
