@@ -490,7 +490,15 @@ pub fn main_loop(app: &mut AppState) {
         // Overlay the custom titlebar controls on top of whatever update_view
         // rendered (every render path has already begun the passes; the submit
         // happens below in draw_frame).
-        draw_window_controls(app);
+        //
+        // Skipped when sicompass *is* the session: desicompass is cursorless,
+        // so there is no pointer to click these with, and a tiling compositor
+        // has nothing to minimise to and no other window to restore from. The
+        // row would be unreachable decoration costing vertical space that
+        // matters at tile sizes. Off by default; see `session_mode`.
+        if !crate::session_mode::is_session_mode() {
+            draw_window_controls(app);
+        }
 
         // ---- Update accessibility tree (no-op when no AT is active) ---------
         if let Some(adapter) = app.accesskit_adapter.as_mut() {

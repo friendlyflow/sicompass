@@ -10,8 +10,13 @@ use std::time::Instant;
 
 use smithay::{
     backend::renderer::utils::on_commit_buffer_handler,
-    delegate_compositor, delegate_data_device, delegate_output, delegate_seat, delegate_shm,
-    delegate_xdg_shell,
+    backend::{
+        allocator::dmabuf::Dmabuf,
+        renderer::{gles::GlesRenderer, ImportDma},
+        winit::WinitGraphicsBackend,
+    },
+    delegate_compositor, delegate_data_device, delegate_dmabuf, delegate_output, delegate_seat,
+    delegate_shm, delegate_xdg_shell,
     desktop::{PopupKind, PopupManager, Space, Window},
     input::{keyboard::FilterResult, pointer::CursorImageStatus, Seat, SeatHandler, SeatState},
     output::Output,
@@ -26,6 +31,7 @@ use smithay::{
     utils::{Logical, Rectangle, Serial, Size},
     wayland::{
         buffer::BufferHandler,
+        dmabuf::{DmabufGlobal, DmabufHandler, DmabufState, ImportNotifier},
         compositor::{
             get_parent, is_sync_subsurface, with_states, CompositorClientState, CompositorHandler,
             CompositorState,
@@ -111,6 +117,13 @@ pub struct State {
     /// Set by the first quit chord, cleared by any other binding.
     quit_armed: bool,
 
+    // ---- Rendering ----
+    /// The GPU side. It lives here rather than in the main loop because
+    /// `DmabufHandler::dmabuf_imported` is handed only `&mut State` and has
+    /// to reach the renderer to validate a client's buffer.
+    pub backend: WinitGraphicsBackend<GlesRenderer>,
+    pub dmabuf_state: DmabufState,
+
     // ---- Spawning ----
     /// Command run by the spawn binding.
     pub spawn_cmd: String,
@@ -119,7 +132,12 @@ pub struct State {
 }
 
 impl State {
-    pub fn new(display: &DisplayHandle, loop_signal: LoopSignal, output: Output) -> Self {
+    pub fn new(
+        display: &DisplayHandle,
+        loop_signal: LoopSignal,
+        output: Output,
+        backend: WinitGraphicsBackend<GlesRenderer>,
+    ) -> Self {
         let compositor_state = CompositorState::new::<Self>(display);
         let xdg_shell_state = XdgShellState::new::<Self>(display);
         let shm_state = ShmState::new::<Self>(display, vec![]);
@@ -150,6 +168,8 @@ impl State {
             focus: FocusStack::new(),
             next_id: 0,
             quit_armed: false,
+            backend,
+            dmabuf_state: DmabufState::new(),
             spawn_cmd: String::new(),
             socket_name: String::new(),
             output,
@@ -319,6 +339,11 @@ impl State {
         match std::process::Command::new("/bin/sh")
             .args(["-c", &self.spawn_cmd])
             .env("WAYLAND_DISPLAY", &self.socket_name)
+            .env("SICOMPASS_SESSION", "1")
+            // See the same call in main.rs: a client that inherits the host's
+            // DISPLAY may render into the desktop we are nested in instead of
+            // into us, silently.
+            .env_remove("DISPLAY")
             .spawn()
         {
             Ok(child) => debug!("spawned pid {}", child.id()),
@@ -665,3 +690,40 @@ impl ServerDndGrabHandler for State {
 }
 
 delegate_data_device!(State);
+
+// ---------------------------------------------------------------------------
+// Dmabuf
+// ---------------------------------------------------------------------------
+
+// Without `zwp_linux_dmabuf_v1` a hardware Vulkan client cannot present at
+// all: Mesa's Wayland WSI only falls back to wl_shm for software drivers, so
+// a real ICD reports the surface unsupported and the client dies. sicompass
+// is exactly such a client, and so is vkcube, which segfaults outright rather
+// than reporting it.
+impl DmabufHandler for State {
+    fn dmabuf_state(&mut self) -> &mut DmabufState {
+        &mut self.dmabuf_state
+    }
+
+    fn dmabuf_imported(
+        &mut self,
+        _global: &DmabufGlobal,
+        dmabuf: Dmabuf,
+        notifier: ImportNotifier,
+    ) {
+        // Import it now rather than at render time, so a client that hands us
+        // a buffer we cannot use is told immediately instead of showing a
+        // blank window.
+        match self.backend.renderer().import_dmabuf(&dmabuf, None) {
+            Ok(_) => {
+                let _ = notifier.successful::<State>();
+            }
+            Err(err) => {
+                debug!("rejecting client dmabuf: {err}");
+                notifier.failed();
+            }
+        }
+    }
+}
+
+delegate_dmabuf!(State);

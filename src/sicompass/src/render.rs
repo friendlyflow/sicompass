@@ -909,7 +909,10 @@ pub fn build_app() -> Result<AppState, SiError> {
     // restores drag/resize via `set_hit_test` below. `resizable()` is kept so
     // SDL still honours the resize hit-test results.
     wb.vulkan().resizable().borderless().hidden();
-    if crate::programs::read_maximized() {
+    // In session mode the compositor owns the geometry and configures every
+    // window itself, so a remembered "maximized" is both meaningless and a
+    // second opinion about size that it would immediately override.
+    if crate::programs::read_maximized() && !crate::session_mode::is_session_mode() {
         wb.maximized();
     }
     // Enable high-pixel-density backbuffer so SDL honours the OS display

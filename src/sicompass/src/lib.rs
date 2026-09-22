@@ -24,6 +24,7 @@ pub mod programs;
 pub mod provider;
 pub mod rectangle;
 pub mod shaders;
+pub mod session_mode;
 pub mod shortcuts;
 pub mod start_menu;
 pub mod state;

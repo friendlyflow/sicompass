@@ -25,7 +25,6 @@ dist = false
 # default-on `tty` would fail those legs the moment it exists. Build the
 # session binary with `cargo build -p desicompass --features tty`.
 tty = [
-    "smithay/backend_drm",
     "smithay/backend_gbm",
     "smithay/backend_libinput",
     "smithay/backend_udev",
@@ -41,6 +40,13 @@ tty = [
 # use_system_lib — link against system wayland/xkb C libraries.
 # desktop        — Space + Window layout helpers.
 # wayland_frontend — server-side Wayland protocol implementations.
+# backend_drm    — not for the TTY backend (that is the `tty` feature below),
+#                  but for `DrmNode`. Advertising zwp_linux_dmabuf_v1 means
+#                  telling clients which device to allocate on, and the
+#                  device id comes from `EGLDevice::try_get_render_node`,
+#                  which is gated on this feature. It pulls the `drm` and
+#                  `drm-ffi` crates only — no system library, and the CI
+#                  runner already installs libdrm-dev.
 smithay = { version = "0.7", default-features = false, features = [
     "desktop",
     "wayland_frontend",
@@ -48,6 +54,7 @@ smithay = { version = "0.7", default-features = false, features = [
     "backend_egl",
     "renderer_gl",
     "use_system_lib",
+    "backend_drm",
 ] }
 
 # Logging

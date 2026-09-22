@@ -48,7 +48,12 @@ mod linux {
             winit::{self, WinitEvent},
         },
         desktop::space::render_output,
+        backend::{
+            egl::EGLDevice,
+            renderer::ImportDma,
+        },
         input::keyboard::{FilterResult, XkbConfig},
+        wayland::dmabuf::DmabufFeedbackBuilder,
         output::{Mode, Output, PhysicalProperties, Scale, Subpixel},
         reexports::{
             calloop::{
@@ -119,7 +124,7 @@ mod linux {
         // socket makes winit connect to us — and we only start serving
         // clients once this returns. The compositor then looks healthy,
         // process alive and socket present, and answers nobody.
-        let (mut backend, mut winit) = winit::init::<GlesRenderer>()?;
+        let (backend, mut winit) = winit::init::<GlesRenderer>()?;
 
         // One output, sized to the winit window.
         //
@@ -151,7 +156,41 @@ mod linux {
         output.set_preferred(mode);
 
         let mut damage_tracker = OutputDamageTracker::from_output(&output);
-        let mut state = State::new(&dh, event_loop.get_signal(), output.clone());
+        let mut state = State::new(&dh, event_loop.get_signal(), output.clone(), backend);
+
+        // Advertise zwp_linux_dmabuf_v1 with per-surface feedback.
+        //
+        // This is what lets a hardware Vulkan client present. Mesa's Wayland
+        // WSI only falls back to wl_shm for software drivers, so without this
+        // global a real ICD reports every surface unsupported: vkcube
+        // segfaults and sicompass exits. Version 4 (what
+        // `create_global_with_default_feedback` creates) covers both the
+        // modifier negotiation wsi_wl wants from v3 and the per-surface
+        // feedback it wants from v4.
+        //
+        // The device we name has to be the one the client will allocate on,
+        // which on a single-GPU machine is trivially the same node we render
+        // with. On a hybrid laptop this is the first thing to get wrong.
+        let render_node = EGLDevice::device_for_display(state.backend.renderer().egl_context().display())
+            .ok()
+            .and_then(|device| device.try_get_render_node().ok().flatten());
+        match render_node {
+            Some(node) => {
+                let formats: Vec<_> = state.backend.renderer().dmabuf_formats().iter().copied().collect();
+                info!(
+                    "advertising zwp_linux_dmabuf_v1 on {:?} with {} formats",
+                    node.dev_path().unwrap_or_default(),
+                    formats.len()
+                );
+                let feedback = DmabufFeedbackBuilder::new(node.dev_id(), formats).build()?;
+                let _dmabuf_global = state
+                    .dmabuf_state
+                    .create_global_with_default_feedback::<State>(&dh, &feedback);
+            }
+            // Not fatal: shm clients still work, which is most of the test
+            // suite. Hardware Vulkan clients will not.
+            None => warn!("no DRM render node found; dmabuf is unavailable and GPU clients cannot present"),
+        }
 
         // The keymap the compositor compiles is the keymap every client
         // gets; `XkbConfig::default()` means US, silently, on any machine.
@@ -226,6 +265,19 @@ mod linux {
             match std::process::Command::new("/bin/sh")
                 .args(["-c", cmd])
                 .env("WAYLAND_DISPLAY", &socket_name)
+                // sicompass checks this and drops its self-drawn titlebar,
+                // which is unreachable here: no pointer exists to click it.
+                // Any other client ignores it.
+                .env("SICOMPASS_SESSION", "1")
+                // Drop the *host* session's DISPLAY. Without this a
+                // toolkit that can speak both protocols may quietly pick X11
+                // and render into the desktop we are nested in, instead of
+                // into us: the client looks healthy, the compositor stays
+                // empty, and nothing anywhere reports an error. SDL3 does
+                // exactly this. On a real TTY session there is no DISPLAY to
+                // begin with, so this only ever matters while developing
+                // nested - which is when it costs the most time.
+                .env_remove("DISPLAY")
                 .spawn()
             {
                 Ok(child) => info!("startup command running as pid {}", child.id()),
@@ -282,40 +334,54 @@ mod linux {
             }
 
             // ---- Render ----
-            let age = backend.buffer_age().unwrap_or(0);
-            let render_result = {
-                let (renderer, mut framebuffer) = backend.bind()?;
-                render_output::<_, WaylandSurfaceRenderElement<GlesRenderer>, _, _>(
-                    &state.output,
-                    renderer,
-                    &mut framebuffer,
-                    1.0,
-                    age,
-                    [&state.space],
-                    &[],
-                    &mut damage_tracker,
-                    [0.0, 0.0, 0.0, 1.0],
-                )
-                .map(|res| res.damage.cloned())
-            };
+            //
+            // Destructured rather than reached through `state.`, so the
+            // renderer (&mut) and the space (&) are borrows of two disjoint
+            // fields instead of two borrows of the whole struct.
+            {
+                let State {
+                    backend,
+                    space,
+                    output,
+                    start_time,
+                    ..
+                } = &mut state;
 
-            match render_result {
-                Ok(damage) => {
-                    backend.submit(damage.as_deref())?;
+                let age = backend.buffer_age().unwrap_or(0);
+                let render_result = {
+                    let (renderer, mut framebuffer) = backend.bind()?;
+                    render_output::<_, WaylandSurfaceRenderElement<GlesRenderer>, _, _>(
+                        output,
+                        renderer,
+                        &mut framebuffer,
+                        1.0,
+                        age,
+                        [&*space],
+                        &[],
+                        &mut damage_tracker,
+                        [0.0, 0.0, 0.0, 1.0],
+                    )
+                    .map(|res| res.damage.cloned())
+                };
 
-                    // Frame callbacks. Without these a client draws exactly
-                    // one frame and then waits forever for permission to draw
-                    // the next — the compositor looks like it has frozen
-                    // every window on screen.
-                    let now = state.start_time.elapsed();
-                    let output = state.output.clone();
-                    state.space.elements().for_each(|window| {
-                        window.send_frame(&output, now, Some(Duration::ZERO), |_, _| {
-                            Some(output.clone())
+                match render_result {
+                    Ok(damage) => {
+                        backend.submit(damage.as_deref())?;
+
+                        // Frame callbacks. Without these a client draws
+                        // exactly one frame and then waits forever for
+                        // permission to draw the next — the compositor looks
+                        // like it has frozen every window on screen.
+                        let now = start_time.elapsed();
+                        let out = output.clone();
+                        space.elements().for_each(|window| {
+                            window.send_frame(&out, now, Some(Duration::ZERO), |_, _| {
+                                Some(out.clone())
+                            });
                         });
-                    });
+                    }
+                    Err(err) => error!("render failed: {err}"),
                 }
-                Err(err) => error!("render failed: {err}"),
             }
 
             state.space.refresh();
