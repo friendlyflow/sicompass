@@ -2,7 +2,7 @@
 //!
 //! When the user holds Alt and presses a key, the compositor intercepts it
 //! before forwarding it to the focused client.  This mirrors
-//! `handle_keybinding()` in `src/desicompass/main.c`.
+//! `handle_keybinding()` in `src/desicompass-c/main.c`.
 //!
 //! Keeping this logic in its own module makes it trivially unit-testable.
 
@@ -20,7 +20,7 @@ pub enum BindingAction {
 /// Evaluate a keysym that was pressed while Alt was held.
 ///
 /// Returns the [`BindingAction`] for the compositor to execute.  Mirrors
-/// `handle_keybinding()` in `src/desicompass/main.c`.
+/// `handle_keybinding()` in `src/desicompass-c/main.c`.
 ///
 /// # Arguments
 /// * `keysym` — the XKB keysym value (use the constants from `xkbcommon-sys`

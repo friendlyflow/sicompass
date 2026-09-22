@@ -1,6 +1,6 @@
 //! loginsicompass — greetd login screen entry point.
 //!
-//! Rust port of `src/loginsicompass/main.c`.
+//! Rust port of `src/loginsicompass-c/main.c`.
 //!
 //! Linux-only: connects to the Wayland compositor specified by `WAYLAND_DISPLAY`,
 //! shows a full-screen login window, authenticates via greetd, and

@@ -1,13 +1,37 @@
 [package]
+publish = false  # internal crate, never published to crates.io
 name = "desicompass"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "desicompass — Wayland compositor (Rust/smithay port of src/desicompass/)"
+description = "desicompass — Wayland compositor (Rust/smithay port of src/desicompass-c/)"
 
 [[bin]]
 name = "desicompass"
 path = "src/main.rs"
+
+# cargo-dist discovers every `[[bin]]` in the workspace, and
+# `dist-workspace.toml` targets Windows and both macOS triples. This is a
+# Linux-only compositor, so a release run must not try to build or ship a
+# `desicompass.exe`.
+[package.metadata.dist]
+dist = false
+
+[features]
+# The TTY/DRM backend, off by default on purpose. Enabling it pulls in
+# libinput, libseat, libudev and gbm, which the Ubuntu CI runner does not
+# install and `nix develop` only provides on Linux. CI runs
+# `cargo clippy --workspace --all-targets` on macOS and Windows too, so a
+# default-on `tty` would fail those legs the moment it exists. Build the
+# session binary with `cargo build -p desicompass --features tty`.
+tty = [
+    "smithay/backend_drm",
+    "smithay/backend_gbm",
+    "smithay/backend_libinput",
+    "smithay/backend_udev",
+    "smithay/backend_session_libseat",
+    "smithay/renderer_multi",
+]
 
 [target.'cfg(target_os = "linux")'.dependencies]
 # Smithay: Wayland compositor framework.

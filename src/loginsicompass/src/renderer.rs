@@ -18,7 +18,7 @@ use crate::entry::{InputMode, PasswordEntry};
 // ---------------------------------------------------------------------------
 
 /// All styling options for a single frame.  Mirrors the CLI flags from
-/// `src/loginsicompass/main.c`.
+/// `src/loginsicompass-c/main.c`.
 #[derive(Debug, Clone)]
 pub struct RenderConfig {
     /// Window dimensions in pixels.

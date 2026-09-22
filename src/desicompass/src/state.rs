@@ -1,7 +1,7 @@
 //! Compositor state — all Wayland protocol state in one struct, implementing
 //! the smithay delegate traits.
 //!
-//! Mirrors the `tinywl_server` struct in `src/desicompass/main.c` but
+//! Mirrors the `tinywl_server` struct in `src/desicompass-c/main.c` but
 //! expressed through smithay's typed API instead of raw wlroots calls.
 
 use smithay::{

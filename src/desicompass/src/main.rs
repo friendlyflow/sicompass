@@ -1,6 +1,6 @@
 //! desicompass — Wayland compositor entry point.
 //!
-//! Rust port of `src/desicompass/main.c` using smithay instead of wlroots.
+//! Rust port of `src/desicompass-c/main.c` using smithay instead of wlroots.
 //! Linux-only.
 //!
 //! ## Keybindings (Alt held)
@@ -32,7 +32,7 @@ mod linux {
     };
     use crate::state::{ClientState, State};
     use std::sync::Arc;
-    use tracing::info;
+    use tracing::{error, info};
 
     // ---------------------------------------------------------------------------
     // CLI
@@ -68,23 +68,44 @@ mod linux {
         let keyboard = state.seat.add_keyboard(Default::default(), 200, 25)?;
         state.seat.add_pointer();
 
+        // Winit backend: creates an OS window we render into.
+        //
+        // This must happen *before* the socket name reaches the environment.
+        // winit reads WAYLAND_DISPLAY to find the host compositor to open that
+        // window on, so exporting our own socket name first makes winit
+        // connect to us — and we cannot answer it, because we only start
+        // accepting clients once this call returns. The result is a compositor
+        // that looks healthy (process alive, socket present) and serves
+        // nobody: every client hangs in the registry roundtrip with no error
+        // on either side.
+        let (mut backend, mut winit) = winit::init::<GlesRenderer>()?;
+
         // Open the Wayland socket.
         let socket_name = "wayland-desicompass";
         let listener = ListeningSocket::bind(socket_name)?;
-        std::env::set_var("WAYLAND_DISPLAY", socket_name);
         info!("WAYLAND_DISPLAY={socket_name}");
 
         // Optionally launch a startup program.
+        //
+        // The socket name is handed to the child explicitly instead of being
+        // exported into our own environment. A process-wide `set_var` is
+        // `unsafe` under edition 2024, it repoints every library in *this*
+        // process at our socket (which is what broke winit above), and the
+        // child is the only thing that needs it.
         if let Some(cmd) = &args.startup_cmd {
             info!("launching startup command: {cmd}");
-            std::process::Command::new("/bin/sh")
+            match std::process::Command::new("/bin/sh")
                 .args(["-c", cmd])
+                .env("WAYLAND_DISPLAY", socket_name)
                 .spawn()
-                .ok();
+            {
+                Ok(child) => info!("startup command running as pid {}", child.id()),
+                // Never silent: on a bare TTY a startup command that failed to
+                // exec is a black screen with no other diagnosis available.
+                Err(e) => error!("startup command {cmd:?} failed to start: {e}"),
+            }
         }
 
-        // Winit backend: creates an OS window we render into.
-        let (mut backend, mut winit) = winit::init::<GlesRenderer>()?;
         let start_time = std::time::Instant::now();
 
         while state.running {

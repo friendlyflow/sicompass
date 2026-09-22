@@ -2,7 +2,7 @@
 //!
 //! The compositor maintains a focus stack: toplevels are ordered from
 //! most-recently-focused (front) to least-recently-focused (back), mirroring
-//! the `wl_list toplevels` in `src/desicompass/main.c`.
+//! the `wl_list toplevels` in `src/desicompass-c/main.c`.
 //!
 //! This module provides the pure window-management logic that can be tested
 //! without a running Wayland server.
@@ -55,7 +55,7 @@ impl FocusStack {
 
     /// Cycle focus: the last window in the stack (least recently focused)
     /// becomes the new frontmost window.  Mirrors the Alt+F1 logic in
-    /// `handle_keybinding()` in `src/desicompass/main.c`.
+    /// `handle_keybinding()` in `src/desicompass-c/main.c`.
     ///
     /// Returns the newly focused window, or `None` if the stack has fewer
     /// than 2 windows.

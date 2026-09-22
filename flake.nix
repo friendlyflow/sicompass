@@ -157,6 +157,17 @@
               at-spi2-core
               dbus
               accerciser
+
+              # Test clients for desicompass, the Wayland compositor in
+              # src/desicompass. They are how you tell a compositor bug from a
+              # client bug, cheapest first: wayland-info dumps the registry so
+              # you can see which globals are actually advertised, foot is a
+              # shm-only terminal that needs no GPU import, and vkcube (from
+              # vulkan-tools above) is the smallest hardware Vulkan client
+              # there is, so it answers the dmabuf question without dragging
+              # the whole app into the diagnosis.
+              wayland-utils
+              foot
             ] ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isDarwin [
               # MoltenVK is the only Vulkan driver on macOS: it implements
               # Vulkan on top of Metal, and vulkan-loader enumerates zero ICDs
@@ -182,7 +193,7 @@
             ''
             + lib.optionalString stdenv.hostPlatform.isLinux ''
               export PKG_CONFIG_PATH="${libxkbcommon.dev}/lib/pkgconfig:$PKG_CONFIG_PATH";
-              export LIBRARY_PATH="${sdl3}/lib:${libxkbcommon}/lib:${wayland}/lib:$LIBRARY_PATH";
+              export LIBRARY_PATH="${sdl3}/lib:${libxkbcommon}/lib:${wayland}/lib:${libGL}/lib:${mesa}/lib:$LIBRARY_PATH";
 
               # Library path for Vulkan and other runtime deps.
               #
@@ -198,8 +209,22 @@
               # curl.out, not curl: curl's *default* output is `bin`, which
               # holds no lib directory at all, so a bare ${curl}/lib here was
               # a path that has never existed.
-              export LD_LIBRARY_PATH="${libwebp}/lib:${freetype}/lib:${vulkan-loader}/lib:${vulkan-validation-layers}/lib:${curl.out}/lib:${sdl3}/lib:${libxkbcommon}/lib:${wayland}/lib";
+              # libGL and mesa are here for desicompass, not for the app. This
+              # variable is an assignment with no ":$LD_LIBRARY_PATH" tail, so
+              # anything missing from it is excluded outright rather than
+              # falling back to the system: smithay's backend_egl dlopens
+              # "libEGL.so.1" and "libGLESv2.so.2" by bare name, and without
+              # these two entries the compositor builds and links fine and then
+              # dies at startup. libGL is libglvnd (the dispatch library that
+              # owns those sonames); mesa is the vendor behind it.
+              export LD_LIBRARY_PATH="${libwebp}/lib:${freetype}/lib:${vulkan-loader}/lib:${vulkan-validation-layers}/lib:${curl.out}/lib:${sdl3}/lib:${libxkbcommon}/lib:${wayland}/lib:${libGL}/lib:${mesa}/lib";
               export VK_LAYER_PATH="${vulkan-validation-layers}/share/vulkan/explicit_layer.d";
+
+              # EGL vendor discovery, the glvnd counterpart of the Vulkan ICD
+              # block below. libglvnd looks in /usr/share/glvnd/egl_vendor.d,
+              # which on NixOS does not exist, so without this it finds no
+              # vendor at all and eglInitialize fails with EGL_NOT_INITIALIZED.
+              export __EGL_VENDOR_LIBRARY_DIRS="${mesa}/share/glvnd/egl_vendor.d";
 
               # Vulkan ICD discovery on non-NixOS distros.
               #
