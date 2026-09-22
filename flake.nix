@@ -711,17 +711,76 @@
             cargoBuildFlags = [ "-p" "loginsicompass" ];
             doCheck = false;
 
-            nativeBuildInputs = with pkgs; [ pkg-config makeWrapper ];
-            # A greetd greeter, and a Wayland *client*: it draws with
-            # tiny-skia into shared memory, so it needs no GPU stack at all.
-            buildInputs = with pkgs; [ wayland libxkbcommon ];
+            # This used to say "it draws with tiny-skia into shared memory, so
+            # it needs no GPU stack at all". That stopped being true when the
+            # greeter grew a real login screen: it links `sicompass-ui`, the
+            # app's own SDL3/Vulkan renderer, so that the login screen speaks
+            # to a screen reader and renders text at all. The tiny-skia box is
+            # still in there as `--render-backend shm`, reached only when the
+            # Vulkan path cannot start.
+            #
+            # What it deliberately does NOT link is the `sicompass`
+            # application crate, which would drag wasmtime, a bundled SQLite,
+            # a headless-Chromium driver and an IMAP/SMTP stack into a login
+            # screen. See src/sicompass-ui/Cargo.toml.
+            nativeBuildInputs = with pkgs; [
+              pkg-config
+              # aws-lc-sys and libsqlite3-sys are not in this graph, but
+              # bindgen still is (freetype-sys, sdl3-sys).
+              rustPlatform.bindgenHook
+              makeWrapper
+            ];
 
+            buildInputs = with pkgs; [
+              # System SDL3, matching the main package: inside a Nix build
+              # there is no reason to compile a vendored copy.
+              sdl3
+              freetype
+              libwebp
+              libxkbcommon
+              wayland
+              # accesskit_unix speaks AT-SPI2 over D-Bus. A greeter that
+              # cannot reach it still renders; it is simply mute, which for
+              # this application is the failure the whole project exists to
+              # prevent.
+              at-spi2-core
+              dbus
+              # The GL/GBM dispatch libraries, same pair as desicompass: the
+              # loader goes on LD_LIBRARY_PATH below, the vendor comes from
+              # /run/opengl-driver.
+              libGL
+              libgbm
+              libdrm
+            ];
+
+            # Same shape as the desicompass wrapper, and for the same reasons.
+            #
+            # vulkan-loader on LD_LIBRARY_PATH is what lets `ash::Entry::load()`
+            # dlopen libvulkan.so.1 — it is not in the binary's DT_NEEDED, so a
+            # missing loader is a startup failure rather than a link error.
+            # Deliberately no VK_ICD_FILENAMES: on NixOS the drivers live in
+            # /run/opengl-driver and the loader finds them itself, and pinning a
+            # path that does not exist makes it report zero ICDs.
+            #
+            # The three vendor variables are `--set-default` rather than
+            # `--set`, so a non-NixOS host or a deliberate driver test still
+            # wins. nixpkgs' own libgbm next to a system EGL of a different
+            # version segfaulted inside libEGL_mesa on the GBM path, which is
+            # why desicompass points at the system one; the greeter shares a
+            # display with it, so it points at the same.
             postInstall = ''
               wrapProgram $out/bin/loginsicompass \
                 --prefix LD_LIBRARY_PATH : "${pkgs.lib.makeLibraryPath (with pkgs; [
+                  vulkan-loader
+                  sdl3
+                  libGL
+                  libgbm
                   libxkbcommon
                   wayland
-                ])}"
+                ])}" \
+                --set-default __EGL_VENDOR_LIBRARY_DIRS /run/opengl-driver/share/glvnd/egl_vendor.d \
+                --set-default LIBGL_DRIVERS_PATH        /run/opengl-driver/lib/dri \
+                --set-default GBM_BACKENDS_PATH         /run/opengl-driver/lib/gbm
             '';
 
             meta = with pkgs.lib; {
@@ -823,6 +882,36 @@
                 exec ${packages.default}/bin/sicompass --session
               '';
 
+              # What the compositor starts when it is the *greeter*, as a
+              # script for the same reason the session one is: it carries an
+              # environment as well as a command, and greetd hands
+              # `default_session.command` to sh(1) while desicompass hands
+              # `--startup-cmd` to `sh -c` in turn.
+              #
+              # No --user and no --command. Those two flags are what made the
+              # old greeter authenticate `nobody` and then launch `false`: it
+              # had no way to enumerate anything, so the defaults applied. The
+              # greeter now reads users from /etc/passwd (bounded by
+              # /etc/login.defs) and sessions from the wayland-sessions
+              # directories itself.
+              #
+              # The XDG_* variables exist because the greeter user's home is
+              # /var/empty. sicompass_sdk::platform honours them ahead of
+              # $HOME, so every write the renderer makes lands in the tmpfiles
+              # directory rather than failing.
+              greeterScript = pkgs.writeShellScript "loginsicompass-start" ''
+                export XDG_CONFIG_HOME=/var/lib/loginsicompass/xdg/config
+                export XDG_STATE_HOME=/var/lib/loginsicompass/xdg/state
+                export XDG_DATA_HOME=/var/lib/loginsicompass/xdg/data
+                export XDG_CACHE_HOME=/var/lib/loginsicompass/xdg/cache
+                exec ${packages.loginsicompass}/bin/loginsicompass \
+                  --state-dir /var/lib/loginsicompass \
+                  --sessions-dir /run/current-system/sw/share/wayland-sessions \
+                  --suspend-command  '${pkgs.systemd}/bin/systemctl suspend' \
+                  --reboot-command   '${pkgs.systemd}/bin/systemctl reboot' \
+                  --poweroff-command '${pkgs.systemd}/bin/systemctl poweroff'
+              '';
+
               sessionPackage = pkgs.writeTextDir
  "share/wayland-sessions/desicompass.desktop" ''
                 [Desktop Entry]
@@ -842,7 +931,27 @@
                 providedSessions = [ "desicompass" ];
               };
             in
-            lib.mkIf cfg.enable (lib.mkMerge [
+            lib.mkMerge [
+
+            {
+              # `greeter.enable` on its own does nothing, because everything
+              # below is gated on `cfg.enable` - and "I turned it on and
+              # nothing happened" is a bad way to find that out about a login
+              # screen. Say so at build time instead. This assertion sits
+              # outside the `mkIf` on purpose, so it still fires when
+              # `enable` is false.
+              assertions = [
+                {
+                  assertion = cfg.greeter.enable -> cfg.enable;
+                  message =
+                    "services.desicompass.greeter.enable requires "
+                    + "services.desicompass.enable: the greeter needs the session "
+                    + "it offers, and the at-spi2-core that makes it audible.";
+                }
+              ];
+            }
+
+            (lib.mkIf cfg.enable (lib.mkMerge [
             {
               services.displayManager.sessionPackages = [ sessionPackage ];
 
@@ -891,21 +1000,54 @@
               environment.pathsToLink = [ "/share/wayland-sessions" ];
             }
 
+            ]))
+
             (lib.mkIf cfg.greeter.enable {
+              # The greeter user that nixpkgs' greetd module creates is a
+              # system user with no home (`greeter:x:989:985::/var/empty:…`),
+              # so everything the greeter writes needs somewhere to be. The
+              # remembered user and session live here, and the XDG_* variables
+              # in the startup script below keep sicompass-ui's own config,
+              # state and cache writes out of a home that does not exist.
+              # nixpkgs ships the same shape for tuigreet's /var/cache dir.
+              systemd.tmpfiles.rules = [
+                "d /var/lib/loginsicompass     0755 greeter greeter - -"
+                "d /var/lib/loginsicompass/xdg 0700 greeter greeter - -"
+              ];
+
+              # Orca, so the accessibility toggle has a screen reader to start.
+              # at-spi2-core comes from `cfg.enable`, which `greeter.enable`
+              # now implies (see the assertion in the shared branch).
+              environment.systemPackages = [ pkgs.orca ];
+
               services.greetd = {
                 enable = true;
                 settings.default_session.command = lib.concatStringsSep " " [
+                  # greetd captures neither stdout nor stderr of what it
+                  # starts, so without systemd-cat a greeter that fell back to
+                  # the software renderer — or failed to start twice — says so
+                  # to nobody. `journalctl -t loginsicompass -b` reads it.
+                  "${pkgs.systemd}/bin/systemd-cat --identifier=loginsicompass"
+                  # dbus-run-session is load-bearing, for exactly the reason
+                  # recorded on the session's own Exec line above: accesskit_unix
+                  # speaks AT-SPI2 over the *session* bus, and without one the
+                  # greeter stalls 400ms waiting for a registration that never
+                  # arrives and is then mute to Orca. A login screen nobody can
+                  # hear is not a degradation, it is the failure this project
+                  # exists to prevent.
+                  "${pkgs.dbus}/bin/dbus-run-session"
                   "${packages.desicompass}/bin/desicompass"
                   "--backend tty"
                   "--xkb-layout ${cfg.xkbLayout}"
                   # The greeter is a Wayland client, so it needs a compositor
                   # of its own to run in. This is the same shape cage +
                   # gtkgreet use, and it is why --startup-cmd earns its keep.
-                  "--startup-cmd '${packages.loginsicompass}/bin/loginsicompass'"
+                  "--startup-cmd ${greeterScript}"
                 ];
               };
             })
-          ]);
+
+          ];
         };
 
       apps = forAllSystems (system: {
