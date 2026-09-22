@@ -630,7 +630,210 @@
               platforms = platforms.unix;
             };
           };
+        } // pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+
+          # The compositor and its greeter are separate derivations rather
+          # than extra `cargoBuildFlags` on the one above. That package's
+          # postInstall wraps `$out/bin/sicompass` by name, its `apps` entry
+          # hardcodes the same, and its meta claims `platforms.unix` — none of
+          # which fits a pair of Linux-only binaries with entirely different
+          # runtime needs (no SDL, no MoltenVK, but DRM, libinput and libseat).
+          desicompass = pkgs.rustPlatform.buildRustPackage {
+            pname = "desicompass";
+            inherit version;
+            src = ./.;
+            cargoLock.lockFile = ./Cargo.lock;
+
+            cargoBuildFlags = [ "-p" "desicompass" ];
+            # The TTY/DRM backend. Off by default in the crate so the ordinary
+            # workspace build needs none of this, but a session package that
+            # cannot take the display would be pointless.
+            buildFeatures = [ "tty" ];
+
+            doCheck = false;
+
+            nativeBuildInputs = with pkgs; [ pkg-config makeWrapper ];
+            buildInputs = with pkgs; [
+              wayland
+              libxkbcommon
+              libinput
+              seatd
+              udev
+              libgbm
+              libdrm
+              libGL
+            ];
+
+            # Only the dispatch libraries. The GL/EGL/GBM *vendor* is found
+            # through /run/opengl-driver, which nixpkgs' libglvnd and mesa are
+            # already patched to look in — putting nixpkgs' own mesa here
+            # instead is what loaded two incompatible Mesa builds into one
+            # process and segfaulted the first TTY run.
+            postInstall = ''
+              wrapProgram $out/bin/desicompass \
+                --prefix LD_LIBRARY_PATH : "${pkgs.lib.makeLibraryPath (with pkgs; [
+                  libGL
+                  libgbm
+                  libxkbcommon
+                  wayland
+                  libinput
+                  seatd
+                  udev
+                ])}"
+            '';
+
+            meta = with pkgs.lib; {
+              description = "Keyboard-driven tiling Wayland compositor for sicompass";
+              homepage = "https://github.com/friendlyflow/sicompass";
+              license = licenses.gpl3Only;
+              mainProgram = "desicompass";
+              platforms = platforms.linux;
+            };
+          };
+
+          loginsicompass = pkgs.rustPlatform.buildRustPackage {
+            pname = "loginsicompass";
+            inherit version;
+            src = ./.;
+            cargoLock.lockFile = ./Cargo.lock;
+            cargoBuildFlags = [ "-p" "loginsicompass" ];
+            doCheck = false;
+
+            nativeBuildInputs = with pkgs; [ pkg-config makeWrapper ];
+            # A greetd greeter, and a Wayland *client*: it draws with
+            # tiny-skia into shared memory, so it needs no GPU stack at all.
+            buildInputs = with pkgs; [ wayland libxkbcommon ];
+
+            postInstall = ''
+              wrapProgram $out/bin/loginsicompass \
+                --prefix LD_LIBRARY_PATH : "${pkgs.lib.makeLibraryPath (with pkgs; [
+                  libxkbcommon
+                  wayland
+                ])}"
+            '';
+
+            meta = with pkgs.lib; {
+              description = "greetd login screen for sicompass";
+              homepage = "https://github.com/friendlyflow/sicompass";
+              license = licenses.gpl3Only;
+              mainProgram = "loginsicompass";
+              platforms = platforms.linux;
+            };
+          };
+
         });
+
+      # Opt-in NixOS integration. Enabling nothing changes nothing.
+      #
+      # Two steps on purpose, and the order matters on a machine someone
+      # depends on:
+      #
+      #   services.sicompass.enable = true;
+      #     Adds "Sicompass" to the session list the *existing* greeter
+      #     offers. If the session fails to start you are returned to that
+      #     greeter, so a broken session costs a login attempt and nothing
+      #     more.
+      #
+      #   services.sicompass.greeter.enable = true;
+      #     Replaces the greeter itself with loginsicompass. Only worth
+      #     turning on once the session above is known to work, because a
+      #     greeter that fails to start leaves no graphical way in at all -
+      #     recovery is a VT and `nixos-rebuild --rollback`.
+      nixosModules.default = { config, lib, pkgs, ... }:
+        let
+          cfg = config.services.sicompass;
+          packages = self.packages.${pkgs.stdenv.hostPlatform.system};
+        in
+        {
+          options.services.sicompass = {
+            enable = lib.mkEnableOption
+              "the sicompass session, offered by whichever greeter is configured";
+
+            greeter.enable = lib.mkEnableOption
+              "loginsicompass as the greetd greeter, replacing the current one";
+
+            xkbLayout = lib.mkOption {
+              type = lib.types.str;
+              default = config.services.xserver.xkb.layout;
+              defaultText = lib.literalExpression "config.services.xserver.xkb.layout";
+              description = ''
+                Keyboard layout the compositor compiles and hands to every
+                client. Defaults to the system's X keyboard layout, which is
+                almost always what is wanted: the compositor owns the keymap,
+                so leaving it unset would put every client on a US layout no
+                matter what the console and the desktop are set to.
+              '';
+            };
+          };
+
+          config =
+            let
+              # The session entry a display manager offers in its list.
+              #
+              # Generated here rather than as a flake package because it has
+              # to carry --xkb-layout, and only NixOS config knows the
+              # layout. XKB_DEFAULT_LAYOUT is not set anywhere on a stock
+              # NixOS - not system-wide, not in greetd's environment - so a
+              # session entry without the flag hands every client a US
+              # keymap regardless of what the console and desktop use.
+              #
+              # Generated rather than committed under `assets/` because
+              # `src/sicompass/tests/packaging.rs` holds that directory to
+              # packaging inputs only, and rightly: a file there must be
+              # added by hand to the deb, the rpm, the MSI and the Nix
+              # install before it reaches anyone.
+              #
+              # dbus-run-session is load-bearing. accesskit_unix speaks
+              # AT-SPI2 over the session bus, so without one sicompass stalls
+              # 400ms at startup waiting for a registration that never
+              # arrives and is then mute to screen readers - for an
+              # accessibility-first shell, a failure rather than a
+              # degradation.
+              sessionPackage = pkgs.writeTextDir "share/wayland-sessions/sicompass.desktop" ''
+                [Desktop Entry]
+                Name=Sicompass
+                Comment=Use your whole computer from the keyboard, with no mouse needed
+                Exec=${pkgs.dbus}/bin/dbus-run-session ${packages.desicompass}/bin/desicompass --backend tty --xkb-layout ${cfg.xkbLayout} --startup-cmd '${packages.default}/bin/sicompass --session'
+                Type=Application
+                DesktopNames=Sicompass
+              '' // {
+                # NixOS asserts that anything in sessionPackages declares the
+                # sessions it provides, and the name must match the .desktop.
+                passthru.providedSessions = [ "sicompass" ];
+              };
+            in
+            lib.mkIf cfg.enable (lib.mkMerge [
+            {
+              services.displayManager.sessionPackages = [ sessionPackage ];
+
+              # accesskit_unix reaches screen readers over AT-SPI2, which is a
+              # D-Bus service. Without this the app runs and renders but is
+              # silent to Orca, which for an accessibility-first shell is a
+              # failure rather than a degradation.
+              services.gnome.at-spi2-core.enable = true;
+
+              environment.systemPackages = [
+                packages.desicompass
+                packages.default
+              ];
+            }
+
+            (lib.mkIf cfg.greeter.enable {
+              services.greetd = {
+                enable = true;
+                settings.default_session.command = lib.concatStringsSep " " [
+                  "${packages.desicompass}/bin/desicompass"
+                  "--backend tty"
+                  "--xkb-layout ${cfg.xkbLayout}"
+                  # The greeter is a Wayland client, so it needs a compositor
+                  # of its own to run in. This is the same shape cage +
+                  # gtkgreet use, and it is why --startup-cmd earns its keep.
+                  "--startup-cmd '${packages.loginsicompass}/bin/loginsicompass'"
+                ];
+              };
+            })
+          ]);
+        };
 
       apps = forAllSystems (system: {
         default = {
