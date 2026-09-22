@@ -809,11 +809,26 @@
               # arrives and is then mute to screen readers - for an
               # accessibility-first shell, a failure rather than a
               # degradation.
-              sessionPackage = pkgs.writeTextDir "share/wayland-sessions/desicompass.desktop" ''
+              # What the compositor starts, as a script rather than an
+              # argument containing a space.
+              #
+              # The Desktop Entry spec gives no special meaning to single
+              # quotes - only double ones - so `--startup-cmd '... --session'`
+              # is split by the greeter's parser and the compositor is handed
+              # a stray `--session` it rejects, which is exactly how this
+              # failed. Rather than swap quote characters and depend on how
+              # carefully each greeter implements the spec, the Exec line now
+              # contains no quoting at all.
+              startupScript = pkgs.writeShellScript "desicompass-startup" ''
+                exec ${packages.default}/bin/sicompass --session
+              '';
+
+              sessionPackage = pkgs.writeTextDir
+ "share/wayland-sessions/desicompass.desktop" ''
                 [Desktop Entry]
                 Name=Desicompass
                 Comment=Use your whole computer from the keyboard, with no mouse needed
-                Exec=${pkgs.systemd}/bin/systemd-cat --identifier=desicompass ${pkgs.dbus}/bin/dbus-run-session ${packages.desicompass}/bin/desicompass --backend tty --xkb-layout ${cfg.xkbLayout} --startup-cmd '${packages.default}/bin/sicompass --session'
+                Exec=${pkgs.systemd}/bin/systemd-cat --identifier=desicompass ${pkgs.dbus}/bin/dbus-run-session ${packages.desicompass}/bin/desicompass --backend tty --xkb-layout ${cfg.xkbLayout} --startup-cmd ${startupScript}
                 Type=Application
                 DesktopNames=Desicompass
               '' // {
