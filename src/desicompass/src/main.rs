@@ -48,7 +48,7 @@ mod linux {
     use smithay::{
         backend::{
             egl::EGLDevice,
-            input::{InputEvent, KeyState, KeyboardKeyEvent},
+            input::{Event, InputEvent, KeyState, KeyboardKeyEvent},
             renderer::{
                 damage::OutputDamageTracker,
                 element::surface::WaylandSurfaceRenderElement,
@@ -203,6 +203,7 @@ mod linux {
                 subpixel: Subpixel::Unknown,
                 make: "desicompass".into(),
                 model: "winit".into(),
+                serial_number: String::new(),
             },
         );
         let _output_global = output.create_global::<State>(&dh);
@@ -325,7 +326,7 @@ mod linux {
                         event.key_code(),
                         event.state(),
                         0.into(),
-                        0,
+                        event.time(),
                         |app_state, modifiers, keysym| {
                             // The *Latin* sym for the physical key, not the
                             // modified one: Shift would turn `j` into `J`,
@@ -349,7 +350,7 @@ mod linux {
                 _ => {}
             });
 
-            if let smithay::reexports::winit::platform::pump_events::PumpStatus::Exit(_) = status {
+            if let smithay::reexports::winit::event_loop::pump_events::PumpStatus::Exit(_) = status {
                 break;
             }
 

@@ -8,13 +8,12 @@
 
 use smithay_client_toolkit::{
     compositor::{CompositorHandler, CompositorState},
-    delegate_compositor, delegate_keyboard, delegate_output, delegate_registry, delegate_seat,
-    delegate_shm, delegate_xdg_shell, delegate_xdg_window,
+    delegate_dispatch2, delegate_registry,
     output::{OutputHandler, OutputState},
     registry::{ProvidesRegistryState, RegistryState},
     registry_handlers,
     seat::{
-        keyboard::{KeyEvent, KeyboardHandler, Modifiers},
+        keyboard::{KeyEvent, KeyboardHandler, Modifiers, RawModifiers},
         Capability, SeatHandler, SeatState,
     },
     shell::{
@@ -328,7 +327,6 @@ impl CompositorHandler for AppState {
     }
 }
 
-delegate_compositor!(AppState);
 
 // ---- Output ----
 
@@ -362,7 +360,6 @@ impl OutputHandler for AppState {
     }
 }
 
-delegate_output!(AppState);
 
 // ---- Seat ----
 
@@ -406,7 +403,6 @@ impl SeatHandler for AppState {
     fn remove_seat(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_seat::WlSeat) {}
 }
 
-delegate_seat!(AppState);
 
 // ---- Keyboard ----
 
@@ -465,6 +461,21 @@ impl KeyboardHandler for AppState {
         }
     }
 
+    /// Compositor-side key repeat (wl_keyboard v10). A held key edits the
+    /// entry again, but a held Return must not resubmit the password.
+    fn repeat_key(
+        &mut self,
+        conn: &Connection,
+        qh: &QueueHandle<Self>,
+        keyboard: &wl_keyboard::WlKeyboard,
+        serial: u32,
+        event: KeyEvent,
+    ) {
+        if !matches!(event.keysym, Keysym::Return | Keysym::KP_Enter) {
+            self.press_key(conn, qh, keyboard, serial, event);
+        }
+    }
+
     fn release_key(
         &mut self,
         _conn: &Connection,
@@ -482,12 +493,12 @@ impl KeyboardHandler for AppState {
         _keyboard: &wl_keyboard::WlKeyboard,
         _serial: u32,
         _modifiers: Modifiers,
+        _raw_modifiers: RawModifiers,
         _layout: u32,
     ) {
     }
 }
 
-delegate_keyboard!(AppState);
 
 // ---- Shm ----
 
@@ -497,7 +508,6 @@ impl ShmHandler for AppState {
     }
 }
 
-delegate_shm!(AppState);
 
 // ---- XDG shell ----
 
@@ -528,8 +538,6 @@ impl WindowHandler for AppState {
     }
 }
 
-delegate_xdg_shell!(AppState);
-delegate_xdg_window!(AppState);
 
 // ---- Registry ----
 
@@ -542,3 +550,4 @@ impl ProvidesRegistryState for AppState {
 }
 
 delegate_registry!(AppState);
+delegate_dispatch2!(AppState);

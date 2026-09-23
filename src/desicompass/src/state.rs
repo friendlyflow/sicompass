@@ -11,10 +11,11 @@ use std::time::Instant;
 use smithay::{
     backend::renderer::utils::on_commit_buffer_handler,
     backend::{allocator::dmabuf::Dmabuf, renderer::ImportDma},
-    delegate_compositor, delegate_data_device, delegate_dmabuf, delegate_output, delegate_seat,
-    delegate_shm, delegate_xdg_shell,
     desktop::{PopupKind, PopupManager, Space, Window},
-    input::{keyboard::FilterResult, pointer::CursorImageStatus, Seat, SeatHandler, SeatState},
+    input::{
+        dnd::DndGrabHandler, keyboard::FilterResult, pointer::CursorImageStatus, Seat,
+        SeatHandler, SeatState,
+    },
     output::Output,
     reexports::{
         calloop::LoopSignal,
@@ -33,10 +34,9 @@ use smithay::{
             CompositorState,
         },
         output::OutputManagerState,
+        pointer_constraints::PointerConstraintsHandler,
         selection::{
-            data_device::{
-                ClientDndGrabHandler, DataDeviceHandler, DataDeviceState, ServerDndGrabHandler,
-            },
+            data_device::{DataDeviceHandler, DataDeviceState, WaylandDndGrabHandler},
             SelectionHandler,
         },
         shell::xdg::{
@@ -546,8 +546,6 @@ fn ensure_initial_configure(state: &mut State, surface: &WlSurface) {
     }
 }
 
-delegate_compositor!(State);
-
 // ---------------------------------------------------------------------------
 // XdgShellHandler
 // ---------------------------------------------------------------------------
@@ -642,8 +640,6 @@ impl XdgShellHandler for State {
     }
 }
 
-delegate_xdg_shell!(State);
-
 // ---------------------------------------------------------------------------
 // ShmHandler
 // ---------------------------------------------------------------------------
@@ -654,15 +650,11 @@ impl ShmHandler for State {
     }
 }
 
-delegate_shm!(State);
-
 impl BufferHandler for State {
     fn buffer_destroyed(&mut self, _buffer: &WlBuffer) {}
 }
 
 impl smithay::wayland::output::OutputHandler for State {}
-
-delegate_output!(State);
 
 // ---------------------------------------------------------------------------
 // SeatHandler
@@ -682,7 +674,9 @@ impl SeatHandler for State {
     fn cursor_image(&mut self, _seat: &Seat<Self>, _image: CursorImageStatus) {}
 }
 
-delegate_seat!(State);
+// Required of every seat's handler, even one like ours that never grows a
+// wl_pointer, so there is never a constraint to act on.
+impl PointerConstraintsHandler for State {}
 
 // ---------------------------------------------------------------------------
 // DataDevice (clipboard / DnD — required by many clients)
@@ -693,18 +687,16 @@ impl SelectionHandler for State {
 }
 
 impl DataDeviceHandler for State {
-    fn data_device_state(&self) -> &DataDeviceState {
-        &self.data_device_state
+    fn data_device_state(&mut self) -> &mut DataDeviceState {
+        &mut self.data_device_state
     }
 }
 
-impl ClientDndGrabHandler for State {}
-
-impl ServerDndGrabHandler for State {
-    fn send(&mut self, _mime_type: String, _fd: std::os::unix::io::OwnedFd, _seat: Seat<Self>) {}
-}
-
-delegate_data_device!(State);
+// Drag-and-drop is a pointer gesture, and desicompass has no pointer. The
+// default `dnd_requested` cancels the source, which is the right answer for a
+// drag that nothing could ever start.
+impl DndGrabHandler for State {}
+impl WaylandDndGrabHandler for State {}
 
 // ---------------------------------------------------------------------------
 // Dmabuf
@@ -741,4 +733,4 @@ impl DmabufHandler for State {
     }
 }
 
-delegate_dmabuf!(State);
+smithay::delegate_dispatch2!(State);

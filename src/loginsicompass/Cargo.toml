@@ -16,13 +16,11 @@ path = "src/main.rs"
 dist = false
 
 [target.'cfg(target_os = "linux")'.dependencies]
-# Wayland client — smithay-client-toolkit 0.19 for XDG shell, shm, seat
-smithay-client-toolkit = { version = "0.19", default-features = false, features = [
-    "calloop",
+# Wayland client — smithay-client-toolkit 0.21 for XDG shell, shm, seat
+smithay-client-toolkit = { version = "0.21", default-features = false, features = [
     "xkbcommon",
 ] }
 wayland-client = "0.31"
-wayland-protocols = { version = "0.31", features = ["client"] }
 
 # Keyboard
 xkeysym = "0.2"
@@ -36,10 +34,6 @@ image = { workspace = true }
 # greetd IPC: JSON over Unix socket
 serde = { workspace = true }
 serde_json = { workspace = true }
-
-# Event loop (SCTK uses calloop 0.13)
-calloop = "0.13"
-calloop-wayland-source = "0.3"
 
 # CLI
 clap = { version = "4", features = ["derive"] }

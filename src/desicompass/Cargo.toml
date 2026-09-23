@@ -47,7 +47,13 @@ tty = [
 #                  which is gated on this feature. It pulls the `drm` and
 #                  `drm-ffi` crates only — no system library, and the CI
 #                  runner already installs libdrm-dev.
-smithay = { version = "0.7", default-features = false, features = [
+#
+# Pinned to a git commit rather than a crates.io release: 0.7.0 (June 2025)
+# is the last release, and master is far ahead of it (Dispatch2 delegates,
+# the DnD rework, InputTime). master still calls itself 0.7.0, so the rev is
+# the only thing that identifies it. The Nix build (crane) fetches it by the
+# rev in Cargo.lock, so bumping it needs no hash in flake.nix.
+smithay = { git = "https://github.com/Smithay/smithay", rev = "79bbed5e1199090d787115614847a79c76607181", default-features = false, features = [
     "desktop",
     "wayland_frontend",
     "backend_winit",

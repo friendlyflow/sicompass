@@ -159,6 +159,8 @@ pub fn run(args: TtyArgs) -> Result<(), Box<dyn std::error::Error>> {
             subpixel: Subpixel::Unknown,
             make: "desicompass".into(),
             model: connector_info.interface().as_str().to_string(),
+            // Only EDID knows it, and nothing here parses EDID yet.
+            serial_number: String::new(),
         },
     );
     let _output_global = output.create_global::<State>(&dh);
@@ -181,11 +183,11 @@ pub fn run(args: TtyArgs) -> Result<(), Box<dyn std::error::Error>> {
         GbmBufferFlags::RENDERING | GbmBufferFlags::SCANOUT,
     );
     let compositor = GbmDrmCompositor::new(
-        OutputModeSource::Auto(output.clone()),
+        OutputModeSource::Auto(output.downgrade()),
         surface,
         None,
         allocator,
-        GbmFramebufferExporter::new(gbm.clone(), Some(primary)),
+        GbmFramebufferExporter::new(gbm.clone(), primary.into()),
         [
             smithay::reexports::drm::buffer::DrmFourcc::Xrgb8888,
             smithay::reexports::drm::buffer::DrmFourcc::Argb8888,
@@ -415,7 +417,7 @@ fn handle_input(state: &mut State, event: InputEvent<LibinputInputBackend>) {
             event.key_code(),
             event.state(),
             serial,
-            event.time_msec(),
+            event.time(),
             |app_state, modifiers, keysym| {
                 // Diagnostics for chords only — never for ordinary typing.
                 //
