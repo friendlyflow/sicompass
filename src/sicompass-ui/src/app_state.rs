@@ -1970,7 +1970,12 @@ pub struct AppState {
 
     // ---- Synchronisation ----------------------------------------------------
     pub image_available: [ash::vk::Semaphore; MAX_FRAMES_IN_FLIGHT],
-    pub render_finished: [ash::vk::Semaphore; MAX_FRAMES_IN_FLIGHT],
+    /// One per swapchain image, not per frame in flight: the present engine
+    /// holds a render-finished semaphore until that *image* is re-acquired,
+    /// so indexing it by frame reuses one still pending when there are more
+    /// images than frames (VUID-vkQueueSubmit-pSignalSemaphores-00067).
+    /// Rebuilt by `recreate_swapchain` whenever the image count can change.
+    pub render_finished: Vec<ash::vk::Semaphore>,
     pub in_flight: [ash::vk::Fence; MAX_FRAMES_IN_FLIGHT],
     pub current_frame: usize,
 

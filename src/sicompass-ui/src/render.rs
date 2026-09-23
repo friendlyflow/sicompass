@@ -884,6 +884,25 @@ unsafe fn create_framebuffers(
     }
 }
 
+/// `n` binary semaphores. On failure the ones already made are destroyed, so
+/// the caller never holds a partial set.
+unsafe fn create_semaphores(device: &ash::Device, n: usize) -> Result<Vec<vk::Semaphore>, SiError> {
+    let info = vk::SemaphoreCreateInfo::default();
+    let mut out = Vec::with_capacity(n);
+    for _ in 0..n {
+        match unsafe { device.create_semaphore(&info, None) } {
+            Ok(s) => out.push(s),
+            Err(e) => {
+                for s in out {
+                    unsafe { device.destroy_semaphore(s, None) };
+                }
+                return Err(e.into());
+            }
+        }
+    }
+    Ok(out)
+}
+
 // ---------------------------------------------------------------------------
 // Public: full app construction
 // ---------------------------------------------------------------------------
@@ -1265,10 +1284,7 @@ pub fn build_app_with(cfg: &crate::app_state::AppConfig) -> Result<AppState, SiE
         unsafe { device.create_semaphore(&sem_info, None)? },
         unsafe { device.create_semaphore(&sem_info, None)? },
     ];
-    let render_finished = [
-        unsafe { device.create_semaphore(&sem_info, None)? },
-        unsafe { device.create_semaphore(&sem_info, None)? },
-    ];
+    let render_finished = unsafe { create_semaphores(&device, sc.images.len())? };
     let in_flight = [unsafe { device.create_fence(&fence_info, None)? }, unsafe {
         device.create_fence(&fence_info, None)?
     }];
@@ -1322,30 +1338,34 @@ pub fn build_app_with(cfg: &crate::app_state::AppConfig) -> Result<AppState, SiE
 // Public: recreate swap-chain on resize
 // ---------------------------------------------------------------------------
 
-pub fn recreate_swapchain(app: &mut AppState) {
+/// What `recreate_swapchain` managed to do.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Recreated {
+    /// A new swapchain is in place and the next frame can draw.
+    Done,
+    /// The window has no area (minimised, or a 0x0 configure). Nothing was
+    /// touched; try again on a later frame, after the event loop has run.
+    Minimized,
+}
+
+/// Replace the swapchain and everything sized to it.
+///
+/// Never leaves `app` holding a destroyed handle: the new swapchain and its
+/// framebuffers are built *before* anything old is destroyed, so on failure
+/// `app` still describes the old (retired, but still destroyable) swapchain
+/// and `cleanup` destroys each handle exactly once. Destroying the old views
+/// first and then panicking on `ERROR_SURFACE_LOST_KHR` is what used to make
+/// `cleanup` free them a second time (`free(): invalid size`).
+pub fn recreate_swapchain(app: &mut AppState) -> Result<Recreated, SiError> {
+    let (w, h) = app.window.size_in_pixels();
+    if w == 0 || h == 0 {
+        return Ok(Recreated::Minimized);
+    }
+
     unsafe {
-        // Wait until the window is not minimised
-        loop {
-            let (w, h) = app.window.size_in_pixels();
-            if w > 0 && h > 0 {
-                break;
-            }
-            // window is minimised — yield to SDL event loop
-            std::thread::sleep(std::time::Duration::from_millis(16));
-        }
+        app.device.device_wait_idle()?;
 
-        app.device.device_wait_idle().unwrap();
-
-        // Destroy old framebuffers + image views
-        for &fb in &app.framebuffers {
-            app.device.destroy_framebuffer(fb, None);
-        }
-        for &iv in &app.swapchain_image_views {
-            app.device.destroy_image_view(iv, None);
-        }
         let old = app.swapchain;
-
-        // Recreate
         let sc = create_swapchain(
             &app.device,
             &app.swapchain_loader,
@@ -1356,24 +1376,81 @@ pub fn recreate_swapchain(app: &mut AppState) {
             app.present_family,
             &app.window,
             old,
-        )
-        .expect("recreate_swapchain failed");
+        )?;
 
+        let discard_new = |app: &AppState| {
+            for &iv in &sc.image_views {
+                app.device.destroy_image_view(iv, None);
+            }
+            app.swapchain_loader.destroy_swapchain(sc.swapchain, None);
+        };
+
+        let framebuffers =
+            match create_framebuffers(&app.device, app.render_pass, &sc.image_views, sc.extent) {
+                Ok(fbs) => fbs,
+                Err(e) => {
+                    discard_new(app);
+                    return Err(e);
+                }
+            };
+
+        // The image count can change with the new swapchain, and there is one
+        // render-finished semaphore per image. The old set is only replaced
+        // when it has to be: the device is idle, but a present may still be
+        // waiting on one of them.
+        let render_finished = if sc.images.len() != app.render_finished.len() {
+            match create_semaphores(&app.device, sc.images.len()) {
+                Ok(sems) => Some(sems),
+                Err(e) => {
+                    for fb in framebuffers {
+                        app.device.destroy_framebuffer(fb, None);
+                    }
+                    discard_new(app);
+                    return Err(e);
+                }
+            }
+        } else {
+            None
+        };
+
+        // Everything new exists. Only now retire the old set.
+        for fb in std::mem::take(&mut app.framebuffers) {
+            app.device.destroy_framebuffer(fb, None);
+        }
+        for iv in std::mem::take(&mut app.swapchain_image_views) {
+            app.device.destroy_image_view(iv, None);
+        }
         app.swapchain_loader.destroy_swapchain(old, None);
+        if let Some(sems) = render_finished {
+            for s in std::mem::replace(&mut app.render_finished, sems) {
+                app.device.destroy_semaphore(s, None);
+            }
+        }
 
         app.swapchain = sc.swapchain;
         app.swapchain_images = sc.images;
         app.swapchain_format = sc.format;
         app.swapchain_extent = sc.extent;
         app.swapchain_image_views = sc.image_views;
+        app.framebuffers = framebuffers;
+    }
+    Ok(Recreated::Done)
+}
 
-        app.framebuffers = create_framebuffers(
-            &app.device,
-            app.render_pass,
-            &app.swapchain_image_views,
-            app.swapchain_extent,
-        )
-        .expect("recreate framebuffers failed");
+/// `recreate_swapchain` for the main loop. Returns whether this frame can be
+/// drawn. A minimised window leaves `framebuffer_resized` set so the rebuild
+/// is retried once it has an area again. A failure ends the main loop.
+pub fn rebuild_swapchain(app: &mut AppState) -> bool {
+    match recreate_swapchain(app) {
+        Ok(Recreated::Done) => true,
+        Ok(Recreated::Minimized) => {
+            app.framebuffer_resized = true;
+            false
+        }
+        Err(e) => {
+            stop(app, "recreate_swapchain", e);
+            false
+        }
     }
 }
 
@@ -1381,14 +1458,70 @@ pub fn recreate_swapchain(app: &mut AppState) {
 // Public: draw one frame
 // ---------------------------------------------------------------------------
 
+/// How the present loop reacts to a failed acquire or present.
+#[derive(Debug, PartialEq, Eq)]
+enum Present {
+    /// The swapchain no longer matches the surface. Rebuild it.
+    Recreate,
+    /// The surface or the device is gone for good. On a real session this is
+    /// the compositor exiting at logout. Leave the main loop and clean up.
+    Fatal,
+    /// Anything else. Log it and skip this frame.
+    Transient,
+}
+
+fn classify(r: vk::Result) -> Present {
+    match r {
+        vk::Result::ERROR_OUT_OF_DATE_KHR => Present::Recreate,
+        vk::Result::ERROR_SURFACE_LOST_KHR | vk::Result::ERROR_DEVICE_LOST => Present::Fatal,
+        _ => Present::Transient,
+    }
+}
+
+/// End the main loop because the GPU or the surface failed. `AppState::drop`
+/// then runs `cleanup`, which is safe here because no handle in `app` has
+/// been destroyed.
+fn stop(app: &mut AppState, what: &str, e: impl std::fmt::Display) {
+    eprintln!("{what}: {e}; stopping");
+    app.running = false;
+}
+
+/// Unwrap a per-frame Vulkan call, or stop the main loop and return.
+macro_rules! vk_or_stop {
+    ($app:expr, $what:literal, $call:expr) => {
+        match $call {
+            Ok(v) => v,
+            Err(e) => {
+                stop($app, $what, e);
+                return;
+            }
+        }
+    };
+}
+
+/// Route a failed acquire or present through `classify`.
+fn present_failed(app: &mut AppState, what: &str, e: vk::Result) {
+    match classify(e) {
+        Present::Recreate => {
+            app.framebuffer_resized = false;
+            rebuild_swapchain(app);
+        }
+        Present::Fatal => stop(app, what, e),
+        Present::Transient => eprintln!("{what}: {e}"),
+    }
+}
+
 pub fn draw_frame(app: &mut AppState) {
     let frame = app.current_frame;
 
     unsafe {
         // Wait for previous frame's fence
-        app.device
-            .wait_for_fences(&[app.in_flight[frame]], true, u64::MAX)
-            .unwrap();
+        vk_or_stop!(
+            app,
+            "wait_for_fences",
+            app.device
+                .wait_for_fences(&[app.in_flight[frame]], true, u64::MAX)
+        );
 
         // Acquire next swapchain image
         let result = app.swapchain_loader.acquire_next_image(
@@ -1400,17 +1533,17 @@ pub fn draw_frame(app: &mut AppState) {
 
         let image_index = match result {
             Ok((idx, _)) => idx,
-            Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => {
-                recreate_swapchain(app);
-                return;
-            }
             Err(e) => {
-                eprintln!("acquire_next_image: {e}");
+                present_failed(app, "acquire_next_image", e);
                 return;
             }
         };
 
-        app.device.reset_fences(&[app.in_flight[frame]]).unwrap();
+        vk_or_stop!(
+            app,
+            "reset_fences",
+            app.device.reset_fences(&[app.in_flight[frame]])
+        );
 
         // Re-upload any glyphs rasterized on demand during this frame's view
         // build. Must happen outside the render pass (it transitions the atlas
@@ -1421,12 +1554,19 @@ pub fn draw_frame(app: &mut AppState) {
 
         // Record command buffer
         let cb = app.command_buffers[frame];
-        app.device
-            .reset_command_buffer(cb, vk::CommandBufferResetFlags::empty())
-            .unwrap();
+        vk_or_stop!(
+            app,
+            "reset_command_buffer",
+            app.device
+                .reset_command_buffer(cb, vk::CommandBufferResetFlags::empty())
+        );
 
         let begin_info = vk::CommandBufferBeginInfo::default();
-        app.device.begin_command_buffer(cb, &begin_info).unwrap();
+        vk_or_stop!(
+            app,
+            "begin_command_buffer",
+            app.device.begin_command_buffer(cb, &begin_info)
+        );
 
         let [r, g, b, a] = app.clear_color;
         let clear_values = [vk::ClearValue {
@@ -1478,12 +1618,13 @@ pub fn draw_frame(app: &mut AppState) {
         }
 
         app.device.cmd_end_render_pass(cb);
-        app.device.end_command_buffer(cb).unwrap();
+        vk_or_stop!(app, "end_command_buffer", app.device.end_command_buffer(cb));
 
-        // Submit
+        // Submit. The render-finished semaphore belongs to the image, not the
+        // frame: see `AppState::render_finished`.
         let wait_sems = [app.image_available[frame]];
         let wait_stages = [vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT];
-        let signal_sems = [app.render_finished[frame]];
+        let signal_sems = [app.render_finished[image_index as usize]];
         let cbs = [cb];
         let submit_info = vk::SubmitInfo::default()
             .wait_semaphores(&wait_sems)
@@ -1491,9 +1632,12 @@ pub fn draw_frame(app: &mut AppState) {
             .command_buffers(&cbs)
             .signal_semaphores(&signal_sems);
 
-        app.device
-            .queue_submit(app.graphics_queue, &[submit_info], app.in_flight[frame])
-            .unwrap();
+        vk_or_stop!(
+            app,
+            "queue_submit",
+            app.device
+                .queue_submit(app.graphics_queue, &[submit_info], app.in_flight[frame])
+        );
 
         // Present
         let swapchains = [app.swapchain];
@@ -1508,14 +1652,14 @@ pub fn draw_frame(app: &mut AppState) {
             .queue_present(app.present_queue, &present_info);
 
         match present_result {
-            Err(vk::Result::ERROR_OUT_OF_DATE_KHR) | Ok(true /* suboptimal */) => {
+            Ok(true /* suboptimal */) => {
                 app.framebuffer_resized = false;
-                recreate_swapchain(app);
+                rebuild_swapchain(app);
             }
-            Err(e) => eprintln!("queue_present: {e}"),
+            Err(e) => present_failed(app, "queue_present", e),
             _ if app.framebuffer_resized => {
                 app.framebuffer_resized = false;
-                recreate_swapchain(app);
+                rebuild_swapchain(app);
             }
             _ => {}
         }
@@ -1546,8 +1690,10 @@ pub fn cleanup(app: &mut AppState) {
         // accesskit_adapter has no GPU resources — drop is sufficient.
         drop(app.accesskit_adapter.take());
 
+        for s in std::mem::take(&mut app.render_finished) {
+            app.device.destroy_semaphore(s, None);
+        }
         for i in 0..MAX_FRAMES_IN_FLIGHT {
-            app.device.destroy_semaphore(app.render_finished[i], None);
             app.device.destroy_semaphore(app.image_available[i], None);
             app.device.destroy_fence(app.in_flight[i], None);
         }
@@ -1593,4 +1739,34 @@ unsafe extern "system" fn vulkan_debug_callback(
         eprintln!("[VK WARN]  {msg}");
     }
     vk::FALSE
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn out_of_date_rebuilds_the_swapchain() {
+        assert_eq!(
+            classify(vk::Result::ERROR_OUT_OF_DATE_KHR),
+            Present::Recreate
+        );
+    }
+
+    /// The compositor exiting (logout) loses the surface. That has to end the
+    /// main loop cleanly, not panic mid-teardown.
+    #[test]
+    fn a_lost_surface_or_device_stops_the_loop() {
+        assert_eq!(classify(vk::Result::ERROR_SURFACE_LOST_KHR), Present::Fatal);
+        assert_eq!(classify(vk::Result::ERROR_DEVICE_LOST), Present::Fatal);
+    }
+
+    #[test]
+    fn other_errors_skip_one_frame() {
+        assert_eq!(
+            classify(vk::Result::ERROR_OUT_OF_HOST_MEMORY),
+            Present::Transient
+        );
+        assert_eq!(classify(vk::Result::TIMEOUT), Present::Transient);
+    }
 }

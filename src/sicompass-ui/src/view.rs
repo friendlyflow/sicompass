@@ -541,9 +541,15 @@ pub fn main_loop(app: &mut AppState) {
         // behaviour where the announcement text stays in the tree between speaks.
 
         // ---- Recreate swapchain if needed -----------------------------------
+        // A window with no area (minimised) skips drawing and keeps the flag,
+        // so the loop goes on polling events and retries next frame. A lost
+        // surface has cleared `app.running` and the loop ends.
         if app.framebuffer_resized {
             app.framebuffer_resized = false;
-            render::recreate_swapchain(app);
+            if !render::rebuild_swapchain(app) {
+                std::thread::sleep(std::time::Duration::from_millis(16));
+                continue;
+            }
         }
 
         // ---- Sync clear colour from active palette --------------------------

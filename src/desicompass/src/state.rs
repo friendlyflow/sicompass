@@ -175,10 +175,10 @@ impl State {
 
     /// The current output size in logical coordinates.
     ///
-    /// Never zero: a 0x0 `xdg_toplevel.configure` is not a slow start for an
-    /// SDL/Vulkan client, it is an unrecoverable spin — sicompass's
-    /// `recreate_swapchain` loops on `size_in_pixels()` with no exit
-    /// condition. Every configure this compositor sends goes through here.
+    /// Never zero: a 0x0 `xdg_toplevel.configure` gives an SDL/Vulkan client
+    /// no swapchain to draw into. sicompass treats it as minimised and stops
+    /// drawing until a real size arrives, which on a one-window session is a
+    /// blank screen. Every configure this compositor sends goes through here.
     pub fn output_size(&self) -> Size<i32, Logical> {
         self.output
             .current_mode()
@@ -249,9 +249,8 @@ impl State {
     /// Give every window the geometry the layout assigns it.
     ///
     /// Every configure this compositor sends passes through here, which is
-    /// why the size can never be zero: sicompass's `recreate_swapchain`
-    /// loops on `size_in_pixels()` with a 16ms sleep and no exit condition,
-    /// so a 0x0 configure would spin its main thread forever.
+    /// why the size can never be zero: sicompass treats a 0x0 window as
+    /// minimised and draws nothing until a real size arrives.
     pub fn relayout(&mut self) {
         if self.tiler.is_empty() {
             return;
