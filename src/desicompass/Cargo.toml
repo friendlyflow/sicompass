@@ -63,3 +63,8 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # Command-line argument parsing
 clap = { version = "4", features = ["derive"] }
+
+# Reads the keyboard layout from systemd-localed (org.freedesktop.locale1)
+# on the system bus, which is where the OS installer puts it. Already in the
+# lock through accesskit_unix, so this adds no crates.
+zbus = { version = "5", default-features = false, features = ["blocking-api", "async-io"] }

@@ -50,7 +50,6 @@ use smithay::{
         udev::primary_gpu,
     },
     desktop::space::{space_render_elements, SpaceRenderElements},
-    input::keyboard::XkbConfig,
     output::{Mode, Output, OutputModeSource, PhysicalProperties, Scale, Subpixel},
     reexports::{
         calloop::{
@@ -75,8 +74,8 @@ use crate::{
 /// The subset of the command line the TTY backend needs.
 pub struct TtyArgs {
     pub startup_cmd: Option<String>,
-    pub xkb_layout: Option<String>,
-    pub xkb_variant: Option<String>,
+    /// The `--xkb-*` flags, still to be resolved against the system.
+    pub xkb: crate::xkb::XkbNames,
     pub terminal: String,
 }
 
@@ -213,26 +212,9 @@ pub fn run(args: TtyArgs) -> Result<(), Box<dyn std::error::Error>> {
     );
 
     // ---- Keyboard -------------------------------------------------------
-    let layout = args
-        .xkb_layout
-        .clone()
-        .or_else(|| std::env::var("XKB_DEFAULT_LAYOUT").ok())
-        .unwrap_or_default();
-    let variant = args
-        .xkb_variant
-        .clone()
-        .or_else(|| std::env::var("XKB_DEFAULT_VARIANT").ok())
-        .unwrap_or_default();
-    info!("xkb layout={layout:?} variant={variant:?}");
-    state.seat.add_keyboard(
-        XkbConfig {
-            layout: &layout,
-            variant: &variant,
-            ..Default::default()
-        },
-        200,
-        25,
-    )?;
+    let (xkb, source) = crate::xkb::resolve(&args.xkb);
+    info!("xkb {xkb} (from {source})");
+    state.seat.add_keyboard(xkb.as_config(), 200, 25)?;
 
     // ---- dmabuf ---------------------------------------------------------
     match EGLDevice::device_for_display(&egl_display)

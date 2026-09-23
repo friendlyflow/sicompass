@@ -37,6 +37,8 @@ mod startup;
 mod state;
 #[cfg(all(target_os = "linux", feature = "tty"))]
 mod tty;
+#[cfg(target_os = "linux")]
+mod xkb;
 
 #[cfg(target_os = "linux")]
 mod linux {
@@ -56,7 +58,7 @@ mod linux {
             winit::{self, WinitEvent},
         },
         desktop::space::render_output,
-        input::keyboard::{FilterResult, XkbConfig},
+        input::keyboard::FilterResult,
         output::{Mode, Output, PhysicalProperties, Scale, Subpixel},
         reexports::{
             calloop::{
@@ -87,17 +89,24 @@ mod linux {
 
         /// XKB layout handed to every client, e.g. `be`, `us`, `fr`.
         ///
-        /// Defaults to XKB_DEFAULT_LAYOUT, then to `us`. This is not
-        /// cosmetic: the compositor owns the keymap, so getting it wrong
-        /// leaves every client on a US layout no matter what the console or
-        /// the desktop is set to, and on a Belgian keyboard that costs you
-        /// `@`, `#`, `[`, `]`, `{` and `}`.
+        /// Normally left unset: the layout then comes from systemd-localed,
+        /// which is what the OS installer configured (see `xkb.rs` for the
+        /// full fallback order). Given, it replaces the system's layout
+        /// along with its variant, model and options.
         #[arg(long)]
         xkb_layout: Option<String>,
 
-        /// XKB variant to pair with the layout.
+        /// XKB variant, overriding the system's.
         #[arg(long)]
         xkb_variant: Option<String>,
+
+        /// XKB model, overriding the system's, e.g. `pc105`.
+        #[arg(long)]
+        xkb_model: Option<String>,
+
+        /// XKB options, overriding the system's, e.g. `ctrl:nocaps`.
+        #[arg(long)]
+        xkb_options: Option<String>,
 
         /// Command launched by the spawn binding (Super+Return).
         #[arg(long, default_value = "foot")]
@@ -110,6 +119,18 @@ mod linux {
         /// both from a desktop while developing and from a TTY at boot.
         #[arg(long, value_enum, default_value_t = BackendChoice::Auto)]
         backend: BackendChoice,
+    }
+
+    impl Args {
+        fn xkb_overrides(&self) -> crate::xkb::XkbNames {
+            crate::xkb::XkbNames {
+                rules: None,
+                model: self.xkb_model.clone(),
+                layout: self.xkb_layout.clone(),
+                variant: self.xkb_variant.clone(),
+                options: self.xkb_options.clone(),
+            }
+        }
     }
 
     pub fn main_impl() -> Result<(), Box<dyn std::error::Error>> {
@@ -146,8 +167,7 @@ mod linux {
     fn args_to_tty(args: &Args) -> crate::tty::TtyArgs {
         crate::tty::TtyArgs {
             startup_cmd: args.startup_cmd.clone(),
-            xkb_layout: args.xkb_layout.clone(),
-            xkb_variant: args.xkb_variant.clone(),
+            xkb: args.xkb_overrides(),
             terminal: args.terminal.clone(),
         }
     }
@@ -233,29 +253,9 @@ mod linux {
             None => warn!("no DRM render node found; dmabuf is unavailable and GPU clients cannot present"),
         }
 
-        // The keymap the compositor compiles is the keymap every client
-        // gets; `XkbConfig::default()` means US, silently, on any machine.
-        let layout = args
-            .xkb_layout
-            .clone()
-            .or_else(|| std::env::var("XKB_DEFAULT_LAYOUT").ok())
-            .unwrap_or_default();
-        let variant = args
-            .xkb_variant
-            .clone()
-            .or_else(|| std::env::var("XKB_DEFAULT_VARIANT").ok())
-            .unwrap_or_default();
-        let xkb_config = XkbConfig {
-            layout: &layout,
-            variant: &variant,
-            ..Default::default()
-        };
-        info!(
-            "xkb layout={:?} variant={:?}",
-            if layout.is_empty() { "us (default)" } else { &layout },
-            variant
-        );
-        let keyboard = state.seat.add_keyboard(xkb_config, 200, 25)?;
+        let (xkb, source) = crate::xkb::resolve(&args.xkb_overrides());
+        info!("xkb {xkb} (from {source})");
+        let keyboard = state.seat.add_keyboard(xkb.as_config(), 200, 25)?;
         // No `add_pointer()`. A seat with no wl_pointer is the honest
         // advertisement of a cursorless compositor, and it means a client's
         // pointer-driven paths (sicompass's SDL hit test, for one) can never

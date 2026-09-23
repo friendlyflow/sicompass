@@ -824,15 +824,16 @@
               "loginsicompass as the greetd greeter, replacing the current one";
 
             xkbLayout = lib.mkOption {
-              type = lib.types.str;
-              default = config.services.xserver.xkb.layout;
-              defaultText = lib.literalExpression "config.services.xserver.xkb.layout";
+              type = lib.types.nullOr lib.types.str;
+              default = null;
+              example = "be";
               description = ''
                 Keyboard layout the compositor compiles and hands to every
-                client. Defaults to the system's X keyboard layout, which is
-                almost always what is wanted: the compositor owns the keymap,
-                so leaving it unset would put every client on a US layout no
-                matter what the console and the desktop are set to.
+                client, overriding the system's. Leave it null: desicompass
+                then asks systemd-localed, which on NixOS reports
+                services.xserver.xkb.{layout,variant,model,options}, all four
+                of them rather than only the layout. Set it only to give
+                desicompass a different layout from the rest of the system.
               '';
             };
           };
@@ -841,12 +842,11 @@
             let
               # The session entry a display manager offers in its list.
               #
-              # Generated here rather than as a flake package because it has
-              # to carry --xkb-layout, and only NixOS config knows the
-              # layout. XKB_DEFAULT_LAYOUT is not set anywhere on a stock
-              # NixOS - not system-wide, not in greetd's environment - so a
-              # session entry without the flag hands every client a US
-              # keymap regardless of what the console and desktop use.
+              # Generated here rather than as a flake package because it
+              # points at store paths and may carry the xkbLayout override.
+              # Without the override, desicompass reads the layout from
+              # systemd-localed at startup (src/desicompass/src/xkb.rs), the
+              # same source COSMIC's first-login setup copies from.
               #
               # Generated rather than committed under `assets/` because
               # `src/sicompass/tests/packaging.rs` holds that directory to
@@ -878,6 +878,8 @@
               # failed. Rather than swap quote characters and depend on how
               # carefully each greeter implements the spec, the Exec line now
               # contains no quoting at all.
+              xkbArgs = lib.optionalString (cfg.xkbLayout != null) " --xkb-layout ${cfg.xkbLayout}";
+
               startupScript = pkgs.writeShellScript "desicompass-startup" ''
                 exec ${packages.default}/bin/sicompass --session
               '';
@@ -917,7 +919,7 @@
                 [Desktop Entry]
                 Name=Desicompass
                 Comment=Use your whole computer from the keyboard, with no mouse needed
-                Exec=${pkgs.systemd}/bin/systemd-cat --identifier=desicompass ${pkgs.dbus}/bin/dbus-run-session ${packages.desicompass}/bin/desicompass --backend tty --xkb-layout ${cfg.xkbLayout} --startup-cmd ${startupScript}
+                Exec=${pkgs.systemd}/bin/systemd-cat --identifier=desicompass ${pkgs.dbus}/bin/dbus-run-session ${packages.desicompass}/bin/desicompass --backend tty${xkbArgs} --startup-cmd ${startupScript}
                 Type=Application
                 DesktopNames=Desicompass
               '' // {
@@ -1037,8 +1039,7 @@
                   # exists to prevent.
                   "${pkgs.dbus}/bin/dbus-run-session"
                   "${packages.desicompass}/bin/desicompass"
-                  "--backend tty"
-                  "--xkb-layout ${cfg.xkbLayout}"
+                  "--backend tty${xkbArgs}"
                   # The greeter is a Wayland client, so it needs a compositor
                   # of its own to run in. This is the same shape cage +
                   # gtkgreet use, and it is why --startup-cmd earns its keep.
