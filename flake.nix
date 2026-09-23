@@ -11,9 +11,14 @@
     # last branch carrying it, and it gets security fixes until the end of
     # 2026. Retire this input, and the system below, when that runs out.
     nixpkgs-x86-darwin.url = "github:NixOS/nixpkgs/nixpkgs-26.05-darwin";
+
+    # Splits each package into a dependency build keyed on Cargo.lock alone and
+    # the workspace crates on top, so an edit to sicompass itself does not
+    # recompile the whole dependency graph. See `buildMember` below.
+    crane.url = "github:ipetkov/crane";
   };
 
-  outputs = { self, nixpkgs, nixpkgs-x86-darwin }:
+  outputs = { self, nixpkgs, nixpkgs-x86-darwin, crane }:
     let
       supportedSystems = [
         "aarch64-linux"
@@ -484,23 +489,49 @@
       packages = forAllSystems (system:
         let
           pkgs = nixpkgsFor.${system};
+          craneLib = crane.mkLib pkgs;
+
+          # Each workspace member is two derivations: its dependencies, built
+          # from a dummy source that keeps only the Cargo.toml files and
+          # Cargo.lock, and the member itself on top of those artifacts. An
+          # edit to sicompass's own code then rebuilds only the workspace
+          # crates; the dependency half is reused until Cargo.lock or a
+          # manifest changes.
+          #
+          # One dependency build per member rather than one for the whole
+          # workspace: `-p` decides feature unification, so a `--workspace`
+          # build would compile the graph with a different feature set than
+          # each member uses and cargo would rebuild most of it anyway.
+          #
+          # No cargoHash and no git outputHashes to keep up to date: crane
+          # vendors from Cargo.lock, git sources (desicompass's smithay)
+          # included, by the rev recorded there.
+          buildMember = args:
+            let
+              memberArgs = {
+                inherit version;
+                src = ./.;
+                strictDeps = true;
+                # The workspace suite wants a network and a display. It is
+                # run by ci.yml instead, where both can be arranged.
+                doCheck = false;
+              } // args;
+            in
+            craneLib.buildPackage (memberArgs // {
+              cargoArtifacts = craneLib.buildDepsOnly
+                (builtins.removeAttrs memberArgs [ "postInstall" "desktopItems" "meta" ] // {
+                  # Only `cargo build`'s artifacts are reused by the member
+                  # build; a `cargo check` pass would be compiled for nothing.
+                  cargoCheckCommand = "true";
+                });
+            });
         in
         {
-          default = pkgs.rustPlatform.buildRustPackage {
+          default = buildMember {
             pname = "sicompass";
-            inherit version;
-            src = ./.;
-
-            # Cargo.lock has no git sources, so the lock file alone is enough
-            # and there is no cargoHash to keep up to date.
-            cargoLock.lockFile = ./Cargo.lock;
 
             # Only the app crate. The lib_* crates come in transitively.
-            cargoBuildFlags = [ "-p" "sicompass" ];
-
-            # The workspace suite wants a network and a display. It is run by
-            # ci.yml instead, where both can be arranged.
-            doCheck = false;
+            cargoExtraArgs = "--locked -p sicompass";
 
             nativeBuildInputs = with pkgs; [
               pkg-config
@@ -638,19 +669,13 @@
           # hardcodes the same, and its meta claims `platforms.unix` — none of
           # which fits a pair of Linux-only binaries with entirely different
           # runtime needs (no SDL, no MoltenVK, but DRM, libinput and libseat).
-          desicompass = pkgs.rustPlatform.buildRustPackage {
+          desicompass = buildMember {
             pname = "desicompass";
-            inherit version;
-            src = ./.;
-            cargoLock.lockFile = ./Cargo.lock;
 
-            cargoBuildFlags = [ "-p" "desicompass" ];
-            # The TTY/DRM backend. Off by default in the crate so the ordinary
-            # workspace build needs none of this, but a session package that
-            # cannot take the display would be pointless.
-            buildFeatures = [ "tty" ];
-
-            doCheck = false;
+            # `--features tty` is the TTY/DRM backend. Off by default in the
+            # crate so the ordinary workspace build needs none of this, but a
+            # session package that cannot take the display would be pointless.
+            cargoExtraArgs = "--locked -p desicompass --features tty";
 
             nativeBuildInputs = with pkgs; [ pkg-config makeWrapper ];
             buildInputs = with pkgs; [
@@ -703,13 +728,9 @@
             };
           };
 
-          loginsicompass = pkgs.rustPlatform.buildRustPackage {
+          loginsicompass = buildMember {
             pname = "loginsicompass";
-            inherit version;
-            src = ./.;
-            cargoLock.lockFile = ./Cargo.lock;
-            cargoBuildFlags = [ "-p" "loginsicompass" ];
-            doCheck = false;
+            cargoExtraArgs = "--locked -p loginsicompass";
 
             # This used to say "it draws with tiny-skia into shared memory, so
             # it needs no GPU stack at all". That stopped being true when the
