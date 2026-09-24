@@ -79,6 +79,10 @@
               # `nix develop -c cargo test` does not silently depend on
               # whatever git happens to be on the contributor's PATH.
               git
+              # git-filter-repo: the `/split-repo` skill uses it to lift a
+              # crate out of this workspace into its own sibling repo with the
+              # crate's history intact (`--subdirectory-filter`).
+              git-filter-repo
 
               # Native libs required by Rust crates
               pkg-config
@@ -163,32 +167,14 @@
               dbus
               accerciser
 
-              # desicompass's TTY backend (the `tty` cargo feature): libinput
-              # for input devices, seatd for libseat (nixpkgs has no
-              # `libseat` attribute; the daemon package is what ships the
-              # library, and the logind backend is what actually gets used
-              # here), udev for device enumeration. libdrm and mesa's gbm are
-              # already above. All Linux-only, which is why they sit in this
-              # branch: nixpkgs marks several of them bad on darwin and a
-              # stray reference breaks `nix develop` at eval time there.
-              libinput
-              seatd
+              # udev for SDL's device enumeration. (desicompass's TTY backend
+              # libraries, libinput and seatd, and its Wayland test clients
+              # moved to that repo's own dev shell: ../desicompass.)
               udev
               # gbm is its own package in this nixpkgs (mesa-libgbm); it is no
               # longer part of the mesa output, so `gbm.pc` is only found with
-              # this listed explicitly.
+              # this listed explicitly. loginsicompass links it.
               libgbm
-
-              # Test clients for desicompass, the Wayland compositor in
-              # src/desicompass. They are how you tell a compositor bug from a
-              # client bug, cheapest first: wayland-info dumps the registry so
-              # you can see which globals are actually advertised, foot is a
-              # shm-only terminal that needs no GPU import, and vkcube (from
-              # vulkan-tools above) is the smallest hardware Vulkan client
-              # there is, so it answers the dmabuf question without dragging
-              # the whole app into the diagnosis.
-              wayland-utils
-              foot
             ] ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isDarwin [
               # MoltenVK is the only Vulkan driver on macOS: it implements
               # Vulkan on top of Metal, and vulkan-loader enumerates zero ICDs
@@ -214,7 +200,7 @@
             ''
             + lib.optionalString stdenv.hostPlatform.isLinux ''
               export PKG_CONFIG_PATH="${libxkbcommon.dev}/lib/pkgconfig:$PKG_CONFIG_PATH";
-              export LIBRARY_PATH="${sdl3}/lib:${libxkbcommon}/lib:${wayland}/lib:${libGL}/lib:${mesa}/lib:${libinput}/lib:${seatd}/lib:${udev}/lib:${libgbm}/lib:$LIBRARY_PATH";
+              export LIBRARY_PATH="${sdl3}/lib:${libxkbcommon}/lib:${wayland}/lib:${libGL}/lib:${mesa}/lib:${udev}/lib:${libgbm}/lib:$LIBRARY_PATH";
 
               # Library path for Vulkan and other runtime deps.
               #
@@ -230,8 +216,8 @@
               # curl.out, not curl: curl's *default* output is `bin`, which
               # holds no lib directory at all, so a bare ${curl}/lib here was
               # a path that has never existed.
-              # libGL (libglvnd) and libgbm are here for desicompass, not for
-              # the app. Note what is *not* here: nixpkgs' `mesa`. These two
+              # libGL (libglvnd) and libgbm are here for loginsicompass, not
+              # for the app. Note what is *not* here: nixpkgs' `mesa`. These two
               # are dispatch libraries, which is exactly why they are safe to
               # take from the shell — they load a vendor at runtime and the
               # vendor has to be the system's, see the block below.
@@ -244,7 +230,7 @@
               # these two entries the compositor builds and links fine and then
               # dies at startup. libGL is libglvnd (the dispatch library that
               # owns those sonames); mesa is the vendor behind it.
-              export LD_LIBRARY_PATH="${libwebp}/lib:${freetype}/lib:${vulkan-loader}/lib:${vulkan-validation-layers}/lib:${curl.out}/lib:${sdl3}/lib:${libxkbcommon}/lib:${wayland}/lib:${libGL}/lib:${libinput}/lib:${seatd}/lib:${udev}/lib:${libgbm}/lib";
+              export LD_LIBRARY_PATH="${libwebp}/lib:${freetype}/lib:${vulkan-loader}/lib:${vulkan-validation-layers}/lib:${curl.out}/lib:${sdl3}/lib:${libxkbcommon}/lib:${wayland}/lib:${libGL}/lib:${udev}/lib:${libgbm}/lib";
               export VK_LAYER_PATH="${vulkan-validation-layers}/share/vulkan/explicit_layer.d";
 
               # The GL/EGL/GBM *vendor*, as opposed to the dispatch libraries
@@ -504,8 +490,9 @@
           # each member uses and cargo would rebuild most of it anyway.
           #
           # No cargoHash and no git outputHashes to keep up to date: crane
-          # vendors from Cargo.lock, git sources (desicompass's smithay)
-          # included, by the rev recorded there.
+          # vendors from Cargo.lock, git sources (the sicompass-ui and
+          # sicompass-payments git dependencies, once they move out) included,
+          # by the rev recorded there.
           buildMember = args:
             let
               memberArgs = {
@@ -663,71 +650,15 @@
           };
         } // pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
 
-          # The compositor and its greeter are separate derivations rather
-          # than extra `cargoBuildFlags` on the one above. That package's
-          # postInstall wraps `$out/bin/sicompass` by name, its `apps` entry
-          # hardcodes the same, and its meta claims `platforms.unix` — none of
-          # which fits a pair of Linux-only binaries with entirely different
-          # runtime needs (no SDL, no MoltenVK, but DRM, libinput and libseat).
-          desicompass = buildMember {
-            pname = "desicompass";
-
-            # `--features tty` is the TTY/DRM backend. Off by default in the
-            # crate so the ordinary workspace build needs none of this, but a
-            # session package that cannot take the display would be pointless.
-            cargoExtraArgs = "--locked -p desicompass --features tty";
-
-            nativeBuildInputs = with pkgs; [ pkg-config makeWrapper ];
-            buildInputs = with pkgs; [
-              wayland
-              libxkbcommon
-              libinput
-              seatd
-              udev
-              libgbm
-              libdrm
-              libGL
-            ];
-
-            # Only the dispatch libraries go on LD_LIBRARY_PATH, and the
-            # GL/EGL/GBM *vendor* is pointed at /run/opengl-driver.
-            #
-            # Both halves are required. Assuming the first was enough is what
-            # made the session die instantly when launched from the greeter:
-            # the wrapper put nixpkgs' libgbm (26.1.3) on the path while EGL
-            # resolved to the system driver (26.1.8), so on the GBM path -
-            # which only the TTY backend takes, which is why it survived
-            # nested - two incompatible Mesa builds ended up in one process
-            # and it segfaulted inside libEGL_mesa.
-            #
-            # `--set-default` rather than `--set`: on a non-NixOS host, or for
-            # someone deliberately testing another driver, the environment
-            # should still win.
-            postInstall = ''
-              wrapProgram $out/bin/desicompass \
-                --prefix LD_LIBRARY_PATH : "${pkgs.lib.makeLibraryPath (with pkgs; [
-                  libGL
-                  libgbm
-                  libxkbcommon
-                  wayland
-                  libinput
-                  seatd
-                  udev
-                ])}" \
-                --set-default __EGL_VENDOR_LIBRARY_DIRS /run/opengl-driver/share/glvnd/egl_vendor.d \
-                --set-default LIBGL_DRIVERS_PATH /run/opengl-driver/lib/dri \
-                --set-default GBM_BACKENDS_PATH /run/opengl-driver/lib/gbm
-            '';
-
-            meta = with pkgs.lib; {
-              description = "Keyboard-driven tiling Wayland compositor for sicompass";
-              homepage = "https://github.com/friendlyflow/sicompass";
-              license = licenses.gpl3Only;
-              mainProgram = "desicompass";
-              platforms = platforms.linux;
-            };
-          };
-
+          # The greeter is a separate derivation rather than extra
+          # `cargoBuildFlags` on the one above. That package's postInstall
+          # wraps `$out/bin/sicompass` by name, its `apps` entry hardcodes the
+          # same, and its meta claims `platforms.unix`, none of which fits a
+          # Linux-only binary with entirely different runtime needs.
+          #
+          # The compositor, desicompass, and the NixOS module that wires both
+          # into a session are in their own repo:
+          # github:friendlyflow/desicompass.
           loginsicompass = buildMember {
             pname = "loginsicompass";
             cargoExtraArgs = "--locked -p loginsicompass";
@@ -774,7 +705,8 @@
               libdrm
             ];
 
-            # Same shape as the desicompass wrapper, and for the same reasons.
+            # Same shape as desicompass's wrapper (github:friendlyflow/desicompass),
+            # and for the same reasons.
             #
             # vulkan-loader on LD_LIBRARY_PATH is what lets `ash::Entry::load()`
             # dlopen libvulkan.so.1 — it is not in the binary's DT_NEEDED, so a
@@ -815,262 +747,9 @@
 
         });
 
-      # Opt-in NixOS integration. Enabling nothing changes nothing.
-      #
-      # Two steps on purpose, and the order matters on a machine someone
-      # depends on:
-      #
-      #   services.desicompass.enable = true;
-      #     Adds "Desicompass" to the session list the *existing* greeter
-      #     offers. If the session fails to start you are returned to that
-      #     greeter, so a broken session costs a login attempt and nothing
-      #     more.
-      #
-      #   services.desicompass.greeter.enable = true;
-      #     Replaces the greeter itself with loginsicompass. Only worth
-      #     turning on once the session above is known to work, because a
-      #     greeter that fails to start leaves no graphical way in at all -
-      #     recovery is a VT and `nixos-rebuild --rollback`.
-      nixosModules.default = { config, lib, pkgs, ... }:
-        let
-          cfg = config.services.desicompass;
-          packages = self.packages.${pkgs.stdenv.hostPlatform.system};
-        in
-        {
-          options.services.desicompass = {
-            enable = lib.mkEnableOption
-              "the desicompass session, offered by whichever greeter is configured";
-
-            greeter.enable = lib.mkEnableOption
-              "loginsicompass as the greetd greeter, replacing the current one";
-
-            xkbLayout = lib.mkOption {
-              type = lib.types.nullOr lib.types.str;
-              default = null;
-              example = "be";
-              description = ''
-                Keyboard layout the compositor compiles and hands to every
-                client, overriding the system's. Leave it null: desicompass
-                then asks systemd-localed, which on NixOS reports
-                services.xserver.xkb.{layout,variant,model,options}, all four
-                of them rather than only the layout. Set it only to give
-                desicompass a different layout from the rest of the system.
-              '';
-            };
-          };
-
-          config =
-            let
-              # The session entry a display manager offers in its list.
-              #
-              # Generated here rather than as a flake package because it
-              # points at store paths and may carry the xkbLayout override.
-              # Without the override, desicompass reads the layout from
-              # systemd-localed at startup (src/desicompass/src/xkb.rs), the
-              # same source COSMIC's first-login setup copies from.
-              #
-              # Generated rather than committed under `assets/` because
-              # `src/sicompass/tests/packaging.rs` holds that directory to
-              # packaging inputs only, and rightly: a file there must be
-              # added by hand to the deb, the rpm, the MSI and the Nix
-              # install before it reaches anyone.
-              #
-              # systemd-cat is what makes a failure visible at all. greetd
-              # captures neither stdout nor stderr of the session it starts,
-              # so a session dying on startup leaves behind only "session
-              # opened" and "session closed" a second apart and nothing about
-              # why - which is exactly how this first presented. The journal
-              # is where a session's output belongs anyway:
-              # `journalctl -t desicompass -b` reads it.
-              #
-              # dbus-run-session is load-bearing. accesskit_unix speaks
-              # AT-SPI2 over the session bus, so without one sicompass stalls
-              # 400ms at startup waiting for a registration that never
-              # arrives and is then mute to screen readers - for an
-              # accessibility-first shell, a failure rather than a
-              # degradation.
-              # What the compositor starts, as a script rather than an
-              # argument containing a space.
-              #
-              # The Desktop Entry spec gives no special meaning to single
-              # quotes - only double ones - so `--startup-cmd '... --session'`
-              # is split by the greeter's parser and the compositor is handed
-              # a stray `--session` it rejects, which is exactly how this
-              # failed. Rather than swap quote characters and depend on how
-              # carefully each greeter implements the spec, the Exec line now
-              # contains no quoting at all.
-              xkbArgs = lib.optionalString (cfg.xkbLayout != null) " --xkb-layout ${cfg.xkbLayout}";
-
-              startupScript = pkgs.writeShellScript "desicompass-startup" ''
-                exec ${packages.default}/bin/sicompass --session
-              '';
-
-              # What the compositor starts when it is the *greeter*, as a
-              # script for the same reason the session one is: it carries an
-              # environment as well as a command, and greetd hands
-              # `default_session.command` to sh(1) while desicompass hands
-              # `--startup-cmd` to `sh -c` in turn.
-              #
-              # No --user and no --command. Those two flags are what made the
-              # old greeter authenticate `nobody` and then launch `false`: it
-              # had no way to enumerate anything, so the defaults applied. The
-              # greeter now reads users from /etc/passwd (bounded by
-              # /etc/login.defs) and sessions from the wayland-sessions
-              # directories itself.
-              #
-              # The XDG_* variables exist because the greeter user's home is
-              # /var/empty. sicompass_sdk::platform honours them ahead of
-              # $HOME, so every write the renderer makes lands in the tmpfiles
-              # directory rather than failing.
-              greeterScript = pkgs.writeShellScript "loginsicompass-start" ''
-                export XDG_CONFIG_HOME=/var/lib/loginsicompass/xdg/config
-                export XDG_STATE_HOME=/var/lib/loginsicompass/xdg/state
-                export XDG_DATA_HOME=/var/lib/loginsicompass/xdg/data
-                export XDG_CACHE_HOME=/var/lib/loginsicompass/xdg/cache
-                exec ${packages.loginsicompass}/bin/loginsicompass \
-                  --state-dir /var/lib/loginsicompass \
-                  --sessions-dir /run/current-system/sw/share/wayland-sessions \
-                  --suspend-command  '${pkgs.systemd}/bin/systemctl suspend' \
-                  --reboot-command   '${pkgs.systemd}/bin/systemctl reboot' \
-                  --poweroff-command '${pkgs.systemd}/bin/systemctl poweroff'
-              '';
-
-              sessionPackage = pkgs.writeTextDir
- "share/wayland-sessions/desicompass.desktop" ''
-                [Desktop Entry]
-                Name=Desicompass
-                Comment=Use your whole computer from the keyboard, with no mouse needed
-                Exec=${pkgs.systemd}/bin/systemd-cat --identifier=desicompass ${pkgs.dbus}/bin/dbus-run-session ${packages.desicompass}/bin/desicompass --backend tty${xkbArgs} --startup-cmd ${startupScript}
-                Type=Application
-                DesktopNames=Desicompass
-              '' // {
-                # NixOS requires anything in sessionPackages to declare the
-                # sessions it provides, and the name must match the .desktop
-                # file. Set at the top level, not under `passthru`: the option
-                # type tests `p ? providedSessions` directly, and `passthru`
-                # is only lifted to the top level by mkDerivation - adding it
-                # with `//` to an already-built derivation leaves it nested
-                # where nothing looks for it.
-                providedSessions = [ "desicompass" ];
-              };
-            in
-            lib.mkMerge [
-
-            {
-              # `greeter.enable` on its own does nothing, because everything
-              # below is gated on `cfg.enable` - and "I turned it on and
-              # nothing happened" is a bad way to find that out about a login
-              # screen. Say so at build time instead. This assertion sits
-              # outside the `mkIf` on purpose, so it still fires when
-              # `enable` is false.
-              assertions = [
-                {
-                  assertion = cfg.greeter.enable -> cfg.enable;
-                  message =
-                    "services.desicompass.greeter.enable requires "
-                    + "services.desicompass.enable: the greeter needs the session "
-                    + "it offers, and the at-spi2-core that makes it audible.";
-                }
-              ];
-            }
-
-            (lib.mkIf cfg.enable (lib.mkMerge [
-            {
-              services.displayManager.sessionPackages = [ sessionPackage ];
-
-              # accesskit_unix reaches screen readers over AT-SPI2, which is a
-              # D-Bus service. Without this the app runs and renders but is
-              # silent to Orca, which for an accessibility-first shell is a
-              # failure rather than a degradation.
-              services.gnome.at-spi2-core.enable = true;
-
-              environment.systemPackages = [
-                packages.desicompass
-                packages.default
-
-                # The session entry has to be here, not only in
-                # sessionPackages above.
-                #
-                # `services.displayManager.sessionPackages` collects entries
-                # into `sessionData.desktops`, a store path each display
-                # manager is expected to be pointed at. cosmic-greeter is not
-                # pointed at it: its nixpkgs module contains no reference to
-                # sessionData, sessionPackages or wayland-sessions at all. It
-                # scans a fixed list of directories instead, and the only one
-                # of those under our control is
-                # /run/current-system/sw/share/wayland-sessions - which is
-                # exactly what environment.systemPackages populates.
-                #
-                # Both are kept. sessionPackages is the correct mechanism and
-                # is what GDM, SDDM and LightDM consume; this is what makes
-                # the entry visible to a greeter that ignores it.
-                sessionPackage
-              ];
-
-              # ...and systemPackages alone is still not enough.
-              #
-              # NixOS links only the subdirectories named in pathsToLink into
-              # /run/current-system/sw, and share/wayland-sessions is not one
-              # of the ~50 defaults. Without this the .desktop file sits in
-              # the store, referenced by the system closure, reachable by
-              # nothing: the package is installed and the session is still
-              # invisible, with no error anywhere to say so.
-              #
-              # Three layers had to line up for a greeter to see this entry -
-              # sessionPackages for display managers that use it,
-              # systemPackages for cosmic-greeter which does not, and this to
-              # make the directory exist at all.
-              environment.pathsToLink = [ "/share/wayland-sessions" ];
-            }
-
-            ]))
-
-            (lib.mkIf cfg.greeter.enable {
-              # The greeter user that nixpkgs' greetd module creates is a
-              # system user with no home (`greeter:x:989:985::/var/empty:…`),
-              # so everything the greeter writes needs somewhere to be. The
-              # remembered user and session live here, and the XDG_* variables
-              # in the startup script below keep sicompass-ui's own config,
-              # state and cache writes out of a home that does not exist.
-              # nixpkgs ships the same shape for tuigreet's /var/cache dir.
-              systemd.tmpfiles.rules = [
-                "d /var/lib/loginsicompass     0755 greeter greeter - -"
-                "d /var/lib/loginsicompass/xdg 0700 greeter greeter - -"
-              ];
-
-              # Orca, so the accessibility toggle has a screen reader to start.
-              # at-spi2-core comes from `cfg.enable`, which `greeter.enable`
-              # now implies (see the assertion in the shared branch).
-              environment.systemPackages = [ pkgs.orca ];
-
-              services.greetd = {
-                enable = true;
-                settings.default_session.command = lib.concatStringsSep " " [
-                  # greetd captures neither stdout nor stderr of what it
-                  # starts, so without systemd-cat a greeter that fell back to
-                  # the software renderer — or failed to start twice — says so
-                  # to nobody. `journalctl -t loginsicompass -b` reads it.
-                  "${pkgs.systemd}/bin/systemd-cat --identifier=loginsicompass"
-                  # dbus-run-session is load-bearing, for exactly the reason
-                  # recorded on the session's own Exec line above: accesskit_unix
-                  # speaks AT-SPI2 over the *session* bus, and without one the
-                  # greeter stalls 400ms waiting for a registration that never
-                  # arrives and is then mute to Orca. A login screen nobody can
-                  # hear is not a degradation, it is the failure this project
-                  # exists to prevent.
-                  "${pkgs.dbus}/bin/dbus-run-session"
-                  "${packages.desicompass}/bin/desicompass"
-                  "--backend tty${xkbArgs}"
-                  # The greeter is a Wayland client, so it needs a compositor
-                  # of its own to run in. This is the same shape cage +
-                  # gtkgreet use, and it is why --startup-cmd earns its keep.
-                  "--startup-cmd ${greeterScript}"
-                ];
-              };
-            })
-
-          ];
-        };
+      # The NixOS module (services.desicompass.{enable,greeter.enable}) moved
+      # to github:friendlyflow/desicompass, next to the compositor it starts.
+      # It takes `sicompass` and `loginsicompass` from this flake.
 
       apps = forAllSystems (system: {
         default = {

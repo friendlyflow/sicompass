@@ -52,6 +52,23 @@ produce the installable Linux package. It reads the version from
   The hook reads the OS user database instead (`getent`, then `/etc/passwd`,
   then `dscl` on macOS).
 
+## Sibling repos
+
+sicompass is being split into sibling repos under the same parent directory,
+all driven from this checkout. [.claude/repos.json](.claude/repos.json) lists
+them. So far:
+
+- `../desicompass`, the Wayland compositor, together with the NixOS module
+  (`services.desicompass.*`) that wires it, the app and the greeter into a
+  session.
+- `../sicompass-plugin-sdk`, the SDK and the WASM plugin kit (on crates.io).
+
+`/commit-and-push`, `/release`, `/sync` and `/update-cargo` take a repo name as
+their first argument and then follow that repo's own copy of the skill (see
+[.claude/repo-selection.md](.claude/repo-selection.md)). `/split-repo` moves a
+crate out, keeping its history. Edits under `../<repo>` fire this repo's hooks,
+and `run-tests.sh` runs the suite of the repo that owns the edited file.
+
 ## Code Style
 
 ### Rust

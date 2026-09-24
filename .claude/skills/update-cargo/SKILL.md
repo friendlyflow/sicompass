@@ -1,7 +1,7 @@
 ---
 name: update-cargo
 description: Refresh Rust dependencies (Cargo.lock, workspace version requirements, flake.lock) and verify with a build plus the test suite, then smoke-test the sibling SDK repo against freshly resolved deps
-argument-hint: "[major] [push] [no-sdk]"
+argument-hint: "[repo|all] [major] [push] [no-sdk]"
 disable-model-invocation: true
 model: sonnet
 effort: medium
@@ -21,6 +21,13 @@ allowed-tools:
   - Edit
   - Grep
 ---
+
+**Target repo.** Before anything else, resolve which repo this runs in, as
+described in [.claude/repo-selection.md](../../repo-selection.md). The first
+argument may name a sibling repo from `.claude/repos.json`. If it does, and that
+repo has its own copy of this skill, follow that copy instead of the steps
+below. With no repo argument, the target is sicompass and everything below
+applies unchanged.
 
 Update this workspace's dependencies. Mechanical chore — no refactoring, no
 unrelated cleanups. One commit, in this repo.

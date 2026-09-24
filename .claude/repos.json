@@ -1,0 +1,20 @@
+{
+  "_comment": "Sibling repos that the skills in this directory can operate on. `path` is relative to this repo's root. The first argument of /commit-and-push, /release, /sync and /update-cargo is matched against `name`. /split-repo appends an entry for every repo it creates. kind: app | sdk | compositor | greeter | ui | crate | plugin.",
+  "repos": [
+    {
+      "name": "sicompass",
+      "path": ".",
+      "kind": "app"
+    },
+    {
+      "name": "sicompass-plugin-sdk",
+      "path": "../sicompass-plugin-sdk",
+      "kind": "sdk"
+    },
+    {
+      "name": "desicompass",
+      "path": "../desicompass",
+      "kind": "compositor"
+    }
+  ]
+}

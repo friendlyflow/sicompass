@@ -147,8 +147,11 @@ last thing turned on.
 # The socket path must be short: sockaddr_un caps it at ~108 bytes.
 cargo run -p loginsicompass --example fake-greetd -- /tmp/greetd.sock hunter2
 
-# The greeter, nested inside desicompass, inside your current session.
-GREETD_SOCK=/tmp/greetd.sock cargo run -p desicompass -- --backend auto \
+# The greeter, nested inside desicompass (its own repo, checked out next to
+# this one at ../desicompass), inside your current session.
+cargo build -p loginsicompass
+GREETD_SOCK=/tmp/greetd.sock cargo run --manifest-path ../desicompass/Cargo.toml -- \
+  --backend auto \
   --startup-cmd "$PWD/target/debug/loginsicompass --state-dir /tmp/lsc-state"
 ```
 
@@ -171,6 +174,10 @@ latter and "I turned it on and nothing happened" is a bad way to learn that
 about a login screen.
 
 ## What the NixOS module has to get right
+
+The module lives in the desicompass repo's `flake.nix`
+(github:friendlyflow/desicompass), next to the compositor it starts, and takes
+the `loginsicompass` package from this flake.
 
 - **`dbus-run-session`.** `accesskit_unix` speaks AT-SPI2 over the *session*
   bus. Without one the greeter stalls 400ms waiting for a registration that

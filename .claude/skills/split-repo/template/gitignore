@@ -1,0 +1,8 @@
+# Build artifacts
+target/
+result
+result-*
+graphify-out/
+.cache
+.vscode
+.claude/settings.local.json

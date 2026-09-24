@@ -1,0 +1,29 @@
+name: CI
+
+# Runs the tests, clippy and the Nix build. Manual only, like every workflow in
+# the sicompass repos: start it from Actions -> CI -> Run workflow. Nothing runs
+# as a side effect of committing.
+#
+# The toolchain is the flake's dev shell, the same one used locally, so there is
+# no apt package list here that can drift from flake.nix.
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: cachix/install-nix-action@v31
+      - name: Test
+        run: nix develop -c cargo test @CARGO_FLAGS@
+      - name: Clippy
+        run: nix develop -c cargo clippy --all-targets @CARGO_FLAGS@ -- -D warnings
+      - name: Format
+        run: nix develop -c cargo fmt --check
+      - name: Nix build
+        run: nix build -L

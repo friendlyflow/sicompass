@@ -1,7 +1,7 @@
 ---
 name: sync
 description: Fast-forward main from origin, then build and run the test suite to verify the synced tree
-argument-hint: "[clippy] [no-jit] [graph]"
+argument-hint: "[repo|all] [clippy] [no-jit] [graph]"
 disable-model-invocation: true
 model: sonnet
 effort: medium
@@ -22,6 +22,13 @@ allowed-tools:
   - Read
   - Grep
 ---
+
+**Target repo.** Before anything else, resolve which repo this runs in, as
+described in [.claude/repo-selection.md](../../repo-selection.md). The first
+argument may name a sibling repo from `.claude/repos.json`. If it does, and that
+repo has its own copy of this skill, follow that copy instead of the steps
+below. With no repo argument, the target is sicompass and everything below
+applies unchanged.
 
 Pull `origin/main` into the local checkout, then prove the result still builds
 and passes its tests. Read-and-verify only — this skill does not commit, push,

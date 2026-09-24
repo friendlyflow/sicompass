@@ -1,9 +1,17 @@
 ---
 name: release
-description: Bump the sicompass workspace version and cut a GitHub release via the tag-push pipeline
+description: Bump the version and cut a release via the tag-push pipeline, for sicompass or a sibling repo named by the first argument
+argument-hint: "[repo] [major|minor|patch]"
 disable-model-invocation: true
 model: sonnet
 ---
+
+**Target repo.** Before anything else, resolve which repo this runs in, as
+described in [.claude/repo-selection.md](../../repo-selection.md). The first
+argument may name a sibling repo from `.claude/repos.json`. If it does, and that
+repo has its own copy of this skill, follow that copy instead of the steps
+below. With no repo argument, the target is sicompass and everything below
+applies unchanged.
 
 Cut a new sicompass release.
 

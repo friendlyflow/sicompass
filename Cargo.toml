@@ -20,11 +20,11 @@ members = [
     "lib/lib_updater",
     "src/sicompass",
     "src/sicompass-ui",
-    # Linux-only binaries: the Wayland compositor and its greetd greeter. Every
-    # dependency of both sits behind `[target.'cfg(target_os = "linux")'.dependencies]`,
-    # so on macOS and Windows they build an empty `main()` and the workspace-wide
+    # Linux-only binary: the greetd greeter. Every dependency sits behind
+    # `[target.'cfg(target_os = "linux")'.dependencies]`, so on macOS and
+    # Windows it builds an empty `main()` and the workspace-wide
     # `cargo test` / `cargo clippy --all-targets` legs in CI stay green.
-    "src/desicompass",
+    # (The compositor, desicompass, is its own repo: ../desicompass.)
     "src/loginsicompass",
 ]
 resolver = "2"
