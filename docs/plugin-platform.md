@@ -274,6 +274,17 @@ time the task runs WebAssembly: a task blocked inside a host call (a network
 request, a sleep) stops when that call returns. Worker threads are named
 `task:<plugin>`. The `task-plugin` example is the fixture.
 
+**The inbox (Step 10):** `send(id, message)` from the UI instance puts bytes in
+a running task's inbox, and `receive(timeout-ms)` in the task takes the next
+one (or `none` after the wait, at most 60 seconds, and at once when the task
+is cancelled). An inbox holds 256 messages before `send` refuses more. So a
+task can live as long as the plugin and serve requests: the email plugin's
+worker holds the one IMAP connection and answers each job with `emit`, and its
+IDLE task is told what to watch rather than started per folder. Per-folder
+tasks would pile up against the cap, because a task blocked in a socket read
+only sees its cancel when the read returns. Both calls are additive, so
+plugins built before them still load.
+
 ### process (gated)
 
 ```wit
@@ -751,8 +762,18 @@ write the app's settings. The user's decisions for the rest of the step:
 - **PUT and DELETE** join GET, HEAD and POST in `net.fetch` (Matrix sends with
   PUT). A task's requests may wait two minutes (a long poll).
 - **Email and the browser keep their slow work in a long-lived task** that the
-  UI instance sends requests to (a task inbox, still to build), because a call
+  UI instance sends requests to (the task inbox, §`tasks`), because a call
   into the UI instance gets 10 seconds before the plugin is trapped.
+
+**Step 10, email:** the email client is a Store plugin
+(`emailclient_plugin_sicompass`) with sockets `*:993`, `*:465` and `*:587`,
+Google's token and userinfo endpoints, and its storage folder. IMAP is the
+blocking `imap` crate over a host socket and rustls (ring, built with clang
+for wasm), SMTP a few commands by hand with STARTTLS for port 587. The
+envelope cache moved from SQLite to a JSON file in storage: SQLite needs C
+emulation libraries to build for WASI and has no file locks there. Tests in
+sicompass drive the released plugin against a fake mailbox on loopback
+(`tests/fake_imap`), granted by name.
 
 ## 14. Decisions on the former open questions (2026-09-24)
 

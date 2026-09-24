@@ -1,6 +1,13 @@
 # Email-client provider strings — English (source/fallback).
 
 emailclient-display-name = email client
+emailclient-description = Email as a list: your folders, their messages, and a form to write one. Sign in with Google.
+emailclient-setting-imap-url = IMAP URL
+emailclient-setting-smtp-url = SMTP URL
+emailclient-setting-username = username
+emailclient-setting-password = password
+emailclient-setting-client-id = client ID (OAuth)
+emailclient-setting-client-secret = client secret (OAuth)
 
 # Error messages
 emailclient-error-not-connected = not connected

@@ -15,11 +15,17 @@
 //! call returns. `tasks.cancelled()` lets a loop stop cleanly, and the grace is
 //! what makes sure it gets the chance to, even on a loaded machine. At most
 //! [`MAX_CONCURRENT_TASKS`] run per plugin; further ones wait in order.
+//!
+//! The UI instance can also talk to a task: `tasks.send` puts a message in its
+//! [`Inbox`] and `tasks.receive` takes it out, so a task can live as long as
+//! the plugin, holding an IMAP session or a browser and doing what the UI asks,
+//! with no deadline on the waiting.
 
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, mpsc};
+use std::sync::{Arc, Condvar, Mutex, mpsc};
+use std::time::{Duration, Instant};
 
 use sicompass_sdk::plugin_abi::MAX_CONCURRENT_TASKS;
 use wasmtime::component::Component;
@@ -31,6 +37,52 @@ use super::{Grants, HostState, Plugin};
 
 /// Epoch ticks (100 ms each) a cancelled task gets to stop by itself.
 pub const CANCEL_GRACE_TICKS: u32 = 5;
+
+/// Messages waiting in one task's inbox before `send` refuses more: a task
+/// that does not read cannot make the host hold everything the UI sends it.
+pub const INBOX_LIMIT: usize = 256;
+
+/// The longest one `receive` waits.
+const RECEIVE_MAX: Duration = Duration::from_secs(60);
+
+/// How often a waiting `receive` looks at the cancel flag.
+const RECEIVE_SLICE: Duration = Duration::from_millis(100);
+
+/// What the UI instance sent one task and it has not received yet.
+#[derive(Default)]
+pub struct Inbox {
+    queue: Mutex<VecDeque<Vec<u8>>>,
+    ready: Condvar,
+}
+
+impl Inbox {
+    fn push(&self, message: Vec<u8>) -> Result<(), String> {
+        let mut q = self.queue.lock().map_err(|e| e.to_string())?;
+        if q.len() >= INBOX_LIMIT {
+            return Err("the task is not keeping up with what it is sent".to_owned());
+        }
+        q.push_back(message);
+        self.ready.notify_one();
+        Ok(())
+    }
+
+    /// The next message, waiting up to `timeout`; `None` in time or on cancel.
+    fn pop(&self, timeout: Duration, cancel: &AtomicBool) -> Option<Vec<u8>> {
+        let deadline = Instant::now() + timeout.min(RECEIVE_MAX);
+        let mut q = self.queue.lock().ok()?;
+        loop {
+            if let Some(m) = q.pop_front() {
+                return Some(m);
+            }
+            let now = Instant::now();
+            if cancel.load(Ordering::Acquire) || now >= deadline {
+                return None;
+            }
+            let wait = (deadline - now).min(RECEIVE_SLICE);
+            q = self.ready.wait_timeout(q, wait).ok()?.0;
+        }
+    }
+}
 
 /// Which side of the task boundary a `HostState` is on.
 #[derive(Default)]
@@ -45,6 +97,7 @@ pub enum TaskRole {
         id: u64,
         cancel: Arc<AtomicBool>,
         events: mpsc::Sender<(u64, TaskEvent)>,
+        inbox: Arc<Inbox>,
     },
 }
 
@@ -70,6 +123,7 @@ struct State {
     running: usize,
     queue: VecDeque<Queued>,
     cancels: HashMap<u64, Arc<AtomicBool>>,
+    inboxes: HashMap<u64, Arc<Inbox>>,
     closed: bool,
 }
 
@@ -101,12 +155,14 @@ impl TaskManager {
         st.next_id += 1;
         let id = st.next_id;
         st.cancels.insert(id, Arc::new(AtomicBool::new(false)));
+        st.inboxes.insert(id, Arc::new(Inbox::default()));
         let job = Queued { id, name, input };
         if st.running < MAX_CONCURRENT_TASKS {
             st.running += 1;
             let cancel = st.cancels[&id].clone();
+            let inbox = st.inboxes[&id].clone();
             drop(st);
-            self.start(job, cancel);
+            self.start(job, cancel, inbox);
         } else {
             st.queue.push_back(job);
         }
@@ -119,10 +175,26 @@ impl TaskManager {
         if let Some(pos) = st.queue.iter().position(|q| q.id == id) {
             st.queue.remove(pos);
             st.cancels.remove(&id);
+            st.inboxes.remove(&id);
             let _ = self.tx.send((id, TaskEvent::Done(Err("cancelled".to_owned()))));
         } else if let Some(flag) = st.cancels.get(&id) {
             flag.store(true, Ordering::Release);
+            // A task waiting in `receive` notices at once.
+            if let Some(inbox) = st.inboxes.get(&id) {
+                inbox.ready.notify_all();
+            }
         }
+    }
+
+    /// Put `message` in task `id`'s inbox (see `tasks.send`).
+    pub fn send(&self, id: u64, message: Vec<u8>) -> Result<(), String> {
+        let inbox = {
+            let st = self.state.lock().map_err(|e| e.to_string())?;
+            st.inboxes.get(&id).cloned()
+        };
+        inbox
+            .ok_or_else(|| format!("task {id} has ended"))?
+            .push(message)
     }
 
     /// Stop everything: cancel running tasks, drop queued ones. Called when the
@@ -134,6 +206,9 @@ impl TaskManager {
         for flag in st.cancels.values() {
             flag.store(true, Ordering::Release);
         }
+        for inbox in st.inboxes.values() {
+            inbox.ready.notify_all();
+        }
     }
 
     /// Events waiting for the UI instance, in the order they happened.
@@ -144,20 +219,21 @@ impl TaskManager {
             .unwrap_or_default()
     }
 
-    fn start(self: &Arc<Self>, job: Queued, cancel: Arc<AtomicBool>) {
+    fn start(self: &Arc<Self>, job: Queued, cancel: Arc<AtomicBool>, inbox: Arc<Inbox>) {
         let me = self.clone();
+        let id = job.id;
         let spawned = std::thread::Builder::new()
             // Short on purpose: Linux keeps 15 bytes of a thread name, and this
             // is what shows in `top -H` and what a test watches.
             .name(format!("task:{}", self.spec.plugin_name))
             .spawn(move || {
-                let result = run(&me.spec, job.id, &job.name, &job.input, &cancel, &me.tx);
+                let result = run(&me.spec, &job, &cancel, &me.tx, inbox);
                 let _ = me.tx.send((job.id, TaskEvent::Done(result)));
                 me.finished(job.id);
             });
         if let Err(e) = spawned {
-            let _ = self.tx.send((job.id, TaskEvent::Done(Err(format!("no worker thread: {e}")))));
-            self.finished(job.id);
+            let _ = self.tx.send((id, TaskEvent::Done(Err(format!("no worker thread: {e}")))));
+            self.finished(id);
         }
     }
 
@@ -165,6 +241,7 @@ impl TaskManager {
         let next = {
             let Ok(mut st) = self.state.lock() else { return };
             st.cancels.remove(&id);
+            st.inboxes.remove(&id);
             st.running -= 1;
             if st.closed {
                 None
@@ -172,12 +249,13 @@ impl TaskManager {
                 st.queue.pop_front().map(|job| {
                     st.running += 1;
                     let cancel = st.cancels[&job.id].clone();
-                    (job, cancel)
+                    let inbox = st.inboxes[&job.id].clone();
+                    (job, cancel, inbox)
                 })
             }
         };
-        if let Some((job, cancel)) = next {
-            self.start(job, cancel);
+        if let Some((job, cancel, inbox)) = next {
+            self.start(job, cancel, inbox);
         }
     }
 }
@@ -185,12 +263,12 @@ impl TaskManager {
 /// Run one task in a fresh instance, on the current (worker) thread.
 fn run(
     spec: &TaskSpec,
-    id: u64,
-    name: &str,
-    input: &[u8],
+    job: &Queued,
     cancel: &Arc<AtomicBool>,
     events: &mpsc::Sender<(u64, TaskEvent)>,
+    inbox: Arc<Inbox>,
 ) -> Result<Vec<u8>, String> {
+    let (id, name, input) = (job.id, job.name.as_str(), job.input.as_slice());
     let mut state = HostState::with_grants(
         spec.plugin_name.clone(),
         spec.settings_section.clone(),
@@ -203,6 +281,7 @@ fn run(
         id,
         cancel: cancel.clone(),
         events: events.clone(),
+        inbox,
     };
     let linker = super::linker_for(&state)?;
     let mut store = Store::new(super::engine(), state);
@@ -265,5 +344,60 @@ impl wit::tasks::Host for HostState {
             TaskRole::Worker { cancel, .. } => cancel.load(Ordering::Acquire),
             _ => false,
         }
+    }
+
+    fn send(&mut self, id: u64, message: Vec<u8>) -> Result<(), String> {
+        match &self.tasks {
+            TaskRole::Ui(manager) => manager.send(id, message),
+            TaskRole::Worker { .. } => Err("a task cannot send to tasks".to_owned()),
+            TaskRole::Unmanaged => Err("tasks are not available here".to_owned()),
+        }
+    }
+
+    fn receive(&mut self, timeout_ms: u32) -> Option<Vec<u8>> {
+        match &self.tasks {
+            TaskRole::Worker { cancel, inbox, .. } => {
+                inbox.pop(Duration::from_millis(timeout_ms.into()), cancel)
+            }
+            _ => None,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_inbox_hands_messages_over_in_order() {
+        let inbox = Inbox::default();
+        let cancel = AtomicBool::new(false);
+        inbox.push(b"a".to_vec()).unwrap();
+        inbox.push(b"b".to_vec()).unwrap();
+        assert_eq!(inbox.pop(Duration::ZERO, &cancel), Some(b"a".to_vec()));
+        assert_eq!(inbox.pop(Duration::ZERO, &cancel), Some(b"b".to_vec()));
+        assert_eq!(inbox.pop(Duration::from_millis(30), &cancel), None);
+    }
+
+    #[test]
+    fn an_inbox_refuses_a_backlog_the_task_is_not_reading() {
+        let inbox = Inbox::default();
+        for _ in 0..INBOX_LIMIT {
+            inbox.push(Vec::new()).unwrap();
+        }
+        assert!(inbox.push(Vec::new()).is_err());
+    }
+
+    #[test]
+    fn a_wait_ends_with_a_message_sent_meanwhile() {
+        let inbox = Arc::new(Inbox::default());
+        let other = inbox.clone();
+        let sender = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(50));
+            other.push(b"late".to_vec()).unwrap();
+        });
+        let cancel = AtomicBool::new(false);
+        assert_eq!(inbox.pop(Duration::from_secs(5), &cancel), Some(b"late".to_vec()));
+        sender.join().unwrap();
     }
 }

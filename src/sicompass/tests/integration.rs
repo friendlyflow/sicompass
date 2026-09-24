@@ -15,6 +15,9 @@ use sicompass_sdk::provider::Provider;
 use std::path::Path;
 use tempfile::TempDir;
 
+// A fake IMAP mailbox, for the email plugin.
+mod fake_imap;
+
 /// An `AppRenderer` set up the way the application sets one up.
 ///
 /// The renderer itself lives in `sicompass-ui` and defaults to
@@ -6180,7 +6183,7 @@ fn navigate_into_empty_compose_body_shows_i_placeholder() {
     // which would cause fetch() to return "Loading…" on machines with an expired token.
     register_no_init(
         &mut renderer,
-        sicompass_sdk::create_provider_by_name("emailclient").unwrap(),
+        email_plugin(),
     );
 
     // Set provider path to compose root so is_in_email_compose_body returns true
@@ -6247,7 +6250,7 @@ fn delete_last_compose_body_element_keeps_i_placeholder() {
     let mut renderer = app_renderer();
     register_no_init(
         &mut renderer,
-        sicompass_sdk::create_provider_by_name("emailclient").unwrap(),
+        email_plugin(),
     );
 
     // Prime provider internal body state via the trait API:
@@ -6308,7 +6311,7 @@ fn delete_body_element_str_with_obj_sibling_integration() {
     let mut renderer = app_renderer();
     register_no_init(
         &mut renderer,
-        sicompass_sdk::create_provider_by_name("emailclient").unwrap(),
+        email_plugin(),
     );
 
     // Build a body with [Str("abc"), Obj{key:"myobj:"}, Str("def")].
@@ -6371,7 +6374,7 @@ fn is_in_email_compose_body_true_for_reply_from_message() {
     let mut renderer = app_renderer();
     register_no_init(
         &mut renderer,
-        sicompass_sdk::create_provider_by_name("emailclient").unwrap(),
+        email_plugin(),
     );
 
     // Simulate a reply entered from /INBOX/msg — compose root is at segs[2].
@@ -6397,7 +6400,7 @@ fn navigate_into_reply_from_message_body_shows_i_placeholder() {
     let mut renderer = app_renderer();
     register_no_init(
         &mut renderer,
-        sicompass_sdk::create_provider_by_name("emailclient").unwrap(),
+        email_plugin(),
     );
 
     // Simulate the path produced when reply is entered from /INBOX/msg.
@@ -6458,7 +6461,7 @@ fn navigate_into_nested_body_obj_shows_i_placeholder() {
     let mut renderer = app_renderer();
     register_no_init(
         &mut renderer,
-        sicompass_sdk::create_provider_by_name("emailclient").unwrap(),
+        email_plugin(),
     );
 
     // Path is inside the body so that push_path (called by navigate_right_raw) appends
@@ -6524,7 +6527,7 @@ fn commit_in_nested_compose_body_creates_child_there() {
     let mut renderer = app_renderer();
     register_no_init(
         &mut renderer,
-        sicompass_sdk::create_provider_by_name("emailclient").unwrap(),
+        email_plugin(),
     );
 
     // Step 1: create `foo:` at the top level of the body.
@@ -6571,7 +6574,7 @@ fn commit_trailing_colon_in_nested_body_creates_obj_with_i_placeholder() {
     let mut renderer = app_renderer();
     register_no_init(
         &mut renderer,
-        sicompass_sdk::create_provider_by_name("emailclient").unwrap(),
+        email_plugin(),
     );
 
     // Create `foo:` at top level, then `baz:` inside `foo:`.
@@ -6623,7 +6626,7 @@ fn editing_leaf_in_nested_compose_body_does_not_empty_list() {
     let mut renderer = app_renderer();
     register_no_init(
         &mut renderer,
-        sicompass_sdk::create_provider_by_name("emailclient").unwrap(),
+        email_plugin(),
     );
 
     // Step 1: build draft.body via the provider API so that fetch_subtree_children
@@ -6685,124 +6688,98 @@ fn editing_leaf_in_nested_compose_body_does_not_empty_list() {
     );
 }
 
-/// Helper: create a stub IMAP backend + renderer positioned inside an opened
-/// email message (flat FFON at depth 2, provider path = "/INBOX/msg_label").
-/// Returns the renderer ready for key dispatch.
+/// The email plugin signed in to `server`: a saved sign-in in its storage
+/// folder, as a Google sign-in leaves one, and a socket grant for that server
+/// alone.
+fn email_plugin_on(server: &fake_imap::FakeImap, storage: &Path) -> Box<dyn Provider> {
+    std::fs::create_dir_all(storage).unwrap();
+    let saved = serde_json::json!({ "email client": {
+        "emailImapUrl": server.url(),
+        "emailUsername": "me@x.com",
+        "emailOAuthAccessToken": "fake",
+        "emailOAuthRefreshToken": "fake-refresh",
+        "emailTokenExpiry": 4_000_000_000_i64,
+    }});
+    std::fs::write(storage.join("email.json"), saved.to_string()).unwrap();
+    plugin_provider_granted("emailclient", Some(storage), None, &[server.endpoint()])
+}
+
+/// Fetch until `pred` holds over the row keys. The plugin does its IMAP in a
+/// host task, so a level shows "Loading…" until the answer is in.
+fn wait_for_rows(
+    p: &mut Box<dyn Provider>,
+    what: &str,
+    pred: impl Fn(&[String]) -> bool,
+) -> Vec<FfonElement> {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    loop {
+        p.tick();
+        let elems = p.fetch();
+        let rows: Vec<String> = elems
+            .iter()
+            .map(|e| match e {
+                FfonElement::Str(s) => s.clone(),
+                FfonElement::Obj(o) => o.key.clone(),
+            })
+            .collect();
+        if pred(&rows) {
+            return elems;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "{what}: still {rows:?}, error {:?}",
+            p.take_error()
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+}
+
+/// The email plugin, signed in to a fake mailbox holding Alpha and Beta, in
+/// INBOX with its messages fetched.
+fn email_plugin_in_inbox(
+    tmp: &TempDir,
+) -> (Box<dyn Provider>, fake_imap::FakeImap, Vec<FfonElement>) {
+    let server = fake_imap::FakeImap::start(&[("Alpha", "alice@x.com"), ("Beta", "bob@x.com")]);
+    let mut p = email_plugin_on(&server, &tmp.path().join("emailclient"));
+    wait_for_rows(&mut p, "the folder list", |r| r.iter().any(|k| k == "INBOX"));
+    p.set_current_path("INBOX");
+    let messages = wait_for_rows(&mut p, "INBOX", |r| r.iter().any(|k| k.contains("Beta")));
+    (p, server, messages)
+}
+
+/// Wait until the fake server's INBOX is `subjects`: what the plugin's
+/// background worker did has reached it.
+fn wait_for_inbox(server: &fake_imap::FakeImap, p: &mut Box<dyn Provider>, subjects: &[&str]) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    while server.inbox() != subjects {
+        p.tick();
+        assert!(
+            std::time::Instant::now() < deadline,
+            "INBOX on the server is {:?}, commands {:?}",
+            server.inbox(),
+            server.commands()
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+}
+
+/// Helper: the email plugin on a fake mailbox, and a renderer positioned
+/// inside an opened email message (flat FFON at depth 2, provider path =
+/// "/INBOX/msg_label"). Returns the renderer ready for key dispatch, with the
+/// server and the plugin's storage, which must outlive it.
 ///
 /// The email provider's navigate_right_raw uses refresh_on_navigate=true, which
 /// always resets current_id to [provider_idx, 0] (depth 2) and rebuilds ffon[0]
 /// as a flat Obj{msg_key, body_children}.  This helper replicates that runtime
-/// state without going through the full SDL/network stack.
-fn email_renderer_inside_message() -> AppRenderer {
-    use sicompass_emailclient::{
-        EmailClientProvider, EmailMessage, FolderInfo, ImapBackend, MessageHeader,
-    };
+/// state without going through the full SDL stack.
+fn email_renderer_inside_message() -> (AppRenderer, fake_imap::FakeImap, TempDir) {
     use sicompass_sdk::ffon::{FfonElement, IdArray};
 
-    struct StubImap {
-        messages: Vec<MessageHeader>,
-        removed_uids: Vec<u32>,
-    }
-    #[allow(unused_variables)]
-    #[async_trait::async_trait]
-    impl ImapBackend for StubImap {
-        async fn list_folders(&mut self) -> Result<Vec<FolderInfo>, String> {
-            Ok(vec![
-                FolderInfo {
-                    name: "INBOX".to_owned(),
-                    attributes: vec![],
-                },
-                FolderInfo {
-                    name: "[Gmail]/Trash".to_owned(),
-                    attributes: vec!["\\Trash".to_owned()],
-                },
-            ])
-        }
-        async fn list_messages(
-            &mut self,
-            _f: &str,
-            _l: usize,
-        ) -> Result<Vec<MessageHeader>, String> {
-            // Exclude removed UIDs so the list reflects post-delete state.
-            Ok(self
-                .messages
-                .iter()
-                .filter(|m| !self.removed_uids.contains(&m.uid))
-                .cloned()
-                .collect())
-        }
-        async fn fetch_message(&mut self, _: &str, _: u32) -> Result<Option<EmailMessage>, String> {
-            Ok(None)
-        }
-        async fn fetch_message_by_message_id(
-            &mut self,
-            _: &str,
-            _: &str,
-        ) -> Result<Option<EmailMessage>, String> {
-            Ok(None)
-        }
-        async fn set_flags(
-            &mut self,
-            _: &str,
-            _: u32,
-            _: &[&str],
-            _: &[&str],
-        ) -> Result<(), String> {
-            Ok(())
-        }
-        async fn copy_message(&mut self, _: &str, _: u32, _: &str) -> Result<(), String> {
-            Ok(())
-        }
-        async fn move_message(&mut self, _: &str, uid: u32, _: &str) -> Result<(), String> {
-            self.removed_uids.push(uid);
-            Ok(())
-        }
-        async fn expunge_uid(&mut self, _: &str, uid: u32) -> Result<(), String> {
-            self.removed_uids.push(uid);
-            Ok(())
-        }
-        async fn append(&mut self, _: &str, _: &[u8]) -> Result<(), String> {
-            Ok(())
-        }
-        async fn fetch_threads(&mut self, _: &str) -> Result<Option<Vec<Vec<u32>>>, String> {
-            Ok(None)
-        }
-    }
-
-    let msgs = vec![
-        MessageHeader {
-            uid: 1,
-            from: "alice@x.com".to_owned(),
-            subject: "Alpha".to_owned(),
-            date: String::new(),
-            seen: true,
-            message_id: String::new(),
-            flagged: false,
-        },
-        MessageHeader {
-            uid: 2,
-            from: "bob@x.com".to_owned(),
-            subject: "Beta".to_owned(),
-            date: String::new(),
-            seen: true,
-            message_id: String::new(),
-            flagged: false,
-        },
-    ];
-
-    let provider = EmailClientProvider::new()
-        .with_oauth_token("fake")
-        .with_imap(Box::new(StubImap {
-            messages: msgs,
-            removed_uids: vec![],
-        }));
+    let tmp = TempDir::new().unwrap();
+    let (provider, server, _) = email_plugin_in_inbox(&tmp);
 
     let mut renderer = app_renderer();
-    register_no_init(&mut renderer, Box::new(provider));
-
-    // Populate message_cache (needed by lookup_uid during delete).
-    renderer.providers[0].set_current_path("INBOX");
-    let _ = renderer.providers[0].fetch();
+    register_no_init(&mut renderer, provider);
 
     // Simulate navigate_right into "Alpha": push the message label to provider path.
     // Provider path is now "/INBOX/[read] Alpha — alice@x.com" (2 segments).
@@ -6824,7 +6801,7 @@ fn email_renderer_inside_message() -> AppRenderer {
     };
     renderer.coordinate = Coordinate::General;
     sicompass::list::create_list_current_layer(&mut renderer);
-    renderer
+    (renderer, server, tmp)
 }
 
 /// Pressing Ctrl+D while inside an opened message (flat FFON depth 2, provider
@@ -6837,7 +6814,7 @@ fn email_renderer_inside_message() -> AppRenderer {
 /// Expected: view is the message list, cursor at 0 (Beta shifted into slot 0).
 #[test]
 fn ctrl_d_from_inside_message_shows_message_list_with_cursor_on_next() {
-    let mut renderer = email_renderer_inside_message();
+    let (mut renderer, server, _tmp) = email_renderer_inside_message();
 
     // Pre-condition: depth 2, flat FFON shows the message body.
     assert_eq!(
@@ -6892,6 +6869,9 @@ fn ctrl_d_from_inside_message_shows_message_list_with_cursor_on_next() {
             "cursor must point to Beta after Alpha deleted; got: {selected_key:?}"
         );
     }
+
+    // And the plugin's worker moved it to the Trash on the server.
+    wait_for_inbox(&server, &mut renderer.providers[0], &["Beta"]);
 }
 
 /// Pressing Ctrl+D while on a message in the message list (provider path "/INBOX",
@@ -6899,126 +6879,31 @@ fn ctrl_d_from_inside_message_shows_message_list_with_cursor_on_next() {
 /// cursor valid in the refreshed list.
 #[test]
 fn ctrl_d_from_message_list_removes_message() {
-    use sicompass_emailclient::{
-        EmailClientProvider, EmailMessage, FolderInfo, ImapBackend, MessageHeader,
-    };
     use sicompass_sdk::ffon::{FfonElement, IdArray};
 
-    struct StubImap2 {
-        messages: Vec<MessageHeader>,
-        removed_uids: Vec<u32>,
-    }
-    #[allow(unused_variables)]
-    #[async_trait::async_trait]
-    impl ImapBackend for StubImap2 {
-        async fn list_folders(&mut self) -> Result<Vec<FolderInfo>, String> {
-            Ok(vec![
-                FolderInfo {
-                    name: "INBOX".to_owned(),
-                    attributes: vec![],
-                },
-                FolderInfo {
-                    name: "[Gmail]/Trash".to_owned(),
-                    attributes: vec!["\\Trash".to_owned()],
-                },
-            ])
-        }
-        async fn list_messages(
-            &mut self,
-            _f: &str,
-            _l: usize,
-        ) -> Result<Vec<MessageHeader>, String> {
-            Ok(self
-                .messages
-                .iter()
-                .filter(|m| !self.removed_uids.contains(&m.uid))
-                .cloned()
-                .collect())
-        }
-        async fn fetch_message(&mut self, _: &str, _: u32) -> Result<Option<EmailMessage>, String> {
-            Ok(None)
-        }
-        async fn fetch_message_by_message_id(
-            &mut self,
-            _: &str,
-            _: &str,
-        ) -> Result<Option<EmailMessage>, String> {
-            Ok(None)
-        }
-        async fn set_flags(
-            &mut self,
-            _: &str,
-            _: u32,
-            _: &[&str],
-            _: &[&str],
-        ) -> Result<(), String> {
-            Ok(())
-        }
-        async fn copy_message(&mut self, _: &str, _: u32, _: &str) -> Result<(), String> {
-            Ok(())
-        }
-        async fn move_message(&mut self, _: &str, uid: u32, _: &str) -> Result<(), String> {
-            self.removed_uids.push(uid);
-            Ok(())
-        }
-        async fn expunge_uid(&mut self, _: &str, uid: u32) -> Result<(), String> {
-            self.removed_uids.push(uid);
-            Ok(())
-        }
-        async fn append(&mut self, _: &str, _: &[u8]) -> Result<(), String> {
-            Ok(())
-        }
-        async fn fetch_threads(&mut self, _: &str) -> Result<Option<Vec<Vec<u32>>>, String> {
-            Ok(None)
-        }
-    }
-
-    let msgs = vec![
-        MessageHeader {
-            uid: 1,
-            from: "alice@x.com".to_owned(),
-            subject: "Alpha".to_owned(),
-            date: String::new(),
-            seen: true,
-            message_id: String::new(),
-            flagged: false,
-        },
-        MessageHeader {
-            uid: 2,
-            from: "bob@x.com".to_owned(),
-            subject: "Beta".to_owned(),
-            date: String::new(),
-            seen: true,
-            message_id: String::new(),
-            flagged: false,
-        },
-    ];
-
-    let provider = EmailClientProvider::new()
-        .with_oauth_token("fake")
-        .with_imap(Box::new(StubImap2 {
-            messages: msgs,
-            removed_uids: vec![],
-        }));
+    let tmp = TempDir::new().unwrap();
+    let (provider, server, msgs_elements) = email_plugin_in_inbox(&tmp);
 
     let mut renderer = app_renderer();
-    register_no_init(&mut renderer, Box::new(provider));
+    register_no_init(&mut renderer, provider);
 
     // Simulate being at the message list: path = "/INBOX", flat FFON with 2 messages.
-    renderer.providers[0].set_current_path("INBOX");
-    let msgs_elements = renderer.providers[0].fetch(); // also populates message_cache
-
     let mut root = FfonElement::new_obj("INBOX");
     root.as_obj_mut().unwrap().children = msgs_elements;
     renderer.ffon[0] = root;
 
-    // Cursor on Alpha (index 0).
+    // Cursor on the first row: Beta, since the list is newest first.
     renderer.current_id = {
         let mut id = IdArray::new();
         id.push(0);
-        id.push(0); // Alpha
+        id.push(0); // Beta
         id
     };
+    let first = renderer.ffon[0].as_obj().unwrap().children[0]
+        .as_obj()
+        .map(|o| o.key.clone())
+        .unwrap_or_default();
+    assert!(first.contains("Beta"), "newest first: {first:?}");
     renderer.coordinate = Coordinate::General;
     sicompass::list::create_list_current_layer(&mut renderer);
 
@@ -7055,6 +6940,58 @@ fn ctrl_d_from_message_list_removes_message() {
         after_len == 0 || cursor < after_len,
         "cursor {cursor} must be within refreshed list of length {after_len}"
     );
+
+    // And the plugin's worker moved it to the Trash on the server.
+    wait_for_inbox(&server, &mut renderer.providers[0], &["Alpha"]);
+}
+
+/// New mail reaches the list through the plugin's IDLE task: the server
+/// announces it to the idling connection, the task tells the plugin, and the
+/// folder is fetched again.
+#[test]
+fn email_plugin_hears_new_mail_through_its_idle_task() {
+    let tmp = TempDir::new().unwrap();
+    let (mut p, server, _) = email_plugin_in_inbox(&tmp);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    while !server.commands().iter().any(|c| c.ends_with("IDLE")) {
+        p.tick();
+        assert!(std::time::Instant::now() < deadline, "{:?}", server.commands());
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    server.deliver("Gamma", "carol@x.com");
+    wait_for_rows(&mut p, "the new message", |r| {
+        r.iter().any(|k| k.contains("Gamma"))
+    });
+}
+
+/// `*:993` is any *public* server: a mail server on the local network is out
+/// of reach, whatever the settings say.
+#[test]
+fn email_plugin_never_reaches_the_local_network() {
+    let tmp = TempDir::new().unwrap();
+    let storage = tmp.path().join("emailclient");
+    std::fs::create_dir_all(&storage).unwrap();
+    let saved = serde_json::json!({ "email client": {
+        "emailImapUrl": "imaps://127.0.0.1:993",
+        "emailUsername": "me@x.com",
+        "emailOAuthAccessToken": "fake",
+        "emailTokenExpiry": 4_000_000_000_i64,
+    }});
+    std::fs::write(storage.join("email.json"), saved.to_string()).unwrap();
+    let mut p = plugin_provider_granted(
+        "emailclient",
+        Some(&storage),
+        None,
+        &["*:993".to_owned(), "*:465".to_owned()],
+    );
+    let rows = wait_for_rows(&mut p, "the refusal", |r| {
+        r.iter().any(|k| k.starts_with("IMAP error"))
+    });
+    let error = rows
+        .iter()
+        .find_map(|e| e.as_str().filter(|s| s.starts_with("IMAP error")))
+        .unwrap();
+    assert!(error.contains("no address"), "{error}");
 }
 
 // ---------------------------------------------------------------------------
@@ -7190,11 +7127,10 @@ fn filebrowser_ctrl_i_escape_removes_placeholder() {
 #[test]
 fn compose_body_delete_undo_syncs_draft_body() {
     ensure_builtins();
-    use sicompass_emailclient::EmailClientProvider;
     use sicompass_sdk::ffon::{FfonElement, FfonObject, IdArray};
 
     let mut renderer = app_renderer();
-    let mut p = EmailClientProvider::new();
+    let mut p = email_plugin();
 
     // Set up compose path so refresh_on_navigate returns false.
     p.set_current_path("compose/Body: [text]");
@@ -7221,7 +7157,7 @@ fn compose_body_delete_undo_syncs_draft_body() {
         children: vec![body_obj],
     });
     renderer.ffon.push(compose_root);
-    renderer.providers.push(Box::new(p));
+    renderer.providers.push(p);
 
     // Position cursor on "line1" (depth 3: [0=provider, 0=body_obj, 0=line1]).
     renderer.current_id = {
@@ -7280,11 +7216,10 @@ fn compose_body_delete_undo_syncs_draft_body() {
 #[test]
 fn compose_body_delete_undo_redo_syncs_draft_body() {
     ensure_builtins();
-    use sicompass_emailclient::EmailClientProvider;
     use sicompass_sdk::ffon::{FfonElement, FfonObject, IdArray};
 
     let mut renderer = app_renderer();
-    let mut p = EmailClientProvider::new();
+    let mut p = email_plugin();
     p.set_current_path("compose/Body: [text]");
 
     let body_obj = FfonElement::Obj(FfonObject {
@@ -7299,7 +7234,7 @@ fn compose_body_delete_undo_redo_syncs_draft_body() {
         children: vec![body_obj],
     });
     renderer.ffon.push(compose_root);
-    renderer.providers.push(Box::new(p));
+    renderer.providers.push(p);
 
     renderer.current_id = {
         let mut id = IdArray::new();
@@ -7343,11 +7278,10 @@ fn compose_body_delete_undo_redo_syncs_draft_body() {
 #[test]
 fn compose_body_insert_undo_redo_syncs_draft_body() {
     ensure_builtins();
-    use sicompass_emailclient::EmailClientProvider;
     use sicompass_sdk::ffon::{FfonElement, FfonObject, IdArray};
 
     let mut renderer = app_renderer();
-    let mut p = EmailClientProvider::new();
+    let mut p = email_plugin();
     p.set_current_path("compose/Body: [text]");
     // Seed one body line via commit so compose.draft.body is non-empty.
     p.commit_edit("", "line1");
@@ -7362,7 +7296,7 @@ fn compose_body_insert_undo_redo_syncs_draft_body() {
         children: vec![body_obj],
     });
     renderer.ffon.push(compose_root);
-    renderer.providers.push(Box::new(p));
+    renderer.providers.push(p);
 
     // Position on line1 at [0, 0, 0].
     renderer.current_id = {
@@ -7504,12 +7438,11 @@ fn compose_body_insert_undo_redo_syncs_draft_body() {
 #[test]
 fn compose_body_insert_records_only_text_chunks() {
     ensure_builtins();
-    use sicompass_emailclient::EmailClientProvider;
     use sicompass_sdk::ffon::{FfonElement, FfonObject, IdArray};
     use sicompass_sdk::timeline::TimelineEntry;
 
     let mut renderer = app_renderer();
-    let mut p = EmailClientProvider::new();
+    let mut p = email_plugin();
     p.set_current_path("compose/Body: [text]");
     p.commit_edit("", "line1");
 
@@ -7522,7 +7455,7 @@ fn compose_body_insert_records_only_text_chunks() {
         children: vec![body_obj],
     });
     renderer.ffon.push(compose_root);
-    renderer.providers.push(Box::new(p));
+    renderer.providers.push(p);
 
     renderer.current_id = {
         let mut id = IdArray::new();
@@ -7561,11 +7494,10 @@ fn compose_body_insert_records_only_text_chunks() {
 #[test]
 fn compose_body_insert_into_empty_undo_syncs_draft_body() {
     ensure_builtins();
-    use sicompass_emailclient::EmailClientProvider;
     use sicompass_sdk::ffon::{FfonElement, FfonObject, IdArray};
 
     let mut renderer = app_renderer();
-    let mut p = EmailClientProvider::new();
+    let mut p = email_plugin();
     p.set_current_path("compose/Body: [text]");
     // Draft body starts empty.
 
@@ -7579,7 +7511,7 @@ fn compose_body_insert_into_empty_undo_syncs_draft_body() {
         children: vec![body_obj],
     });
     renderer.ffon.push(compose_root);
-    renderer.providers.push(Box::new(p));
+    renderer.providers.push(p);
 
     // Position on the I_PLACEHOLDER at [0, 0, 0].
     renderer.current_id = {
@@ -7670,11 +7602,10 @@ fn compose_body_insert_into_empty_undo_syncs_draft_body() {
 #[test]
 fn compose_body_undo_last_element_restores_i_placeholder() {
     ensure_builtins();
-    use sicompass_emailclient::EmailClientProvider;
     use sicompass_sdk::ffon::{FfonElement, FfonObject, IdArray};
 
     let mut renderer = app_renderer();
-    let mut p = EmailClientProvider::new();
+    let mut p = email_plugin();
     p.set_current_path("compose/Body: [text]");
     // Draft body starts empty.
 
@@ -7688,7 +7619,7 @@ fn compose_body_undo_last_element_restores_i_placeholder() {
         children: vec![body_obj],
     });
     renderer.ffon.push(compose_root);
-    renderer.providers.push(Box::new(p));
+    renderer.providers.push(p);
 
     renderer.current_id = {
         let mut id = IdArray::new();
@@ -7790,11 +7721,10 @@ fn compose_body_undo_last_element_restores_i_placeholder() {
 #[test]
 fn compose_body_delete_undo_single_element_no_extra_placeholder() {
     ensure_builtins();
-    use sicompass_emailclient::EmailClientProvider;
     use sicompass_sdk::ffon::{FfonElement, FfonObject, IdArray};
 
     let mut renderer = app_renderer();
-    let mut p = EmailClientProvider::new();
+    let mut p = email_plugin();
     p.set_current_path("compose/Body: [text]");
     p.commit_edit("", "only");
 
@@ -7807,7 +7737,7 @@ fn compose_body_delete_undo_single_element_no_extra_placeholder() {
         children: vec![body_obj],
     });
     renderer.ffon.push(compose_root);
-    renderer.providers.push(Box::new(p));
+    renderer.providers.push(p);
 
     renderer.current_id = {
         let mut id = IdArray::new();
@@ -8154,9 +8084,8 @@ fn chatclient_plugin_never_reaches_the_local_network() {
 /// update the draft when navigating to those field segments.
 #[test]
 fn email_compose_cc_bcc_fields_appear_and_commit() {
-    use sicompass_emailclient::EmailClientProvider;
 
-    let mut p = EmailClientProvider::new();
+    let mut p = email_plugin();
     p.push_path("compose");
     let items = p.fetch();
     assert!(
@@ -8210,11 +8139,10 @@ fn email_compose_cc_bcc_fields_appear_and_commit() {
 #[test]
 fn email_compose_commit_to_field_keeps_cursor_on_to() {
     ensure_builtins();
-    use sicompass_emailclient::EmailClientProvider;
     use sicompass_sdk::ffon::{FfonElement, FfonObject, IdArray};
 
     let mut renderer = app_renderer();
-    let mut p = EmailClientProvider::new();
+    let mut p = email_plugin();
     p.push_path("compose");
     let items = p.fetch();
     let to_idx = items
@@ -8226,7 +8154,7 @@ fn email_compose_commit_to_field_keeps_cursor_on_to() {
         key: "email".to_owned(),
         children: items,
     }));
-    renderer.providers.push(Box::new(p));
+    renderer.providers.push(p);
 
     renderer.current_id = {
         let mut id = IdArray::new();
@@ -18310,6 +18238,27 @@ fn plugin_provider_with(
     storage: Option<&Path>,
     process: Option<&[&str]>,
 ) -> Box<dyn Provider> {
+    plugin_provider_granted(name, storage, process, &[])
+}
+
+/// The email plugin with no mail server: enough for everything the compose
+/// form does, which never touches the network. Its sockets are the ones its
+/// manifest asks for, public servers only.
+fn email_plugin() -> Box<dyn Provider> {
+    let sockets = ["*:993", "*:465", "*:587"].map(str::to_owned);
+    plugin_provider_granted("emailclient", None, None, &sockets)
+}
+
+/// A plugin from the fixtures, with the grants its manifest asks for, except
+/// `process` when given (only those programs) and `sockets`, which are only
+/// the ones given: the tests' servers are on loopback, which `*:<port>`
+/// never reaches.
+fn plugin_provider_granted(
+    name: &str,
+    storage: Option<&Path>,
+    process: Option<&[&str]>,
+    sockets: &[String],
+) -> Box<dyn Provider> {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures/plugins")
         .join(name);
@@ -18340,6 +18289,7 @@ fn plugin_provider_with(
             .map(|a| a.iter().filter_map(|s| s["key"].as_str().map(str::to_owned)).collect())
             .unwrap_or_default(),
         service_tier: manifest["service"]["tier"].as_str().map(str::to_owned),
+        sockets: sockets.to_vec(),
         ..Default::default()
     };
     let component = sicompass::wasm_host::load_component(&dir.join("plugin.wasm")).unwrap();

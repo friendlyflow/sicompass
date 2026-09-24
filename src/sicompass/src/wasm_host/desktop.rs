@@ -471,6 +471,7 @@ mod tests {
             id: 1,
             cancel,
             events,
+            inbox: Default::default(),
         };
         s
     }

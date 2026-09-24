@@ -1,6 +1,13 @@
 # Email-client provider strings — Belgian Dutch (Flemish).
 
 emailclient-display-name = e-mailclient
+emailclient-description = E-mail als lijst: je mappen, hun berichten en een formulier om er een te schrijven. Meld je aan met Google.
+emailclient-setting-imap-url = IMAP-URL
+emailclient-setting-smtp-url = SMTP-URL
+emailclient-setting-username = gebruikersnaam
+emailclient-setting-password = wachtwoord
+emailclient-setting-client-id = client-ID (OAuth)
+emailclient-setting-client-secret = clientgeheim (OAuth)
 
 # Foutmeldingen
 emailclient-error-not-connected = niet verbonden

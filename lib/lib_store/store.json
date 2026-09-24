@@ -61,6 +61,12 @@
       "repo": "friendlyflow/chatclient_plugin_sicompass",
       "pubkey": "cK0H0GI2m7DlGnTzrbUBhywmo6K4yLKTCRwiqWGfzWg=",
       "category": "communication"
+    },
+    {
+      "name": "emailclient",
+      "repo": "friendlyflow/emailclient_plugin_sicompass",
+      "pubkey": "+tpLk3f9PKBSTG1Ebuf6kZDWyiNhJOcWC1BVgAVt5i8=",
+      "category": "communication"
     }
   ]
 }

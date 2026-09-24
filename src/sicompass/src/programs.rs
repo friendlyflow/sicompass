@@ -2565,17 +2565,16 @@ mod tests {
             .map(|o| &o.children)
     }
 
+    /// The web browser is the last built-in with a setting of its own (the
+    /// email client's twin of this test went with the crate).
     #[test]
-    fn hot_enable_email_client_registers_settings() {
-        let ffon = settings_ffon_after_enable("email client");
-        let children = section_children(&ffon, "email client")
-            .expect("email client section should be present");
-        // Should have 6 editable entries, not the fallback "no settings".
-        // Two of them (password, OAuth client secret) are masked `<password>`
-        // fields; the rest are plain `<input>`.
+    fn hot_enable_web_browser_registers_settings() {
+        let ffon = settings_ffon_after_enable("web browser");
+        let children = section_children(&ffon, "web browser")
+            .expect("web browser section should be present");
         assert!(
             !children.iter().any(|e| e.as_str() == Some("no settings")),
-            "email client section should not show 'no settings'"
+            "web browser section should not show 'no settings'"
         );
         let editable: Vec<_> = children
             .iter()
@@ -2584,20 +2583,10 @@ mod tests {
             .collect();
         assert_eq!(
             editable.len(),
-            6,
-            "expected 6 editable settings, got {}: {:?}",
+            1,
+            "expected 1 editable setting, got {}: {:?}",
             editable.len(),
             editable
-        );
-        let masked: Vec<_> = editable
-            .iter()
-            .filter(|s| s.contains("<password>"))
-            .collect();
-        assert_eq!(
-            masked.len(),
-            2,
-            "expected 2 masked (password) settings, got {:?}",
-            masked
         );
     }
 

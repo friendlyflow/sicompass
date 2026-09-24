@@ -420,12 +420,8 @@ sicompass-webbrowser = { workspace = true }
 # Only to switch network access off for the test binary — see
 # `ensure_builtins`. Without it a fixture repository with a remote configured
 # would have these tests contacting it.
-sicompass-emailclient = { workspace = true }
 mockall = { workspace = true }
 tempfile = { workspace = true }
-# The integration test injects its own `ImapBackend` stubs, which the trait
-# requires to be `#[async_trait]`.
-async-trait = { workspace = true }
 wit-parser = "0.258.0"
 wit-component = "0.258.0"
 wiremock.workspace = true

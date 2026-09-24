@@ -1345,6 +1345,48 @@ fn a_task_reports_progress_in_order_then_its_result() {
 
 /// The whole point of a task: it is not bound by the 10-second call deadline.
 /// Deliberately slow (about 11 seconds).
+/// A long-lived task answers what the UI sends it, in order, and a message to
+/// a task that has ended is refused.
+#[test]
+fn the_ui_can_talk_to_a_running_task() {
+    let mut p = open_task();
+    let id = start(&mut p, "serve", "");
+    let mut error = String::new();
+    for m in ["one", "two"] {
+        p.handle_command("send", &format!("{id} {m}"), 0, &mut error);
+        assert!(error.is_empty(), "{error}");
+    }
+    wait_for(&mut p, 10, |l| l.iter().any(|x| x.contains("echo two")));
+    p.handle_command("send", &format!("{id} bye"), 0, &mut error);
+    let log = wait_for(&mut p, 10, |l| l.iter().any(|x| x.contains("done")));
+    assert_eq!(
+        log,
+        vec![
+            format!("started {id}"),
+            format!("{id} progress echo one"),
+            format!("{id} progress echo two"),
+            format!("{id} done ok served"),
+        ]
+    );
+    p.handle_command("send", &format!("{id} late"), 0, &mut error);
+    assert!(error.contains("ended"), "{error}");
+}
+
+/// Cancelling wakes a task waiting in `receive` instead of leaving it there
+/// for the rest of its timeout.
+#[test]
+fn a_task_waiting_for_a_message_stops_when_cancelled() {
+    let mut p = open_task();
+    let id = start(&mut p, "serve", "");
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    let asked = std::time::Instant::now();
+    let mut error = String::new();
+    p.handle_command("cancel", &id.to_string(), 0, &mut error);
+    let log = wait_for(&mut p, 10, |l| l.iter().any(|x| x.contains("done")));
+    assert!(log.contains(&format!("{id} done ok stopped")), "{log:?}");
+    assert!(asked.elapsed() < std::time::Duration::from_secs(2), "stopped promptly");
+}
+
 #[test]
 fn a_task_outlives_the_call_deadline() {
     let mut p = open_task();

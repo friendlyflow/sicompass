@@ -4,7 +4,6 @@ members = [
     "lib/lib_settings",
     "lib/lib_store",
     "lib/lib_webbrowser",
-    "lib/lib_emailclient",
     "lib/lib_builtins",
     "lib/lib_updater",
     "src/sicompass",
@@ -31,7 +30,7 @@ license = "GPL-3.0-only"
 # config, state, data and cache out of an installed release build's. Every
 # provider that persists anything calls one of them unconditionally
 # (lib_notes, lib_webbrowser, lib_emailclient,
-# lib_project_management) as does the app's own clipboard cache, and there is no
+# lib_project_management, as they were then) as does the app's own clipboard cache, and there is no
 # fallback path: on 0.6.0 they do not compile. (Carries forward
 # `take_announcement` and `dashboard_uses_app_undo` from 0.6.0, both used
 # unconditionally by lib_project_management's kanban dashboard, with the app's
@@ -45,7 +44,6 @@ sicompass-tutorial = { path = "lib/lib_tutorial" }
 sicompass-settings = { path = "lib/lib_settings" }
 sicompass-store = { path = "lib/lib_store" }
 sicompass-webbrowser = { path = "lib/lib_webbrowser" }
-sicompass-emailclient = { path = "lib/lib_emailclient" }
 sicompass-builtins = { path = "lib/lib_builtins" }
 sicompass-updater = { path = "lib/lib_updater" }
 # The renderer shared with the login greeter, in its own repo
@@ -123,22 +121,8 @@ natord = "1"
 tokio = { version = "1", features = ["full"] }
 reqwest = { version = "0.13", features = ["json", "blocking", "cookies", "form"] }
 
-# Email client
-#
-# `async-imap` (async-email / Delta Chat) replaced the `imap` 2.x crate, which
-# has had no stable release since 2023 and is advertising for maintainers. It
-# re-exports its own `imap-proto`, so there is no separate pin to keep in sync.
-# The default features select async-std, so they are off deliberately.
-async-imap = { version = "0.11", default-features = false, features = ["runtime-tokio"] }
-# Wraps the same `native-tls` that lettre uses, keeping one TLS implementation
-# in the tree rather than adding rustls alongside it.
-async-native-tls = { version = "0.6", default-features = false, features = ["runtime-tokio"] }
-lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "tokio1-native-tls", "builder"] }
 async-trait = "0.1"
 futures = "0.3"
-# CancellationToken, for interrupting an IDLE wait immediately.
-tokio-util = "0.7"
-rusqlite = { version = "0.40", features = ["bundled"] }
 
 # WASM plugin host. No compiler backend is selected here: the `sicompass` crate's
 # `jit-wasm` (default) and `no-jit-wasm` features pick `cranelift` or `pulley`, so
@@ -205,7 +189,7 @@ wiremock = "0.6"
 # unreleased, so it still satisfies the `0.8.0` requirements. Remove this block
 # when the pins move to the published 0.9.0.
 [patch.crates-io]
-sicompass-sdk = { git = "https://github.com/friendlyflow/sicompass-plugin-sdk", rev = "4d71b14688f8fb8dae6159fb0a7819d5c397f66e" }
+sicompass-sdk = { git = "https://github.com/friendlyflow/sicompass-plugin-sdk", rev = "494cff619feb408aff15f541ba530120a65019fa" }
 #
 # The same rule, for working on the renderer and the app together:
 #

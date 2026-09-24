@@ -552,6 +552,18 @@ interface tasks {
 
   /// From inside a task: whether it has been asked to stop.
   cancelled: func() -> bool;
+
+  /// From the UI instance: send `message` to task `id`, running or still
+  /// queued. It arrives in that task's `receive`, in order. Refused once the
+  /// task has ended, and while it has a backlog it is not reading. With this
+  /// a task can live as long as the plugin, holding a connection or a program
+  /// and doing what the UI asks of it, without the UI's 10-second deadline.
+  send: func(id: u64, message: list<u8>) -> result<_, string>;
+
+  /// From inside a task: the next message the UI instance sent, waiting up to
+  /// `timeout-ms` (a minute at most) for one. None when none came in time, or
+  /// the task was asked to stop.
+  receive: func(timeout-ms: u32) -> option<list<u8>>;
 }
 
 /// Programs on the user's machine. **The one interface that reaches outside the

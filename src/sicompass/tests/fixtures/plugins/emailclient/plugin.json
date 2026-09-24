@@ -1,0 +1,52 @@
+{
+  "name": "emailclient",
+  "displayName": "email client",
+  "type": "wasm",
+  "entry": "plugin.wasm",
+  "version": "0.2.0",
+  "minAppVersion": "0.1.21",
+  "description": "emailclient-description",
+  "settings": [
+    {
+      "type": "text",
+      "label": "emailclient-setting-imap-url",
+      "key": "emailImapUrl",
+      "default": "imaps://imap.gmail.com"
+    },
+    {
+      "type": "text",
+      "label": "emailclient-setting-smtp-url",
+      "key": "emailSmtpUrl",
+      "default": "smtps://smtp.gmail.com"
+    },
+    {
+      "type": "text",
+      "label": "emailclient-setting-username",
+      "key": "emailUsername",
+      "default": ""
+    },
+    {
+      "type": "password",
+      "label": "emailclient-setting-password",
+      "key": "emailPassword",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "label": "emailclient-setting-client-id",
+      "key": "emailClientId",
+      "default": ""
+    },
+    {
+      "type": "password",
+      "label": "emailclient-setting-client-secret",
+      "key": "emailClientSecret",
+      "default": ""
+    }
+  ],
+  "permissions": {
+    "storage": true,
+    "sockets": ["*:993", "*:465", "*:587"],
+    "allowedHosts": ["oauth2.googleapis.com", "www.googleapis.com"]
+  }
+}

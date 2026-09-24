@@ -75,6 +75,11 @@
       "name": "chatclient_plugin_sicompass",
       "path": "../chatclient_plugin_sicompass",
       "kind": "plugin"
+    },
+    {
+      "name": "emailclient_plugin_sicompass",
+      "path": "../emailclient_plugin_sicompass",
+      "kind": "plugin"
     }
   ]
 }
