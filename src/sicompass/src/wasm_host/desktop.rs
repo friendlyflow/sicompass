@@ -196,8 +196,11 @@ impl wit::desktop::Host for HostState {
         }
     }
 
+    /// The item itself goes to the trash: for a symlink, the link, never what
+    /// it points to. So its folder is confined (resolved), and the name is not.
     fn trash(&mut self, path: String) -> Result<(), String> {
-        let host = self.confine_granted(&path, true)?;
+        let host = self.confine_granted(&path, false)?;
+        std::fs::symlink_metadata(&host).map_err(|e| format!("{path}: {e}"))?;
         trash_delete(&host)
     }
 
@@ -250,6 +253,30 @@ mod tests {
         std::os::unix::fs::symlink("/etc", host.path().join("escape")).unwrap();
         let s = state(vec![(PathBuf::from("/storage"), host.path().to_path_buf())]);
         assert!(s.confine_granted("/storage/escape/passwd", true).is_err());
+    }
+
+    /// Trashing a symlink takes the link, never its target: deleting a link
+    /// to a folder in the file browser must not throw the folder away.
+    #[cfg(unix)]
+    #[test]
+    fn trash_takes_a_link_and_leaves_its_target() {
+        use wit::desktop::Host;
+        _set_test_no_trash(true);
+        let granted = tempfile::tempdir().unwrap();
+        let root = granted.path().canonicalize().unwrap();
+        std::fs::create_dir(root.join("docs")).unwrap();
+        std::fs::write(root.join("docs/a.txt"), "keep me").unwrap();
+        std::os::unix::fs::symlink(root.join("docs"), root.join("link")).unwrap();
+        let mut s = state(vec![(root.clone(), root.clone())]);
+
+        s.trash(root.join("link").to_string_lossy().into_owned()).unwrap();
+        assert!(std::fs::symlink_metadata(root.join("link")).is_err(), "the link is gone");
+        assert_eq!(
+            std::fs::read_to_string(root.join("docs/a.txt")).unwrap(),
+            "keep me",
+            "and what it pointed to is untouched"
+        );
+        assert!(s.trash(root.join("nothing").to_string_lossy().into_owned()).is_err());
     }
 
     /// A link inside a granted folder reads back as written, an absolute
