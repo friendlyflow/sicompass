@@ -82,6 +82,11 @@ pub struct Grants {
     /// `host:port` pairs it may open TCP connections to (the approved
     /// `permissions.sockets`). Empty: TCP is off and `sockets` is not linked.
     pub sockets: Vec<String>,
+    /// Keys of the settings the plugin declared in `plugin.json`: the only
+    /// ones `on-setting-change` tells it about. The app broadcasts every
+    /// settings change to every provider, and other programs' settings hold
+    /// API keys and passwords.
+    pub settings: Vec<String>,
 }
 
 impl Grants {

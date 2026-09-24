@@ -179,6 +179,7 @@ pub fn grants_for(
         filesystem,
         process: m.permissions.process.clone(),
         sockets: m.permissions.sockets.clone(),
+        settings: m.settings.iter().map(|s| s.key.clone()).collect(),
     })
 }
 
@@ -250,6 +251,18 @@ pub fn discover_user_plugins() -> Vec<DiscoveredPlugin> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn grants_carry_the_declared_setting_keys_and_nothing_else() {
+        let m = parse_manifest(
+            r#"{ "name": "x", "displayName": "x", "entry": "plugin.wasm",
+                 "settings": [ { "type": "text", "label": "l", "key": "servers" },
+                               { "type": "password", "label": "k", "key": "apiKeys" } ] }"#,
+        )
+        .unwrap();
+        let g = grants_for(&m, &Default::default()).unwrap();
+        assert_eq!(g.settings, vec!["servers".to_owned(), "apiKeys".to_owned()]);
+    }
 
     #[test]
     fn permissions_parse_and_both_allowed_hosts_lists_merge() {

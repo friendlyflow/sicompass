@@ -90,6 +90,8 @@ pub struct WasmProvider {
     /// `..` — happens once, before the host ever reads anything, rather than on every
     /// frame.
     dashboard_image: Option<String>,
+    /// The settings this plugin declared; see [`hears_setting`].
+    setting_keys: Vec<String>,
 }
 
 impl WasmProvider {
@@ -212,6 +214,7 @@ impl WasmProvider {
             plugin_dir: plugin_dir.to_path_buf(),
             grants: grants.clone(),
         });
+        let setting_keys = grants.settings.clone();
         let mut state = HostState::with_grants(plugin_name, settings_section, plugin_dir, grants)?;
         state.tasks = super::tasks::TaskRole::Ui(manager);
         let linker = super::linker_for(&state)?;
@@ -239,6 +242,7 @@ impl WasmProvider {
             current_path: "/".to_owned(),
             polled: default_poll(),
             dashboard_image: None,
+            setting_keys,
         };
 
         // `init` before `describe`, so a plugin can compute its display name.
@@ -447,6 +451,11 @@ fn default_descriptor(name: &str) -> wit_types::Descriptor {
         dashboard_kind: wit_types::DashboardKind::None,
         dashboard_uses_app_undo: false,
     }
+}
+
+/// Whether a plugin that declared `declared` is told about a change of `key`.
+fn hears_setting(declared: &[String], key: &str) -> bool {
+    declared.iter().any(|k| k == key)
 }
 
 fn default_poll() -> wit_types::PollResult {
@@ -883,6 +892,12 @@ impl Provider for WasmProvider {
     }
 
     fn on_setting_change(&mut self, key: &str, value: &str) {
+        // The app broadcasts every change to every provider. A plugin hears
+        // only about the settings it declared, never another program's keys
+        // or passwords.
+        if !hears_setting(&self.setting_keys, key) {
+            return;
+        }
         let _ = self.call("on-setting-change", |g, s| {
             g.call_on_setting_change(s, key, value)
         });
@@ -1159,6 +1174,15 @@ mod tests {
         assert!(!d.no_cache);
         assert!(!d.has_editor_semantics);
         assert!(!d.supports_structural_edit);
+    }
+
+    #[test]
+    fn a_plugin_hears_only_about_its_own_settings() {
+        let declared = vec!["greetee".to_owned(), "servers".to_owned()];
+        assert!(hears_setting(&declared, "greetee"));
+        assert!(!hears_setting(&declared, "licenseRedeemToken"));
+        assert!(!hears_setting(&declared, "emailPassword"));
+        assert!(!hears_setting(&[], "greetee"));
     }
 
     #[test]
