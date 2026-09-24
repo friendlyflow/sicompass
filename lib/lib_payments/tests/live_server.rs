@@ -184,13 +184,19 @@ fn the_grace_period_holds_on_the_server_and_the_client_alike() {
 
     let late = issue("cloud-monthly", -3 * 86_400);
     let status = cert::tier_status_among(&[certificate(&late)], cert::tier::CLOUD, key);
-    assert!(matches!(status, cert::TierStatus::Grace { .. }), "{status:?}");
+    assert!(
+        matches!(status, cert::TierStatus::Grace { .. }),
+        "{status:?}"
+    );
     let snapshot = backup::Snapshot::new("notes", files());
     backup::put_snapshot(&server(), &late, &snapshot).expect("grace must still back up");
 
     let gone = issue("cloud-monthly", -15 * 86_400);
     let status = cert::tier_status_among(&[certificate(&gone)], cert::tier::CLOUD, key);
-    assert!(matches!(status, cert::TierStatus::Expired { .. }), "{status:?}");
+    assert!(
+        matches!(status, cert::TierStatus::Expired { .. }),
+        "{status:?}"
+    );
     let err = backup::put_snapshot(&server(), &gone, &snapshot).unwrap_err();
     assert!(err.contains("expired"), "{err}");
 }
@@ -204,7 +210,10 @@ fn a_backup_reply_reports_usage() {
     backup::put_snapshot(&server(), &token, &snapshot).expect("upload failed");
     let usage = sicompass_payments::usage::last().expect("usage reported");
     assert!(usage.stored > 0 && usage.transferred > 0, "{usage:?}");
-    assert!(usage.storage_cap > usage.stored && usage.transfer_cap > 0, "{usage:?}");
+    assert!(
+        usage.storage_cap > usage.stored && usage.transfer_cap > 0,
+        "{usage:?}"
+    );
 }
 
 /// A support license does not buy cloud storage.

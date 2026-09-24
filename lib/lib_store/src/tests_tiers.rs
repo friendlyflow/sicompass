@@ -393,3 +393,14 @@ fn a_store_list_cannot_name_another_issuer_for_our_tiers() {
         Some(sicompass_payments::cert::LICENSE_PUBLIC_KEY_B64)
     );
 }
+
+#[test]
+fn tokens_are_given_for_our_tiers_only() {
+    // Under test the payments config reads no settings, so there is no token
+    // for any tier; a third party's tier never has one here.
+    sicompass_payments::config::_set_test_no_persist(true);
+    assert_eq!(license_token(sicompass_payments::cert::tier::CLOUD), None);
+    assert_eq!(license_token("acme/pro"), None);
+    let s = license_standing("nobody/tier");
+    assert_eq!(s, sicompass_sdk::license::Standing::MISSING);
+}

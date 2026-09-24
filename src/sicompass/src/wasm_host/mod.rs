@@ -87,6 +87,9 @@ pub struct Grants {
     /// settings change to every provider, and other programs' settings hold
     /// API keys and passwords.
     pub settings: Vec<String>,
+    /// The tier the plugin's manifest names as its `service`: the only tier
+    /// `license.token` hands it a token for.
+    pub service_tier: Option<String>,
 }
 
 impl Grants {
@@ -132,6 +135,8 @@ pub struct HostState {
     pub process_allowed: Vec<String>,
     /// `host:port` pairs this instance may connect to. Empty: no TCP.
     pub sockets_allowed: Vec<String>,
+    /// The tier of this plugin's own service (see [`Grants::service_tier`]).
+    pub service_tier: Option<String>,
 }
 
 impl HostState {
@@ -184,6 +189,7 @@ impl HostState {
             tasks: tasks::TaskRole::Unmanaged,
             process_allowed: grants.process,
             sockets_allowed: grants.sockets,
+            service_tier: grants.service_tier,
         })
     }
 

@@ -402,12 +402,13 @@ interface net {
 /// folder, or a `filesystem` folder the user approved), re-checked by the host
 /// after resolving symlinks, so it reaches nothing the plugin could not already
 /// read and write. A plugin with no granted folder can only open URLs.
-/// Whether the user holds a paid tier, for a plugin that gates features of its
-/// own (a third party's choice, disclosed in the store). The host verifies the
-/// user's certificate for `tier` against the issuer key the signed store list
-/// names for that tier; the plugin never sees a key or a certificate.
-/// First-party plugins do not call it: their paid part is a service on a
-/// server, never a feature. Never gate the user's data behind it.
+/// Where the user stands with a paid tier, and the credential for the tier's
+/// server. The host verifies the user's certificate for `tier` against the
+/// issuer key the signed store list names for that tier; the plugin never sees
+/// a key or a certificate. A plugin that offers a paid service (its
+/// `plugin.json` names it as `service.tier`) uses this to show where the user
+/// stands and to authenticate to that service. Never gate the user's data
+/// behind it: what is paid is the service, not the plugin.
 interface license {
   enum tier-status {
     /// A valid certificate, not expired.
@@ -419,8 +420,22 @@ interface license {
     missing,
   }
 
+  /// Where the user stands, with a day count: until renewal when active, left
+  /// when in grace, since expiry when expired, 0 when missing.
+  record tier-standing {
+    status: tier-status,
+    days: s32,
+  }
+
   /// `tier` is a tier id from the store list, e.g. `acme/pro`.
   status: func(tier: string) -> tier-status;
+
+  standing: func(tier: string) -> tier-standing;
+
+  /// The user's redeem token for `tier`: the bearer credential for that tier's
+  /// server. Only for the tier this plugin's `plugin.json` names as its
+  /// `service`; `none` for any other, and when the user has not redeemed one.
+  token: func(tier: string) -> option<string>;
 }
 
 interface desktop {

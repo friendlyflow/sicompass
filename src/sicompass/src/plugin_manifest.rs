@@ -180,6 +180,7 @@ pub fn grants_for(
         process: m.permissions.process.clone(),
         sockets: m.permissions.sockets.clone(),
         settings: m.settings.iter().map(|s| s.key.clone()).collect(),
+        service_tier: m.service.as_ref().map(|s| s.tier.clone()),
     })
 }
 

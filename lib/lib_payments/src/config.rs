@@ -92,6 +92,11 @@ pub fn redeem_token() -> String {
         .unwrap_or_default()
 }
 
+/// The support redeem token, when the user has one.
+pub fn support_redeem_token() -> String {
+    read_key("supportRedeemToken").unwrap_or_default()
+}
+
 fn token_path() -> Option<std::path::PathBuf> {
     sicompass_sdk::platform::provider_config_path(TOKEN_SLUG)
 }

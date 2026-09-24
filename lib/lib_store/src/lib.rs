@@ -836,24 +836,51 @@ fn remember_issuers(store: &sicompass_sdk::store::Store) {
     }
 }
 
-/// What a plugin's `license.status(tier)` hears: the user's certificates for
+/// What a plugin's `license.standing(tier)` hears: the user's certificates for
 /// `tier`, verified against its issuer. Ours are always checked against the
 /// built-in key; a store list cannot name another issuer for them.
-pub fn license_status(tier_id: &str) -> sicompass_sdk::license::LicenseStatus {
+pub fn license_standing(tier_id: &str) -> sicompass_sdk::license::Standing {
     use sicompass_payments::cert;
-    use sicompass_sdk::license::LicenseStatus;
+    use sicompass_sdk::license::{LicenseStatus, Standing};
     let issuer = cert::known_issuer(tier_id)
         .map(str::to_owned)
         .or_else(|| ISSUERS.read().ok().and_then(|i| i.get(tier_id).cloned()));
     let Some(issuer) = issuer else {
-        return LicenseStatus::Missing;
+        return Standing::MISSING;
     };
-    match cert::tier_status(tier_id, &issuer) {
-        cert::TierStatus::Active { .. } => LicenseStatus::Active,
-        cert::TierStatus::Grace { .. } => LicenseStatus::Grace,
-        cert::TierStatus::Expired { .. } => LicenseStatus::Expired,
-        cert::TierStatus::Missing => LicenseStatus::Missing,
+    let (status, days) = match cert::tier_status(tier_id, &issuer) {
+        cert::TierStatus::Active { renews_in_days, .. } => (LicenseStatus::Active, renews_in_days),
+        cert::TierStatus::Grace { days_left, .. } => (LicenseStatus::Grace, days_left),
+        cert::TierStatus::Expired {
+            expired_days_ago, ..
+        } => (LicenseStatus::Expired, expired_days_ago),
+        cert::TierStatus::Missing => (LicenseStatus::Missing, 0),
+    };
+    Standing {
+        status,
+        days: i32::try_from(days).unwrap_or(i32::MAX),
     }
+}
+
+/// [`license_standing`] without the days: `license.status(tier)`.
+pub fn license_status(tier_id: &str) -> sicompass_sdk::license::LicenseStatus {
+    license_standing(tier_id).status
+}
+
+/// The redeem token for one of our tiers, which the host gives a plugin only
+/// for the tier its manifest names as its service. Cloud and Commercial share
+/// the licence token (one certificate slot); a third party's tiers have none
+/// here yet.
+pub fn license_token(tier_id: &str) -> Option<String> {
+    use sicompass_payments::cert::tier;
+    let token = match tier_id {
+        t if t == tier::CLOUD || t == tier::COMMERCIAL => {
+            sicompass_payments::config::redeem_token()
+        }
+        t if t == tier::SUPPORT => sicompass_payments::config::support_redeem_token(),
+        _ => return None,
+    };
+    (!token.is_empty()).then_some(token)
 }
 
 /// Register the Store with the SDK: always present, never in "Available
@@ -868,7 +895,8 @@ pub fn register() {
     ) {
         remember_issuers(&store);
     }
-    sicompass_sdk::license::register_checker(license_status);
+    sicompass_sdk::license::register_checker(license_standing);
+    sicompass_sdk::license::register_token_source(license_token);
     sicompass_sdk::register_provider_factory("store", || Box::new(StoreProvider::new()));
     sicompass_sdk::register_builtin_manifest(
         sicompass_sdk::BuiltinManifest::new("store", "store").always_enabled(),
