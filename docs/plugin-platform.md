@@ -21,7 +21,7 @@ paid tiers.
 5. [Capabilities, one by one](#5-capabilities-one-by-one)
 6. [Translations shipped by a plugin](#6-translations-shipped-by-a-plugin)
 7. [Packaging and signing](#7-packaging-and-signing)
-8. [The catalog](#8-the-catalog)
+8. [The store](#8-the-store)
 9. [lib_store](#9-lib_store)
 10. [Tiers and certificates](#10-tiers-and-certificates)
 11. [Host changes in sicompass](#11-host-changes-in-sicompass)
@@ -61,11 +61,11 @@ Decided with the maintainer on 2026-09-24.
 
   The commercial licence is a legal right. The certificate proves it, and no code
   enforces it, exactly like today's `scope: "commercial"` certificates.
-- **The Store says what is paid.** Every catalog entry states whether the plugin
+- **The Store says what is paid.** Every store entry states whether the plugin
   uses a paid service and which tier, before the user installs it.
 - **Third parties choose, and disclose.** A third-party plugin may be proprietary
-  and gate its own features. The catalog shows "paid features", and
-  never-gate-the-data applies, checked when its catalog PR is reviewed. From day
+  and gate its own features. The store shows "paid features", and
+  never-gate-the-data applies, checked when its store PR is reviewed. From day
   one a third party runs its own checkout and signs its own certificates. Our
   server acting as their issuer (a marketplace with Stripe Connect) is a later,
   server-only change.
@@ -334,7 +334,7 @@ interface license {
 ```
 
 The host verifies the user's certificate for `tier` against the issuer key the
-catalog lists for that tier. A plugin never handles keys or certificates.
+store lists for that tier. A plugin never handles keys or certificates.
 First-party plugins do not call it (see §1). It exists for third parties.
 
 ## 6. Translations shipped by a plugin
@@ -368,7 +368,7 @@ A new CLI in the SDK repo, `sicompass-plugin` (published with the SDK, so third
 parties `cargo install` the same tool CI uses), does the whole cycle:
 
 ```
-sicompass-plugin keygen                # prints the public key for the catalog
+sicompass-plugin keygen                # prints the public key for the store
 sicompass-plugin pack                  # builds, audits imports against plugin.json, archives
 sicompass-plugin sign --key <file>     # writes release.json(.sig)
 sicompass-plugin verify <dir|url>      # what the Store does, runnable by hand
@@ -378,9 +378,9 @@ The plugin template's `release.yml`: tag, then `nix build`, then `pack`, then
 `sign` (key from the `PLUGIN_SIGNING_KEY` repo secret), then attach to the
 release.
 
-## 8. The catalog
+## 8. The store
 
-`lib/lib_store/catalog.json` and `catalog.json.sig`, in the sicompass repo.
+`lib/lib_store/store.json` and `store.json.sig`, in the sicompass repo.
 
 ```json
 {
@@ -399,22 +399,22 @@ release.
 
 - `title` is a Fluent id in `lib_store`'s bundles, so "Sicompass Cloud" and
   "Sicompass Commercial" are translated, and renaming is a string change.
-- The catalog holds **no versions**. The Store reads `release.json` from each
+- The store holds **no versions**. The Store reads `release.json` from each
   repo's latest release, so releasing a plugin never needs a sicompass commit. It
   changes only when a plugin, a key or a tier is added.
-- It is signed with a **friendlyflow catalog key**, whose public half is compiled
-  into `lib_store`. A `/catalog` skill adds an entry and re-signs. A pull request
+- It is signed with a **friendlyflow store key**, whose public half is compiled
+  into `lib_store`. A `/store` skill adds an entry and re-signs. A pull request
   can therefore propose an entry but cannot make the app trust it.
 - **Key custody is the maintainer's**, and deliberately not CI's: the key file
-  lives in `~/.config/sicompass/catalog.key` (mode 600), the app's own config
-  directory, **outside Dropbox**, which syncs to the cloud. `lib_store` trusts **two** catalog keys:
+  lives in `~/.config/sicompass/store.key` (mode 600), the app's own config
+  directory, **outside Dropbox**, which syncs to the cloud. `lib_store` trusts **two** store keys:
   that working key and a cold backup key, generated at the same time and kept
-  offline. If the working key is lost or leaked, the backup signs a catalog, and
+  offline. If the working key is lost or leaked, the backup signs a store, and
   the next app release carries a new working key. A hardware key (FIDO2,
   `ed25519-sk`) can replace the working key later without changing the scheme.
-- **Plugin keys rotate through the catalog.** The Store trusts whatever key the
-  current signed catalog lists for a plugin, so a lost or leaked plugin key is
-  replaced by a catalog change alone. The catalog also pins each plugin's
+- **Plugin keys rotate through the store.** The Store trusts whatever key the
+  current signed store lists for a plugin, so a lost or leaked plugin key is
+  replaced by a store change alone. The store also pins each plugin's
   **repo**, so a leaked key without write access to that repo ships nothing. Two
   more fields handle a leak: `revoked` (SHA-256 hashes of bad releases, which the
   Store refuses and offers to replace), and the Store never downgrades. A plugin
@@ -459,7 +459,7 @@ Store
   settings** (today a hot enable skips them, which is a bug), and enables it. No
   restart, unlike today.
 - **Updates** move here from `lib_updater`, which keeps only the app's own
-  update. Catalog plugins update through their `release.json`. A plugin copied in
+  update. Store plugins update through their `release.json`. A plugin copied in
   by hand with an `updateUrl` uses the same format.
 - **The tier pages move here from Settings**, with the licence redeem and the
   store URL. `lib_store` depends on `sicompass-payments`, and `lib_settings`
@@ -486,7 +486,7 @@ pub struct Payload {
 ```
 
 - A certificate is verified against the issuer key of the tier it claims, which
-  the catalog lists. For `friendlyflow/*` that is today's licence key in
+  the store lists. For `friendlyflow/*` that is today's licence key in
   `cert.rs`. A third party's key is only ever trusted for that party's own tiers.
 - **Old certificates keep working:** `scope: "commercial"` maps to
   `friendlyflow/commercial`, and a cloud entitlement maps to `friendlyflow/cloud`.
@@ -556,7 +556,7 @@ Each part ends in something runnable, like Steps 1-3.
 | 4.5 | Tasks | fixture: a task outlives the 10 s call deadline, is cancelled on close, and 4 run at once |
 | 4.6 | Process and PTY | fixture: `echo` round-trip, a PTY reads a prompt, a program not listed is refused |
 | 4.7 | Sockets | fixture: a listed `host:port` connects, an unlisted one is refused |
-| 4.8 | Catalog and lib_store (programs): install, update, uninstall live, permission approval | integration test with wiremock serving a catalog and a signed release. Bad signature, bigger permissions and a tampered archive are each refused |
+| 4.8 | Store and lib_store (programs): install, update, uninstall live, permission approval | integration test with wiremock serving a store and a signed release. Bad signature, bigger permissions and a tampered archive are each refused |
 | 4.9 | Tiers: certificate `tiers`, `../server`, pages moved from Settings, `license` import | against a local `../server`: redeem, grace, expiry. Old certificates map correctly |
 | 4.10 | Plugin release workflow in the template, docs, tutorial | a dry-run release of hello-plugin from a fork |
 
@@ -565,11 +565,11 @@ Steps 6-10 exercise the rest.
 
 ## 14. Decisions on the former open questions (2026-09-24)
 
-1. **Catalog key custody:** a key file on the maintainer's machine, outside
+1. **Store key custody:** a key file on the maintainer's machine, outside
    Dropbox, plus a cold offline backup key that the app also trusts (§8). Custody
    is the maintainer's responsibility. Claude generates keys and signs through the
-   `/catalog` skill, but never holds them.
-2. **Plugin key loss or leak:** the signed catalog is the sole authority, with a
+   `/store` skill, but never holds them.
+2. **Plugin key loss or leak:** the signed store is the sole authority, with a
    pinned repo, `revoked` releases and no downgrades (§8).
 3. **Names and billing:** Sicompass Cloud and Sicompass Commercial, monthly or
    yearly; Sponsor pay-what-you-want; Support yearly; a disability discount
