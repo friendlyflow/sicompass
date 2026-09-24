@@ -174,7 +174,15 @@ impl WasmProvider {
             eprintln!("plugin '{plugin_name}': {refusal}");
         }
 
-        let state = HostState::with_grants(plugin_name, settings_section, plugin_dir, grants)?;
+        let manager = super::tasks::TaskManager::new(super::tasks::TaskSpec {
+            component: component.clone(),
+            plugin_name: plugin_name.to_owned(),
+            settings_section: settings_section.to_owned(),
+            plugin_dir: plugin_dir.to_path_buf(),
+            grants: grants.clone(),
+        });
+        let mut state = HostState::with_grants(plugin_name, settings_section, plugin_dir, grants)?;
+        state.tasks = super::tasks::TaskRole::Ui(manager);
         let linker = super::linker_for(&state)?;
 
         let mut store = Store::new(super::engine(), state);
@@ -221,11 +229,10 @@ impl WasmProvider {
             None
         };
 
-        Ok(WasmProvider {
-            descriptor,
-            dashboard_image,
-            ..me
-        })
+        let mut me = me;
+        me.descriptor = descriptor;
+        me.dashboard_image = dashboard_image;
+        Ok(me)
     }
 
     /// Ask the guest for its dashboard image and check the answer.
@@ -269,6 +276,33 @@ impl WasmProvider {
                 ));
                 None
             }
+        }
+    }
+
+    /// Hand the UI instance every task event that arrived, in order. Returns
+    /// whether there were any, which asks for a redraw.
+    fn deliver_task_events(&self) -> bool {
+        let events = match self.inner.try_borrow() {
+            Ok(inner) => match &inner.store.data().tasks {
+                super::tasks::TaskRole::Ui(manager) => manager.drain(),
+                _ => Vec::new(),
+            },
+            Err(_) => return false,
+        };
+        let delivered = !events.is_empty();
+        for (id, event) in events {
+            let _ = self.call("on-task-event", |g, s| g.call_on_task_event(s, id, &event));
+        }
+        delivered
+    }
+
+    /// Stop this plugin's tasks: running ones at their next epoch tick, queued
+    /// ones not at all.
+    fn close_tasks(&self) {
+        if let Ok(inner) = self.inner.try_borrow()
+            && let super::tasks::TaskRole::Ui(manager) = &inner.store.data().tasks
+        {
+            manager.close();
         }
     }
 
@@ -593,11 +627,14 @@ impl Provider for WasmProvider {
 
     fn cleanup(&mut self) {
         let _ = self.call("cleanup", |g, s| g.call_cleanup(s));
+        self.close_tasks();
     }
 
     // ---- Per-frame: one crossing, then cached ------------------------------
 
     fn tick(&mut self) -> bool {
+        // Task events first, so the guest's `poll` already reflects them.
+        let delivered = self.deliver_task_events();
         match self.call("poll", |g, s| g.call_poll(s)) {
             Ok(p) => {
                 self.polled = p;
@@ -607,7 +644,7 @@ impl Provider for WasmProvider {
                         inner.pending_error = Some(err);
                     }
                 }
-                self.polled.redraw
+                self.polled.redraw || delivered
             }
             // A trap during poll already queued an error and poisoned us; ask for a
             // redraw so the error row appears promptly.
@@ -1333,5 +1370,13 @@ mod tests {
     fn first_element_decodes_a_single_element_payload() {
         let blob = ffon::serialize_binary(&[FfonElement::new_str("only")]);
         assert_eq!(first_element(&blob), Some(FfonElement::new_str("only")));
+    }
+}
+
+/// A provider dropped without `cleanup` (a tab closed, a hot reload) must not
+/// leave its tasks running on the worker threads.
+impl Drop for WasmProvider {
+    fn drop(&mut self) {
+        self.close_tasks();
     }
 }

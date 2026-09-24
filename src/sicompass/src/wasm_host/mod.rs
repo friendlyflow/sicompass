@@ -26,6 +26,7 @@ pub mod desktop;
 pub mod host_fetch;
 pub mod limits;
 pub mod provider;
+pub mod tasks;
 pub mod wasi;
 
 use std::collections::HashMap;
@@ -107,6 +108,8 @@ pub struct HostState {
     /// Directories this instance may reach, as `(guest path, host path)`: the
     /// preopens, and the only places `desktop` paths may point into.
     pub granted_roots: Vec<(PathBuf, PathBuf)>,
+    /// The UI instance's task manager, or which task this worker instance runs.
+    pub tasks: tasks::TaskRole,
 }
 
 impl HostState {
@@ -156,6 +159,7 @@ impl HostState {
             wasi,
             table: wasi::resource_table(),
             granted_roots,
+            tasks: tasks::TaskRole::Unmanaged,
         })
     }
 
@@ -489,6 +493,14 @@ pub fn linker_for(state: &HostState) -> Result<Linker<HostState>, String> {
     // audit refuses anything else before instantiation. See `wasi`.
     wasi::add_to_linker(&mut linker)?;
 
+    // Always linked: a task is the same plugin with the same access, running
+    // longer on a worker thread.
+    wit::tasks::add_to_linker::<_, wasmtime::component::HasSelf<_>>(
+        &mut linker,
+        |s: &mut HostState| s,
+    )
+    .map_err(|e| format!("link sicompass:plugin/tasks: {e}"))?;
+
     // Always linked: every path it takes is confined to `granted_roots`.
     wit::desktop::add_to_linker::<_, wasmtime::component::HasSelf<_>>(
         &mut linker,
@@ -731,6 +743,9 @@ pub use sicompass_sdk::plugin_abi::NET_FUNCTIONS as NET_IMPORTS;
 
 /// `sicompass:plugin/desktop`: always linked, paths confined to the grants.
 pub use sicompass_sdk::plugin_abi::DESKTOP_FUNCTIONS as DESKTOP_IMPORTS;
+
+/// `sicompass:plugin/tasks`: always linked.
+pub use sicompass_sdk::plugin_abi::TASK_FUNCTIONS as TASK_IMPORTS;
 
 #[cfg(test)]
 mod tests {

@@ -869,6 +869,8 @@ fn wit_vendor_matches_host_tables() {
         .chain(wasm_host::NET_IMPORTS.iter())
         // ABI 0.2 (4.4): the desktop interface.
         .chain(wasm_host::DESKTOP_IMPORTS.iter())
+        // ABI 0.2 (4.5): background tasks.
+        .chain(wasm_host::TASK_IMPORTS.iter())
         .map(|(i, f)| (i.to_string(), f.to_string()))
         .collect();
     expected.sort();
@@ -1260,4 +1262,158 @@ fn a_filesystem_grant_needs_the_users_approval_of_exactly_this_manifest() {
     )
     .unwrap();
     assert!(grants_for(&more, &approvals).is_err());
+}
+
+// ---------------------------------------------------------------------------
+// 4.5: background tasks
+// ---------------------------------------------------------------------------
+
+fn open_task() -> WasmProvider {
+    WasmProvider::open(&fixture_dir().join("task.wasm"), "task", "task", &fixture_dir(), Vec::new())
+        .expect("the task fixture loads")
+}
+
+/// Start a task through the fixture's command and return its id.
+fn start(p: &mut WasmProvider, cmd: &str, arg: &str) -> u64 {
+    let mut error = String::new();
+    match p.handle_command(cmd, arg, 0, &mut error) {
+        Some(FfonElement::Str(id)) => id.parse().unwrap(),
+        other => panic!("{cmd}: {other:?} ({error})"),
+    }
+}
+
+/// Tick (which delivers task events) until `pred` holds on the event log, or
+/// panic after `secs`.
+fn wait_for(p: &mut WasmProvider, secs: u64, pred: impl Fn(&[String]) -> bool) -> Vec<String> {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(secs);
+    loop {
+        p.tick();
+        let log = all_text(&p.fetch());
+        if pred(&log) {
+            return log;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "timed out after {secs}s; events so far: {log:?}"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+}
+
+#[test]
+fn a_task_reports_progress_in_order_then_its_result() {
+    let mut p = open_task();
+    let id = start(&mut p, "count", "3");
+    let log = wait_for(&mut p, 10, |l| l.iter().any(|x| x.contains("done")));
+    assert_eq!(
+        log,
+        vec![
+            format!("started {id}"),
+            format!("{id} progress 0"),
+            format!("{id} progress 1"),
+            format!("{id} progress 2"),
+            format!("{id} done ok counted 3"),
+        ]
+    );
+}
+
+/// The whole point of a task: it is not bound by the 10-second call deadline.
+/// Deliberately slow (about 11 seconds).
+#[test]
+fn a_task_outlives_the_call_deadline() {
+    let mut p = open_task();
+    let id = start(&mut p, "sleep", "11");
+    let log = wait_for(&mut p, 30, |l| l.iter().any(|x| x.contains("done")));
+    assert!(log.contains(&format!("{id} done ok slept")), "{log:?}");
+}
+
+#[test]
+fn a_cooperative_task_stops_when_asked() {
+    let mut p = open_task();
+    let id = start(&mut p, "spin", "");
+    wait_for(&mut p, 10, |l| l.contains(&format!("{id} progress running")));
+    let mut error = String::new();
+    p.handle_command("cancel", &id.to_string(), 0, &mut error);
+    let log = wait_for(&mut p, 10, |l| l.iter().any(|x| x.contains("done")));
+    assert!(log.contains(&format!("{id} done ok stopped")), "{log:?}");
+}
+
+#[test]
+fn a_task_that_ignores_cancel_is_stopped_by_the_host() {
+    let mut p = open_task();
+    let id = start(&mut p, "busy", "");
+    wait_for(&mut p, 10, |l| l.contains(&format!("{id} progress running")));
+    let mut error = String::new();
+    p.handle_command("cancel", &id.to_string(), 0, &mut error);
+    let log = wait_for(&mut p, 10, |l| l.iter().any(|x| x.contains("done")));
+    assert!(log.contains(&format!("{id} done err cancelled")), "{log:?}");
+}
+
+#[test]
+fn at_most_four_tasks_run_at_once_and_the_next_starts_when_one_ends() {
+    let mut p = open_task();
+    let ids: Vec<u64> = (0..5).map(|_| start(&mut p, "spin", "")).collect();
+    let running = |l: &[String]| l.iter().filter(|x| x.ends_with("progress running")).count();
+    wait_for(&mut p, 10, |l| running(l) == 4);
+    // Give a fifth a moment it must not use.
+    std::thread::sleep(std::time::Duration::from_millis(400));
+    p.tick();
+    assert_eq!(running(&all_text(&p.fetch())), 4);
+
+    let mut error = String::new();
+    p.handle_command("cancel", &ids[0].to_string(), 0, &mut error);
+    wait_for(&mut p, 10, |l| running(l) == 5);
+    for id in &ids[1..] {
+        p.handle_command("cancel", &id.to_string(), 0, &mut error);
+    }
+    wait_for(&mut p, 10, |l| l.iter().filter(|x| x.contains("done")).count() == 5);
+}
+
+#[test]
+fn a_task_cannot_start_a_task() {
+    let mut p = open_task();
+    let id = start(&mut p, "nested", "");
+    let log = wait_for(&mut p, 10, |l| l.iter().any(|x| x.contains("done")));
+    assert!(
+        log.contains(&format!("{id} done err a task cannot start tasks")),
+        "{log:?}"
+    );
+}
+
+/// Threads of this process whose name is `name` (Linux: `/proc/self/task/*/comm`).
+#[cfg(target_os = "linux")]
+fn threads_named(name: &str) -> usize {
+    std::fs::read_dir("/proc/self/task")
+        .unwrap()
+        .flatten()
+        .filter(|t| {
+            std::fs::read_to_string(t.path().join("comm"))
+                .is_ok_and(|c| c.trim_end() == name)
+        })
+        .count()
+}
+
+/// A provider dropped without `cleanup` must not leave a task spinning a core.
+/// A plugin name no other test uses, so the worker thread (`task:<name>`) is
+/// this test's alone.
+#[cfg(target_os = "linux")]
+#[test]
+fn dropping_the_provider_stops_its_tasks() {
+    let mut p = WasmProvider::open(
+        &fixture_dir().join("task.wasm"),
+        "dropme",
+        "dropme",
+        &fixture_dir(),
+        Vec::new(),
+    )
+    .unwrap();
+    let id = start(&mut p, "busy", "");
+    wait_for(&mut p, 10, |l| l.contains(&format!("{id} progress running")));
+    assert_eq!(threads_named("task:dropme"), 1);
+    drop(p);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while threads_named("task:dropme") > 0 {
+        assert!(std::time::Instant::now() < deadline, "the task outlived its provider");
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
 }

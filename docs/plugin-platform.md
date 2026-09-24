@@ -264,7 +264,15 @@ on-task-event: func(id: u64, event: task-event);      // progress / done, UI ins
   memory, and it is the shape every existing worker thread in the libs already has
   (a channel into the provider).
 - At most 4 tasks per plugin run at once. Further `spawn`s queue.
-- Closing the provider cancels its tasks.
+- Closing the provider cancels its tasks, including dropping it without
+  `cleanup` (a tab closed, a hot reload).
+
+Built in 4.5 (`src/wasm_host/tasks.rs`). As built: `spawn` returns
+`result<u64, string>` and is refused inside a task; the interface also has
+`cancelled()`, so a loop can stop cleanly. Cancellation takes effect the next
+time the task runs WebAssembly: a task blocked inside a host call (a network
+request, a sleep) stops when that call returns. Worker threads are named
+`task:<plugin>`. The `task-plugin` example is the fixture.
 
 ### process (gated)
 

@@ -211,6 +211,15 @@ interface types {
     select-path(list<u32>),
   }
 
+  /// What happened to a background task.
+  variant task-event {
+    /// Bytes the task passed to `tasks.emit`, in order.
+    progress(list<u8>),
+    /// The task ended: `run-task`'s result, or why it stopped (cancelled,
+    /// trapped, out of memory).
+    done(result<list<u8>, string>),
+  }
+
   /// A reversible action, for the unified undo/redo timeline.
   ///
   /// This is `TimelineEntry::ProviderOp` and only that. The typed variants
@@ -400,6 +409,33 @@ interface desktop {
   restore: func(path: string) -> result<_, string>;
 }
 
+/// Background work. Every call into a provider runs on the UI thread under a
+/// 10-second deadline, so anything slower (a mail sync, a long poll, an upload,
+/// `git status` on a big repository) runs as a task instead.
+///
+/// A task is a **fresh instance of this same component** on a worker thread,
+/// with the same grants and no shared memory: `init` is not called, and
+/// `run-task` gets only its `input`. It reports through `emit` and its result,
+/// which the host delivers to the UI instance through `on-task-event`, just
+/// before the next `poll`. It has no deadline, but stops at its next epoch tick
+/// once cancelled, and `cancelled` lets a loop exit cleanly. At most 4 tasks run
+/// per plugin; further ones wait. Always linked: a task can do nothing the
+/// plugin could not already do, only for longer.
+interface tasks {
+  /// From the UI instance: start task `name` with `input`. Returns its id.
+  /// Refused from inside a task.
+  spawn: func(name: string, input: list<u8>) -> result<u64, string>;
+
+  /// Ask a task to stop. Harmless for an id that already finished.
+  cancel: func(id: u64);
+
+  /// From inside a task: report progress. Ignored in the UI instance.
+  emit: func(event: list<u8>);
+
+  /// From inside a task: whether it has been asked to stop.
+  cancelled: func() -> bool;
+}
+
 // ---------------------------------------------------------------------------
 // Guest exports — what a provider implements
 // ---------------------------------------------------------------------------
@@ -407,7 +443,7 @@ interface desktop {
 interface provider {
   use types.{
     ffon, list-item, search-result, frame, key, descriptor, poll-result,
-    provider-op, palette,
+    provider-op, palette, task-event,
   };
 
   // ---- Lifecycle ---------------------------------------------------------
@@ -421,6 +457,14 @@ interface provider {
 
   /// Called once before the provider is dropped.
   cleanup: func();
+
+  // ---- Background tasks --------------------------------------------------
+
+  /// Run one task, in a fresh worker instance (see `interface tasks`).
+  run-task: func(name: string, input: list<u8>) -> result<list<u8>, string>;
+
+  /// In the UI instance: progress from, or the end of, a task it spawned.
+  on-task-event: func(id: u64, event: task-event);
 
   // ---- Data source -------------------------------------------------------
 
@@ -587,5 +631,6 @@ world plugin {
   import host;
   import net;
   import desktop;
+  import tasks;
   export provider;
 }
