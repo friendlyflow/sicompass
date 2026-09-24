@@ -7,7 +7,7 @@
 //! Windows Start Menu entry (`start_menu`).
 //!
 //! That split is what keeps `loginsicompass` from linking wasmtime, a bundled
-//! SQLite and a headless-Chromium driver. See `src/sicompass-ui/Cargo.toml`.
+//! SQLite and a headless-Chromium driver. See sicompass-ui's `Cargo.toml`.
 //!
 //! The renderer calls back into this crate through
 //! [`sicompass_ui::registry::HostHooks`], implemented by [`boot::ProgramsHooks`].

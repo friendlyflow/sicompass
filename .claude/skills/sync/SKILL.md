@@ -123,7 +123,7 @@ runners have no SDL3.
      `nix develop -c` invocations pick the change up on their own.
    - `Cargo.toml` or `Cargo.lock` moved — expect the build to fetch and
      compile new crates, so a long first build is normal, not a hang.
-   - `shaders/*`, `assets/icons/*` or `THIRD-PARTY-LICENSES.html` moved —
+   - `assets/icons/*` or `THIRD-PARTY-LICENSES.html` moved —
      these are committed generated files. You do not regenerate them here;
      `cargo test -p sicompass` fails if they drifted, which is exactly the
      signal this skill exists to surface.

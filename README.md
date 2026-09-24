@@ -143,10 +143,11 @@ cargo build --release
 cargo run --release
 ```
 
-Nix users can also build the packaged version with `nix build`. Shaders are
-compiled by `scripts/gen-shaders.sh` and committed, so building needs no shader
-toolchain. Rerun that script if you change anything under `shaders/`, and
-`scripts/gen-icons.sh` if you change the icon.
+Nix users can also build the packaged version with `nix build`. The renderer,
+with its shaders and fonts, is the separate
+[sicompass-ui](https://github.com/friendlyflow/sicompass-ui) repository, which
+cargo fetches on the first build. Rerun `scripts/gen-icons.sh` if you change
+the icon.
 
 ## Key features
 

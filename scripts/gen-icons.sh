@@ -8,8 +8,12 @@
 # The outputs are committed rather than generated at build time. They change
 # about once a year, and requiring librsvg, imagemagick, icoutils and libicns
 # on four CI runners plus every contributor's machine to build a Rust app
-# would be a poor trade. This mirrors how shaders/ and THIRD-PARTY-LICENSES
-# .html are handled.
+# would be a poor trade. This mirrors how THIRD-PARTY-LICENSES.html (and the
+# renderer's shaders, in the sicompass-ui repo) are handled.
+#
+# 256x256.png is also the window icon, which sicompass-ui embeds from its own
+# copy (assets/icon-256x256.png there). Copy it over after running this, tag
+# that repo and move the pin. tests/packaging.rs fails until the two match.
 #
 # Where each output is consumed:
 #   sicompass.ico   -> the .exe, via winresource in src/sicompass/build.rs

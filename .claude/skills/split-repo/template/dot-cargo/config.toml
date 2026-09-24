@@ -1,0 +1,49 @@
+# Copied from sicompass's .cargo/config.toml. Keep the XDG block: anything that
+# links sicompass-sdk resolves its config, state, data and cache directories
+# through `sicompass_sdk::platform`, so without it `cargo test` reads and writes
+# the developer's real sicompass directories.
+[build]
+
+# Pin the macOS deployment target so the C dependencies (aws-lc-sys,
+# libsqlite3-sys, sdl3-sys) compile their object files for the same OS
+# version that rustc links the final binary against. Without this the
+# cc-driven C builds default to the runner's SDK (macOS 14.x) while
+# rustc links aarch64-apple-darwin at 11.0, producing thousands of
+# "built for newer macOS version" linker warnings. Ignored off macOS.
+[env]
+MACOSX_DEPLOYMENT_TARGET = { value = "11.0", force = true }
+
+# Give every process cargo spawns — `cargo test`, `cargo run`, build scripts — a
+# throwaway XDG tree under `target/` instead of the developer's own directories.
+# This is a second, independent net under the per-crate `TEST_NO_*` stubs, and
+# it is the one that catches a sink nobody has thought to guard yet. That is not
+# hypothetical: `trash::delete` put roughly 38 test fixtures per run into the
+# real `~/.local/share/Trash` for about a thousand runs before anyone noticed,
+# because the trash is not a directory sicompass owns and so no amount of
+# guarding sicompass's own paths could ever have covered it.
+#
+# Nothing is ever cleared by this. The app simply looks somewhere else; the real
+# directories are not read, written or deleted. The sandbox persists across runs,
+# so `cargo run` keeps its own settings, and only `cargo clean` removes it.
+#
+# Deliberately *not* HOME. Redirecting HOME makes cargo re-fetch the entire
+# registry (33 000 files, measured); redirecting only the XDG variables does not,
+# because CARGO_HOME resolves separately.
+#
+# `force = true` on purpose: a developer whose desktop already exports
+# XDG_DATA_HOME would otherwise silently opt out of the net and never know,
+# which is the worst possible failure mode for a safety net.
+#
+# `relative = true` resolves against the repo root (the parent of this
+# `.cargo` directory), so it works from any subdirectory.
+#
+# Escape hatch: this applies to cargo-spawned processes only. Run
+# the built binary directly to use the real directories.
+#
+# Linux only in effect — `sicompass_sdk::platform` ignores XDG on macOS and
+# Windows. That covers the whole CI test surface, since the full suite runs only
+# on ubuntu-22.04, and elsewhere the per-crate stubs remain the real defence.
+XDG_CONFIG_HOME = { value = "target/test-xdg/config", force = true, relative = true }
+XDG_DATA_HOME = { value = "target/test-xdg/data", force = true, relative = true }
+XDG_STATE_HOME = { value = "target/test-xdg/state", force = true, relative = true }
+XDG_CACHE_HOME = { value = "target/test-xdg/cache", force = true, relative = true }

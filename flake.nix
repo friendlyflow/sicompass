@@ -103,7 +103,7 @@
               spirv-tools
               vulkan-loader
               vulkan-headers
-              glslang
+              # (glslang left with the shaders, for the sicompass-ui repo.)
 
               # Icon generation (scripts/gen-icons.sh). Not needed to build or
               # run sicompass, only to regenerate assets/icons/* from the two
@@ -556,7 +556,7 @@
               moltenvk
             ];
 
-            # No glslang, no fonts and no assets here: shaders, fonts and every
+            # No fonts and no assets here: shaders, fonts and every
             # provider asset are compiled into the binary, so there is no runtime
             # tree to install. Only the icons and the .desktop item below, which
             # the desktop environment reads rather than the app.
@@ -674,7 +674,7 @@
             # What it deliberately does NOT link is the `sicompass`
             # application crate, which would drag wasmtime, a bundled SQLite,
             # a headless-Chromium driver and an IMAP/SMTP stack into a login
-            # screen. See src/sicompass-ui/Cargo.toml.
+            # screen. See sicompass-ui's Cargo.toml.
             nativeBuildInputs = with pkgs; [
               pkg-config
               # aws-lc-sys and libsqlite3-sys are not in this graph, but

@@ -157,15 +157,18 @@ exactly, and nixpkgs tracks its own cadence, so a flake-pinned copy would drift.
 and sets the product icon), which is why `allow-dirty = ["msi"]` is set. dist will never refresh that file, so when
 upgrading cargo-dist, diff its new template against ours by hand.
 
-Shaders and icons are also committed rather than built:
+Icons are also committed rather than built:
 
 ```sh
-nix develop -c ./scripts/gen-shaders.sh   # after editing shaders/*.vert|frag
 nix develop -c ./scripts/gen-icons.sh     # after editing assets/icons/*.svg
 ```
 
-Each script's header explains why. `cargo test -p sicompass` fails if the
-shaders drift.
+The script's header explains why. The shaders moved with the renderer to the
+sicompass-ui repo, which regenerates them with its own `scripts/gen-shaders.sh`.
+
+The `sicompass-ui` git dependency must point at a **tag** for a release, and
+the `[patch]` sections at the bottom of `Cargo.toml` must be commented out: the
+release build checks out this repo alone.
 
 ## Post-release smoke test
 

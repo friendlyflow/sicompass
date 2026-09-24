@@ -19,7 +19,6 @@ members = [
     "lib/lib_builtins",
     "lib/lib_updater",
     "src/sicompass",
-    "src/sicompass-ui",
     # Linux-only binary: the greetd greeter. Every dependency sits behind
     # `[target.'cfg(target_os = "linux")'.dependencies]`, so on macOS and
     # Windows it builds an empty `main()` and the workspace-wide
@@ -74,7 +73,11 @@ sicompass-notes = { path = "lib/lib_notes" }
 sicompass-project-management = { path = "lib/lib_project_management" }
 sicompass-builtins = { path = "lib/lib_builtins" }
 sicompass-updater = { path = "lib/lib_updater" }
-sicompass-ui = { path = "src/sicompass-ui" }
+# The renderer shared with the login greeter, in its own repo
+# (github:friendlyflow/sicompass-ui). Not on crates.io: pinned by git, to a `rev`
+# between releases and to `tag = "vX.Y.Z"` at a release. crane vendors it from
+# Cargo.lock like any git dependency, so there is no hash to maintain.
+sicompass-ui = { git = "https://github.com/friendlyflow/sicompass-ui", rev = "8d58f6b27335472fa1eab65066a5a8c1002cacac" }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
@@ -220,6 +223,11 @@ wiremock = "0.6"
 #
 # [patch.crates-io]
 # sicompass-sdk = { path = "../sicompass-plugin-sdk" }
+#
+# The same rule, for working on the renderer and the app together:
+#
+# [patch."https://github.com/friendlyflow/sicompass-ui"]
+# sicompass-ui = { path = "../sicompass-ui" }
 
 # Optimize heavy third-party deps even in debug builds — html5ever and the
 # TLS/HTTP stack are 10-50x slower without optimizations.

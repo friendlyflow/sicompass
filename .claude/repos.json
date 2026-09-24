@@ -12,6 +12,11 @@
       "kind": "sdk"
     },
     {
+      "name": "sicompass-ui",
+      "path": "../sicompass-ui",
+      "kind": "ui"
+    },
+    {
       "name": "desicompass",
       "path": "../desicompass",
       "kind": "compositor"

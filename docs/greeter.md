@@ -39,7 +39,7 @@ it produces.
 
 The radio groups are served **path-scoped**: `fetch()` returns the whole page at
 `/` and only that group's options at `/User`. Do not add `"login"` to the
-`whole_tree` list in `sicompass-ui/src/provider.rs` — returning the whole tree
+`whole_tree` list in sicompass-ui's `src/provider.rs` — returning the whole tree
 from inside a group grafts a copy of the page under one of its own descendants.
 
 ## The crate split
@@ -49,7 +49,7 @@ from inside a group grafts a copy of the page under one of its own descendants.
 wasmtime, a bundled SQLite, a headless-Chromium driver, an IMAP and an SMTP
 client, none of them ever called. The greeter links 302.
 
-The rule, enforced by `.claude/hooks/check-sdk-boundary.sh`: **`sicompass-ui`
+The rule, enforced by the Stop hook in the sicompass-ui repo: **`sicompass-ui`
 must not depend on `sicompass-builtins`, `sicompass-updater`, `wasmtime` or
 `reqwest`.** Where the renderer needs an answer only the embedder has, it asks:
 

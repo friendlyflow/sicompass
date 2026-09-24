@@ -3,8 +3,9 @@
 //! Its only job is embedding the application icon and version resource into
 //! the `.exe` on Windows. It is a no-op everywhere else.
 //!
-//! Shaders are deliberately *not* built here. See `scripts/gen-shaders.sh` for
-//! why they are compiled by hand and committed.
+//! Shaders are deliberately *not* built here. They live with the renderer in
+//! the sicompass-ui repo, whose `scripts/gen-shaders.sh` explains why they are
+//! compiled by hand and committed.
 
 fn main() {
     println!("cargo::rerun-if-changed=build.rs");

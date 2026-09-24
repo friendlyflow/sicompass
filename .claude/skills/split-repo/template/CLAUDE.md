@@ -23,6 +23,13 @@ is installed system-wide.
 - The version lives in `[package] version` in `Cargo.toml`. `flake.nix` reads it
   from there, so there is only one version to bump.
 
+## Generated files that are committed
+
+- `THIRD-PARTY-LICENSES.html`: `cargo about generate about.hbs -o
+  THIRD-PARTY-LICENSES.html` (cargo-about 0.9.2, the version the `licenses.yml`
+  workflow pins). Regenerate and commit it with any dependency change. The
+  workflow fails if it drifts.
+
 ## Code Style
 
 Follow standard Rust idioms. Use `#[allow(...)]` sparingly and only when

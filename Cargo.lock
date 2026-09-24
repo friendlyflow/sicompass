@@ -4856,7 +4856,8 @@ dependencies = [
 
 [[package]]
 name = "sicompass-ui"
-version = "0.1.21"
+version = "0.2.0"
+source = "git+https://github.com/friendlyflow/sicompass-ui?rev=8d58f6b27335472fa1eab65066a5a8c1002cacac#8d58f6b27335472fa1eab65066a5a8c1002cacac"
 dependencies = [
  "accesskit",
  "accesskit_macos",
@@ -4874,7 +4875,6 @@ dependencies = [
  "serde",
  "serde_json",
  "sicompass-sdk",
- "tempfile",
  "tokio",
  "tracing",
  "unicode-normalization",

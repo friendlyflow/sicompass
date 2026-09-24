@@ -52,6 +52,17 @@ with `command -v git-filter-repo`, and fall back to `nix develop -c`.
      --path <path-in-sicompass>/ [--path <extra> ...] \
      --path-rename <path-in-sicompass>/: [--path-rename <extra>:<dest> ...]
    ```
+   **Find the crate's older paths first.** Files that moved into
+   `<path-in-sicompass>` (a crate carved out of another, a `-rs` rename) carry
+   their real history under the old paths, and a plain `--path` drops all of
+   it. List them with
+   `git log --follow --name-status --format= -- <file> | awk '/^[AR]/{print $2}'`
+   for every tracked file, check that none is still tracked by another crate
+   today, and pass them through `--paths-from-file`. In that file a
+   `old==>new` line is **only a rename**: the old path must also be listed on a
+   line of its own, or it is filtered out (sicompass-ui kept 9 commits instead
+   of 289 until this was fixed).
+
    `--no-local` gives filter-repo a fresh clone, which it insists on. It also
    drops the `origin` remote, which is what we want, because it must never
    point at sicompass.
@@ -74,7 +85,16 @@ with `command -v git-filter-repo`, and fall back to `nix develop -c`.
      about this crate, and delete them from sicompass in the same step, leaving
      a one-line pointer.
    - `gitignore` becomes `.gitignore`, `dot-claude/` becomes `.claude/`,
-     `dot-github/` becomes `.github/`. They are stored under other names so
+     `dot-github/` becomes `.github/`, `dot-cargo/` becomes `.cargo/`.
+   - `.cargo/config.toml` is **not optional** for anything that links
+     `sicompass-sdk`. It points every cargo-spawned process at a throwaway XDG
+     tree under `target/`, and without it `cargo test` reads and writes the
+     developer's real sicompass config, state and trash (see sicompass's own
+     `.cargo/config.toml` for how that was found).
+   - `.github/workflows/ci.yml` runs clippy with `-D warnings`. Keep that only
+     if the crate is already clean. If it carries lints over from sicompass
+     (whose CI does not deny warnings), drop the flag rather than fixing
+     hundreds of lints as part of the split. They are stored under other names so
      that Claude Code does not pick up the template's skills as skills of
      sicompass itself.
    - `flake.nix`: fill `@...@`. `craneLib.cleanCargoSource` keeps only Cargo
@@ -102,6 +122,13 @@ with `command -v git-filter-repo`, and fall back to `nix develop -c`.
      dependencies kept their rev (`grep -A2 'name = "smithay"' Cargo.lock`).
 
 5. **Verify locally, before any remote exists.**
+   A dependant pinned by `git = "https://github.com/..."` cannot resolve until
+   the repo is published, and a `[patch]` does not help, because cargo still
+   fetches the original source. To test the dependant first, point its
+   dependency at `git = "file:///<absolute path>", rev = "..."` for the moment,
+   and switch it to the https URL (then `cargo metadata`, which rewrites only
+   the `source` line in `Cargo.lock`) once the repo is pushed.
+
    `cargo build`, `cargo test`, `cargo clippy --all-targets`, and
    `timeout 1200 nix build "git+file://$PWD"`. `git add -A` first, because a
    flake only sees tracked files.

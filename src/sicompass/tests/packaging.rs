@@ -362,3 +362,89 @@ fn every_msi_component_is_referenced_exactly_once() {
          `light` with LGHT0094; a component without a ref silently ships nothing."
     );
 }
+
+/// The renderer (`sicompass-ui`, its own repo) compiles the fonts into this
+/// binary, so every package has to ship their license texts, and `fonts/` here
+/// keeps copies for dist, cargo-packager, the rpm and the Nix build to install.
+/// Those copies have to be the texts of the fonts actually linked.
+#[test]
+fn shipped_font_licenses_match_the_linked_renderer() {
+    for (name, text) in sicompass_ui::fonts::LICENSES {
+        assert_eq!(
+            read(&format!("fonts/{name}")),
+            *text,
+            "fonts/{name} differs from the one in the sicompass-ui version this \
+             build links. Copy it over from that repo's fonts/."
+        );
+    }
+    assert!(
+        !sicompass_ui::fonts::LICENSES.is_empty(),
+        "sicompass-ui exposes no font licenses to check"
+    );
+}
+
+/// `scripts/gen-icons.sh` regenerates `assets/icons/*` here, but the window
+/// icon is embedded by the renderer, which keeps its own copy. A regenerated
+/// icon that never reached that copy would leave every window on the old one.
+#[test]
+fn the_window_icon_matches_the_generated_one() {
+    let generated = std::fs::read(workspace_root().join("assets/icons/256x256.png"))
+        .expect("reading assets/icons/256x256.png");
+    assert!(
+        generated == sicompass_ui::icon::ICON_PNG,
+        "assets/icons/256x256.png differs from sicompass-ui's assets/icon-256x256.png. \
+         Copy it into the sicompass-ui repo, tag a release, and move the pin."
+    );
+}
+
+/// `APP_ID` is what the compositor turns into `<APP_ID>.desktop`. If it
+/// stops matching the shipped entry, the window silently loses its icon
+/// again on every packaged install.
+///
+/// Moved here from `sicompass-ui`'s `icon.rs` when the renderer got its own
+/// repo: the entry is part of this repo's packages, not of the renderer.
+#[test]
+fn app_id_matches_the_shipped_desktop_entry() {
+    use sicompass_ui::icon::{APP_ID, APP_NAME};
+    let entry = read("assets/sicompass.desktop");
+
+    assert_eq!(
+        entry.lines().find_map(|l| l.strip_prefix("Icon=")),
+        Some(APP_ID),
+        "Icon= must equal APP_ID"
+    );
+    assert_eq!(
+        entry
+            .lines()
+            .find_map(|l| l.strip_prefix("StartupWMClass=")),
+        Some(APP_ID),
+        "StartupWMClass= is what X11 desktops match WM_CLASS against"
+    );
+    assert_eq!(
+        entry.lines().find_map(|l| l.strip_prefix("Name=")),
+        Some(APP_NAME)
+    );
+}
+
+/// `sicompass --check` is the first thing the post-release smoke test runs, and
+/// its first line is how a user reports what they have installed. The check
+/// itself lives in the renderer (`sicompass-ui`, its own repo and version), so
+/// the version has to be handed in by the app. Right after the split it wasn't,
+/// and sicompass 0.1.21 reported itself as the renderer's 0.2.0.
+///
+/// Only the first line is read: the Vulkan probe that follows may or may not
+/// find a device on the machine running the tests, which is not this test's
+/// business.
+#[test]
+fn check_reports_the_apps_own_version() {
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_sicompass"))
+        .arg("--check")
+        .output()
+        .expect("running sicompass --check");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let first = stdout.lines().next().unwrap_or_default();
+    assert!(
+        first.starts_with(&format!("sicompass {} (", env!("CARGO_PKG_VERSION"))),
+        "`sicompass --check` opened with {first:?}"
+    );
+}

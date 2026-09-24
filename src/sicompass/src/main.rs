@@ -50,7 +50,7 @@ fn main() {
         .init();
 
     if std::env::args().any(|a| a == "--check") {
-        process::exit(render::check_runtime_files());
+        process::exit(render::check_runtime_files("sicompass", env!("CARGO_PKG_VERSION")));
     }
 
     // Make sure this install has a Start Menu entry (Windows, non-MSI installs

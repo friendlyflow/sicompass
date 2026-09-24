@@ -44,7 +44,7 @@ clap = { version = "4", features = ["derive"] }
 #
 # Note what is NOT here: `sicompass`, the application crate. Linking it would
 # drag wasmtime, a bundled SQLite, a headless-Chromium driver, an IMAP client
-# and an SMTP client into a login screen. See src/sicompass-ui/Cargo.toml.
+# and an SMTP client into a login screen. See sicompass-ui's Cargo.toml.
 sicompass-sdk = { workspace = true }
 sicompass-ui = { workspace = true }
 
