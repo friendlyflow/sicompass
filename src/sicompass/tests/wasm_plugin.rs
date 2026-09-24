@@ -873,6 +873,8 @@ fn wit_vendor_matches_host_tables() {
         .chain(wasm_host::TASK_IMPORTS.iter())
         // ABI 0.2 (4.6): processes.
         .chain(wasm_host::PROCESS_IMPORTS.iter())
+        // ABI 0.2 (4.7): socket name resolution.
+        .chain(wasm_host::SOCKET_IMPORTS.iter())
         .map(|(i, f)| (i.to_string(), f.to_string()))
         .collect();
     expected.sort();
@@ -1497,4 +1499,81 @@ fn the_working_directory_must_be_granted() {
     );
     let outside = fs_cmd(&mut p, "cwd", "/etc");
     assert!(outside.starts_with("err:"), "{outside}");
+}
+
+// ---------------------------------------------------------------------------
+// 4.7: sockets
+// ---------------------------------------------------------------------------
+
+/// A line-echo server on 127.0.0.1, answering `pong` to every line, one thread
+/// per connection. Returns its port.
+fn echo_server() -> u16 {
+    use std::io::{BufRead, BufReader, Write};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    std::thread::spawn(move || {
+        for stream in listener.incoming().flatten() {
+            std::thread::spawn(move || {
+                let mut w = stream.try_clone().unwrap();
+                for line in BufReader::new(stream).lines().map_while(Result::ok) {
+                    let _ = writeln!(w, "pong to {line}");
+                }
+            });
+        }
+    });
+    port
+}
+
+fn open_socket(endpoints: Vec<String>) -> Result<WasmProvider, String> {
+    WasmProvider::open_with_grants(
+        &fixture_dir().join("socket.wasm"),
+        "socket",
+        "socket",
+        &fixture_dir(),
+        wasm_host::Grants {
+            sockets: endpoints,
+            ..Default::default()
+        },
+    )
+}
+
+#[test]
+fn a_granted_endpoint_connects_by_name() {
+    let port = echo_server();
+    let mut p = open_socket(vec![format!("localhost:{port}")]).unwrap();
+    assert_eq!(fs_cmd(&mut p, "echo", &format!("localhost:{port}")), "pong to ping");
+}
+
+#[test]
+fn a_port_that_was_not_granted_is_refused_even_by_address() {
+    let granted = echo_server();
+    let other = echo_server();
+    let mut p = open_socket(vec![format!("localhost:{granted}")]).unwrap();
+    // The same address as the granted one, another port: the host's socket
+    // check refuses it (not "unsupported", which would prove nothing).
+    let a = fs_cmd(&mut p, "raw", &format!("127.0.0.1:{other}"));
+    assert!(a.starts_with("err:") && !a.contains("not supported"), "{a}");
+    // And the granted one, by address, works.
+    assert_eq!(fs_cmd(&mut p, "raw", &format!("127.0.0.1:{granted}")), "pong to ping");
+    let a = fs_cmd(&mut p, "echo", &format!("localhost:{other}"));
+    assert!(a.starts_with("err:") && a.contains("not among"), "{a}");
+}
+
+#[test]
+fn a_name_that_was_not_granted_does_not_resolve() {
+    let port = echo_server();
+    let mut p = open_socket(vec![format!("127.0.0.1:{port}")]).unwrap();
+    let a = fs_cmd(&mut p, "echo", &format!("localhost:{port}"));
+    assert!(a.starts_with("err:") && a.contains("not among"), "{a}");
+    // The same address, approved as an IP, works.
+    assert_eq!(fs_cmd(&mut p, "echo", &format!("127.0.0.1:{port}")), "pong to ping");
+}
+
+#[test]
+fn a_plugin_that_uses_sockets_needs_them_granted() {
+    let e = match open_socket(Vec::new()) {
+        Ok(_) => panic!("sockets must not be linked without a grant"),
+        Err(e) => e,
+    };
+    assert!(e.contains("permissions.sockets"), "{e}");
 }

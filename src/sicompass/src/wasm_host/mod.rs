@@ -27,6 +27,7 @@ pub mod host_fetch;
 pub mod limits;
 pub mod process;
 pub mod provider;
+pub mod sockets;
 pub mod tasks;
 pub mod wasi;
 
@@ -77,6 +78,9 @@ pub struct Grants {
     /// Programs it may start (the approved `permissions.process`). Empty:
     /// `process` is not linked.
     pub process: Vec<String>,
+    /// `host:port` pairs it may open TCP connections to (the approved
+    /// `permissions.sockets`). Empty: TCP is off and `sockets` is not linked.
+    pub sockets: Vec<String>,
 }
 
 impl Grants {
@@ -120,6 +124,8 @@ pub struct HostState {
     pub tasks: tasks::TaskRole,
     /// Programs this instance may start. Empty: `process` is not linked.
     pub process_allowed: Vec<String>,
+    /// `host:port` pairs this instance may connect to. Empty: no TCP.
+    pub sockets_allowed: Vec<String>,
 }
 
 impl HostState {
@@ -158,7 +164,7 @@ impl HostState {
         for dir in &grants.filesystem {
             granted_roots.push((dir.clone(), dir.clone()));
         }
-        let wasi = wasi::ctx(&plugin_name, &granted_roots)?;
+        let wasi = wasi::ctx(&plugin_name, &granted_roots, &grants.sockets)?;
         Ok(HostState {
             plugin_name,
             settings_section: settings_section.into(),
@@ -171,6 +177,7 @@ impl HostState {
             granted_roots,
             tasks: tasks::TaskRole::Unmanaged,
             process_allowed: grants.process,
+            sockets_allowed: grants.sockets,
         })
     }
 
@@ -519,6 +526,16 @@ pub fn linker_for(state: &HostState) -> Result<Linker<HostState>, String> {
     )
     .map_err(|e| format!("link sicompass:plugin/desktop: {e}"))?;
 
+    // Linked only with a `sockets` grant: name resolution for the approved
+    // `host:port` pairs (wasi:sockets/ip-name-lookup is never used).
+    if !state.sockets_allowed.is_empty() {
+        wit::sockets::add_to_linker::<_, wasmtime::component::HasSelf<_>>(
+            &mut linker,
+            |s: &mut HostState| s,
+        )
+        .map_err(|e| format!("link sicompass:plugin/sockets: {e}"))?;
+    }
+
     // Linked only when the plugin may start programs: the one capability that
     // reaches outside the sandbox.
     if !state.process_allowed.is_empty() {
@@ -625,7 +642,7 @@ pub fn audit_component_imports(component: &Component, grants: &Grants) -> Result
             .map(|p| p.to_string_lossy().into_owned())
             .collect(),
         process: grants.process.clone(),
-        sockets: Vec::new(),
+        sockets: grants.sockets.clone(),
     };
     sicompass_sdk::plugin_abi::audit_imports(&imports, &exports, &permissions, &grants.allowed_hosts)
 }
@@ -773,6 +790,9 @@ pub use sicompass_sdk::plugin_abi::TASK_FUNCTIONS as TASK_IMPORTS;
 
 /// `sicompass:plugin/process`: linked only for listed programs.
 pub use sicompass_sdk::plugin_abi::PROCESS_FUNCTIONS as PROCESS_IMPORTS;
+
+/// `sicompass:plugin/sockets`: linked only with a `sockets` grant.
+pub use sicompass_sdk::plugin_abi::SOCKET_FUNCTIONS as SOCKET_IMPORTS;
 
 #[cfg(test)]
 mod tests {

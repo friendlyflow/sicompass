@@ -43,7 +43,11 @@ pub fn is_baseline(interface: &str) -> bool {
 
 /// The per-plugin WASI context: the inert baseline, plus a preopen for each
 /// granted `(guest path, host path)`.
-pub fn ctx(plugin_name: &str, preopens: &[(std::path::PathBuf, std::path::PathBuf)]) -> Result<WasiCtx, String> {
+pub fn ctx(
+    plugin_name: &str,
+    preopens: &[(std::path::PathBuf, std::path::PathBuf)],
+    sockets: &[String],
+) -> Result<WasiCtx, String> {
     let mut b = WasiCtxBuilder::new();
     for (guest, host) in preopens {
         std::fs::create_dir_all(host).map_err(|e| format!("{}: {e}", host.display()))?;
@@ -52,11 +56,18 @@ pub fn ctx(plugin_name: &str, preopens: &[(std::path::PathBuf, std::path::PathBu
     }
     b.stdout(LogStream::new(plugin_name, "stdout"))
         .stderr(LogStream::new(plugin_name, "stderr"))
-        // Belt and braces: the audit already refuses a component that imports
-        // sockets without a grant, so these only matter if that ever regresses.
-        .allow_tcp(false)
+        // UDP and name lookup are never available; TCP only with a grant, and
+        // then only to the approved endpoints (see `super::sockets`).
         .allow_udp(false)
-        .allow_ip_name_lookup(false);
+        .allow_ip_name_lookup(false)
+        .allow_tcp(!sockets.is_empty());
+    if !sockets.is_empty() {
+        let endpoints = super::sockets::Endpoints::parse(sockets)?;
+        b.socket_addr_check(move |addr, usage| {
+            let ok = endpoints.permits(addr, usage);
+            Box::pin(async move { ok })
+        });
+    }
     Ok(b.build())
 }
 

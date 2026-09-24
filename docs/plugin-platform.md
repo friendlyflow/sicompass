@@ -312,6 +312,18 @@ This is plain `wasi:sockets` with the address check above. It exists for IMAP an
 SMTP. TLS is the guest's job (rustls with a pure-Rust crypto provider), so the
 host never sees a password or a plaintext mailbox.
 
+Built in 4.7 (`src/wasm_host/sockets.rs`). As built: `wasi:sockets/ip-name-lookup`
+is **never** linked (it would resolve any name, and a lookup of a made-up name is
+enough to leak data). A plugin resolves through `sicompass:plugin/sockets.resolve`,
+which answers only for approved `host:port` pairs, and connects by address;
+`sicompass_pdk::sockets::connect(host, port)` does both. The host's socket check
+lets a connection through only to an address an approved name resolves to, on its
+port, plus the implicit bind `connect` makes; no listening, accepting or UDP. A
+grant links what `std::net::TcpStream` imports on `wasm32-wasip2` (measured:
+network, instance-network, tcp, tcp-create-socket, and the UDP pair, switched off).
+Listed endpoints may be local (a mail bridge on `localhost`). `try_clone` is not
+supported on wasip2. The `socket-plugin` example is the fixture.
+
 ### license (always)
 
 ```wit

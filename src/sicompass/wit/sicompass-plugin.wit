@@ -486,6 +486,20 @@ interface process {
   }
 }
 
+/// Name resolution for `wasi:sockets`. Linked, together with the TCP parts of
+/// `wasi:sockets`, only when `plugin.json` lists `host:port` pairs in
+/// `permissions.sockets` and the user approved them. `wasi:sockets/ip-name-lookup`
+/// itself is never linked: it would resolve any name, and a lookup of a made-up
+/// name is enough to leak data. So a plugin resolves through here, which answers
+/// only for the approved pairs, and then connects by address; the host lets it
+/// connect only to the addresses those names resolve to, on the approved ports.
+/// UDP is not available.
+interface sockets {
+  /// The addresses (`"93.184.215.14"`, `"2606:2800::1"`) of an approved `host`
+  /// for `port`.
+  resolve: func(host: string, port: u16) -> result<list<string>, string>;
+}
+
 // ---------------------------------------------------------------------------
 // Guest exports — what a provider implements
 // ---------------------------------------------------------------------------
@@ -683,5 +697,6 @@ world plugin {
   import desktop;
   import tasks;
   import process;
+  import sockets;
   export provider;
 }

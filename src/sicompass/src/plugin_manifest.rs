@@ -22,18 +22,6 @@ pub use sicompass_sdk::plugin_manifest::{
     parse_manifest,
 };
 
-/// Permissions this sicompass cannot grant yet (part 4.7 of
-/// docs/plugin-platform.md). A plugin asking for one is not loaded at all,
-/// rather than loaded without what it asked for.
-pub fn unsupported_permissions(m: &PluginManifest) -> Vec<&'static str> {
-    let p = &m.permissions;
-    let mut out = Vec::new();
-    if !p.sockets.is_empty() {
-        out.push("sockets");
-    }
-    out
-}
-
 /// The top-level `settings.json` key recording what the user approved, per
 /// plugin: `{ "<name>": "<approval fingerprint>" }`. Written by the Store when the
 /// user grants access; compared on every load, so an update asking for more is
@@ -64,6 +52,7 @@ pub fn read_approvals() -> std::collections::HashMap<String, String> {
 /// - `filesystem`: only if the user approved exactly this manifest's access
 ///   ([`sicompass_sdk::plugin_abi::approval_fingerprint`]); `~` means home.
 /// - `process`: the listed programs, under the same approval.
+/// - `sockets`: TCP to the listed `host:port` pairs, under the same approval.
 ///
 /// `Err` says why the plugin cannot load: a permission this build cannot grant,
 /// or access the user has not approved.
@@ -71,13 +60,6 @@ pub fn grants_for(
     m: &PluginManifest,
     approvals: &std::collections::HashMap<String, String>,
 ) -> Result<crate::wasm_host::Grants, String> {
-    let unsupported = unsupported_permissions(m);
-    if !unsupported.is_empty() {
-        return Err(format!(
-            "it asks for {}, which this sicompass cannot grant yet",
-            unsupported.join(", ")
-        ));
-    }
     if sicompass_sdk::plugin_abi::needs_approval(m)
         && approvals.get(&m.name) != Some(&sicompass_sdk::plugin_abi::approval_fingerprint(m))
     {
@@ -87,6 +69,7 @@ pub fn grants_for(
             .iter()
             .map(|f| format!("folder {f}"))
             .chain(m.permissions.process.iter().map(|p| format!("program {p}")))
+            .chain(m.permissions.sockets.iter().map(|s| format!("connection to {s}")))
             .collect();
         return Err(format!(
             "it asks for access you have not approved ({}); approve it in the Store",
@@ -117,6 +100,7 @@ pub fn grants_for(
         storage_dir,
         filesystem,
         process: m.permissions.process.clone(),
+        sockets: m.permissions.sockets.clone(),
     })
 }
 
@@ -221,19 +205,10 @@ mod tests {
         .unwrap();
         assert_eq!(m.permissions, Permissions::default());
         assert!(m.allowed_hosts().is_empty());
-        assert!(unsupported_permissions(&m).is_empty());
-    }
-
-    #[test]
-    fn permissions_this_host_cannot_grant_yet_are_named() {
-        let m: PluginManifest = serde_json::from_str(
-            r#"{ "name": "x", "displayName": "x", "entry": "plugin.wasm",
-                 "permissions": { "storage": true, "process": ["git"],
-                                  "sockets": ["imap.example.org:993"] } }"#,
-        )
-        .unwrap();
-        // storage and filesystem are grantable since 4.4, process since 4.6.
-        assert_eq!(unsupported_permissions(&m), vec!["sockets"]);
+        // And the host grants it nothing: no hosts, folders, programs, sockets.
+        let g = grants_for(&m, &Default::default()).unwrap();
+        assert!(g.allowed_hosts.is_empty() && g.storage_dir.is_none());
+        assert!(g.filesystem.is_empty() && g.process.is_empty() && g.sockets.is_empty());
     }
 
     use std::io::Write;
