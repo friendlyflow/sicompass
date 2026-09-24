@@ -292,8 +292,8 @@ This also closed a gap. A guest's `<image>` value used to go straight to the ima
 decoder with no confinement and no rebasing, so a plugin could have the host open any
 file the user could read and learn its dimensions through `texture_size`.
 
-**A built-in provider** keeps its files in its own crate — `lib/lib_tutorial/assets/`,
-`lib/lib_sales_demo/assets/` — `include_bytes!`s them, and publishes them in
+**A built-in provider** keeps its files in its own crate — `lib/lib_tutorial/assets/`
+— `include_bytes!`s them, and publishes them in
 `register()`:
 
 ```rust

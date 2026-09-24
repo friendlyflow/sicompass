@@ -916,7 +916,8 @@ mod tests {
         p.push_path("Extending Sicompass");
         let text = joined(&p.fetch());
         assert!(
-            text.contains("lib/lib_sales_demo/"),
+            // The reference program became a plugin in 0.2.0.
+            text.contains("salesdemo_plugin_sicompass"),
             "must point to the reference program"
         );
         // Rust for built-ins, WASM for anything installed. The `native` and

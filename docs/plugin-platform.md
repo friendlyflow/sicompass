@@ -621,6 +621,15 @@ Each part ends in something runnable, like Steps 1-3.
 Step 5 (the salesdemo pilot) then exercises 4.2, 4.3 and 4.8 end to end, and
 Steps 6-10 exercise the rest.
 
+**Step 5 done (2026-09-24):** github.com/friendlyflow/salesdemo_plugin_sicompass
+(32 commits of history), released as v0.2.0 by its release workflow with its own
+key, listed in the store list, installed from GitHub through the Store into a
+dev build, and `lib/lib_sales_demo` removed. The port needed two per-level
+answers a cached descriptor cannot give (structural editing only where "Add
+element:" is, the diagram only at the root), so `poll-result` gained
+`structural-edit-here` and `dashboard-here`, and the host polls again after
+every navigation.
+
 ## 14. Decisions on the former open questions (2026-09-24)
 
 1. **Store key custody:** a key file on the maintainer's machine, outside

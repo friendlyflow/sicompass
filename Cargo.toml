@@ -10,7 +10,6 @@ members = [
     "lib/lib_emailclient",
     "lib/lib_texteditor",
     "lib/lib_remote",
-    "lib/lib_sales_demo",
     "lib/lib_shell",
     "lib/lib_terminal",
     "lib/lib_claude",
@@ -49,7 +48,7 @@ license = "GPL-3.0-only"
 # unconditionally by lib_project_management's kanban dashboard, with the app's
 # own announcement drain calling the first on every provider. Also the
 # `supports_structural_edit` capability and `platform::data_home` from 0.5.0 —
-# used unconditionally by lib_notes, lib_filebrowser, lib_sales_demo and
+# used unconditionally by lib_notes, lib_filebrowser and
 # lib_project_management — and the provider-scoped asset registry and
 # `read-asset` host import from 0.4.0, likewise required unconditionally.)
 sicompass-sdk = "0.8.0"
@@ -63,7 +62,6 @@ sicompass-chatclient = { path = "lib/lib_chatclient" }
 sicompass-emailclient = { path = "lib/lib_emailclient" }
 sicompass-text-editor = { path = "lib/lib_texteditor" }
 sicompass-remote = { path = "lib/lib_remote" }
-sicompass-sales-demo = { path = "lib/lib_sales_demo" }
 sicompass-shell = { path = "lib/lib_shell" }
 sicompass-terminal = { path = "lib/lib_terminal" }
 sicompass-claude = { path = "lib/lib_claude" }
@@ -232,7 +230,7 @@ wiremock = "0.6"
 # unreleased, so it still satisfies the `0.8.0` requirements. Remove this block
 # when the pins move to the published 0.9.0.
 [patch.crates-io]
-sicompass-sdk = { git = "https://github.com/friendlyflow/sicompass-plugin-sdk", rev = "ca78c2ffa1b53d617bbfbca5d8b16fb9f9f8b054" }
+sicompass-sdk = { git = "https://github.com/friendlyflow/sicompass-plugin-sdk", rev = "61b528dd5bde858229e77d47092b3494e212ce17" }
 #
 # The same rule, for working on the renderer and the app together:
 #

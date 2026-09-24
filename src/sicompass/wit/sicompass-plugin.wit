@@ -293,6 +293,15 @@ interface types {
     dashboard-request: option<dashboard-request>,
     /// (`take-navigation-request`)
     navigation-request: option<navigation-request>,
+    /// Whether structural editing (insert, delete, cut and paste of rows) is
+    /// available at the current path. Narrows `descriptor.supports-structural-edit`,
+    /// which says whether it ever is. The host polls again right after each
+    /// `push-path`, `pop-path` and `set-current-path`, so this is never a level
+    /// behind.
+    structural-edit-here: bool,
+    /// Whether the dashboard (`d`) is offered at the current path. Narrows
+    /// `descriptor.dashboard-kind` in the same way.
+    dashboard-here: bool,
   }
 }
 

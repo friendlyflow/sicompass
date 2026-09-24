@@ -178,8 +178,8 @@ before, so check the real thing:
 - **Any platform**: `sicompass --check`. It lists every provider asset with the
   number of bytes that actually resolved, and the Vulkan devices it can see,
   which is the whole class of failure that used to only appear on a user's
-  machine. Expect three `OK` asset lines (two tutorial, one sales demo) and
-  exit 0.
+  machine. Expect two `OK` asset lines (the tutorial's) and exit 0. (The sales
+  demo's diagram left with it for its plugin.)
 - **Linux**: install the `.deb` on a clean Ubuntu container and run it. Then
   run the AppImage on a *different* distribution: linuxdeploy bundling a
   `libvulkan.so.1` that shadows the host's ICDs is the classic failure, which

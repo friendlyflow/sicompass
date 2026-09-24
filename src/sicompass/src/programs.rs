@@ -574,7 +574,7 @@ fn inject_builtin_manifest_settings(
 /// then strips spaces as a fallback so callers from `instantiate_user_plugin`
 /// (which uses `manifest.name`) work without conversion.
 fn instantiate_builtin(name: &str) -> Option<Box<dyn Provider>> {
-    // Try exact name first (e.g. "sales demo", "filebrowser").
+    // Try exact name first (e.g. "text editor", "filebrowser").
     if let Some(p) = sicompass_sdk::create_provider_by_name(name) {
         return Some(p);
     }
@@ -2620,29 +2620,6 @@ mod tests {
             2,
             "expected 2 masked (password) settings, got {:?}",
             masked
-        );
-    }
-
-    #[test]
-    fn hot_enable_sales_demo_registers_settings() {
-        let ffon = settings_ffon_after_enable("sales demo");
-        let children =
-            section_children(&ffon, "sales demo").expect("sales demo section should be present");
-        assert!(
-            !children.iter().any(|e| e.as_str() == Some("no settings")),
-            "sales demo section should not show 'no settings'"
-        );
-        let inputs: Vec<_> = children
-            .iter()
-            .filter_map(|e| e.as_str())
-            .filter(|s| s.contains("<input>"))
-            .collect();
-        assert_eq!(
-            inputs.len(),
-            1,
-            "expected 1 text setting, got {}: {:?}",
-            inputs.len(),
-            inputs
         );
     }
 

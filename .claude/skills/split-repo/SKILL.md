@@ -66,6 +66,9 @@ with `command -v git-filter-repo`, and fall back to `nix develop -c`.
    `--no-local` gives filter-repo a fresh clone, which it insists on. It also
    drops the `origin` remote, which is what we want, because it must never
    point at sicompass.
+   **Then delete every tag**: `git tag -l | xargs -r git tag -d`. The clone
+   carries sicompass's own release tags, rewritten onto the filtered history,
+   and the new repo's versions start at its own first release.
    Check the result: `git log --oneline | wc -l` is roughly the number of
    commits `git log --oneline -- <path>` shows in sicompass, and `ls` shows the
    crate at the root.

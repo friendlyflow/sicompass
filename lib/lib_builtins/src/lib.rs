@@ -29,7 +29,6 @@ pub fn register_all() {
         sicompass_webbrowser::register();
         sicompass_chatclient::register();
         sicompass_emailclient::register();
-        sicompass_sales_demo::register();
         sicompass_remote::register();
         sicompass_settings::register();
         sicompass_store::register();

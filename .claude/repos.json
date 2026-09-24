@@ -25,6 +25,11 @@
       "name": "loginsicompass",
       "path": "../loginsicompass",
       "kind": "greeter"
+    },
+    {
+      "name": "salesdemo_plugin_sicompass",
+      "path": "../salesdemo_plugin_sicompass",
+      "kind": "plugin"
     }
   ]
 }

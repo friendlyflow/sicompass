@@ -82,9 +82,10 @@ path = "sicompass"
 main = true
 
 # Shaders, fonts and every provider asset are compiled into the binary, so there
-# is no runtime tree to place here. The tutorial's and sales demo's files live in
-# `lib/lib_tutorial/assets/` and `lib/lib_sales_demo/assets/`, where those crates
-# `include_bytes!` them; nothing reads them from disk at runtime, on any platform.
+# is no runtime tree to place here. The tutorial's files live in
+# `lib/lib_tutorial/assets/`, where that crate `include_bytes!`s them; nothing
+# reads them from disk at runtime, on any platform. (Plugins bring their own
+# `assets/`, installed by the Store.)
 #
 # The fonts are embedded in the binary, so their license texts have to travel
 # with it. This is a real obligation, not bookkeeping: cargo-about only sees

@@ -59,3 +59,8 @@ accepted = ["GPL-3.0-only"]
 
 [sicompass-payments]
 accepted = ["GPL-3.0-only"]
+
+# Plugins (the guest kit). Delete the sections of crates this repo does not
+# use: cargo-about warns about a section for a crate not in the graph.
+[sicompass-pdk]
+accepted = ["GPL-3.0-only"]

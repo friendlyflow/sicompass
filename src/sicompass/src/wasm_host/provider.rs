@@ -93,6 +93,37 @@ pub struct WasmProvider {
 }
 
 impl WasmProvider {
+    /// Keep a poll's answers. An error goes to the pending slot; a request an
+    /// earlier poll left untaken survives a poll that has none.
+    fn take_poll(&mut self, mut p: wit_types::PollResult) {
+        if let Some(err) = p.error.take() {
+            let mut inner = self.inner.borrow_mut();
+            if inner.pending_error.is_none() {
+                inner.pending_error = Some(err);
+            }
+        }
+        if p.dashboard_request.is_none() {
+            p.dashboard_request = self.polled.dashboard_request.take();
+        }
+        if p.navigation_request.is_none() {
+            p.navigation_request = self.polled.navigation_request.take();
+        }
+        if p.announcement.is_none() {
+            p.announcement = self.polled.announcement.take();
+        }
+        p.needs_refresh |= self.polled.needs_refresh;
+        self.polled = p;
+    }
+
+    /// Poll right after navigating, so the per-level answers (at root,
+    /// structural editing, dashboard) are for the level the user is now on,
+    /// not the one they left, before the next frame's tick.
+    fn repoll(&mut self) {
+        if let Ok(p) = self.call("poll", |g, s| g.call_poll(s)) {
+            self.take_poll(p);
+        }
+    }
+
     /// Load, instantiate and initialise a plugin.
     ///
     /// `allowed_hosts` comes from the manifest and decides whether the network
@@ -428,6 +459,8 @@ fn default_poll() -> wit_types::PollResult {
         announcement: None,
         dashboard_request: None,
         navigation_request: None,
+        structural_edit_here: true,
+        dashboard_here: true,
     }
 }
 
@@ -637,13 +670,7 @@ impl Provider for WasmProvider {
         let delivered = self.deliver_task_events();
         match self.call("poll", |g, s| g.call_poll(s)) {
             Ok(p) => {
-                self.polled = p;
-                if let Some(err) = self.polled.error.take() {
-                    let mut inner = self.inner.borrow_mut();
-                    if inner.pending_error.is_none() {
-                        inner.pending_error = Some(err);
-                    }
-                }
+                self.take_poll(p);
                 self.polled.redraw || delivered
             }
             // A trap during poll already queued an error and poisoned us; ask for a
@@ -654,6 +681,10 @@ impl Provider for WasmProvider {
 
     fn needs_refresh(&self) -> bool {
         self.polled.needs_refresh
+    }
+
+    fn supports_structural_edit(&self) -> bool {
+        self.descriptor.supports_structural_edit && self.polled.structural_edit_here
     }
 
     fn clear_needs_refresh(&mut self) {
@@ -704,18 +735,21 @@ impl Provider for WasmProvider {
     fn push_path(&mut self, segment: &str) {
         if let Ok(p) = self.call("push-path", |g, s| g.call_push_path(s, segment)) {
             self.current_path = p;
+            self.repoll();
         }
     }
 
     fn pop_path(&mut self) {
         if let Ok(p) = self.call("pop-path", |g, s| g.call_pop_path(s)) {
             self.current_path = p;
+            self.repoll();
         }
     }
 
     fn set_current_path(&mut self, path: &str) {
         if let Ok(p) = self.call("set-current-path", |g, s| g.call_set_current_path(s, path)) {
             self.current_path = p;
+            self.repoll();
         }
     }
 
@@ -934,9 +968,6 @@ impl Provider for WasmProvider {
         self.descriptor.has_editor_semantics
     }
 
-    fn supports_structural_edit(&self) -> bool {
-        self.descriptor.supports_structural_edit
-    }
 
     // ---- Persistent config -------------------------------------------------
     //
@@ -965,10 +996,13 @@ impl Provider for WasmProvider {
     }
 
     fn manual_dashboard_entry_allowed(&self) -> bool {
-        self.descriptor.manual_dashboard_entry_allowed
+        self.descriptor.manual_dashboard_entry_allowed && self.polled.dashboard_here
     }
 
     fn dashboard_image_path(&self) -> Option<&str> {
+        if !self.polled.dashboard_here {
+            return None;
+        }
         // Resolved and confined once at construction. The trait returns a borrow,
         // which a guest call cannot produce, and re-confining a path on every frame
         // would be wasted work for something that does not change.
