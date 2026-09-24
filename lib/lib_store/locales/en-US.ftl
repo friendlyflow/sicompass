@@ -39,3 +39,17 @@ store-by-hand-no-updates = Installed by hand, without an update address, so the 
 store-data-kept = Its data folder is kept at { $path }
 store-trash-data = move its data folder to the trash
 store-data-trashed = Its data folder was moved to the trash.
+
+# Store > tiers (moved from Settings).
+store-tiers = tiers
+store-tier-sponsor = Sponsor
+store-tier-cloud = Sicompass Cloud
+store-tier-commercial = Sicompass Commercial
+store-tier-support = Support
+store-tier-status-missing = not active
+store-tier-status-active = active for { $licensee }, renews in { $days } days
+store-tier-status-grace = expired, still on for { $days } days, renew to keep it
+store-tier-status-expired = expired { $days } days ago
+store-label-server-url = store server URL
+store-loading-page = Loading this page from the store server. Press Left and Right again in a moment.
+store-tier-page-failed = This page could not be loaded from the store server: { $err }

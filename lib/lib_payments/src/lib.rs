@@ -1,8 +1,9 @@
 //! The client half of the sicompass commercial offering.
 //!
-//! Everything a provider needs to take part in the sponsor / cloud / store /
-//! support tiers lives here, so the three crates that need it — the settings
-//! provider, notes and project management — share one implementation:
+//! Everything a provider needs to take part in the tiers (Sponsor, Sicompass
+//! Cloud, Sicompass Commercial, Support) lives here, so the three crates that
+//! need it — the Store, notes and project management — share one
+//! implementation:
 //!
 //! - [`cert`] — the license certificate: schema, offline Ed25519 verification,
 //!   load and save. Display only; it never gates anything in the client.
@@ -17,6 +18,7 @@
 //!   its first layer.
 //! - [`backup`] — read a provider's store directory, mirror it to the server,
 //!   and write it back.
+//! - [`usage`] — the storage and monthly traffic the server last reported.
 //!
 //! None of this is a feature gate. The app is free under GPLv3 and a user's
 //! notes and board stay fully readable and editable whether or not they have
@@ -31,6 +33,7 @@ pub mod config;
 pub mod entitlement;
 pub mod row;
 pub mod tier_input;
+pub mod usage;
 
 use sicompass_sdk::localize;
 use std::sync::OnceLock;

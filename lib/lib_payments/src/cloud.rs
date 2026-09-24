@@ -68,7 +68,7 @@ fn status() -> LicenseStatus {
 }
 
 fn is_active() -> bool {
-    matches!(status(), LicenseStatus::Active { .. })
+    entitlement::backs_up(&status())
 }
 
 /// One upload request.

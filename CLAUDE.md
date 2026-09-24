@@ -31,7 +31,7 @@ produce the installable Linux package. It reads the version from
   `display_name().replace(' ', "")` still equals it).
   `lib/lib_payments` is `sicompass-payments`, and is the one `lib/lib_*` that
   is not a provider: it registers no factory and hosts the commercial client
-  (checkout, license certificates, cloud backup) that `lib_settings`,
+  (checkout, license certificates, tiers, cloud backup) that `lib_store`,
   `lib_notes` and `lib_project_management` share.
   Crates under `src/` keep their directory name. `cargo test -p` takes the
   package name.

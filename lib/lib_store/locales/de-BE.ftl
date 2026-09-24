@@ -39,3 +39,17 @@ store-by-hand-no-updates = Von Hand installiert, ohne Update-Adresse, daher kann
 store-data-kept = Sein Datenordner bleibt in { $path } erhalten
 store-trash-data = seinen Datenordner in den Papierkorb verschieben
 store-data-trashed = Sein Datenordner wurde in den Papierkorb verschoben.
+
+# Store > Abos (aus den Einstellungen hierher verschoben).
+store-tiers = Abos
+store-tier-sponsor = Sponsor
+store-tier-cloud = Sicompass Cloud
+store-tier-commercial = Sicompass Commercial
+store-tier-support = Support
+store-tier-status-missing = nicht aktiv
+store-tier-status-active = aktiv für { $licensee }, verlängert sich in { $days } Tagen
+store-tier-status-grace = abgelaufen, noch { $days } Tage aktiv, verlängern Sie, um es zu behalten
+store-tier-status-expired = vor { $days } Tagen abgelaufen
+store-label-server-url = Store-Server-URL
+store-loading-page = Diese Seite wird vom Store-Server geladen. Drücken Sie gleich noch einmal Links und Rechts.
+store-tier-page-failed = Diese Seite konnte nicht vom Store-Server geladen werden: { $err }

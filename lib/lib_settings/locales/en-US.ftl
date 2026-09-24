@@ -19,7 +19,7 @@ settings-language-option-de-BE = Deutsch (Belgien)
 # settings.json) stays language-neutral; these entries only translate the
 # displayed FFON Obj key when navigating into a section.
 settings-section-sicompass = sicompass
-settings-section-available-programs = Available programs and Store (sponsoring, cloud, cloud + proprietary license, and support):
+settings-section-available-programs = Available programs:
 settings-section-file-browser = file browser
 settings-section-web-browser = web browser
 settings-section-email-client = email client
@@ -28,21 +28,9 @@ settings-section-terminal = terminal
 settings-section-text-editor = text editor
 settings-section-tutorial = tutorial
 
-# Sponsor / cloud / support tier link titles (built client-side; the tier
-# trees themselves are served, in English, by the server).
-settings-tier-sponsor = BECOME A SPONSOR
-settings-tier-cloud = ENABLE CLOUD AND STORE
-settings-tier-support = ENABLE SUPPORT
-
-# Offline license-status labels suffixed onto the cloud / support tier links.
-settings-license-label-cloud = Cloud and store
-settings-license-label-support = Support
-
 # Setting labels (checkbox / radio / text). Storage keys (config_key) stay
 # language-neutral; lib_settings reverse-maps the displayed label back to
 # the stored entry when the user toggles a setting.
-settings-label-store-url = Store server URL
-settings-label-license-redeem-token = License redeem token
 # Generic per-program version, shown under every non-sicompass section.
 settings-label-version = version
 # The sicompass section shows two versions and must keep them apart: the app

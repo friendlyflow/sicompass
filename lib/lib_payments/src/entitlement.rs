@@ -7,16 +7,34 @@
 
 use crate::{CLOUD_SLUG, cert};
 
-/// The saved cloud and store certificate's status, verified offline.
+/// The saved Cloud certificate's status, verified offline. A certificate for
+/// a tier that does not include Sicompass Cloud is reported as not for it.
 pub fn cloud_status() -> cert::LicenseStatus {
     match cert::load(CLOUD_SLUG) {
-        Some(c) => cert::verify(&c),
+        Some(c) => {
+            let pays = cert::tier_of_scope(&c.payload.scope)
+                .is_some_and(|held| cert::tier_includes(held, cert::tier::CLOUD));
+            if pays {
+                cert::verify(&c)
+            } else {
+                cert::LicenseStatus::Invalid(
+                    "this certificate is not for Sicompass Cloud".to_owned(),
+                )
+            }
+        }
         None => cert::LicenseStatus::None,
     }
 }
 
-/// Whether the cloud and store subscription is signed, unexpired and therefore
-/// good for cloud backup right now.
+/// Whether a certificate in `status` keeps cloud backup on: active, or
+/// expired less than [`cert::GRACE_DAYS`] ago (the server allows the same).
+pub fn backs_up(status: &cert::LicenseStatus) -> bool {
+    cert::with_grace(status).is_on()
+}
+
+/// Whether the Sicompass Cloud subscription (or Commercial, which includes it)
+/// is signed and unexpired, or in its grace period, and therefore good for
+/// cloud backup right now.
 ///
 /// Note what this deliberately cannot see: revocation. A cancelled
 /// subscription still holds a valid, unexpired certificate on disk, and only
@@ -24,7 +42,7 @@ pub fn cloud_status() -> cert::LicenseStatus {
 /// every request and is the authority; this check is here so the client does
 /// not upload a customer's notes into a 403 on every keystroke.
 pub fn is_active() -> bool {
-    matches!(cloud_status(), cert::LicenseStatus::Active { .. })
+    backs_up(&cloud_status())
 }
 
 #[cfg(test)]
@@ -61,5 +79,23 @@ mod tests {
                 "{status:?}"
             );
         }
+    }
+
+    #[test]
+    fn backup_runs_through_the_grace_period_and_stops_after() {
+        use super::backs_up;
+        let expired = |d| LicenseStatus::Expired {
+            licensee: "Acme Corp".to_owned(),
+            expired_days_ago: d,
+        };
+        assert!(backs_up(&LicenseStatus::Active {
+            licensee: "Acme Corp".to_owned(),
+            renews_in_days: 1
+        }));
+        assert!(backs_up(&expired(0)));
+        assert!(backs_up(&expired(13)));
+        assert!(!backs_up(&expired(14)));
+        assert!(!backs_up(&LicenseStatus::None));
+        assert!(!backs_up(&LicenseStatus::Invalid("bad".into())));
     }
 }

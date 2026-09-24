@@ -39,3 +39,17 @@ store-by-hand-no-updates = Met de hand geïnstalleerd, zonder updateadres, dus d
 store-data-kept = Zijn gegevensmap blijft bewaard in { $path }
 store-trash-data = zijn gegevensmap naar de prullenbak verplaatsen
 store-data-trashed = Zijn gegevensmap is naar de prullenbak verplaatst.
+
+# Store > tiers (verhuisd uit Instellingen).
+store-tiers = abonnementen
+store-tier-sponsor = Sponsor
+store-tier-cloud = Sicompass Cloud
+store-tier-commercial = Sicompass Commercial
+store-tier-support = Support
+store-tier-status-missing = niet actief
+store-tier-status-active = actief voor { $licensee }, verlengt over { $days } dagen
+store-tier-status-grace = verlopen, nog { $days } dagen aan, vernieuw om het te houden
+store-tier-status-expired = { $days } dagen geleden verlopen
+store-label-server-url = storeserver-URL
+store-loading-page = Deze pagina wordt van de storeserver geladen. Druk zo meteen opnieuw op Links en Rechts.
+store-tier-page-failed = Deze pagina kon niet van de storeserver geladen worden: { $err }

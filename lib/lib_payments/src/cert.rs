@@ -191,6 +191,162 @@ pub fn verify(cert: &Certificate) -> LicenseStatus {
     verify_against(cert, LICENSE_PUBLIC_KEY_B64)
 }
 
+// ---------------------------------------------------------------------------
+// Tiers
+// ---------------------------------------------------------------------------
+
+/// The tiers sold (docs/plugin-platform.md §1 and §10). The server's
+/// `cert::tier` holds the same ids.
+///
+/// A certificate names its tier in `scope`: a new `Payload` field would make
+/// every new certificate fail to verify on 0.1.x, which re-serializes its own
+/// `Payload` to check the signature and would drop a field it does not know.
+pub mod tier {
+    pub const CLOUD: &str = "friendlyflow/cloud";
+    pub const COMMERCIAL: &str = "friendlyflow/commercial";
+    pub const SPONSOR: &str = "friendlyflow/sponsor";
+    pub const SUPPORT: &str = "friendlyflow/support";
+}
+
+/// Days a service stays on after its certificate expires, with a notice, so a
+/// late renewal payment does not switch cloud backup off. The server allows
+/// the same (`GRACE_SECS` there).
+pub const GRACE_DAYS: i64 = 14;
+
+/// The tier a certificate's `scope` names. Pre-tier scopes map onto tiers:
+/// `commercial` (what "cloud and store" sold) is Sicompass Commercial, which
+/// includes Sicompass Cloud, so nobody who paid before loses anything.
+pub fn tier_of_scope(scope: &str) -> Option<&str> {
+    match scope {
+        "commercial" => Some(tier::COMMERCIAL),
+        "support" => Some(tier::SUPPORT),
+        "sponsor" => Some(tier::SPONSOR),
+        s if s.contains('/') => Some(s),
+        _ => None,
+    }
+}
+
+/// Whether holding tier `held` gives what tier `wanted` gives. Commercial is
+/// everything in Cloud plus the commercial licence.
+pub fn tier_includes(held: &str, wanted: &str) -> bool {
+    held == wanted || (held == tier::COMMERCIAL && wanted == tier::CLOUD)
+}
+
+/// The key a tier's certificates are signed with, for the tiers this client
+/// knows itself. A third party's tier is signed by the issuer the store list
+/// names for it, which the Store passes in.
+pub fn known_issuer(tier_id: &str) -> Option<&'static str> {
+    tier_id
+        .starts_with("friendlyflow/")
+        .then_some(LICENSE_PUBLIC_KEY_B64)
+}
+
+/// Where the user stands with one tier.
+#[derive(Debug, Clone, PartialEq)]
+pub enum TierStatus {
+    /// No valid certificate for it.
+    Missing,
+    Active {
+        licensee: String,
+        renews_in_days: i64,
+    },
+    /// Expired, but within [`GRACE_DAYS`]: the service is still on.
+    Grace { licensee: String, days_left: i64 },
+    Expired {
+        licensee: String,
+        expired_days_ago: i64,
+    },
+}
+
+impl TierStatus {
+    /// Whether the tier's service is on: active, or in its grace period.
+    pub fn is_on(&self) -> bool {
+        matches!(self, TierStatus::Active { .. } | TierStatus::Grace { .. })
+    }
+
+    fn rank(&self) -> u8 {
+        match self {
+            TierStatus::Active { .. } => 3,
+            TierStatus::Grace { .. } => 2,
+            TierStatus::Expired { .. } => 1,
+            TierStatus::Missing => 0,
+        }
+    }
+}
+
+/// A verified certificate's standing for the service it pays for: expiry
+/// becomes grace for [`GRACE_DAYS`]. `None` for a status with no licensee.
+pub fn with_grace(status: &LicenseStatus) -> TierStatus {
+    match status {
+        LicenseStatus::Active {
+            licensee,
+            renews_in_days,
+        } => TierStatus::Active {
+            licensee: licensee.clone(),
+            renews_in_days: *renews_in_days,
+        },
+        LicenseStatus::Expired {
+            licensee,
+            expired_days_ago,
+        } if *expired_days_ago < GRACE_DAYS => TierStatus::Grace {
+            licensee: licensee.clone(),
+            days_left: GRACE_DAYS - expired_days_ago,
+        },
+        LicenseStatus::Expired {
+            licensee,
+            expired_days_ago,
+        } => TierStatus::Expired {
+            licensee: licensee.clone(),
+            expired_days_ago: *expired_days_ago,
+        },
+        LicenseStatus::None | LicenseStatus::Invalid(_) => TierStatus::Missing,
+    }
+}
+
+/// The best standing any of `certs` gives for `tier_id`, counting only those
+/// whose own tier includes it and that verify against `issuer`.
+pub fn tier_status_among(certs: &[Certificate], tier_id: &str, issuer: &str) -> TierStatus {
+    certs
+        .iter()
+        .filter(|c| {
+            tier_of_scope(&c.payload.scope).is_some_and(|held| tier_includes(held, tier_id))
+        })
+        .map(|c| with_grace(&verify_against(c, issuer)))
+        .max_by_key(TierStatus::rank)
+        .unwrap_or(TierStatus::Missing)
+}
+
+/// The slugs certificates are saved under.
+pub const SLUGS: [&str; 2] = [crate::CLOUD_SLUG, crate::SUPPORT_SLUG];
+
+/// Every saved certificate, unverified: ours under [`SLUGS`], and a third
+/// party's as `providers/license-<anything>.json`.
+pub fn saved() -> Vec<Certificate> {
+    let mut out: Vec<Certificate> = SLUGS.iter().filter_map(|slug| load(slug)).collect();
+    if let Some(dir) = sicompass_sdk::platform::provider_config_dir()
+        && let Ok(entries) = std::fs::read_dir(dir)
+    {
+        let mut paths: Vec<PathBuf> = entries
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| {
+                p.file_name()
+                    .and_then(|n| n.to_str())
+                    .is_some_and(|n| n.starts_with("license-") && n.ends_with(".json"))
+            })
+            .collect();
+        paths.sort();
+        out.extend(paths.iter().filter_map(|p| load_from(p)));
+    }
+    out
+}
+
+/// Where the user stands with `tier_id`, from the saved certificates, checked
+/// against `issuer`.
+pub fn tier_status(tier_id: &str, issuer: &str) -> TierStatus {
+    tier_status_among(&saved(), tier_id, issuer)
+}
+
 /// On-disk location of the saved certificate for license `slug`
 /// (`"store-license"` for cloud and store, `"support-license"` for support).
 pub fn cert_path(slug: &str) -> Option<PathBuf> {
@@ -373,5 +529,97 @@ mod tests {
         let support = cert_path("support-license");
         assert!(cloud.is_some() && support.is_some());
         assert_ne!(cloud, support);
+    }
+
+    // ---- tiers ------------------------------------------------------------
+
+    fn with_scope(signing: &SigningKey, scope: &str, expires_at: i64) -> Certificate {
+        let mut p = sample_payload(expires_at);
+        p.scope = scope.to_owned();
+        sign(signing, p)
+    }
+
+    #[test]
+    fn old_scopes_map_onto_tiers_and_commercial_includes_cloud() {
+        assert_eq!(tier_of_scope("commercial"), Some(tier::COMMERCIAL));
+        assert_eq!(tier_of_scope("support"), Some(tier::SUPPORT));
+        assert_eq!(tier_of_scope("sponsor"), Some(tier::SPONSOR));
+        assert_eq!(tier_of_scope("acme/pro"), Some("acme/pro"));
+        assert_eq!(tier_of_scope("weird"), None);
+        assert!(tier_includes(tier::COMMERCIAL, tier::CLOUD));
+        assert!(!tier_includes(tier::CLOUD, tier::COMMERCIAL));
+        assert!(!tier_includes(tier::SUPPORT, tier::CLOUD));
+    }
+
+    /// A certificate from before tiers still verifies, and still pays for
+    /// cloud backup: its bytes are unchanged, since the tier is in `scope`.
+    #[test]
+    fn a_pre_tier_commercial_certificate_counts_as_cloud_and_commercial() {
+        let (signing, pubkey) = test_keypair();
+        let old = sign(&signing, sample_payload(now_unix() + 30 * 86_400));
+        assert_eq!(old.payload.scope, "commercial");
+        let json = serde_json::to_string(&old).unwrap();
+        let reread: Certificate = serde_json::from_str(&json).unwrap();
+        for t in [tier::CLOUD, tier::COMMERCIAL] {
+            assert!(matches!(
+                tier_status_among(std::slice::from_ref(&reread), t, &pubkey),
+                TierStatus::Active { .. }
+            ));
+        }
+        assert_eq!(
+            tier_status_among(&[reread], tier::SUPPORT, &pubkey),
+            TierStatus::Missing
+        );
+    }
+
+    #[test]
+    fn fourteen_days_of_grace_then_expired() {
+        let (signing, pubkey) = test_keypair();
+        let status = |days_ago: i64| {
+            tier_status_among(
+                &[with_scope(
+                    &signing,
+                    tier::CLOUD,
+                    now_unix() - days_ago * 86_400 - 60,
+                )],
+                tier::CLOUD,
+                &pubkey,
+            )
+        };
+        assert!(matches!(status(0), TierStatus::Grace { days_left: 14, .. }));
+        assert!(matches!(status(13), TierStatus::Grace { days_left: 1, .. }));
+        assert!(status(13).is_on());
+        assert!(matches!(status(14), TierStatus::Expired { .. }));
+        assert!(!status(14).is_on());
+    }
+
+    #[test]
+    fn the_best_certificate_for_a_tier_wins_and_others_do_not_count() {
+        let (signing, pubkey) = test_keypair();
+        let certs = [
+            with_scope(&signing, tier::CLOUD, now_unix() - 30 * 86_400),
+            with_scope(&signing, tier::SUPPORT, now_unix() + 90 * 86_400),
+            with_scope(&signing, tier::COMMERCIAL, now_unix() + 10 * 86_400),
+        ];
+        assert!(matches!(
+            tier_status_among(&certs, tier::CLOUD, &pubkey),
+            TierStatus::Active {
+                renews_in_days: 9..=10,
+                ..
+            }
+        ));
+        // Signed by someone else: not ours to believe.
+        let (other, _) = (SigningKey::from_bytes(&[9u8; 32]), ());
+        let forged = [with_scope(&other, tier::CLOUD, now_unix() + 86_400)];
+        assert_eq!(
+            tier_status_among(&forged, tier::CLOUD, &pubkey),
+            TierStatus::Missing
+        );
+    }
+
+    #[test]
+    fn our_tiers_are_ours_to_verify_and_a_third_partys_are_not() {
+        assert_eq!(known_issuer(tier::CLOUD), Some(LICENSE_PUBLIC_KEY_B64));
+        assert_eq!(known_issuer("acme/pro"), None);
     }
 }

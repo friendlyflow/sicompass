@@ -121,3 +121,98 @@ fn an_unknown_token_is_refused_with_a_readable_reason() {
     let err = backup::get_snapshot(&server(), "not-a-real-token", "notes").unwrap_err();
     assert!(err.contains("token"), "{err}");
 }
+
+// ---- Tiers, grace and usage (4.9) ---------------------------------------------
+//
+// These mint their own licenses through `POST /dev/issue`, so the server must
+// run with SICOMPASS_DEV_ISSUE=1 (as in the recipe above).
+
+/// Mint a license for checkout `item`, lasting `term_secs` (negative: already
+/// expired that long ago). Returns the redeem token.
+fn issue(item: &str, term_secs: i64) -> String {
+    let reply: serde_json::Value = reqwest::blocking::Client::new()
+        .post(format!("{}/dev/issue", server().trim_end_matches('/')))
+        .json(&serde_json::json!({
+            "licensee": "Acme Corp", "email": "acme@example.com",
+            "item": item, "term_secs": term_secs
+        }))
+        .send()
+        .expect("server unreachable")
+        .json()
+        .expect("dev issue reply");
+    reply["redeem_token"]
+        .as_str()
+        .expect("dev issue is off: run the server with SICOMPASS_DEV_ISSUE=1")
+        .to_owned()
+}
+
+fn certificate(token: &str) -> cert::Certificate {
+    let url = format!("{}/license/{token}", server().trim_end_matches('/'));
+    reqwest::blocking::get(&url)
+        .expect("server unreachable")
+        .json()
+        .expect("not a certificate")
+}
+
+/// What the server sells verifies here and lands in the right tier, and
+/// Commercial includes Cloud.
+#[test]
+#[ignore = "needs a running license server"]
+fn cloud_and_commercial_certificates_map_onto_their_tiers() {
+    let key = cert::LICENSE_PUBLIC_KEY_B64;
+    let cloud = certificate(&issue("cloud-monthly", 31 * 86_400));
+    assert_eq!(cloud.payload.scope, cert::tier::CLOUD);
+    let one = std::slice::from_ref(&cloud);
+    assert!(cert::tier_status_among(one, cert::tier::CLOUD, key).is_on());
+    assert_eq!(
+        cert::tier_status_among(one, cert::tier::COMMERCIAL, key),
+        cert::TierStatus::Missing
+    );
+
+    let commercial = certificate(&issue("commercial-yearly", 365 * 86_400));
+    let one = std::slice::from_ref(&commercial);
+    assert!(cert::tier_status_among(one, cert::tier::COMMERCIAL, key).is_on());
+    assert!(cert::tier_status_among(one, cert::tier::CLOUD, key).is_on());
+}
+
+/// Three days past expiry the backup still works on both sides; fifteen days
+/// past, both sides stop it.
+#[test]
+#[ignore = "needs a running license server"]
+fn the_grace_period_holds_on_the_server_and_the_client_alike() {
+    let key = cert::LICENSE_PUBLIC_KEY_B64;
+
+    let late = issue("cloud-monthly", -3 * 86_400);
+    let status = cert::tier_status_among(&[certificate(&late)], cert::tier::CLOUD, key);
+    assert!(matches!(status, cert::TierStatus::Grace { .. }), "{status:?}");
+    let snapshot = backup::Snapshot::new("notes", files());
+    backup::put_snapshot(&server(), &late, &snapshot).expect("grace must still back up");
+
+    let gone = issue("cloud-monthly", -15 * 86_400);
+    let status = cert::tier_status_among(&[certificate(&gone)], cert::tier::CLOUD, key);
+    assert!(matches!(status, cert::TierStatus::Expired { .. }), "{status:?}");
+    let err = backup::put_snapshot(&server(), &gone, &snapshot).unwrap_err();
+    assert!(err.contains("expired"), "{err}");
+}
+
+/// Every backup reply reports usage, and the client keeps it for the Store.
+#[test]
+#[ignore = "needs a running license server"]
+fn a_backup_reply_reports_usage() {
+    let token = issue("cloud-yearly", 365 * 86_400);
+    let snapshot = backup::Snapshot::new("notes", files());
+    backup::put_snapshot(&server(), &token, &snapshot).expect("upload failed");
+    let usage = sicompass_payments::usage::last().expect("usage reported");
+    assert!(usage.stored > 0 && usage.transferred > 0, "{usage:?}");
+    assert!(usage.storage_cap > usage.stored && usage.transfer_cap > 0, "{usage:?}");
+}
+
+/// A support license does not buy cloud storage.
+#[test]
+#[ignore = "needs a running license server"]
+fn a_support_license_is_refused_for_backup() {
+    let token = issue("support-annual", 365 * 86_400);
+    let err = backup::put_snapshot(&server(), &token, &backup::Snapshot::new("notes", files()))
+        .unwrap_err();
+    assert!(err.contains("Sicompass Cloud"), "{err}");
+}

@@ -265,6 +265,7 @@ pub fn put_snapshot(store_url: &str, token: &str, snapshot: &Snapshot) -> Result
     }
     let value: serde_json::Value = serde_json::from_str(&body)
         .map_err(|e| format!("Server returned an invalid reply: {e}"))?;
+    crate::usage::record_from(&value);
     Ok(value
         .get("stored")
         .and_then(serde_json::Value::as_bool)
@@ -305,6 +306,7 @@ pub fn get_snapshot(
 
     let value: serde_json::Value = serde_json::from_str(&body)
         .map_err(|e| format!("Server returned an invalid backup: {e}"))?;
+    crate::usage::record_from(&value);
     let files: BTreeMap<String, String> = value
         .get("files")
         .cloned()

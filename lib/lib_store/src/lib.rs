@@ -25,6 +25,7 @@
 pub mod http;
 pub mod install;
 pub mod source;
+pub mod tiers;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
@@ -142,6 +143,8 @@ pub struct StoreProvider {
     apply_fn: Option<ApplyFn>,
     announcement: Option<String>,
     refresh: bool,
+    /// Store > tiers.
+    tiers: tiers::Tiers,
 }
 
 impl Default for StoreProvider {
@@ -173,6 +176,7 @@ impl StoreProvider {
             apply_fn: None,
             announcement: None,
             refresh: false,
+            tiers: tiers::Tiers::new(http::http_fetch()),
         }
     }
 
@@ -191,7 +195,32 @@ impl StoreProvider {
         self.releases_url = releases_url.to_owned();
         self.trusted = trusted.iter().map(|k| (*k).to_owned()).collect();
         self.plugins_dir = Some(plugins_dir);
+        self.tiers = tiers::Tiers::new(self.fetch.clone());
         self
+    }
+
+    /// Keep the Store's settings (server URL, redeem tokens) in another
+    /// `settings.json` (tests).
+    pub fn with_settings_path(mut self, path: PathBuf) -> Self {
+        self.tiers.set_settings_path(path);
+        self
+    }
+
+    /// The tiers section, for tests.
+    pub fn tiers_mut(&mut self) -> &mut tiers::Tiers {
+        &mut self.tiers
+    }
+
+    /// Whether `segment` (the first one of a path) is the tiers section.
+    fn is_tiers(segment: &str) -> bool {
+        segment == localize::t("store-tiers")
+    }
+
+    /// Tell the app about Store settings the tiers section changed.
+    fn announce_tier_settings(&mut self) {
+        for (k, v) in self.tiers.take_changed() {
+            self.fire(&k, &v);
+        }
     }
 
     /// Point the data-folder check somewhere else (tests).
@@ -346,6 +375,9 @@ impl StoreProvider {
     fn finish(&mut self, done: Done) {
         match done {
             Done::Loaded { store, offers } => {
+                if let Ok(loaded) = &store {
+                    remember_issuers(&loaded.store);
+                }
                 self.offers = offers;
                 self.loaded = Some(store);
             }
@@ -398,7 +430,10 @@ impl StoreProvider {
     }
 
     fn root(&self) -> Vec<FfonElement> {
-        vec![FfonElement::new_obj(localize::t("store-programs"))]
+        vec![
+            FfonElement::new_obj(localize::t("store-programs")),
+            FfonElement::new_obj(localize::t("store-tiers")),
+        ]
     }
 
     fn programs(&mut self) -> Vec<FfonElement> {
@@ -647,6 +682,7 @@ impl Provider for StoreProvider {
         let segments: Vec<String> = self.segments().into_iter().map(str::to_owned).collect();
         match segments.as_slice() {
             [] => self.root(),
+            [first, rest @ ..] if Self::is_tiers(first) => self.tiers.fetch_at(rest),
             [_programs] => self.programs(),
             [_programs, entry] => {
                 // The entry's key carries its state after the name, which changes
@@ -688,6 +724,10 @@ impl Provider for StoreProvider {
     }
 
     fn on_button_press(&mut self, function_name: &str) {
+        if self.tiers.on_button_press(function_name).is_some() {
+            self.refresh = true;
+            return;
+        }
         match function_name.split_once(':') {
             Some(("install", name)) => self.start_install(name, false),
             Some(("update", name)) => self.start_install(name, true),
@@ -703,6 +743,10 @@ impl Provider for StoreProvider {
     }
 
     fn tick(&mut self) -> bool {
+        if self.tiers.tick() {
+            self.refresh = true;
+            return true;
+        }
         let Some((_, rx)) = &self.job else {
             return false;
         };
@@ -740,12 +784,81 @@ impl Provider for StoreProvider {
     fn take_announcement(&mut self) -> Option<String> {
         self.announcement.take()
     }
+
+    fn take_error(&mut self) -> Option<String> {
+        self.tiers.take_error()
+    }
+
+    fn on_radio_change(&mut self, group: &str, value: &str) {
+        self.tiers.on_radio_change(group, value);
+    }
+
+    /// Only the tiers section has inputs: the server URL and the ones on the
+    /// tier pages. The app pushes the input's label as the last segment.
+    fn commit_edit(&mut self, _old: &str, new: &str) -> bool {
+        let segments: Vec<String> = self.segments().into_iter().map(str::to_owned).collect();
+        let (Some(first), Some(label)) = (segments.first(), segments.last()) else {
+            return false;
+        };
+        if !Self::is_tiers(first) || segments.len() < 2 {
+            return false;
+        }
+        let handled = self.tiers.commit(label, new);
+        self.announce_tier_settings();
+        handled
+    }
+
+    fn on_setting_change(&mut self, key: &str, value: &str) {
+        self.tiers.on_setting_change(key, value);
+    }
+}
+
+/// Issuer keys of the tiers in the store list, for third-party tiers: the
+/// compiled-in list at startup, then the live one once it is loaded.
+static ISSUERS: std::sync::RwLock<BTreeMap<String, String>> =
+    std::sync::RwLock::new(BTreeMap::new());
+
+fn remember_issuers(store: &sicompass_sdk::store::Store) {
+    if let Ok(mut issuers) = ISSUERS.write() {
+        for (id, tier) in &store.tiers {
+            issuers.insert(id.clone(), tier.issuer.clone());
+        }
+    }
+}
+
+/// What a plugin's `license.status(tier)` hears: the user's certificates for
+/// `tier`, verified against its issuer. Ours are always checked against the
+/// built-in key; a store list cannot name another issuer for them.
+pub fn license_status(tier_id: &str) -> sicompass_sdk::license::LicenseStatus {
+    use sicompass_payments::cert;
+    use sicompass_sdk::license::LicenseStatus;
+    let issuer = cert::known_issuer(tier_id)
+        .map(str::to_owned)
+        .or_else(|| ISSUERS.read().ok().and_then(|i| i.get(tier_id).cloned()));
+    let Some(issuer) = issuer else {
+        return LicenseStatus::Missing;
+    };
+    match cert::tier_status(tier_id, &issuer) {
+        cert::TierStatus::Active { .. } => LicenseStatus::Active,
+        cert::TierStatus::Grace { .. } => LicenseStatus::Grace,
+        cert::TierStatus::Expired { .. } => LicenseStatus::Expired,
+        cert::TierStatus::Missing => LicenseStatus::Missing,
+    }
 }
 
 /// Register the Store with the SDK: always present, never in "Available
 /// programs:".
 pub fn register() {
     register_translations();
+    let keys: Vec<&str> = source::TRUSTED_KEYS.to_vec();
+    if let Ok(store) = sicompass_sdk::store::verify_store(
+        source::COMPILED_STORE,
+        source::COMPILED_STORE_SIGNATURE,
+        &keys,
+    ) {
+        remember_issuers(&store);
+    }
+    sicompass_sdk::license::register_checker(license_status);
     sicompass_sdk::register_provider_factory("store", || Box::new(StoreProvider::new()));
     sicompass_sdk::register_builtin_manifest(
         sicompass_sdk::BuiltinManifest::new("store", "store").always_enabled(),
@@ -754,3 +867,5 @@ pub fn register() {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_tiers;

@@ -4690,7 +4690,7 @@ dependencies = [
 [[package]]
 name = "sicompass-sdk"
 version = "0.8.0"
-source = "git+https://github.com/friendlyflow/sicompass-plugin-sdk?rev=e89640b0424776931b6ddee79bfb0dc6abfdae54#e89640b0424776931b6ddee79bfb0dc6abfdae54"
+source = "git+https://github.com/friendlyflow/sicompass-plugin-sdk?rev=ca78c2ffa1b53d617bbfbca5d8b16fb9f9f8b054#ca78c2ffa1b53d617bbfbca5d8b16fb9f9f8b054"
 dependencies = [
  "async-trait",
  "base64 0.23.1",
@@ -4719,14 +4719,10 @@ name = "sicompass-settings"
 version = "0.1.21"
 dependencies = [
  "async-trait",
- "reqwest",
  "serde",
  "serde_json",
- "sicompass-payments",
  "sicompass-sdk",
  "tempfile",
- "tokio",
- "wiremock",
 ]
 
 [[package]]
@@ -4743,6 +4739,7 @@ dependencies = [
  "reqwest",
  "semver",
  "serde_json",
+ "sicompass-payments",
  "sicompass-sdk",
  "tempfile",
  "tokio",

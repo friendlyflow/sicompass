@@ -16,7 +16,7 @@ settings-language-option-de-BE = Deutsch (Belgien)
 # Section display names. "sicompass" is the product name and stays in all
 # locales.
 settings-section-sicompass = sicompass
-settings-section-available-programs = Verfügbare Programme und Geschäft (Sponsoring, Cloud, Cloud + proprietäre Lizenz und Support):
+settings-section-available-programs = Verfügbare Programme:
 settings-section-file-browser = Dateimanager
 settings-section-web-browser = Webbrowser
 settings-section-email-client = E-Mail-Client
@@ -25,19 +25,7 @@ settings-section-terminal = Terminal
 settings-section-text-editor = Texteditor
 settings-section-tutorial = Anleitung
 
-# Titel der Sponsor- / Cloud- / Support-Links (clientseitig erstellt; die
-# Inhalte der Stufen liefert der Server, auf Englisch).
-settings-tier-sponsor = SPONSOR WERDEN
-settings-tier-cloud = CLOUD UND GESCHÄFT AKTIVIEREN
-settings-tier-support = SUPPORT AKTIVIEREN
-
-# Beschriftungen des Offline-Lizenzstatus hinter den Cloud- und Support-Links.
-settings-license-label-cloud = Cloud und Geschäft
-settings-license-label-support = Support
-
 # Setting labels
-settings-label-store-url = URL des Geschäftsservers
-settings-label-license-redeem-token = Lizenz-Einlösetoken
 settings-label-version = Version
 settings-label-version-app = Version (App)
 settings-label-version-sdk = Version (SDK)

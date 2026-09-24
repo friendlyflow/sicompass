@@ -24,6 +24,7 @@
 
 pub mod desktop;
 pub mod host_fetch;
+pub mod license;
 pub mod limits;
 pub mod process;
 pub mod provider;
@@ -526,6 +527,13 @@ pub fn linker_for(state: &HostState) -> Result<Linker<HostState>, String> {
     )
     .map_err(|e| format!("link sicompass:plugin/desktop: {e}"))?;
 
+    // Always linked: answers whether the user holds a tier, nothing more.
+    wit::license::add_to_linker::<_, wasmtime::component::HasSelf<_>>(
+        &mut linker,
+        |s: &mut HostState| s,
+    )
+    .map_err(|e| format!("link sicompass:plugin/license: {e}"))?;
+
     // Linked only with a `sockets` grant: name resolution for the approved
     // `host:port` pairs (wasi:sockets/ip-name-lookup is never used).
     if !state.sockets_allowed.is_empty() {
@@ -815,6 +823,9 @@ pub use sicompass_sdk::plugin_abi::DESKTOP_FUNCTIONS as DESKTOP_IMPORTS;
 
 /// `sicompass:plugin/tasks`: always linked.
 pub use sicompass_sdk::plugin_abi::TASK_FUNCTIONS as TASK_IMPORTS;
+
+/// `sicompass:plugin/license`: always linked.
+pub use sicompass_sdk::plugin_abi::LICENSE_FUNCTIONS as LICENSE_IMPORTS;
 
 /// `sicompass:plugin/process`: linked only for listed programs.
 pub use sicompass_sdk::plugin_abi::PROCESS_FUNCTIONS as PROCESS_IMPORTS;

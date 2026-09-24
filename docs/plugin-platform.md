@@ -46,13 +46,13 @@ Decided with the maintainer on 2026-09-24.
 - **Installing and updating free plugins through the Store is free.** The Store
   must never be the reason a new user, in particular a screen-reader user, cannot
   get the file browser, the text editor or the web browser.
-- **Tiers, per user, yearly:**
+- **Tiers, per user:**
 
   | Tier | Contents | Billing |
   |---|---|---|
   | Sicompass Cloud | cloud backup, and paid extras bought through the Store | monthly or yearly |
   | Sicompass Commercial | everything in Sicompass Cloud, plus the commercial licence: the right to adapt the code and share private adaptations within a closed circle without publishing them under the GPL | monthly or yearly |
-  | Sponsor | a contribution, no service (kept from today) | pay what you want, small minimum |
+  | Sponsor | a contribution, no service (kept from today) | the monthly sponsor tiers, or a donation of your choice above a minimum |
   | Support | paid help (kept from today) | yearly |
 
   Prices are set on the server. A discount programme for users with a disability,
@@ -328,14 +328,18 @@ supported on wasip2. The `socket-plugin` example is the fixture.
 
 ```wit
 interface license {
-  enum status { active, grace, expired, missing }
-  status: func(tier: string) -> status;
+  enum tier-status { active, grace, expired, missing }
+  status: func(tier: string) -> tier-status;
 }
 ```
 
 The host verifies the user's certificate for `tier` against the issuer key the
 store lists for that tier. A plugin never handles keys or certificates.
 First-party plugins do not call it (see §1). It exists for third parties.
+(The enum is `tier-status` because WIT does not allow a type and a function
+of one name in an interface.) Built in 4.9: the Store registers the check
+(`sicompass_sdk::license::register_checker`), and a third party's certificate
+is read from `providers/license-<anything>.json`.
 
 ## 6. Translations shipped by a plugin
 
@@ -505,26 +509,23 @@ Tiers and licences come in 4.9.
 
 ## 10. Tiers and certificates
 
-The certificate payload gets a `tiers` list. `scope` stays for old certificates:
+A certificate names its tier in `scope`: `friendlyflow/cloud`,
+`friendlyflow/commercial`, `friendlyflow/sponsor`, `friendlyflow/support`, or a
+third party's `acme/pro`. The `Payload` is unchanged.
 
-```rust
-pub struct Payload {
-    pub product: String,     // "sicompass"
-    pub license_id: String,
-    pub licensee: String,
-    pub scope: String,       // kept; "commercial" on pre-0.2 certificates
-    pub issued_at: i64,
-    pub expires_at: i64,
-    pub tiers: Vec<String>,  // new: ["friendlyflow/cloud"], ["friendlyflow/commercial", …]
-}
-```
+(This first said "the payload gets a `tiers` list". It cannot: a client verifies
+by deserializing into its own `Payload` and serializing it again, and a client
+that does not know a field drops it, so every certificate issued with a new
+field would fail on every 0.1.x install. One purchase is one tier, so `scope`
+is enough.)
 
 - A certificate is verified against the issuer key of the tier it claims, which
   the store lists. For `friendlyflow/*` that is today's licence key in
   `cert.rs`. A third party's key is only ever trusted for that party's own tiers.
-- **Old certificates keep working:** `scope: "commercial"` maps to
-  `friendlyflow/commercial`, and a cloud entitlement maps to `friendlyflow/cloud`.
-  Sponsor and support stay valid until they expire.
+- **Old certificates keep working:** `scope: "commercial"` (what "cloud and
+  store" sold) maps to `friendlyflow/commercial`, which includes
+  `friendlyflow/cloud`, so nobody who paid loses anything. `support` and
+  `sponsor` map to theirs and stay valid until they expire.
 - **Expiry:** 14 days of `grace` with a visible notice, then `expired`. For our
   tiers that stops the service, for example uploads, never the data. Nothing
   phones home at startup.
@@ -535,10 +536,21 @@ pub struct Payload {
   each backup response, and the Store shows it ("2.1 GB of 10 GB, 340 MB of
   5 GB transferred this month"). Going over a cap pauses uploads with a notice,
   and never touches what is already stored or on disk.
-- **`../server` changes** (private repo): `tiers` in its byte-identical
-  `Payload`, the two new products at checkout, and the mapping of existing
-  licences. This has to land before the client side ships, because the payload
-  must match on both sides.
+- **`../server` changes** (private repo): the tier in `scope`, the Cloud and
+  Commercial products (`cloud-monthly`, `cloud-yearly`, `commercial-monthly`,
+  `commercial-yearly`, with a `/commercial` page), the mapping of existing
+  licences, the 14-day grace on the backup routes, and the two caps (defaults
+  10 GB stored and 5 GB a month, set in `.env`). A restore is never refused for
+  traffic. The minimum donation is checked at checkout.
+
+**Built in 4.9:** the above on both sides; Store > tiers, which replaces the
+tier links in Settings and serves the server's tier pages from the Store's own
+tree (a `<link>` graft has no path, so the refresh after redeeming a token put
+the tiers list where the page was); the usage lines under the tiers; the
+`license` import. `lib_settings` no longer depends on `sicompass-payments`.
+Checked against a local server by `lib/lib_payments/tests/live_server.rs`
+(run by hand, see its header): certificates per tier, Commercial including
+Cloud, grace on both sides, usage, and a support licence refused for backup.
 
 ## 11. Host changes in sicompass
 

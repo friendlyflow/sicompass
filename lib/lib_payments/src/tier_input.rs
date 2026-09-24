@@ -9,7 +9,7 @@
 //!
 //! So a tier tree entered from Settings is Settings' to drive, and the very
 //! same tree entered from notes is notes' to drive. That is why this lives in
-//! a shared crate instead of in the settings provider: the alternative is
+//! a shared crate instead of in one provider: the alternative is
 //! three copies of the checkout, one per provider that shows a tier link.
 //!
 //! A provider forwards its three callbacks here and stashes the returned error,
@@ -25,8 +25,7 @@ const CLOUD_PERIOD_GROUP: &str = "monthly or yearly";
 /// Transient state for a tier tree the user is filling in.
 ///
 /// Nothing here is persisted: the selections only have to live long enough to
-/// build one checkout request. The settings provider keeps its equivalent in
-/// `server_form_state` for the same reason.
+/// build one checkout request. The Store, notes and the board each hold one.
 #[derive(Debug, Default)]
 pub struct TierSession {
     /// Base URL of the license server. Kept in step through
@@ -83,7 +82,7 @@ impl TierSession {
 
     /// An `<input>` inside the tier tree was committed.
     ///
-    /// `label` is the last path segment, which is how the settings provider
+    /// `label` is the last path segment, which is how the Store
     /// matches these too, so an arbitrarily deep server-served tree works.
     /// Returns `None` when the input is not one of ours.
     pub fn commit_input(&mut self, label: &str, value: &str) -> Option<Result<(), String>> {
@@ -127,19 +126,16 @@ impl TierSession {
     /// whatever the user picked in the tree.
     fn resolve_item(&self, item: &str) -> (String, String, String) {
         match item {
-            "cloud" => {
+            // Sicompass Cloud and Commercial each come monthly or yearly.
+            "cloud" | "commercial" => {
                 // Yearly is the server's default checked option, so monthly
                 // only when the user actively picked it.
                 let monthly = self
                     .form_state
                     .get(CLOUD_PERIOD_GROUP)
                     .is_some_and(|v| v.contains("month"));
-                let id = if monthly {
-                    "cloud-monthly"
-                } else {
-                    "cloud-yearly"
-                };
-                (id.to_owned(), String::new(), String::new())
+                let period = if monthly { "monthly" } else { "yearly" };
+                (format!("{item}-{period}"), String::new(), String::new())
             }
             "sponsor-donation" => (
                 "sponsor-donation".to_owned(),
@@ -154,7 +150,7 @@ impl TierSession {
     }
 }
 
-/// The status line the settings provider suffixes onto a tier link.
+/// A status line for a tier link, from the certificate saved under `slug`.
 pub fn status_line(slug: &str, label: &str) -> String {
     match cert::load(slug) {
         Some(c) => cert::verify(&c).summary_line(label),
@@ -191,6 +187,14 @@ mod tests {
         s.on_radio_change(CLOUD_PERIOD_GROUP, "per month");
         s.on_radio_change(CLOUD_PERIOD_GROUP, "per year");
         assert_eq!(s.resolve_item("cloud").0, "cloud-yearly");
+    }
+
+    #[test]
+    fn commercial_comes_monthly_or_yearly_like_cloud() {
+        let mut s = session("https://srv.example");
+        assert_eq!(s.resolve_item("commercial").0, "commercial-yearly");
+        s.on_radio_change(CLOUD_PERIOD_GROUP, "per month");
+        assert_eq!(s.resolve_item("commercial").0, "commercial-monthly");
     }
 
     #[test]

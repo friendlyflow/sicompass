@@ -646,7 +646,10 @@ fn the_root_does_not_touch_the_network() {
     let (server, keys) = (Server::start(), keys());
     let mut h = harness(&server, &keys);
     let root = lines(h.store.fetch());
-    assert_eq!(root, vec![localize::t("store-programs")]);
+    assert_eq!(
+        root,
+        vec![localize::t("store-programs"), localize::t("store-tiers")]
+    );
     assert!(!h.store.is_working());
     let received = server.rt.block_on(server.server.received_requests());
     assert_eq!(received.map(|r| r.len()), Some(0));

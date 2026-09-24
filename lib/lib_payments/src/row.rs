@@ -42,6 +42,13 @@ pub fn label(status: &LicenseStatus) -> String {
         }
         LicenseStatus::Expired {
             expired_days_ago, ..
+        } if *expired_days_ago < crate::cert::GRACE_DAYS => {
+            let mut args = FluentArgs::new();
+            args.set("days", crate::cert::GRACE_DAYS - expired_days_ago);
+            localize::t_args("payments-cloud-grace", &args)
+        }
+        LicenseStatus::Expired {
+            expired_days_ago, ..
         } => {
             let mut args = FluentArgs::new();
             args.set("days", *expired_days_ago);
@@ -141,6 +148,10 @@ mod tests {
                 licensee: "Acme Corp".to_owned(),
                 expired_days_ago: 1,
             },
+            LicenseStatus::Expired {
+                licensee: "Acme Corp".to_owned(),
+                expired_days_ago: 30,
+            },
             LicenseStatus::Invalid("bad".to_owned()),
         ] {
             let text = label(&status);
@@ -192,6 +203,7 @@ mod tests {
             "payments-cloud-needs-payment",
             "payments-cloud-active",
             "payments-cloud-expired",
+            "payments-cloud-grace",
             "payments-cloud-invalid",
             "payments-cloud-needs-subscription",
             "payments-backup-failed",
@@ -206,5 +218,21 @@ mod tests {
                 "{key} is missing from the bundles"
             );
         }
+    }
+
+    #[test]
+    fn in_the_grace_period_the_row_says_how_long_is_left() {
+        crate::register_translations();
+        let grace = label(&LicenseStatus::Expired {
+            licensee: "Acme Corp".to_owned(),
+            expired_days_ago: 3,
+        });
+        assert!(grace.contains("11"), "{grace}");
+        let expired = label(&LicenseStatus::Expired {
+            licensee: "Acme Corp".to_owned(),
+            expired_days_ago: 20,
+        });
+        assert!(expired.contains("20"), "{expired}");
+        assert_ne!(grace, expired);
     }
 }

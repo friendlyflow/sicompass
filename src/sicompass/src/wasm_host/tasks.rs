@@ -8,10 +8,12 @@
 //! just before the next `poll` ([`TaskManager::drain`]).
 //!
 //! A task has no deadline and unlimited fuel, but a cancel flag checked at every
-//! epoch tick (100 ms): [`TaskManager::cancel`], or closing the provider
-//! ([`TaskManager::close`]), stops it the next time it runs WebAssembly. A task
-//! blocked inside a host call (a network request, a sleep) stops when that call
-//! returns. `tasks.cancelled()` lets a loop stop cleanly instead. At most
+//! epoch tick (100 ms): after [`TaskManager::cancel`], or closing the provider
+//! ([`TaskManager::close`]), a task that has not stopped by itself within
+//! [`CANCEL_GRACE_TICKS`] ticks is stopped the next time it runs WebAssembly. A
+//! task blocked inside a host call (a network request, a sleep) stops when that
+//! call returns. `tasks.cancelled()` lets a loop stop cleanly, and the grace is
+//! what makes sure it gets the chance to, even on a loaded machine. At most
 //! [`MAX_CONCURRENT_TASKS`] run per plugin; further ones wait in order.
 
 use std::collections::{HashMap, VecDeque};
@@ -26,6 +28,9 @@ use wasmtime::{Store, UpdateDeadline};
 use super::sicompass::plugin as wit;
 use super::wit_types::TaskEvent;
 use super::{Grants, HostState, Plugin};
+
+/// Epoch ticks (100 ms each) a cancelled task gets to stop by itself.
+pub const CANCEL_GRACE_TICKS: u32 = 5;
 
 /// Which side of the task boundary a `HostState` is on.
 #[derive(Default)]
@@ -206,8 +211,13 @@ fn run(
         .set_fuel(u64::MAX)
         .map_err(|e| format!("could not grant fuel: {e}"))?;
     let flag = cancel.clone();
+    let mut ticks_since_cancel = 0u32;
     store.epoch_deadline_callback(move |_| {
-        if flag.load(Ordering::Acquire) {
+        if !flag.load(Ordering::Acquire) {
+            return Ok(UpdateDeadline::Continue(1));
+        }
+        ticks_since_cancel += 1;
+        if ticks_since_cancel > CANCEL_GRACE_TICKS {
             Err(wasmtime::Error::msg("cancelled"))
         } else {
             Ok(UpdateDeadline::Continue(1))

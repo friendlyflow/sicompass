@@ -393,6 +393,27 @@ interface net {
 /// folder, or a `filesystem` folder the user approved), re-checked by the host
 /// after resolving symlinks, so it reaches nothing the plugin could not already
 /// read and write. A plugin with no granted folder can only open URLs.
+/// Whether the user holds a paid tier, for a plugin that gates features of its
+/// own (a third party's choice, disclosed in the store). The host verifies the
+/// user's certificate for `tier` against the issuer key the signed store list
+/// names for that tier; the plugin never sees a key or a certificate.
+/// First-party plugins do not call it: their paid part is a service on a
+/// server, never a feature. Never gate the user's data behind it.
+interface license {
+  enum tier-status {
+    /// A valid certificate, not expired.
+    active,
+    /// Expired less than 14 days ago: keep the feature on, and say so.
+    grace,
+    expired,
+    /// No valid certificate for this tier.
+    missing,
+  }
+
+  /// `tier` is a tier id from the store list, e.g. `acme/pro`.
+  status: func(tier: string) -> tier-status;
+}
+
 interface desktop {
   /// Open a URL in the user's browser or mail client. `http`, `https` and
   /// `mailto` only.
@@ -695,6 +716,7 @@ world plugin {
   import host;
   import net;
   import desktop;
+  import license;
   import tasks;
   import process;
   import sockets;

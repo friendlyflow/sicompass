@@ -8,11 +8,6 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
-// The commercial client (checkout, license certificates, the tier-tree
-// handlers) lives in its own crate: the tier trees are grafted into whichever
-// provider the user followed the link from, so notes and project management
-// need the same code. See `lib/lib_payments`.
-use sicompass_payments as payments;
 
 /// Version of the `sicompass-sdk` crate this build links against, resolved from
 /// the workspace `Cargo.lock` by [`build.rs`](../build.rs).
@@ -97,17 +92,6 @@ pub struct SettingsProvider {
     /// here. The `id` field is left as the empty `IdArray` — the app
     /// patches in the current_id when it drains.
     pending_timeline_entries: Vec<TimelineEntry>,
-    /// Sponsor / cloud / support state. The "Store" bucket in settings.json
-    /// keeps its legacy key names (`storeUrl`, `licenseRedeemToken`).
-    /// `store_url` is the server base URL the three tier `<link>` Objs point at.
-    store_url: String,
-    license_redeem_token: String,
-    support_redeem_token: String,
-    /// Transient form state captured from server-served tier content: radio
-    /// selections (keyed by radio group key) and the donation amount (key
-    /// `"amount"`). Read by `on_button_press` to build the checkout request.
-    server_form_state: HashMap<String, String>,
-    store_error: Option<String>,
     /// Version string per section (keyed by display name). Rendered as a
     /// passive child of the section. Populated by `set_section_version`.
     section_versions: HashMap<String, String>,
@@ -131,11 +115,6 @@ impl SettingsProvider {
             apply_fn: Some(Box::new(apply_fn)),
             config_path_override: None,
             pending_timeline_entries: Vec::new(),
-            store_url: payments::DEFAULT_STORE_URL.to_owned(),
-            license_redeem_token: String::new(),
-            support_redeem_token: String::new(),
-            server_form_state: HashMap::new(),
-            store_error: None,
             section_versions: HashMap::new(),
             first_run: false,
         }
@@ -155,11 +134,6 @@ impl SettingsProvider {
             apply_fn: None,
             config_path_override: None,
             pending_timeline_entries: Vec::new(),
-            store_url: payments::DEFAULT_STORE_URL.to_owned(),
-            license_redeem_token: String::new(),
-            support_redeem_token: String::new(),
-            server_form_state: HashMap::new(),
-            store_error: None,
             section_versions: HashMap::new(),
             first_run: false,
         }
@@ -411,21 +385,6 @@ impl SettingsProvider {
                 }
             }
         }
-
-        // Store sub-node fields. The "Store" bucket in settings.json is shared
-        // with old installs where the BuiltinManifest injection path wrote it,
-        // so the key names are unchanged.
-        if let Some(Value::Object(sec)) = root.get("Store") {
-            if let Some(Value::String(v)) = sec.get("storeUrl") {
-                self.store_url = v.clone();
-            }
-            if let Some(Value::String(v)) = sec.get("licenseRedeemToken") {
-                self.license_redeem_token = v.clone();
-            }
-            if let Some(Value::String(v)) = sec.get("supportRedeemToken") {
-                self.support_redeem_token = v.clone();
-            }
-        }
     }
 
     // On first run (settings.json absent), write a seed file containing only the
@@ -586,155 +545,6 @@ impl SettingsProvider {
         if label == key { name.to_owned() } else { label }
     }
 
-    /// Build the three server-driven tier `<link>` Objs pinned to the top of
-    /// the "Available programs:" section: BECOME A SPONSOR, ENABLE CLOUD AND
-    /// STORE, ENABLE SUPPORT. Entering a link fetches its tier tree from the
-    /// server. Cloud and Support carry an offline license-status suffix,
-    /// computed client-side (the server cannot verify a certificate offline).
-    /// License verification is display-only, never a feature gate.
-    fn build_tier_subnodes(&self) -> Vec<FfonElement> {
-        let base = self.store_url.trim_end_matches('/');
-
-        let status = |slug: &str, label_key: &str| -> String {
-            payments::tier_input::status_line(slug, &localize::t(label_key))
-        };
-
-        // Display text first, then the `<link>` tag — same shape the web
-        // browser uses for `<a>` links (`text <link>href</link>`), so the
-        // readable title leads the rendered label.
-        vec![
-            FfonElement::new_obj(format!(
-                "{} <link>{base}/sponsor</link>",
-                localize::t("settings-tier-sponsor")
-            )),
-            FfonElement::new_obj(format!(
-                "{}, {} <link>{base}/cloud</link>",
-                localize::t("settings-tier-cloud"),
-                status("store-license", "settings-license-label-cloud")
-            )),
-            FfonElement::new_obj(format!(
-                "{}, {} <link>{base}/support</link>",
-                localize::t("settings-tier-support"),
-                status("support-license", "settings-license-label-support")
-            )),
-        ]
-    }
-
-    /// Handle an edit committed somewhere under the "Available programs:"
-    /// section. `rest` is the path after `/Available programs:/`; the edited
-    /// input's label is its last `/`-separated segment. Server-served tier
-    /// content nests several levels deep, so only the last segment is matched.
-    fn commit_tier_input(&mut self, rest: &str, value: &str) -> bool {
-        let label = rest.rsplit('/').next().unwrap_or(rest);
-
-        // Server base URL input (client-built, localized label).
-        let url_label = localize::t("settings-label-store-url");
-        if label == url_label || label == "Store server URL" {
-            if self.store_url != value {
-                let prev = self.store_url.clone();
-                self.store_url = value.to_owned();
-                self.write_key_string("Store", "storeUrl", value);
-                self.fire_apply("storeUrl", value);
-                self.push_settings_op(
-                    "settings-text",
-                    "Store",
-                    "storeUrl",
-                    &prev,
-                    value,
-                    "text",
-                    "edit server URL",
-                );
-            }
-            return true;
-        }
-
-        // Redeem-token inputs are server-served (English labels); each redeems
-        // against its own certificate slug.
-        if label == "License redeem token" {
-            self.commit_redeem_token(
-                value,
-                "store-license",
-                "licenseRedeemToken",
-                "edit license redeem token",
-            );
-            return true;
-        }
-        if label == "Support redeem token" {
-            self.commit_redeem_token(
-                value,
-                "support-license",
-                "supportRedeemToken",
-                "edit support redeem token",
-            );
-            return true;
-        }
-
-        // Donation amount (server-served): transient form state, not persisted.
-        if label.starts_with("amount in") {
-            self.server_form_state
-                .insert("amount".to_owned(), value.to_owned());
-            return true;
-        }
-
-        // Per-provider setup inputs (Lemonsqueezy / Paddle / Polar) are
-        // server-side operator config; accept the edit so the UI commits but
-        // do not persist it client-side.
-        if label.ends_with("setup") {
-            return true;
-        }
-
-        false
-    }
-
-    /// Redeem `token` against `slug`'s certificate and persist it under the
-    /// `Store/<config_key>` setting (undoable as text — undo restores the
-    /// token string only, not the saved certificate file).
-    fn commit_redeem_token(&mut self, token: &str, slug: &str, config_key: &str, label: &str) {
-        let trimmed = token.trim();
-        if !trimmed.is_empty() {
-            if let Err(msg) = payments::redeem_license(&self.store_url, trimmed, slug) {
-                self.store_error = Some(msg);
-            }
-        }
-        let prev = match config_key {
-            "supportRedeemToken" => self.support_redeem_token.clone(),
-            _ => self.license_redeem_token.clone(),
-        };
-        if prev == token {
-            return;
-        }
-        match config_key {
-            "supportRedeemToken" => self.support_redeem_token = token.to_owned(),
-            _ => self.license_redeem_token = token.to_owned(),
-        }
-        self.write_key_string("Store", config_key, token);
-        self.fire_apply(config_key, token);
-        self.push_settings_op(
-            "settings-text",
-            "Store",
-            config_key,
-            &prev,
-            token,
-            "text",
-            label,
-        );
-    }
-
-    /// Keep the in-memory Store fields in sync when undo/redo rewrites a
-    /// `Store/*` text setting (those keys are not registered text entries, so
-    /// the generic text undo path would otherwise leave the field stale).
-    fn sync_store_field(&mut self, section: &str, key: &str, value: &str) {
-        if section != "Store" {
-            return;
-        }
-        match key {
-            "storeUrl" => self.store_url = value.to_owned(),
-            "licenseRedeemToken" => self.license_redeem_token = value.to_owned(),
-            "supportRedeemToken" => self.support_redeem_token = value.to_owned(),
-            _ => {}
-        }
-    }
-
     fn populate_section(&mut self, section_name: &str) -> FfonElement {
         let mut obj = FfonElement::new_obj(Self::localize_section_name(section_name));
         let o = obj.as_obj_mut().unwrap();
@@ -744,20 +554,6 @@ impl SettingsProvider {
                 "{}: {}",
                 localize::t("settings-label-version"),
                 v
-            )));
-        }
-
-        // Always-top sponsor / cloud / support tier links inside the
-        // "Available programs:" section, followed by the server URL input.
-        // Rendered before the program checkboxes regardless of ordering.
-        if section_name == "Available programs:" {
-            for node in self.build_tier_subnodes() {
-                o.push(node);
-            }
-            o.push(FfonElement::Str(format!(
-                "{}: <input>{}</input>",
-                localize::t("settings-label-store-url"),
-                self.store_url
             )));
         }
 
@@ -1002,20 +798,6 @@ impl Provider for SettingsProvider {
         // Path format: /<section>/<label>
         let path = self.current_path.clone();
 
-        // Anything under the "Available programs:" section — the server-driven
-        // tier trees and the server URL input — routes to commit_tier_input.
-        // current_path carries the *displayed* (localized) section name, so
-        // match that first, falling back to the language-neutral storage id.
-        // commit_tier_input matches the last path segment, so the depth of the
-        // nested tier content does not matter.
-        let prog_prefix = format!("/{}/", Self::localize_section_name("Available programs:"));
-        let tier_rest = path
-            .strip_prefix(prog_prefix.as_str())
-            .or_else(|| path.strip_prefix("/Available programs:/"));
-        if let Some(rest) = tier_rest {
-            return self.commit_tier_input(rest, new_content);
-        }
-
         let parts: Vec<&str> = path.trim_start_matches('/').splitn(2, '/').collect();
         if parts.len() < 2 {
             return false;
@@ -1138,11 +920,6 @@ impl Provider for SettingsProvider {
                 "radio",
                 &format!("set {rkey}"),
             );
-        } else {
-            // Server-served radio (donation cadence, cloud monthly/yearly):
-            // capture the selection so on_button_press can build the checkout.
-            self.server_form_state
-                .insert(group_key.to_owned(), selected_value.to_owned());
         }
     }
 
@@ -1181,59 +958,6 @@ impl Provider for SettingsProvider {
         std::mem::take(&mut self.pending_timeline_entries)
     }
 
-    fn take_error(&mut self) -> Option<String> {
-        self.store_error.take()
-    }
-
-    /// A "for payment" button was pressed inside a server-served tier tree.
-    /// `function_name` is `checkout:<item>`. Request a hosted checkout from
-    /// the server and open the returned URL in the external browser; any
-    /// failure is stashed as the pending error (shown + spoken in the header).
-    fn on_button_press(&mut self, function_name: &str) {
-        let Some(item) = function_name.strip_prefix("checkout:") else {
-            return;
-        };
-        // Resolve the concrete checkout item from server-served form state.
-        let (resolved, amount, recurring): (String, String, String) = match item {
-            "cloud" => {
-                // Yearly is the default checked option; "month" only
-                // when the user has explicitly picked the monthly option.
-                let monthly = self
-                    .server_form_state
-                    .get("monthly or yearly")
-                    .map(|v| v.contains("month"))
-                    .unwrap_or(false);
-                let id = if monthly {
-                    "cloud-monthly"
-                } else {
-                    "cloud-yearly"
-                };
-                (id.to_owned(), String::new(), String::new())
-            }
-            "sponsor-donation" => (
-                "sponsor-donation".to_owned(),
-                self.server_form_state
-                    .get("amount")
-                    .cloned()
-                    .unwrap_or_default(),
-                self.server_form_state
-                    .get("one-time or recurring")
-                    .cloned()
-                    .unwrap_or_default(),
-            ),
-            other => (other.to_owned(), String::new(), String::new()),
-        };
-        match payments::checkout::request_checkout(&self.store_url, &resolved, &amount, &recurring)
-        {
-            Ok(url) => {
-                if let Err(e) = payments::checkout::open_url(&url) {
-                    self.store_error = Some(e);
-                }
-            }
-            Err(msg) => self.store_error = Some(msg),
-        }
-    }
-
     async fn undo(&mut self, entry: &TimelineEntry, error: &mut String) {
         register_translations();
         let payload = match entry {
@@ -1259,7 +983,6 @@ impl Provider for SettingsProvider {
                 {
                     e.current_value = prev.clone();
                 }
-                self.sync_store_field(&section, &key, &prev);
                 self.write_key_string(&section, &key, &prev);
                 self.fire_apply(&key, &prev);
             }
@@ -1317,7 +1040,6 @@ impl Provider for SettingsProvider {
                 {
                     e.current_value = new.clone();
                 }
-                self.sync_store_field(&section, &key, &new);
                 self.write_key_string(&section, &key, &new);
                 self.fire_apply(&key, &new);
             }
@@ -1753,7 +1475,8 @@ mod tests {
         );
         assert_eq!(
             SettingsProvider::localize_section_name("Available programs:"),
-            "Available programs and Store (sponsoring, cloud, cloud + proprietary license, and support):"
+            // The tiers moved to the Store in 0.2.0, and the title with them.
+            "Available programs:"
         );
 
         sicompass_sdk::localize::set_locale("nl-BE");
@@ -1763,7 +1486,7 @@ mod tests {
         );
         assert_eq!(
             SettingsProvider::localize_section_name("Available programs:"),
-            "Beschikbare programma's en Winkel (sponsoring, cloud, cloud + commerciële licentie en ondersteuning):"
+            "Beschikbare programma's:"
         );
 
         sicompass_sdk::localize::set_locale("fr-BE");
@@ -1773,7 +1496,7 @@ mod tests {
         );
         assert_eq!(
             SettingsProvider::localize_section_name("Available programs:"),
-            "Programmes disponibles et Magasin (sponsoring, cloud, cloud + licence propriétaire, et support) :"
+            "Programmes disponibles :"
         );
 
         sicompass_sdk::localize::set_locale("de-BE");
@@ -1783,7 +1506,7 @@ mod tests {
         );
         assert_eq!(
             SettingsProvider::localize_section_name("Available programs:"),
-            "Verfügbare Programme und Geschäft (Sponsoring, Cloud, Cloud + proprietäre Lizenz und Support):"
+            "Verfügbare Programme:"
         );
 
         // Unknown section name falls back to its literal.
@@ -3060,221 +2783,6 @@ mod tests {
         assert!(
             has_section,
             "priority section should appear in fetch output"
-        );
-    }
-
-    // ----- Sponsor / cloud / support tier tests -----------------------------
-
-    use wiremock::matchers::{method, path as wm_path};
-    use wiremock::{Mock, MockServer, ResponseTemplate};
-
-    fn start_mock_server() -> (tokio::runtime::Runtime, MockServer) {
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        let server = rt.block_on(MockServer::start());
-        (rt, server)
-    }
-
-    fn mount(rt: &tokio::runtime::Runtime, server: &MockServer, m: Mock) {
-        rt.block_on(m.mount(server));
-    }
-
-    /// The children of the "Available programs:" section in a fetched tree.
-    fn available_programs_children(items: &[FfonElement]) -> Vec<FfonElement> {
-        let key = SettingsProvider::localize_section_name("Available programs:");
-        items
-            .iter()
-            .find(|e| e.as_obj().map(|o| o.key == key).unwrap_or(false))
-            .expect("Available programs section should be present")
-            .as_obj()
-            .unwrap()
-            .children
-            .clone()
-    }
-
-    /// A syntactically valid certificate body carrying a made-up signature,
-    /// which the embedded public key rejects. That is the point: redeeming it
-    /// must yield a "rejected" error rather than being saved.
-    fn sample_cert_json() -> serde_json::Value {
-        serde_json::json!({
-            "payload": {
-                "product": "sicompass", "license_id": "id", "licensee": "Test",
-                "scope": "commercial", "issued_at": 1_700_000_000_i64,
-                "expires_at": 1_900_000_000_i64, "version_coverage": "*",
-                "payment_provider": "polar"
-            },
-            "signature": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
-        })
-    }
-
-    #[test]
-    fn three_tier_links_lead_the_priority_section() {
-        let mut p = SettingsProvider::new_headless().with_config_path(test_config_path());
-        p.add_priority_section("Available programs:");
-        p.add_checkbox("Available programs:", "tutorial", "enable_tutorial", true);
-        p.store_url = "https://srv.example".to_owned();
-
-        let items = p.fetch();
-        let children = available_programs_children(&items);
-        let key = |i: usize| {
-            children[i]
-                .as_obj()
-                .expect("tier link is an Obj")
-                .key
-                .clone()
-        };
-        assert!(
-            key(0).contains("<link>https://srv.example/sponsor</link>"),
-            "{}",
-            key(0)
-        );
-        assert!(
-            key(1).contains("<link>https://srv.example/cloud</link>"),
-            "{}",
-            key(1)
-        );
-        assert!(
-            key(2).contains("<link>https://srv.example/support</link>"),
-            "{}",
-            key(2)
-        );
-        // The server URL input follows the three tier links.
-        assert!(
-            children[3]
-                .as_str()
-                .map(|s| s.contains("<input>"))
-                .unwrap_or(false)
-        );
-    }
-
-    #[test]
-    fn cloud_and_support_links_carry_a_status_suffix_sponsor_does_not() {
-        let p = SettingsProvider::new_headless().with_config_path(test_config_path());
-        let nodes = p.build_tier_subnodes();
-        let key = |i: usize| nodes[i].as_obj().unwrap().key.clone();
-        assert!(
-            !key(0).contains("license:"),
-            "sponsor has no status: {}",
-            key(0)
-        );
-        assert!(
-            key(1).contains("license:"),
-            "cloud needs a status: {}",
-            key(1)
-        );
-        assert!(
-            key(2).contains("license:"),
-            "support needs a status: {}",
-            key(2)
-        );
-    }
-
-    #[test]
-    fn commit_tier_input_routes_the_server_url() {
-        let mut p = SettingsProvider::new_headless().with_config_path(test_config_path());
-        assert!(p.commit_tier_input("Store server URL", "https://new.example"));
-        assert_eq!(p.store_url, "https://new.example");
-    }
-
-    /// `commit_edit` must route a tier edit even though `current_path` carries
-    /// the *localized* section name, not the "Available programs:" storage id.
-    #[test]
-    fn commit_edit_routes_under_localized_section_name() {
-        use sicompass_sdk::provider::Provider;
-        let _g = locale_test_lock();
-        sicompass_sdk::localize::set_locale("en-US");
-        let mut p = SettingsProvider::new_headless().with_config_path(test_config_path());
-        let localized = SettingsProvider::localize_section_name("Available programs:");
-        assert_ne!(
-            localized, "Available programs:",
-            "test needs a localized name"
-        );
-        p.set_current_path(&format!("/{localized}/Store server URL"));
-        let ok = p.commit_edit("", "http://localhost:8787");
-        assert!(ok, "edit under the localized section name must route");
-        assert_eq!(p.store_url, "http://localhost:8787");
-        sicompass_sdk::localize::set_locale("en-US");
-    }
-
-    #[test]
-    fn commit_tier_input_captures_the_donation_amount() {
-        let mut p = SettingsProvider::new_headless().with_config_path(test_config_path());
-        assert!(p.commit_tier_input("BECOME A SPONSOR/Donation/amount in \u{20ac}", "25"));
-        assert_eq!(
-            p.server_form_state.get("amount").map(String::as_str),
-            Some("25"),
-        );
-    }
-
-    #[test]
-    fn commit_tier_input_accepts_provider_setup_inputs() {
-        let mut p = SettingsProvider::new_headless().with_config_path(test_config_path());
-        assert!(p.commit_tier_input("BECOME A SPONSOR/Bronze sponsor/Paddle setup", "v-2"));
-        // Unrecognised labels are rejected.
-        assert!(!p.commit_tier_input("BECOME A SPONSOR/mystery field", "x"));
-    }
-
-    #[test]
-    fn on_radio_change_captures_a_server_radio_selection() {
-        use sicompass_sdk::provider::Provider;
-        let mut p = SettingsProvider::new_headless().with_config_path(test_config_path());
-        p.on_radio_change("monthly or yearly", "per month");
-        assert_eq!(
-            p.server_form_state
-                .get("monthly or yearly")
-                .map(String::as_str),
-            Some("per month"),
-        );
-    }
-
-    #[test]
-    fn checkout_button_against_unreachable_server_sets_one_error() {
-        use sicompass_sdk::provider::Provider;
-        let mut p = SettingsProvider::new_headless().with_config_path(test_config_path());
-        p.store_url = "http://127.0.0.1:1".to_owned(); // refused immediately
-        p.on_button_press("checkout:support-annual");
-        assert!(
-            p.take_error().is_some(),
-            "an unreachable server must set an error"
-        );
-        assert!(p.take_error().is_none(), "the error is consumed once");
-    }
-
-    #[test]
-    fn redeem_tokens_route_to_their_own_certificate_slug() {
-        use sicompass_sdk::provider::Provider;
-        let (rt, server) = start_mock_server();
-        mount(
-            &rt,
-            &server,
-            Mock::given(method("GET"))
-                .and(wm_path("/license/tok-c"))
-                .respond_with(ResponseTemplate::new(200).set_body_json(sample_cert_json())),
-        );
-        mount(
-            &rt,
-            &server,
-            Mock::given(method("GET"))
-                .and(wm_path("/license/tok-s"))
-                .respond_with(ResponseTemplate::new(200).set_body_json(sample_cert_json())),
-        );
-
-        let mut p = SettingsProvider::new_headless().with_config_path(test_config_path());
-        p.store_url = server.uri();
-
-        assert!(p.commit_tier_input("ENABLE CLOUD AND STORE/License redeem token", "tok-c"));
-        assert_eq!(p.license_redeem_token, "tok-c");
-        assert!(
-            p.take_error()
-                .expect("cloud redeem error")
-                .contains("rejected")
-        );
-
-        assert!(p.commit_tier_input("ENABLE SUPPORT/Support redeem token", "tok-s"));
-        assert_eq!(p.support_redeem_token, "tok-s");
-        assert!(
-            p.take_error()
-                .expect("support redeem error")
-                .contains("rejected")
         );
     }
 }

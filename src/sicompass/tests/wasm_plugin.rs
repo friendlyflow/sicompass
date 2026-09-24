@@ -875,6 +875,8 @@ fn wit_vendor_matches_host_tables() {
         .chain(wasm_host::PROCESS_IMPORTS.iter())
         // ABI 0.2 (4.7): socket name resolution.
         .chain(wasm_host::SOCKET_IMPORTS.iter())
+        // ABI 0.2 (4.9): whether the user holds a tier.
+        .chain(wasm_host::LICENSE_IMPORTS.iter())
         .map(|(i, f)| (i.to_string(), f.to_string()))
         .collect();
     expected.sort();
@@ -1147,7 +1149,10 @@ fn a_plugin_built_for_the_previous_abi_is_refused_readably() {
         Ok(_) => panic!("an ABI 0.1 plugin must not load on an ABI 0.2 host"),
         Err(e) => e,
     };
-    assert!(err.contains("ABI 0.1.0") && err.contains("rebuilt"), "{err}");
+    assert!(
+        err.contains("ABI 0.1.0") && err.contains("rebuilt"),
+        "{err}"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -1190,7 +1195,10 @@ fn storage_is_the_plugins_own_folder_and_only_when_granted() {
         std::fs::read_to_string(storage.join("note.txt")).unwrap(),
         "hello from fs-plugin"
     );
-    assert_eq!(fs_cmd(&mut p, "read", "/storage/note.txt"), "hello from fs-plugin");
+    assert_eq!(
+        fs_cmd(&mut p, "read", "/storage/note.txt"),
+        "hello from fs-plugin"
+    );
     assert_eq!(fs_cmd(&mut p, "list", "/storage"), "note.txt");
     // Nothing outside it.
     assert!(fs_cmd(&mut p, "read", "/etc/passwd").starts_with("err"));
@@ -1235,8 +1243,16 @@ fn desktop_trash_and_restore_stay_inside_the_grant() {
     assert_eq!(fs_cmd(&mut p, "open-url", "https://example.com/x"), "ok");
     assert!(fs_cmd(&mut p, "open-url", "file:///etc/passwd").starts_with("err"));
     let recorded = wasm_host::desktop::_take_recorded();
-    assert!(recorded.iter().any(|r| r.starts_with("open-path:") && r.ends_with("t.txt")), "{recorded:?}");
-    assert!(recorded.contains(&"open-url:https://example.com/x".to_owned()), "{recorded:?}");
+    assert!(
+        recorded
+            .iter()
+            .any(|r| r.starts_with("open-path:") && r.ends_with("t.txt")),
+        "{recorded:?}"
+    );
+    assert!(
+        recorded.contains(&"open-url:https://example.com/x".to_owned()),
+        "{recorded:?}"
+    );
 }
 
 #[test]
@@ -1273,8 +1289,14 @@ fn a_filesystem_grant_needs_the_users_approval_of_exactly_this_manifest() {
 // ---------------------------------------------------------------------------
 
 fn open_task() -> WasmProvider {
-    WasmProvider::open(&fixture_dir().join("task.wasm"), "task", "task", &fixture_dir(), Vec::new())
-        .expect("the task fixture loads")
+    WasmProvider::open(
+        &fixture_dir().join("task.wasm"),
+        "task",
+        "task",
+        &fixture_dir(),
+        Vec::new(),
+    )
+    .expect("the task fixture loads")
 }
 
 /// Start a task through the fixture's command and return its id.
@@ -1335,7 +1357,9 @@ fn a_task_outlives_the_call_deadline() {
 fn a_cooperative_task_stops_when_asked() {
     let mut p = open_task();
     let id = start(&mut p, "spin", "");
-    wait_for(&mut p, 10, |l| l.contains(&format!("{id} progress running")));
+    wait_for(&mut p, 10, |l| {
+        l.contains(&format!("{id} progress running"))
+    });
     let mut error = String::new();
     p.handle_command("cancel", &id.to_string(), 0, &mut error);
     let log = wait_for(&mut p, 10, |l| l.iter().any(|x| x.contains("done")));
@@ -1346,7 +1370,9 @@ fn a_cooperative_task_stops_when_asked() {
 fn a_task_that_ignores_cancel_is_stopped_by_the_host() {
     let mut p = open_task();
     let id = start(&mut p, "busy", "");
-    wait_for(&mut p, 10, |l| l.contains(&format!("{id} progress running")));
+    wait_for(&mut p, 10, |l| {
+        l.contains(&format!("{id} progress running"))
+    });
     let mut error = String::new();
     p.handle_command("cancel", &id.to_string(), 0, &mut error);
     let log = wait_for(&mut p, 10, |l| l.iter().any(|x| x.contains("done")));
@@ -1370,7 +1396,9 @@ fn at_most_four_tasks_run_at_once_and_the_next_starts_when_one_ends() {
     for id in &ids[1..] {
         p.handle_command("cancel", &id.to_string(), 0, &mut error);
     }
-    wait_for(&mut p, 10, |l| l.iter().filter(|x| x.contains("done")).count() == 5);
+    wait_for(&mut p, 10, |l| {
+        l.iter().filter(|x| x.contains("done")).count() == 5
+    });
 }
 
 #[test]
@@ -1391,8 +1419,7 @@ fn threads_named(name: &str) -> usize {
         .unwrap()
         .flatten()
         .filter(|t| {
-            std::fs::read_to_string(t.path().join("comm"))
-                .is_ok_and(|c| c.trim_end() == name)
+            std::fs::read_to_string(t.path().join("comm")).is_ok_and(|c| c.trim_end() == name)
         })
         .count()
 }
@@ -1412,12 +1439,17 @@ fn dropping_the_provider_stops_its_tasks() {
     )
     .unwrap();
     let id = start(&mut p, "busy", "");
-    wait_for(&mut p, 10, |l| l.contains(&format!("{id} progress running")));
+    wait_for(&mut p, 10, |l| {
+        l.contains(&format!("{id} progress running"))
+    });
     assert_eq!(threads_named("task:dropme"), 1);
     drop(p);
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
     while threads_named("task:dropme") > 0 {
-        assert!(std::time::Instant::now() < deadline, "the task outlived its provider");
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the task outlived its provider"
+        );
         std::thread::sleep(std::time::Duration::from_millis(20));
     }
 }
@@ -1455,7 +1487,10 @@ fn a_plugin_that_starts_programs_needs_them_granted() {
 #[test]
 fn a_listed_program_runs_on_pipes() {
     let mut p = open_process(process_grants()).unwrap();
-    assert_eq!(fs_cmd(&mut p, "run", "echo hello there"), "exit 0: hello there\n");
+    assert_eq!(
+        fs_cmd(&mut p, "run", "echo hello there"),
+        "exit 0: hello there\n"
+    );
 }
 
 #[test]
@@ -1541,7 +1576,10 @@ fn open_socket(endpoints: Vec<String>) -> Result<WasmProvider, String> {
 fn a_granted_endpoint_connects_by_name() {
     let port = echo_server();
     let mut p = open_socket(vec![format!("localhost:{port}")]).unwrap();
-    assert_eq!(fs_cmd(&mut p, "echo", &format!("localhost:{port}")), "pong to ping");
+    assert_eq!(
+        fs_cmd(&mut p, "echo", &format!("localhost:{port}")),
+        "pong to ping"
+    );
 }
 
 #[test]
@@ -1554,7 +1592,10 @@ fn a_port_that_was_not_granted_is_refused_even_by_address() {
     let a = fs_cmd(&mut p, "raw", &format!("127.0.0.1:{other}"));
     assert!(a.starts_with("err:") && !a.contains("not supported"), "{a}");
     // And the granted one, by address, works.
-    assert_eq!(fs_cmd(&mut p, "raw", &format!("127.0.0.1:{granted}")), "pong to ping");
+    assert_eq!(
+        fs_cmd(&mut p, "raw", &format!("127.0.0.1:{granted}")),
+        "pong to ping"
+    );
     let a = fs_cmd(&mut p, "echo", &format!("localhost:{other}"));
     assert!(a.starts_with("err:") && a.contains("not among"), "{a}");
 }
@@ -1566,7 +1607,10 @@ fn a_name_that_was_not_granted_does_not_resolve() {
     let a = fs_cmd(&mut p, "echo", &format!("localhost:{port}"));
     assert!(a.starts_with("err:") && a.contains("not among"), "{a}");
     // The same address, approved as an IP, works.
-    assert_eq!(fs_cmd(&mut p, "echo", &format!("127.0.0.1:{port}")), "pong to ping");
+    assert_eq!(
+        fs_cmd(&mut p, "echo", &format!("127.0.0.1:{port}")),
+        "pong to ping"
+    );
 }
 
 #[test]
