@@ -32,37 +32,13 @@ use wasmtime_wasi::{WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
 
 use super::HostState;
 
-/// The `wasi:*` interfaces every plugin may import, without their `@version`.
-///
-/// Exactly what `std` for `wasm32-wasip2` asks for, measured on a real guest, plus
-/// `wall-clock` and `random` (`SystemTime` and hash-map seeding) and the
-/// filesystem pair, which reaches nothing without a preopen.
-pub const BASELINE_INTERFACES: &[&str] = &[
-    "wasi:cli/environment",
-    "wasi:cli/exit",
-    "wasi:cli/stdin",
-    "wasi:cli/stdout",
-    "wasi:cli/stderr",
-    "wasi:cli/terminal-input",
-    "wasi:cli/terminal-output",
-    "wasi:cli/terminal-stdin",
-    "wasi:cli/terminal-stdout",
-    "wasi:cli/terminal-stderr",
-    "wasi:clocks/wall-clock",
-    "wasi:clocks/monotonic-clock",
-    "wasi:random/random",
-    "wasi:random/insecure",
-    "wasi:random/insecure-seed",
-    "wasi:io/error",
-    "wasi:io/poll",
-    "wasi:io/streams",
-    "wasi:filesystem/types",
-    "wasi:filesystem/preopens",
-];
+/// The `wasi:*` interfaces every plugin may import, without their `@version`:
+/// the SDK's single definition, which the audit also uses.
+pub use sicompass_sdk::plugin_abi::WASI_BASELINE as BASELINE_INTERFACES;
 
 /// Whether a `wasi:*` interface (version already stripped) is in the baseline.
 pub fn is_baseline(interface: &str) -> bool {
-    BASELINE_INTERFACES.contains(&interface)
+    sicompass_sdk::plugin_abi::is_wasi_baseline(interface)
 }
 
 /// The per-plugin WASI context: nothing granted.

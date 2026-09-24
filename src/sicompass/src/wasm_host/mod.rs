@@ -497,83 +497,38 @@ pub fn audit_component_imports(
     component: &Component,
     allowed_hosts: &[String],
 ) -> Result<(), String> {
+    use wasmtime::component::types::ComponentItem;
     let engine = engine();
     let ty = component.component_type();
 
-    // The ABI version first: a guest built for another one would otherwise fail
-    // with an opaque type mismatch somewhere deep in instantiation.
-    for (name, _) in ty.imports(engine).chain(ty.exports(engine)) {
-        check_abi_version(name)?;
-    }
+    // Read the component's imports the way wasmtime sees them, then hand them to
+    // the SDK's audit, the same one the release tool and the Store run.
+    let imports: Vec<sicompass_sdk::plugin_abi::ImportedInterface> = ty
+        .imports(engine)
+        .map(|(name, item)| sicompass_sdk::plugin_abi::ImportedInterface {
+            name: name.to_owned(),
+            functions: match item.ty {
+                ComponentItem::ComponentInstance(instance) => instance
+                    .exports(engine)
+                    // An interface also exports its type declarations; only
+                    // functions are capabilities.
+                    .filter(|(_, kind)| matches!(kind.ty, ComponentItem::ComponentFunc(_)))
+                    .map(|(f, _)| f.to_owned())
+                    .collect(),
+                _ => Vec::new(),
+            },
+        })
+        .collect();
+    let exports: Vec<String> = ty.exports(engine).map(|(n, _)| n.to_owned()).collect();
 
-    for (name, item) in ty.imports(engine) {
-        // Strip the `@x.y.z` version suffix; the tables are version-agnostic.
-        let interface = name.split('@').next().unwrap_or(name);
-
-        // A types-only interface carries no functions and grants nothing.
-        if interface == "sicompass:plugin/types" {
-            continue;
-        }
-
-        // WASI: the inert baseline is accepted as a whole interface (it grants
-        // nothing, see `wasi`). Anything else from WASI needs a permission this
-        // plugin was not given.
-        if interface.starts_with("wasi:") {
-            if wasi::is_baseline(interface) {
-                continue;
-            }
-            return Err(format!(
-                "plugin imports `{interface}`, which needs a permission its plugin.json \
-                 does not grant (or this sicompass does not support yet)"
-            ));
-        }
-
-        let known = HOST_IMPORTS
-            .iter()
-            .chain(NET_IMPORTS.iter())
-            .any(|(i, _)| *i == interface);
-        if !known {
-            return Err(format!(
-                "plugin imports `{interface}`, which this host does not provide"
-            ));
-        }
-
-        if interface == "sicompass:plugin/net" && allowed_hosts.is_empty() {
-            return Err(
-                "plugin uses the network but declares no `allowedHosts` in plugin.json; \
-                 add the hosts it needs so the user can see them before enabling it"
-                    .to_owned(),
-            );
-        }
-
-        // Names inside the interface must be ones we actually offer.
-        if let wasmtime::component::types::ComponentItem::ComponentInstance(instance) = item.ty {
-            for (name, kind) in instance.exports(engine) {
-                // An interface exports its type declarations alongside its
-                // functions — `net` declares the `http-request`/`http-response`
-                // records, for instance. Types grant nothing; only functions are
-                // capabilities, so only they are checked.
-                if !matches!(
-                    kind.ty,
-                    wasmtime::component::types::ComponentItem::ComponentFunc(_)
-                ) {
-                    continue;
-                }
-                let offered = HOST_IMPORTS
-                    .iter()
-                    .chain(NET_IMPORTS.iter())
-                    .any(|(i, f)| *i == interface && *f == name);
-                if !offered {
-                    return Err(format!(
-                        "plugin imports `{name}` from `{interface}`, which this host \
-                         does not provide"
-                    ));
-                }
-            }
-        }
-    }
-
-    Ok(())
+    // Only `allowedHosts` is grantable at this stage (docs/plugin-platform.md
+    // 4.4-4.7 add the rest), so the other permissions are passed as not granted.
+    sicompass_sdk::plugin_abi::audit_imports(
+        &imports,
+        &exports,
+        &sicompass_sdk::plugin_manifest::Permissions::default(),
+        allowed_hosts,
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -627,7 +582,7 @@ pub fn register_plugin_locales(plugin_name: &str, plugin_dir: &Path) -> Vec<Stri
                 continue;
             }
         };
-        if let Err(id) = check_locale_prefix(plugin_name, &source) {
+        if let Err(id) = sicompass_sdk::plugin_abi::check_locale_prefix(plugin_name, &source) {
             refusals.push(format!(
                 "{}: message `{id}` does not start with `{plugin_name}-`, so the file \
                  was not loaded",
@@ -647,61 +602,8 @@ pub fn register_plugin_locales(plugin_name: &str, plugin_dir: &Path) -> Vec<Stri
     refusals
 }
 
-/// The first message or term id in `source` that lacks the plugin's prefix.
-///
-/// Fluent ids start at column 0 (`id = ...`, `-term = ...`). Continuation lines,
-/// attributes (`.attr = ...`), comments and blank lines all start otherwise.
-fn check_locale_prefix(plugin_name: &str, source: &str) -> Result<(), String> {
-    let message_prefix = format!("{plugin_name}-");
-    let term_prefix = format!("-{plugin_name}-");
-    for line in source.lines() {
-        let Some((head, _)) = line.split_once('=') else {
-            continue;
-        };
-        let id = head.trim_end();
-        let is_id = !id.is_empty()
-            && !line.starts_with(char::is_whitespace)
-            && !id.starts_with('#')
-            && !id.starts_with('.')
-            && id
-                .trim_start_matches('-')
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
-        if !is_id {
-            continue;
-        }
-        let ok = if id.starts_with('-') {
-            id.starts_with(&term_prefix)
-        } else {
-            id.starts_with(&message_prefix)
-        };
-        if !ok {
-            return Err(id.to_owned());
-        }
-    }
-    Ok(())
-}
-
-/// The plugin ABI this host implements: the `sicompass:plugin` package version.
-pub const ABI_VERSION: &str = "0.2.0";
-
-/// Refuse a `sicompass:plugin/...@x.y.z` import or export of another ABI version,
-/// with a message a user or plugin author can act on.
-fn check_abi_version(name: &str) -> Result<(), String> {
-    let Some(rest) = name.strip_prefix("sicompass:plugin/") else {
-        return Ok(());
-    };
-    let version = rest.split_once('@').map(|(_, v)| v).unwrap_or("");
-    if version == ABI_VERSION {
-        return Ok(());
-    }
-    Err(format!(
-        "this plugin was built for sicompass plugin ABI {}, and this sicompass runs \
-         ABI {ABI_VERSION}. It has to be rebuilt against the current sicompass-pdk \
-         (for wasm32-wasip2); an update of the plugin usually does that.",
-        if version.is_empty() { "(unversioned)" } else { version }
-    ))
-}
+/// The plugin ABI this host implements (the SDK's single definition).
+pub use sicompass_sdk::plugin_abi::ABI_VERSION;
 
 // ---------------------------------------------------------------------------
 // Component loading
@@ -758,26 +660,11 @@ pub fn load_component(path: &Path) -> Result<Component, String> {
 }
 
 /// The import names this host is prepared to satisfy, as
-/// `("interface", "function")` pairs.
-///
-/// Because LTO drops unused imports, a component's real import list reveals what it
-/// can do. Comparing that list against this table lets the host reject a plugin
-/// whose imports exceed its manifest declaration *before* instantiating it, rather
-/// than only failing to link later.
-pub const HOST_IMPORTS: &[(&str, &str)] = &[
-    ("sicompass:plugin/host", "log"),
-    ("sicompass:plugin/host", "get-setting"),
-    ("sicompass:plugin/host", "now-millis"),
-    ("sicompass:plugin/host", "translate"),
-    ("sicompass:plugin/host", "translate-args"),
-    ("sicompass:plugin/host", "read-asset"),
-];
+/// `("interface", "function")` pairs: the SDK's tables, which the audit uses.
+pub use sicompass_sdk::plugin_abi::HOST_FUNCTIONS as HOST_IMPORTS;
 
 /// Import names that require `allowedHosts` in the manifest.
-pub const NET_IMPORTS: &[(&str, &str)] = &[
-    ("sicompass:plugin/net", "fetch"),
-    ("sicompass:plugin/net", "fetch-url-ffon"),
-];
+pub use sicompass_sdk::plugin_abi::NET_FUNCTIONS as NET_IMPORTS;
 
 #[cfg(test)]
 mod tests {
@@ -786,27 +673,27 @@ mod tests {
     #[test]
     fn locale_ids_must_carry_the_plugin_prefix() {
         let good = "# comment\nhello-name = hi\n    .title = attr = still fine\nhello-x =\n    multi = line\n-hello-brand = B\n";
-        assert_eq!(check_locale_prefix("hello", good), Ok(()));
+        assert_eq!(sicompass_sdk::plugin_abi::check_locale_prefix("hello", good), Ok(()));
         assert_eq!(
-            check_locale_prefix("hello", "hello-a = 1\nsettings-title = stolen\n"),
+            sicompass_sdk::plugin_abi::check_locale_prefix("hello", "hello-a = 1\nsettings-title = stolen\n"),
             Err("settings-title".to_owned())
         );
         assert_eq!(
-            check_locale_prefix("hello", "-brand = B\n"),
+            sicompass_sdk::plugin_abi::check_locale_prefix("hello", "-brand = B\n"),
             Err("-brand".to_owned())
         );
         // A plugin called `hello` may not claim `helloworld-…` either.
         assert_eq!(
-            check_locale_prefix("hello", "helloworld-x = 1\n"),
+            sicompass_sdk::plugin_abi::check_locale_prefix("hello", "helloworld-x = 1\n"),
             Err("helloworld-x".to_owned())
         );
     }
 
     #[test]
     fn another_abi_version_is_refused_with_a_readable_reason() {
-        assert!(check_abi_version("sicompass:plugin/host@0.2.0").is_ok());
-        assert!(check_abi_version("wasi:cli/stdout@0.2.9").is_ok());
-        let err = check_abi_version("sicompass:plugin/host@0.1.0").unwrap_err();
+        assert!(sicompass_sdk::plugin_abi::check_abi_version("sicompass:plugin/host@0.2.0").is_ok());
+        assert!(sicompass_sdk::plugin_abi::check_abi_version("wasi:cli/stdout@0.2.9").is_ok());
+        let err = sicompass_sdk::plugin_abi::check_abi_version("sicompass:plugin/host@0.1.0").unwrap_err();
         assert!(err.contains("ABI 0.1.0") && err.contains("rebuilt"), "{err}");
     }
 

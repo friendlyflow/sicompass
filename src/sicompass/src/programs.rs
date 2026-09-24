@@ -461,7 +461,7 @@ fn instantiate_user_plugin(plugin: &DiscoveredPlugin) -> Option<Box<dyn Provider
                 .parent()
                 .unwrap_or_else(|| std::path::Path::new("."));
 
-            let unsupported = m.unsupported_permissions();
+            let unsupported = crate::plugin_manifest::unsupported_permissions(m);
             if !unsupported.is_empty() {
                 eprintln!(
                     "sicompass: plugin '{}' was not loaded: it asks for {}, which this \

@@ -8,199 +8,39 @@
 //! Equivalent to the `PluginManifest` / `discoverUserPlugins` logic in
 //! `src/sicompass/programs.c`.
 
-use serde::Deserialize;
 use std::path::{Path, PathBuf};
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-/// How the plugin is executed.
-#[derive(Debug, Clone, Deserialize, PartialEq, Default)]
-#[serde(rename_all = "lowercase")]
-pub enum PluginType {
-    /// Sandboxed WebAssembly component, and the only way to load third-party code.
-    ///
-    /// The default, so a manifest that omits `type` gets the sandbox rather than
-    /// having to ask for it. See [`crate::wasm_host`].
-    #[default]
-    Wasm,
-    /// Instantiate a built-in factory provider by the manifest's `name` field.
-    /// Mirrors C's `PLUGIN_FACTORY` in `src/sicompass/programs.c`.
-    ///
-    /// Not third-party code: this names a provider already compiled into the
-    /// binary, which is why it is not sandboxed.
-    Factory,
-}
+// The `plugin.json` types are the SDK's (`sicompass_sdk::plugin_manifest`), shared
+// with the `sicompass-plugin` release tool and the Store so the three never
+// disagree about what a manifest says.
+pub use sicompass_sdk::plugin_manifest::{
+    Permissions, PluginManifest, PluginSetting, PluginType, RETIRED_TYPES, Service, SettingKind,
+    parse_manifest,
+};
 
-/// Plugin types that used to exist, kept only to explain their absence.
-///
-/// `native` loaded a `.so`/`.dll`/`.dylib` through `dlopen`, and `script` shelled
-/// out to `bun`. Both are gone: Apple forbids executing downloaded native code and
-/// equally forbids shipping a general-purpose interpreter, and a native in-process
-/// plugin had full process privileges, so `allowedHosts` and every other manifest
-/// policy was advisory against it. Neither could be made safe or shippable.
-const RETIRED_TYPES: &[&str] = &["native", "script"];
-
-/// Kind of a per-plugin setting entry.
-#[derive(Debug, Clone, Deserialize, PartialEq)]
-#[serde(rename_all = "lowercase")]
-pub enum SettingKind {
-    Text,
-    Checkbox,
-    Radio,
-}
-
-/// A single setting declared by a plugin manifest.
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PluginSetting {
-    #[serde(rename = "type")]
-    pub kind: SettingKind,
-    pub label: String,
-    pub key: String,
-    #[serde(default)]
-    pub default: String,
-    #[serde(default)]
-    pub default_checked: bool,
-    #[serde(default)]
-    pub options: Vec<String>,
-}
-
-/// Parsed contents of a `plugin.json` manifest file.
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PluginManifest {
-    pub name: String,
-    pub display_name: String,
-    #[serde(rename = "type", default)]
-    pub plugin_type: PluginType,
-    /// Relative entry path (resolved relative to the manifest directory).
-    pub entry: String,
-    #[serde(default)]
-    pub supports_config_files: bool,
-    #[serde(default)]
-    pub settings: Vec<PluginSetting>,
-    /// Optional plugin version, displayed in the settings tree under the
-    /// plugin's section. Authors set this in `plugin.json`.
-    #[serde(default)]
-    pub version: Option<String>,
-    /// HTTPS URL the updater queries for a newer manifest. Absent =>
-    /// plugin opts out of auto-update.
-    #[serde(default)]
-    pub update_url: Option<String>,
-    /// Minimum sicompass app version this plugin works against. If the
-    /// running app is older, the plugin is skipped at load time.
-    #[serde(default)]
-    pub min_app_version: Option<String>,
-    /// Base64-encoded ed25519 public key. Trust root for verifying
-    /// signatures on future updates. First-install is trust-on-first-use.
-    #[serde(default)]
-    pub pubkey: Option<String>,
-    /// Whether the running provider can be torn down + re-instantiated
-    /// mid-session after an update lands on disk. Defaults to `true`;
-    /// plugins that spawn long-lived threads holding fn-pointers from
-    /// their own library must declare `false` and require a restart.
-    #[serde(default = "default_hot_reload")]
-    pub hot_reload: bool,
-    /// Hosts a `wasm` plugin may reach over the network.
-    ///
-    /// This is a capability declaration, not a hint. Absent or empty means the
-    /// network interface is **not linked into the guest at all**, so the plugin has
-    /// no reachable network function rather than a blocked one. A component that
-    /// uses the network without declaring hosts here is refused before it is
-    /// instantiated.
-    ///
-    /// Matching is exact and case-insensitive: subdomains must be listed
-    /// individually, because `evil.example.com` is not `example.com`. Listing them
-    /// here is also what shows the user, before they enable the plugin, where it
-    /// intends to connect.
-    ///
-    /// Also accepted as `permissions.allowedHosts`, where the other permissions
-    /// live. The two lists are merged; see [`PluginManifest::allowed_hosts`].
-    #[serde(default, rename = "allowedHosts")]
-    pub top_level_allowed_hosts: Vec<String>,
-    /// What the plugin may touch beyond the inert baseline every plugin gets.
-    /// See docs/plugin-platform.md §4.
-    #[serde(default)]
-    pub permissions: Permissions,
-    /// A Fluent id in the plugin's own `locales/`, describing it in one line for
-    /// the Store.
-    #[serde(default)]
-    pub description: Option<String>,
-    /// A paid service the plugin uses, shown before it is installed.
-    #[serde(default)]
-    pub service: Option<Service>,
-}
-
-/// `permissions` in `plugin.json`. Everything defaults to "not granted".
-#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
-pub struct Permissions {
-    /// Hosts the `net` interface may reach (same as the top-level key).
-    pub allowed_hosts: Vec<String>,
-    /// A folder of its own: `app_data_dir()/<name>`, preopened.
-    pub storage: bool,
-    /// Folders the user grants, preopened at the same path.
-    pub filesystem: Vec<String>,
-    /// Programs it may start.
-    pub process: Vec<String>,
-    /// `host:port` pairs it may open sockets to.
-    pub sockets: Vec<String>,
-}
-
-/// `service` in `plugin.json`: a paid service on a server, which the Store shows
-/// before install. The plugin itself stays free (docs/plugin-platform.md §1).
-#[derive(Debug, Clone, PartialEq, Deserialize)]
-pub struct Service {
-    /// Catalog tier id, for example `friendlyflow/cloud`.
-    pub tier: String,
-    /// A Fluent id in the plugin's `locales/`: what the service does.
-    #[serde(default)]
-    pub what: Option<String>,
-}
-
-impl PluginManifest {
-    /// Hosts the plugin may reach: the top-level `allowedHosts` and
-    /// `permissions.allowedHosts`, merged, in declaration order, without duplicates.
-    pub fn allowed_hosts(&self) -> Vec<String> {
-        let mut hosts: Vec<String> = Vec::new();
-        for h in self
-            .top_level_allowed_hosts
-            .iter()
-            .chain(&self.permissions.allowed_hosts)
-        {
-            if !hosts.iter().any(|x| x.eq_ignore_ascii_case(h)) {
-                hosts.push(h.clone());
-            }
-        }
-        hosts
+/// Permissions this sicompass cannot grant yet (parts 4.4-4.7 of
+/// docs/plugin-platform.md). A plugin asking for one is not loaded at all,
+/// rather than loaded without what it asked for.
+pub fn unsupported_permissions(m: &PluginManifest) -> Vec<&'static str> {
+    let p = &m.permissions;
+    let mut out = Vec::new();
+    if p.storage {
+        out.push("storage");
     }
-
-    /// Permissions this sicompass cannot grant yet (parts 4.4-4.7 of
-    /// docs/plugin-platform.md). A plugin asking for one is not loaded at all,
-    /// rather than loaded without what it asked for.
-    pub fn unsupported_permissions(&self) -> Vec<&'static str> {
-        let p = &self.permissions;
-        let mut out = Vec::new();
-        if p.storage {
-            out.push("storage");
-        }
-        if !p.filesystem.is_empty() {
-            out.push("filesystem");
-        }
-        if !p.process.is_empty() {
-            out.push("process");
-        }
-        if !p.sockets.is_empty() {
-            out.push("sockets");
-        }
-        out
+    if !p.filesystem.is_empty() {
+        out.push("filesystem");
     }
-}
-
-fn default_hot_reload() -> bool {
-    true
+    if !p.process.is_empty() {
+        out.push("process");
+    }
+    if !p.sockets.is_empty() {
+        out.push("sockets");
+    }
+    out
 }
 
 // ---------------------------------------------------------------------------
@@ -214,30 +54,13 @@ fn default_hot_reload() -> bool {
 /// with nothing anywhere saying why.
 pub fn load_manifest(path: &Path) -> Option<PluginManifest> {
     let data = std::fs::read_to_string(path).ok()?;
-    match serde_json::from_str(&data) {
+    match parse_manifest(&data) {
         Ok(manifest) => Some(manifest),
         Err(e) => {
-            explain_parse_failure(path, &data, &e);
+            // `parse_manifest` names a retired plugin type itself.
+            eprintln!("sicompass: ignoring {}: {e}", path.display());
             None
         }
-    }
-}
-
-/// Log why a manifest was rejected, naming a retired type if that is the reason.
-fn explain_parse_failure(path: &Path, data: &str, err: &serde_json::Error) {
-    let retired = serde_json::from_str::<serde_json::Value>(data)
-        .ok()
-        .and_then(|v| v.get("type")?.as_str().map(str::to_owned))
-        .filter(|t| RETIRED_TYPES.contains(&t.as_str()));
-
-    match retired {
-        Some(kind) => eprintln!(
-            "sicompass: ignoring {} — `\"type\": \"{kind}\"` plugins are no longer \
-             supported. Third-party plugins are now sandboxed WebAssembly \
-             components (`\"type\": \"wasm\"`); see docs/wasm-plugins.md.",
-            path.display()
-        ),
-        None => eprintln!("sicompass: ignoring {}: {err}", path.display()),
     }
 }
 
@@ -321,7 +144,7 @@ mod tests {
         .unwrap();
         assert_eq!(m.permissions, Permissions::default());
         assert!(m.allowed_hosts().is_empty());
-        assert!(m.unsupported_permissions().is_empty());
+        assert!(unsupported_permissions(&m).is_empty());
     }
 
     #[test]
@@ -332,7 +155,7 @@ mod tests {
                                   "sockets": ["imap.example.org:993"] } }"#,
         )
         .unwrap();
-        assert_eq!(m.unsupported_permissions(), vec!["storage", "process", "sockets"]);
+        assert_eq!(unsupported_permissions(&m), vec!["storage", "process", "sockets"]);
     }
 
     use std::io::Write;
