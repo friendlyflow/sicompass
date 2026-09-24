@@ -148,7 +148,7 @@ Ed25519 signing key must never sit in GPL client code).
 The backups themselves are the plugins'. Notes and project management are
 plugins now (`../notes_plugin_sicompass`, `../projectmanagement_plugin_sicompass`)
 and back up the way a third party's plugin would, with the `sicompass-payments`
-guest library (`../payments_plugin_sicompass`). The host gives a plugin two
+guest library (`sicompass-payments/` in `../sicompass-plugin-sdk`). The host gives a plugin two
 things through the `license` interface: where the user stands with a tier
 (`license.standing`), and the redeem token, only for the tier its `plugin.json`
 names as `service` (`license.token`, gated by `Grants::service_tier`).

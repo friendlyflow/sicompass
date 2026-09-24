@@ -37,11 +37,6 @@
       "kind": "plugin"
     },
     {
-      "name": "payments_plugin_sicompass",
-      "path": "../payments_plugin_sicompass",
-      "kind": "crate"
-    },
-    {
       "name": "notes_plugin_sicompass",
       "path": "../notes_plugin_sicompass",
       "kind": "plugin"

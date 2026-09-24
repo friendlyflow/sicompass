@@ -430,11 +430,70 @@ impl StoreProvider {
             .collect()
     }
 
+    /// Whether a program's data folder is here and holds anything. Never for a
+    /// built-in's name: that folder is the built-in's own.
+    fn has_data(&self, name: &str) -> bool {
+        let builtin = sicompass_sdk::builtin_manifests().iter().any(|m| {
+            m.name == name || m.display_name == name || m.display_name.replace(' ', "") == name
+        });
+        !builtin
+            && self
+                .data_dir
+                .as_ref()
+                .and_then(|d| std::fs::read_dir(d.join(name)).ok())
+                .is_some_and(|mut entries| entries.next().is_some())
+    }
+
+    /// Listed programs that are not installed but have data on this computer.
+    ///
+    /// Mostly the programs that used to ship with the app (notes, project
+    /// management) on a machine that used them: their plugin keeps its data in
+    /// the same folder, so installing it opens that data again. This is how the
+    /// user learns where they went.
+    fn waiting_data(&self, installed: &BTreeMap<String, Installed>) -> Vec<String> {
+        self.offers
+            .iter()
+            .filter(|o| o.entry.is_some() && !installed.contains_key(&o.name))
+            .filter(|o| self.has_data(&o.name))
+            .map(|o| o.name.clone())
+            .collect()
+    }
+
+    /// The names the store lists, without the network: the loaded list, or
+    /// before it is loaded the copy compiled into this version (a hint only,
+    /// so its signature is not the point here, and nothing is installed from
+    /// it).
+    fn listed_names(&self) -> Vec<String> {
+        match &self.loaded {
+            Some(Ok(l)) => l.store.plugins.iter().map(|e| e.name.clone()).collect(),
+            _ => serde_json::from_slice::<sicompass_sdk::store::Store>(source::COMPILED_STORE)
+                .map(|s| s.plugins.into_iter().map(|e| e.name).collect())
+                .unwrap_or_default(),
+        }
+    }
+
+    /// The top of the Store. A listed program with data here but not
+    /// installed is said above everything else. Still no network: the root
+    /// is what every tab shows.
     fn root(&self) -> Vec<FfonElement> {
-        vec![
-            FfonElement::new_obj(localize::t("store-programs")),
-            FfonElement::new_obj(localize::t("store-tiers")),
-        ]
+        let mut out = Vec::new();
+        let installed = self.installed();
+        let waiting: Vec<String> = self
+            .listed_names()
+            .into_iter()
+            .filter(|n| !installed.contains_key(n) && self.has_data(n))
+            .collect();
+        if !waiting.is_empty() {
+            let mut args = localize::Args::new();
+            args.set("names", waiting.join(", "));
+            out.push(FfonElement::new_str(localize::t_args(
+                "store-data-waiting-root",
+                &args,
+            )));
+        }
+        out.push(FfonElement::new_obj(localize::t("store-programs")));
+        out.push(FfonElement::new_obj(localize::t("store-tiers")));
+        out
     }
 
     fn programs(&mut self) -> Vec<FfonElement> {
@@ -462,9 +521,10 @@ impl StoreProvider {
             _ => {}
         }
         let installed = self.installed();
+        let waiting = self.waiting_data(&installed);
         // A plugin installed by hand is shown while it is installed, and after
         // an uninstall for as long as its data folder is on offer.
-        let shown: Vec<&Offer> = self
+        let mut shown: Vec<&Offer> = self
             .offers
             .iter()
             .filter(|o| {
@@ -473,6 +533,9 @@ impl StoreProvider {
                     || self.uninstalled.contains(&o.name)
             })
             .collect();
+        // Programs with data here but not installed come first, the ones the
+        // user is most likely looking for. Stable, so the rest keep their order.
+        shown.sort_by_key(|o| !waiting.contains(&o.name));
         if shown.is_empty() {
             out.push(FfonElement::new_str(localize::t("store-no-programs")));
         }
@@ -504,6 +567,9 @@ impl StoreProvider {
                     _ => localize::t_args("store-state-installed", &args),
                 }
             }
+            None if offer.entry.is_some() && self.has_data(&offer.name) => {
+                localize::t("store-state-data-waiting")
+            }
             None => localize::t("store-state-not-installed"),
         };
         format!("{}, {state}", offer.name)
@@ -523,6 +589,18 @@ impl StoreProvider {
             out.push(FfonElement::new_str(note.clone()));
         }
         if installed.is_none() {
+            // Data here, from a built-in of an earlier version or an install
+            // before this session: installing opens it again.
+            if offer.entry.is_some()
+                && self.data_folder(name).is_none()
+                && self.has_data(name)
+                && let Some(dir) = self.data_dir.as_ref().map(|d| d.join(name))
+            {
+                out.push(line(
+                    "store-data-waiting",
+                    &[("path", dir.display().to_string())],
+                ));
+            }
             if let Some(dir) = self.data_folder(name) {
                 if dir.is_dir() {
                     out.push(line(

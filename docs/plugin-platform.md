@@ -563,8 +563,8 @@ the tiers list where the page was); the usage lines under the tiers; the
 Checked against a local server by hand (see each file's header): the
 certificates per tier, Commercial including Cloud and grace on the client in
 `lib/lib_store/tests/live_server.rs`, and grace on the server, usage and a
-support licence refused for backup in `payments_plugin_sicompass`'s
-`tests/live_server.rs`.
+support licence refused for backup in `sicompass-plugin-sdk`'s
+`sicompass-payments/tests/live_server.rs`.
 
 ## 11. Host changes in sicompass
 
@@ -648,14 +648,18 @@ rows are an app feature regardless; `tests/links.rs` follows one end to end.
 
 **Step 7 (2026-09-24):** plugins do their own cloud backup, the way a third
 party's would. The `sicompass-payments` guest library
-(`payments_plugin_sicompass`) holds the snapshot format, the backup protocol
+(`sicompass-payments/` in the SDK repo) holds the snapshot format, the backup protocol
 over a plugin's `net`, the debounce, and `cloud::Cloud`, the service as a
 plugin runs it (switch, row, uploads and restores as background tasks). The
 host adds `license.standing` and `license.token`, the token only for the tier a
 manifest names as its `service`. Notes and project management became
 `notes_plugin_sicompass` and `projectmanagement_plugin_sicompass`, with
 `storage` mapped to the folders the built-ins used, so existing notes and
-boards open unchanged, and settings sections that keep their names. The backup
+boards open unchanged, and settings sections that keep their names. A user
+who had them learns where they went from the Store: a listed program that is
+not installed but has data here is named at the top of the Store (from the
+compiled list, so without the network), comes first in programs with "your
+data for it is on this computer", and says that installing opens it again. The backup
 row no longer links to a tier page: it says where the user stands and points to
 store, tiers. What was left of `lib_payments` became `lib_store`'s `payments`
 module, and the Store asks `GET /usage` itself. The integration tests that

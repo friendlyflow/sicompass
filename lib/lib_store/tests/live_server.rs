@@ -3,7 +3,7 @@
 //! Ignored by default: they need a server running, which `cargo test` must not
 //! depend on. Run them by hand after changing either side of the wire. The
 //! backup half of these checks moved with the backup protocol to the
-//! `sicompass-payments` guest library (`payments_plugin_sicompass`).
+//! `sicompass-payments` guest library (`sicompass-payments/` in the SDK repo).
 //!
 //! ```sh
 //! # in the server repo
@@ -112,7 +112,7 @@ fn cloud_and_commercial_certificates_map_onto_their_tiers() {
 
 /// Three days past expiry the client counts a Cloud certificate as in grace;
 /// fifteen days past, as expired. (The server side of the same rule is checked
-/// with the backup protocol, in `payments_plugin_sicompass`.)
+/// with the backup protocol, in the SDK repo's `sicompass-payments/`.)
 #[test]
 #[ignore = "needs a running license server"]
 fn the_grace_period_holds_on_the_client() {

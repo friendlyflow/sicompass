@@ -655,6 +655,77 @@ fn the_root_does_not_touch_the_network() {
     assert_eq!(received.map(|r| r.len()), Some(0));
 }
 
+/// Notes and project management used to come with the app. A user who had
+/// them has their data folder but not the plugin, and the Store is where they
+/// learn that installing opens it again: at the top, before anything loads.
+#[test]
+fn the_root_points_out_programs_whose_data_is_here_without_the_network() {
+    let (server, keys) = (Server::start(), keys());
+    let mut h = harness(&server, &keys);
+    std::fs::create_dir_all(h.data.path().join("notes")).unwrap();
+    std::fs::write(h.data.path().join("notes/0001"), "Groceries").unwrap();
+
+    let root = lines(h.store.fetch());
+    assert!(root[0].contains("notes"), "{root:?}");
+    assert_eq!(
+        root[1..],
+        [localize::t("store-programs"), localize::t("store-tiers")]
+    );
+    // Only the one with data: project management was never used here.
+    assert!(!root[0].contains("projectmanagement"), "{root:?}");
+    let received = server.rt.block_on(server.server.received_requests());
+    assert_eq!(received.map(|r| r.len()), Some(0));
+}
+
+/// An empty data folder is nothing to point out.
+#[test]
+fn an_empty_data_folder_is_not_pointed_out() {
+    let (server, keys) = (Server::start(), keys());
+    let mut h = harness(&server, &keys);
+    std::fs::create_dir_all(h.data.path().join("notes")).unwrap();
+    let root = lines(h.store.fetch());
+    assert_eq!(
+        root,
+        vec![localize::t("store-programs"), localize::t("store-tiers")]
+    );
+}
+
+/// In the list, the program with data here says so in its row, comes first,
+/// and says inside that installing opens the data again. Once installed, the
+/// Store stops pointing.
+#[test]
+fn a_program_whose_data_is_here_says_so_until_it_is_installed() {
+    let (server, keys) = (Server::start(), keys());
+    server.serve_store(&keys, &keys.store_secret, &[]);
+    server.serve_release(&release(&keys, "1.0.0", r#""storage": true"#));
+    let mut h = harness(&server, &keys);
+    std::fs::create_dir_all(h.data.path().join("demo")).unwrap();
+    std::fs::write(h.data.path().join("demo/0001"), "kept").unwrap();
+
+    let list = h.open_programs();
+    let waiting = localize::t("store-state-data-waiting");
+    assert!(has(&list, &format!("demo, {waiting}")), "{list:?}");
+    let entry = h.entry();
+    let path = h.data.path().join("demo").display().to_string();
+    assert!(
+        has(&entry, &t_with("store-data-waiting", &[("path", &path)])),
+        "{entry:?}"
+    );
+    // Never offered for the trash: nothing was uninstalled.
+    assert!(!has(&entry, "<button>trashdata:"), "{entry:?}");
+    h.store.set_current_path("/");
+    assert!(lines(h.store.fetch())[0].contains("demo"));
+
+    h.store.set_current_path("/programs");
+    h.press("install:demo");
+    assert_eq!(h.installed_version().as_deref(), Some("1.0.0"));
+    h.store.set_current_path("/");
+    assert_eq!(
+        lines(h.store.fetch()),
+        vec![localize::t("store-programs"), localize::t("store-tiers")]
+    );
+}
+
 #[test]
 fn every_locale_has_every_key() {
     let keys_of = |src: &str| -> std::collections::BTreeSet<String> {

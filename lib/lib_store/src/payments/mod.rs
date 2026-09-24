@@ -3,7 +3,7 @@
 //! It was the `sicompass-payments` crate, shared with the built-in notes and
 //! board for their cloud backup. Those are plugins now, which back up
 //! themselves through the `sicompass-payments` guest library
-//! (`payments_plugin_sicompass`) and learn where the user stands through the
+//! (`sicompass-payments/` in the SDK repo) and learn where the user stands through the
 //! host's `license` interface, so what is left here is only what the app does:
 //!
 //! - [`cert`] — the license certificate: schema, offline Ed25519 verification,
