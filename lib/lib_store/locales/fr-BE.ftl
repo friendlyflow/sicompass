@@ -24,6 +24,7 @@ store-access-hosts = Accès : se connecte à { $list }
 store-access-files = Accès : lit et écrit vos fichiers dans { $list }
 store-access-programs = Accès : lance { $list }
 store-access-sockets = Accès : se connecte à { $list }
+store-access-any-server-ports = Accès : se connecte à n'importe quel serveur sur Internet sur le port { $list }, jamais à votre ordinateur ni à votre réseau local
 store-uses-service = Utilise un service payant : { $tier }
 store-paid-features = A ses propres fonctions payantes
 store-needs-app = Nécessite sicompass { $version } ou plus récent

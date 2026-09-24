@@ -4495,7 +4495,6 @@ dependencies = [
  "serde",
  "serde_json",
  "sicompass-builtins",
- "sicompass-chatclient",
  "sicompass-emailclient",
  "sicompass-sdk",
  "sicompass-settings",
@@ -4525,27 +4524,12 @@ dependencies = [
 name = "sicompass-builtins"
 version = "0.1.21"
 dependencies = [
- "sicompass-chatclient",
  "sicompass-emailclient",
  "sicompass-sdk",
  "sicompass-settings",
  "sicompass-store",
  "sicompass-tutorial",
  "sicompass-webbrowser",
-]
-
-[[package]]
-name = "sicompass-chatclient"
-version = "0.1.21"
-dependencies = [
- "async-trait",
- "reqwest",
- "serde",
- "serde_json",
- "sicompass-sdk",
- "tempfile",
- "tokio",
- "wiremock",
 ]
 
 [[package]]
@@ -4572,7 +4556,7 @@ dependencies = [
 [[package]]
 name = "sicompass-sdk"
 version = "0.8.0"
-source = "git+https://github.com/friendlyflow/sicompass-plugin-sdk?rev=ee8da2906073c5f29e9f7004c9ba13c6645e0d15#ee8da2906073c5f29e9f7004c9ba13c6645e0d15"
+source = "git+https://github.com/friendlyflow/sicompass-plugin-sdk?rev=4d71b14688f8fb8dae6159fb0a7819d5c397f66e#4d71b14688f8fb8dae6159fb0a7819d5c397f66e"
 dependencies = [
  "async-trait",
  "base64 0.23.1",

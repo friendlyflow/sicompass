@@ -1,6 +1,12 @@
 # Chat-client provider strings — Belgian German (Eastern Cantons).
 
 chatclient-display-name = Chat-Client
+chatclient-description = Matrix-Chat als Liste: Ihre Räume, deren Nachrichten und Mitglieder. Melden Sie sich beim Homeserver Ihrer Wahl an, und schreiben Sie mit i.
+chatclient-setting-homeserver = Homeserver-URL
+chatclient-setting-access-token = Zugriffstoken
+chatclient-setting-username = Benutzername
+chatclient-setting-password = Passwort
+chatclient-setting-email = E-Mail
 
 # Error messages — de-BE
 

@@ -2601,38 +2601,4 @@ mod tests {
         );
     }
 
-    #[test]
-    fn hot_enable_chat_client_registers_settings() {
-        let ffon = settings_ffon_after_enable("chat client");
-        let children =
-            section_children(&ffon, "chat client").expect("chat client section should be present");
-        assert!(
-            !children.iter().any(|e| e.as_str() == Some("no settings")),
-            "chat client section should not show 'no settings'"
-        );
-        // 5 editable entries; two (access token, password) are masked.
-        let editable: Vec<_> = children
-            .iter()
-            .filter_map(|e| e.as_str())
-            .filter(|s| s.contains("<input>") || s.contains("<password>"))
-            .collect();
-        assert_eq!(
-            editable.len(),
-            5,
-            "expected 5 editable settings, got {}: {:?}",
-            editable.len(),
-            editable
-        );
-        let masked: Vec<_> = editable
-            .iter()
-            .filter(|s| s.contains("<password>"))
-            .collect();
-        assert_eq!(
-            masked.len(),
-            2,
-            "expected 2 masked (password) settings, got {:?}",
-            masked
-        );
-    }
-
 }

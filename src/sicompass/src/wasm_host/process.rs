@@ -43,6 +43,10 @@ pub struct ProcessChild {
     out: Arc<Mutex<Vec<u8>>>,
     err: Arc<Mutex<Vec<u8>>>,
     writer: Option<Box<dyn Write + Send>>,
+    /// What the program wrote to its channel (fd 4), with `spawn-with-channel`.
+    chan_out: Arc<Mutex<Vec<u8>>>,
+    /// Its channel's other end (fd 3), with `spawn-with-channel`.
+    chan_in: Option<Box<dyn Write + Send>>,
     kind: Kind,
     /// Reader threads still copying output into `out` and `err`.
     open: Arc<AtomicUsize>,
@@ -309,6 +313,55 @@ fn is_executable(p: &std::path::Path) -> bool {
     p.is_file()
 }
 
+/// The two pipes of a message channel, before and after the program starts.
+struct Channel {
+    /// Becomes the program's fd 3.
+    child_reads: std::io::PipeReader,
+    /// Becomes the program's fd 4.
+    child_writes: std::io::PipeWriter,
+    /// The host writes here (`channel-write`).
+    to_child: std::io::PipeWriter,
+    /// The host reads here (`channel-read`).
+    from_child: std::io::PipeReader,
+}
+
+/// Give `cmd` a message channel on fds 3 (it reads) and 4 (it writes).
+#[cfg(unix)]
+fn attach_channel(cmd: &mut std::process::Command) -> Result<Channel, String> {
+    use std::os::fd::AsRawFd;
+    use std::os::unix::process::CommandExt;
+    let (child_reads, to_child) = std::io::pipe().map_err(|e| e.to_string())?;
+    let (from_child, child_writes) = std::io::pipe().map_err(|e| e.to_string())?;
+    let (r, w) = (child_reads.as_raw_fd(), child_writes.as_raw_fd());
+    // SAFETY: runs in the forked child before exec, and calls only fcntl, dup2
+    // and close, which are async-signal-safe. The pipes are close-on-exec, so
+    // only the copies on 3 and 4 (dup2 clears the flag) reach the program. The
+    // copies above 10 first keep a pipe that happens to sit on 3 or 4 from
+    // being overwritten by the other.
+    unsafe {
+        cmd.pre_exec(move || {
+            let (a, b) = (libc::fcntl(r, libc::F_DUPFD, 10), libc::fcntl(w, libc::F_DUPFD, 10));
+            if a < 0 || b < 0 || libc::dup2(a, 3) < 0 || libc::dup2(b, 4) < 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            libc::close(a);
+            libc::close(b);
+            Ok(())
+        });
+    }
+    Ok(Channel {
+        child_reads,
+        child_writes,
+        to_child,
+        from_child,
+    })
+}
+
+#[cfg(not(unix))]
+fn attach_channel(_cmd: &mut std::process::Command) -> Result<Channel, String> {
+    Err("a program with a message channel needs a Unix system".to_owned())
+}
+
 impl HostState {
     fn start(
         &self,
@@ -318,6 +371,32 @@ impl HostState {
         env: &[(String, String)],
         unset: &[String],
         pty: Option<wit::process::PtySize>,
+    ) -> Result<ProcessChild, String> {
+        self.launch(program, args, cwd, env, unset, pty, false)
+    }
+
+    /// `start` on pipes, with the message channel on fds 3 and 4.
+    fn start_with_channel(
+        &self,
+        program: &str,
+        args: &[String],
+        cwd: Option<&str>,
+        env: &[(String, String)],
+        unset: &[String],
+    ) -> Result<ProcessChild, String> {
+        self.launch(program, args, cwd, env, unset, None, true)
+    }
+
+    #[allow(clippy::too_many_arguments)] // `start`'s arguments, and how to connect them
+    fn launch(
+        &self,
+        program: &str,
+        args: &[String],
+        cwd: Option<&str>,
+        env: &[(String, String)],
+        unset: &[String],
+        pty: Option<wit::process::PtySize>,
+        channel: bool,
     ) -> Result<ProcessChild, String> {
         let exe = resolve_program(program, &self.process_allowed)?;
         let dir = match cwd {
@@ -332,6 +411,7 @@ impl HostState {
         };
         let out = Arc::new(Mutex::new(Vec::new()));
         let err = Arc::new(Mutex::new(Vec::new()));
+        let chan_out = Arc::new(Mutex::new(Vec::new()));
         let open = Arc::new(AtomicUsize::new(0));
 
         if let Some(size) = pty {
@@ -364,6 +444,8 @@ impl HostState {
                 out,
                 err,
                 writer: Some(writer),
+                chan_out,
+                chan_in: None,
                 kind: Kind::Pty {
                     master: pair.master,
                     child,
@@ -377,6 +459,11 @@ impl HostState {
         for k in unset {
             cmd.env_remove(k);
         }
+        let chan = if channel {
+            Some(attach_channel(&mut cmd)?)
+        } else {
+            None
+        };
         let mut child = cmd
             .args(args)
             .current_dir(&dir)
@@ -393,10 +480,19 @@ impl HostState {
             pump(stderr, err.clone(), &open, "stderr");
         }
         let writer = child.stdin.take().map(|s| Box::new(s) as Box<dyn Write + Send>);
+        let chan_in = chan.map(|c| {
+            // The program's ends are its own now.
+            drop(c.child_reads);
+            drop(c.child_writes);
+            pump(c.from_child, chan_out.clone(), &open, "channel");
+            Box::new(c.to_child) as Box<dyn Write + Send>
+        });
         Ok(ProcessChild {
             out,
             err,
             writer,
+            chan_out,
+            chan_in,
             kind: Kind::Pipes(child),
             open,
             exited: None,
@@ -431,6 +527,33 @@ impl wit::process::HostChild for HostState {
             self.child_pids.push((r.rep(), pid));
         }
         Ok(r)
+    }
+
+    fn spawn_with_channel(
+        &mut self,
+        program: String,
+        args: Vec<String>,
+        cwd: Option<String>,
+        env: Vec<(String, String)>,
+        unset: Vec<String>,
+    ) -> Result<Resource<ProcessChild>, String> {
+        let child = self.start_with_channel(&program, &args, cwd.as_deref(), &env, &unset)?;
+        let pid = child.pid();
+        let r = self.table.push(child).map_err(|e| e.to_string())?;
+        if let Some(pid) = pid {
+            self.child_pids.push((r.rep(), pid));
+        }
+        Ok(r)
+    }
+
+    fn channel_read(&mut self, r: Resource<ProcessChild>, max: u32) -> Vec<u8> {
+        self.child(&r).map(|c| take(&c.chan_out, max)).unwrap_or_default()
+    }
+
+    fn channel_write(&mut self, r: Resource<ProcessChild>, bytes: Vec<u8>) -> Result<(), String> {
+        let c = self.child(&r).ok_or("the program has gone")?;
+        let w = c.chan_in.as_mut().ok_or("the program has no channel")?;
+        w.write_all(&bytes).and_then(|_| w.flush()).map_err(|e| e.to_string())
     }
 
     fn read(&mut self, r: Resource<ProcessChild>, max: u32) -> Vec<u8> {
@@ -656,6 +779,50 @@ mod tests {
         let sh = s.which("sh".to_owned()).unwrap();
         assert!(std::path::Path::new(&sh).is_absolute(), "{sh}");
         assert!(s.which("rm".to_owned()).unwrap_err().contains("not among"));
+    }
+
+    /// What the program writes to fd 4 comes back through the channel, and
+    /// what the host sends arrives on its fd 3: Chrome's pipe convention.
+    #[cfg(unix)]
+    #[test]
+    fn a_channel_carries_messages_both_ways_on_fds_3_and_4() {
+        let mut s = HostState::new("demo", "demo", "/tmp/sicompass-test-plugin", Vec::new());
+        s.process_allowed = allowed(&["sh"]);
+        // Echo one line from fd 3 to fd 4, upper-cased, then say so on stdout.
+        let script = "read line <&3; printf '%s\\n' \"$line\" | tr a-z A-Z >&4; echo done";
+        let mut child = s
+            .start_with_channel("sh", &["-c".to_owned(), script.to_owned()], None, &[], &[])
+            .unwrap();
+        let w = child.chan_in.as_mut().unwrap();
+        w.write_all(b"{\"id\":1}\n").unwrap();
+        w.flush().unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while child.try_wait().is_none() {
+            assert!(Instant::now() < deadline, "the program never finished");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(take(&child.chan_out, u32::MAX), b"{\"ID\":1}\n");
+        assert_eq!(take(&child.out, u32::MAX), b"done\n");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn without_a_channel_fds_3_and_4_are_closed() {
+        let mut s = HostState::new("demo", "demo", "/tmp/sicompass-test-plugin", Vec::new());
+        s.process_allowed = allowed(&["sh"]);
+        let script = "if [ -e /proc/self/fd/3 ] || [ -e /proc/self/fd/4 ]; then echo open; else echo closed; fi";
+        let mut child = s
+            .start("sh", &["-c".to_owned(), script.to_owned()], None, &[], &[], None)
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while child.try_wait().is_none() {
+            assert!(Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        if cfg!(target_os = "linux") {
+            assert_eq!(take(&child.out, u32::MAX), b"closed\n");
+        }
+        assert!(child.chan_in.is_none());
     }
 
     #[test]

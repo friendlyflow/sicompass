@@ -966,3 +966,32 @@ fn any_server_is_said_plainly_and_never_as_a_star() {
         "{entry:?}"
     );
 }
+
+#[test]
+fn any_server_on_a_port_is_said_plainly_and_never_as_a_star() {
+    let (server, keys) = (Server::start(), keys());
+    server.serve_store(&keys, &keys.store_secret, &[]);
+    server.serve_release(&release(
+        &keys,
+        "1.0.0",
+        r#""sockets": ["*:993", "*:465", "imap.example.org:143"]"#,
+    ));
+    let mut h = harness(&server, &keys);
+    h.open_programs();
+    let entry = h.entry();
+    assert!(
+        has(
+            &entry,
+            &t_with("store-access-any-server-ports", &[("list", "993, 465")])
+        ),
+        "{entry:?}"
+    );
+    assert!(
+        has(
+            &entry,
+            &t_with("store-access-sockets", &[("list", "imap.example.org:143")])
+        ),
+        "{entry:?}"
+    );
+    assert!(!entry.iter().any(|l| l.contains('*')), "{entry:?}");
+}

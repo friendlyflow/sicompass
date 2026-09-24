@@ -7,6 +7,11 @@
 //! address one of the approved names resolves to, on that name's port. Listed
 //! endpoints may be local (a mail bridge on `localhost` is a real use); the user
 //! approved them by name.
+//!
+//! `*:<port>` is any public server on that port, for a plugin whose servers the
+//! user types in (a mail client). Internal addresses stay out of reach there:
+//! a name is resolved first and only its public addresses are answered, so a
+//! name pointing inward gets nowhere either.
 
 use std::net::{SocketAddr, ToSocketAddrs};
 
@@ -37,10 +42,15 @@ impl Endpoints {
         Ok(Endpoints(out))
     }
 
-    /// Whether `host:port` is one of the approved endpoints.
+    /// Whether `host:port` is one of the approved endpoints, by name.
     pub fn lists(&self, host: &str, port: u16) -> bool {
         let host = host.to_ascii_lowercase();
         self.0.iter().any(|(h, p)| *h == host && *p == port)
+    }
+
+    /// Whether any public server may be reached on `port` (`*:<port>`).
+    pub fn any_on(&self, port: u16) -> bool {
+        self.0.iter().any(|(h, p)| h == ANY_HOST && *p == port)
     }
 
     /// The host's socket check. A connection only to a resolved approved
@@ -48,22 +58,35 @@ impl Endpoints {
     /// no listening, no accepting, no UDP.
     pub fn permits(&self, addr: SocketAddr, usage: SocketAddrUse) -> bool {
         match usage {
-            SocketAddrUse::TcpConnect => self.0.iter().any(|(h, p)| {
-                *p == addr.port()
-                    && (h.as_str(), *p)
-                        .to_socket_addrs()
-                        .is_ok_and(|mut it| it.any(|a| a.ip() == addr.ip()))
-            }),
+            SocketAddrUse::TcpConnect => {
+                (self.any_on(addr.port()) && !is_internal(addr.ip()))
+                    || self.0.iter().any(|(h, p)| {
+                        h != ANY_HOST
+                            && *p == addr.port()
+                            && (h.as_str(), *p)
+                                .to_socket_addrs()
+                                .is_ok_and(|mut it| it.any(|a| a.ip() == addr.ip()))
+                    })
+            }
             SocketAddrUse::TcpBind => addr.ip().is_unspecified() && addr.port() == 0,
             _ => false,
         }
     }
 }
 
+/// The host part of an entry meaning any public server.
+const ANY_HOST: &str = "*";
+
+/// Whether `ip` is inside the machine or its network.
+fn is_internal(ip: std::net::IpAddr) -> bool {
+    super::host_fetch::is_internal_host(&ip.to_string())
+}
+
 impl wit::sockets::Host for HostState {
     fn resolve(&mut self, host: String, port: u16) -> Result<Vec<String>, String> {
         let endpoints = Endpoints::parse(&self.sockets_allowed)?;
-        if !endpoints.lists(&host, port) {
+        let named = endpoints.lists(&host, port);
+        if !named && !endpoints.any_on(port) {
             return Err(format!(
                 "`{host}:{port}` is not among the connections this plugin may open"
             ));
@@ -71,6 +94,8 @@ impl wit::sockets::Host for HostState {
         let addrs: Vec<String> = (host.as_str(), port)
             .to_socket_addrs()
             .map_err(|e| format!("{host}: {e}"))?
+            // Reached only as "any server": its internal addresses are not.
+            .filter(|a| named || !is_internal(a.ip()))
             .map(|a| a.ip().to_string())
             .collect();
         if addrs.is_empty() {
@@ -104,6 +129,33 @@ mod tests {
         assert!(!e.permits("0.0.0.0:8080".parse().unwrap(), SocketAddrUse::TcpBind));
         assert!(!e.permits("127.0.0.1:993".parse().unwrap(), SocketAddrUse::TcpListen));
         assert!(!e.permits("127.0.0.1:993".parse().unwrap(), SocketAddrUse::UdpBind));
+    }
+
+    #[test]
+    fn any_server_on_a_port_is_public_servers_on_that_port_only() {
+        let e = ep(&["*:993"]);
+        assert!(e.any_on(993) && !e.any_on(994));
+        assert!(e.permits("93.184.215.14:993".parse().unwrap(), SocketAddrUse::TcpConnect));
+        assert!(!e.permits("93.184.215.14:994".parse().unwrap(), SocketAddrUse::TcpConnect));
+        for inside in ["127.0.0.1:993", "10.0.0.1:993", "192.168.1.2:993", "[::1]:993"] {
+            assert!(
+                !e.permits(inside.parse().unwrap(), SocketAddrUse::TcpConnect),
+                "{inside} is internal"
+            );
+        }
+    }
+
+    #[test]
+    fn resolving_for_any_server_answers_no_internal_address() {
+        let mut s = HostState::new("demo", "demo", "/tmp/sicompass-test-plugin", Vec::new());
+        s.sockets_allowed = vec!["*:993".to_owned()];
+        use wit::sockets::Host;
+        let err = s.resolve("localhost".to_owned(), 993).unwrap_err();
+        assert!(err.contains("no address"), "{err}");
+        assert!(s.resolve("localhost".to_owned(), 25).is_err(), "not that port");
+        // A listed name keeps its internal addresses: the user approved it.
+        s.sockets_allowed = vec!["localhost:993".to_owned()];
+        assert!(!s.resolve("localhost".to_owned(), 993).unwrap().is_empty());
     }
 
     #[test]

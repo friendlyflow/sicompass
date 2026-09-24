@@ -420,7 +420,6 @@ sicompass-webbrowser = { workspace = true }
 # Only to switch network access off for the test binary — see
 # `ensure_builtins`. Without it a fixture repository with a remote configured
 # would have these tests contacting it.
-sicompass-chatclient = { workspace = true }
 sicompass-emailclient = { workspace = true }
 mockall = { workspace = true }
 tempfile = { workspace = true }

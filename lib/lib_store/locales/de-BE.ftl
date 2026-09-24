@@ -24,6 +24,7 @@ store-access-hosts = Zugriff: verbindet sich mit { $list }
 store-access-files = Zugriff: liest und schreibt Ihre Dateien in { $list }
 store-access-programs = Zugriff: startet { $list }
 store-access-sockets = Zugriff: verbindet sich mit { $list }
+store-access-any-server-ports = Zugriff: verbindet sich mit jedem Server im Internet auf Port { $list }, nie mit Ihrem eigenen Computer oder lokalen Netzwerk
 store-uses-service = Nutzt einen kostenpflichtigen Dienst: { $tier }
 store-paid-features = Hat eigene kostenpflichtige Funktionen
 store-needs-app = Braucht sicompass { $version } oder neuer

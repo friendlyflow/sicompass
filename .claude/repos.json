@@ -70,6 +70,11 @@
       "name": "claude_plugin_sicompass",
       "path": "../claude_plugin_sicompass",
       "kind": "plugin"
+    },
+    {
+      "name": "chatclient_plugin_sicompass",
+      "path": "../chatclient_plugin_sicompass",
+      "kind": "plugin"
     }
   ]
 }

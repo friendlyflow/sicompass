@@ -449,6 +449,25 @@ interface desktop {
   /// `mailto` only.
   open-url: func(url: string) -> result<_, string>;
 
+  /// What a browser sign-in came back with.
+  record oauth-reply {
+    /// The redirect URI the sign-in used, which the token request repeats.
+    redirect-uri: string,
+    /// The query the provider redirected with: `code=...&state=...`, or an
+    /// `error=...`. Still percent-encoded.
+    query: string,
+  }
+
+  /// Sign in through the user's browser, the way a desktop app does OAuth 2
+  /// (RFC 8252): the host listens once on a loopback port, opens `auth-url`
+  /// (`https` only) with every `{redirect-uri}` in it replaced by
+  /// `http://127.0.0.1:<port>`, percent-encoded, and waits for the browser to
+  /// come back, `timeout-secs` at most. A plugin never listens itself.
+  ///
+  /// It waits, so it is refused outside a task (`tasks.spawn`), and cancelling
+  /// that task ends the wait.
+  oauth-redirect: func(auth-url: string, timeout-secs: u32) -> result<oauth-reply, string>;
+
   /// Open a file with the application the user's desktop associates with it.
   open-path: func(path: string) -> result<_, string>;
 
@@ -575,9 +594,29 @@ interface process {
       pty: option<pty-size>,
     ) -> result<child, string>;
 
+    /// `spawn` on pipes, plus a private message channel: the program reads
+    /// what `channel-write` sends on file descriptor 3, and what it writes to
+    /// file descriptor 4 is what `channel-read` returns. That is Chrome's
+    /// `--remote-debugging-pipe`, which lets a plugin drive a browser with no
+    /// network port anything else on the machine could reach. Unix only.
+    spawn-with-channel: static func(
+      program: string,
+      args: list<string>,
+      cwd: option<string>,
+      env: list<tuple<string, string>>,
+      unset: list<string>,
+    ) -> result<child, string>;
+
     /// Up to `max` bytes of output so far (the PTY, or stdout). Never blocks;
     /// empty when there is nothing new.
     read: func(max: u32) -> list<u8>;
+
+    /// Up to `max` bytes the program wrote to its channel so far (see
+    /// `spawn-with-channel`). Never blocks. Always empty without a channel.
+    channel-read: func(max: u32) -> list<u8>;
+
+    /// Send bytes to the program's channel.
+    channel-write: func(bytes: list<u8>) -> result<_, string>;
 
     /// Up to `max` bytes of stderr so far. Always empty with a PTY.
     read-stderr: func(max: u32) -> list<u8>;

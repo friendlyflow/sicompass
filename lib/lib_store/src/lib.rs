@@ -123,7 +123,7 @@ enum Job {
 
 /// The programs that came with sicompass until 0.2.0 and are plugins in the
 /// store now, with the settings section each one had (its `displayName`).
-const CAME_WITH_THE_APP: [(&str, &str); 7] = [
+const CAME_WITH_THE_APP: [(&str, &str); 8] = [
     ("filebrowser", "file browser"),
     ("texteditor", "text editor"),
     ("notes", "notes"),
@@ -131,6 +131,7 @@ const CAME_WITH_THE_APP: [(&str, &str); 7] = [
     ("gitclient", "git client"),
     ("terminal", "terminal"),
     ("claude", "claude"),
+    ("chatclient", "chat client"),
 ];
 
 pub struct StoreProvider {
@@ -775,7 +776,15 @@ fn access_lines(release: &ReleaseInfo) -> Vec<String> {
     add("store-access-hosts", &named);
     add("store-access-files", &p.filesystem);
     add("store-access-programs", &p.process);
-    add("store-access-sockets", &p.sockets);
+    // `*:<port>` is any public server on that port (a mail client's).
+    let (any_ports, socket_hosts): (Vec<String>, Vec<String>) =
+        p.sockets.iter().cloned().partition(|e| e.trim().starts_with("*:"));
+    add("store-access-sockets", &socket_hosts);
+    let ports: Vec<String> = any_ports
+        .iter()
+        .map(|e| e.trim().trim_start_matches("*:").to_owned())
+        .collect();
+    add("store-access-any-server-ports", &ports);
     if out.is_empty() {
         out.push(localize::t(if p.storage {
             "store-access-own-folder"

@@ -4,7 +4,6 @@ members = [
     "lib/lib_settings",
     "lib/lib_store",
     "lib/lib_webbrowser",
-    "lib/lib_chatclient",
     "lib/lib_emailclient",
     "lib/lib_builtins",
     "lib/lib_updater",
@@ -46,7 +45,6 @@ sicompass-tutorial = { path = "lib/lib_tutorial" }
 sicompass-settings = { path = "lib/lib_settings" }
 sicompass-store = { path = "lib/lib_store" }
 sicompass-webbrowser = { path = "lib/lib_webbrowser" }
-sicompass-chatclient = { path = "lib/lib_chatclient" }
 sicompass-emailclient = { path = "lib/lib_emailclient" }
 sicompass-builtins = { path = "lib/lib_builtins" }
 sicompass-updater = { path = "lib/lib_updater" }
@@ -207,7 +205,7 @@ wiremock = "0.6"
 # unreleased, so it still satisfies the `0.8.0` requirements. Remove this block
 # when the pins move to the published 0.9.0.
 [patch.crates-io]
-sicompass-sdk = { git = "https://github.com/friendlyflow/sicompass-plugin-sdk", rev = "ee8da2906073c5f29e9f7004c9ba13c6645e0d15" }
+sicompass-sdk = { git = "https://github.com/friendlyflow/sicompass-plugin-sdk", rev = "4d71b14688f8fb8dae6159fb0a7819d5c397f66e" }
 #
 # The same rule, for working on the renderer and the app together:
 #

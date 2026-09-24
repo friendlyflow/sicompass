@@ -25,7 +25,6 @@ pub fn register_all() {
     REGISTERED.get_or_init(|| {
         sicompass_tutorial::register();
         sicompass_webbrowser::register();
-        sicompass_chatclient::register();
         sicompass_emailclient::register();
         sicompass_settings::register();
         sicompass_store::register();
@@ -47,13 +46,6 @@ mod tests {
         register_all();
         let p = sicompass_sdk::create_provider_by_name("tutorial");
         assert!(p.is_some(), "tutorial factory should be registered");
-    }
-
-    #[test]
-    fn chatclient_factory_is_registered() {
-        register_all();
-        let p = sicompass_sdk::create_provider_by_name("chatclient");
-        assert!(p.is_some(), "chatclient factory should be registered");
     }
 
     #[test]

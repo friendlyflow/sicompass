@@ -24,6 +24,7 @@ store-access-hosts = Access: connects to { $list }
 store-access-files = Access: reads and writes your files in { $list }
 store-access-programs = Access: runs { $list }
 store-access-sockets = Access: connects to { $list }
+store-access-any-server-ports = Access: connects to any server on the internet on port { $list }, never to your own computer or local network
 store-uses-service = Uses a paid service: { $tier }
 store-paid-features = Has paid features of its own
 store-needs-app = Needs sicompass { $version } or newer

@@ -31,6 +31,10 @@ use super::sicompass::plugin as wit;
 static TEST_NO_TRASH: AtomicBool = AtomicBool::new(cfg!(test));
 static TEST_NO_OPEN: AtomicBool = AtomicBool::new(cfg!(test));
 static RECORDED: Mutex<Vec<String>> = Mutex::new(Vec::new());
+/// Under `TEST_NO_OPEN`, the sign-in URLs `oauth-redirect` would have opened:
+/// a list of their own, so a test can find its port while other tests drain
+/// [`RECORDED`].
+static SIGN_INS: Mutex<Vec<String>> = Mutex::new(Vec::new());
 static TEST_TRASH: Mutex<Vec<(PathBuf, PathBuf)>> = Mutex::new(Vec::new());
 
 /// Test hook: trash into a private temp directory instead of the OS trash.
@@ -243,7 +247,119 @@ impl HostState {
     }
 }
 
+/// How often the sign-in wait looks at the listener and the task's cancel flag.
+const OAUTH_POLL: std::time::Duration = std::time::Duration::from_millis(50);
+
+/// The longest a sign-in may wait for the browser.
+const OAUTH_MAX_SECS: u32 = 600;
+
+/// Percent-encode for a URL query value (RFC 3986 unreserved kept).
+fn percent_encode(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for b in s.bytes() {
+        if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b'_' | b'~') {
+            out.push(b as char);
+        } else {
+            out.push_str(&format!("%{b:02X}"));
+        }
+    }
+    out
+}
+
+/// The query of the request line `GET /?query HTTP/1.1`, if it has one.
+fn request_query(request: &str) -> Option<String> {
+    let target = request.lines().next()?.split_whitespace().nth(1)?;
+    target.split_once('?').map(|(_, q)| q.to_owned())
+}
+
+/// Wait on `listener` for the browser's redirect, answering it with a page the
+/// user can close. A request without a query (a favicon) is answered and
+/// waited past.
+fn await_redirect(
+    listener: &std::net::TcpListener,
+    deadline: std::time::Instant,
+    cancel: Option<&std::sync::atomic::AtomicBool>,
+) -> Result<String, String> {
+    use std::io::{Read, Write};
+    loop {
+        if cancel.is_some_and(|c| c.load(Ordering::Acquire)) {
+            return Err("sign-in cancelled".to_owned());
+        }
+        if std::time::Instant::now() > deadline {
+            return Err("the sign-in timed out".to_owned());
+        }
+        match listener.accept() {
+            Ok((mut stream, _)) => {
+                let _ = stream.set_nonblocking(false);
+                let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(5)));
+                let mut buf = [0u8; 8192];
+                let n = stream.read(&mut buf).unwrap_or(0);
+                let request = String::from_utf8_lossy(&buf[..n]);
+                let Some(query) = request_query(&request) else {
+                    let _ = stream.write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n");
+                    continue;
+                };
+                let failed = query.split('&').any(|kv| kv.starts_with("error="));
+                let (status, text) = if failed {
+                    ("400 Bad Request", "Sign-in failed.")
+                } else {
+                    ("200 OK", "Signed in.")
+                };
+                let body = format!(
+                    "<html><body><h2>{text}</h2><p>You can close this tab and return to Sicompass.</p></body></html>"
+                );
+                let _ = stream.write_all(
+                    format!(
+                        "HTTP/1.1 {status}\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                        body.len()
+                    )
+                    .as_bytes(),
+                );
+                return Ok(query);
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => std::thread::sleep(OAUTH_POLL),
+            Err(e) => return Err(format!("the sign-in listener failed: {e}")),
+        }
+    }
+}
+
 impl wit::desktop::Host for HostState {
+    /// See the WIT. The browser comes back to a loopback port only this call
+    /// listens on, and only once.
+    fn oauth_redirect(
+        &mut self,
+        auth_url: String,
+        timeout_secs: u32,
+    ) -> Result<wit::desktop::OauthReply, String> {
+        let cancel = match &self.tasks {
+            super::tasks::TaskRole::Worker { cancel, .. } => cancel.clone(),
+            _ => return Err("a sign-in waits for the browser: start it from a task".to_owned()),
+        };
+        if !auth_url.to_ascii_lowercase().starts_with("https://") {
+            return Err("the sign-in URL must be https".to_owned());
+        }
+        let listener = std::net::TcpListener::bind("127.0.0.1:0")
+            .map_err(|e| format!("no loopback port for the sign-in: {e}"))?;
+        listener.set_nonblocking(true).map_err(|e| e.to_string())?;
+        let port = listener.local_addr().map_err(|e| e.to_string())?.port();
+        let redirect_uri = format!("http://127.0.0.1:{port}");
+        let url = auth_url.replace("{redirect-uri}", &percent_encode(&redirect_uri));
+        if no_open() {
+            if let Ok(mut r) = SIGN_INS.lock() {
+                r.push(url);
+            }
+        } else {
+            self.open_url(url)?;
+        }
+        let deadline = std::time::Instant::now()
+            + std::time::Duration::from_secs(timeout_secs.clamp(1, OAUTH_MAX_SECS).into());
+        let query = await_redirect(&listener, deadline, Some(&cancel))?;
+        Ok(wit::desktop::OauthReply {
+            redirect_uri,
+            query,
+        })
+    }
+
     fn open_url(&mut self, url: String) -> Result<(), String> {
         let scheme = url.split_once(':').map(|(s, _)| s.to_ascii_lowercase());
         if !matches!(scheme.as_deref(), Some("http" | "https" | "mailto")) {
@@ -346,6 +462,107 @@ impl wit::desktop::Host for HostState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn worker_state(cancel: std::sync::Arc<AtomicBool>) -> HostState {
+        let mut s = HostState::new("demo", "demo", "/tmp/sicompass-test-plugin", Vec::new());
+        let (events, _rx) = std::sync::mpsc::channel();
+        std::mem::forget(_rx);
+        s.tasks = super::super::tasks::TaskRole::Worker {
+            id: 1,
+            cancel,
+            events,
+        };
+        s
+    }
+
+    /// The URL the sign-in opened, from what the test mode recorded.
+    fn opened_sign_in(needle: &str) -> String {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            // Only this test's entry: tests run in parallel and share the record.
+            let found = SIGN_INS.lock().ok().and_then(|mut r| {
+                let at = r.iter().position(|e| e.contains(needle))?;
+                Some(r.remove(at))
+            });
+            if let Some(u) = found {
+                return u;
+            }
+            assert!(std::time::Instant::now() < deadline, "nothing was opened");
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+    }
+
+    #[test]
+    fn a_sign_in_hands_back_what_the_browser_came_back_with() {
+        use std::io::{Read, Write};
+        _set_test_no_open(true);
+        let cancel = std::sync::Arc::new(AtomicBool::new(false));
+        let waiter = std::thread::spawn(move || {
+            let mut s = worker_state(cancel);
+            wit::desktop::Host::oauth_redirect(
+                &mut s,
+                "https://auth.example.org/o?client_id=x&redirect_uri={redirect-uri}&z=signin1"
+                    .to_owned(),
+                30,
+            )
+        });
+        let url = opened_sign_in("z=signin1");
+        let redirect = url
+            .split("redirect_uri=")
+            .nth(1)
+            .and_then(|r| r.split('&').next())
+            .unwrap()
+            .replace("%3A", ":")
+            .replace("%2F", "/");
+        assert!(redirect.starts_with("http://127.0.0.1:"), "{url}");
+        let port: u16 = redirect.rsplit(':').next().unwrap().parse().unwrap();
+        // A favicon first, as a browser does: answered and waited past.
+        let mut ico = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+        ico.write_all(b"GET /favicon.ico HTTP/1.1\r\n\r\n").unwrap();
+        let mut sink = String::new();
+        let _ = ico.read_to_string(&mut sink);
+        let mut back = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+        back.write_all(b"GET /?code=4%2Fabc&state=s1 HTTP/1.1\r\nHost: x\r\n\r\n")
+            .unwrap();
+        let mut page = String::new();
+        let _ = back.read_to_string(&mut page);
+        assert!(page.starts_with("HTTP/1.1 200"), "{page}");
+        let reply = waiter.join().unwrap().unwrap();
+        assert_eq!(reply.redirect_uri, redirect);
+        assert_eq!(reply.query, "code=4%2Fabc&state=s1");
+    }
+
+    #[test]
+    fn a_sign_in_ends_when_its_task_is_cancelled() {
+        _set_test_no_open(true);
+        let cancel = std::sync::Arc::new(AtomicBool::new(false));
+        let flag = cancel.clone();
+        let waiter = std::thread::spawn(move || {
+            let mut s = worker_state(flag);
+            wit::desktop::Host::oauth_redirect(
+                &mut s,
+                "https://auth.example.org/o?r={redirect-uri}&z=signin2".to_owned(),
+                600,
+            )
+        });
+        opened_sign_in("z=signin2");
+        cancel.store(true, Ordering::Release);
+        let err = waiter.join().unwrap().unwrap_err();
+        assert!(err.contains("cancelled"), "{err}");
+    }
+
+    #[test]
+    fn a_sign_in_is_https_and_only_from_a_task() {
+        let mut ui = HostState::new("demo", "demo", "/tmp/sicompass-test-plugin", Vec::new());
+        let err = wit::desktop::Host::oauth_redirect(&mut ui, "https://a.example/".to_owned(), 5)
+            .unwrap_err();
+        assert!(err.contains("task"), "{err}");
+        let mut s = worker_state(std::sync::Arc::new(AtomicBool::new(false)));
+        let err = wit::desktop::Host::oauth_redirect(&mut s, "http://a.example/".to_owned(), 5)
+            .unwrap_err();
+        assert!(err.contains("https"), "{err}");
+    }
+
 
     fn state(roots: Vec<(PathBuf, PathBuf)>) -> HostState {
         let mut s = HostState::new("demo", "demo", "/tmp/sicompass-test-plugin", Vec::new());

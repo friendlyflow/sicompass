@@ -733,6 +733,27 @@ The integration tests load the three from `tests/fixtures/plugins`. The harness
 lets Claude start only a program that cannot exist and names no Claude folder,
 which replaces the crate's thread-local test seams.
 
+**Step 10, chat (2026-09-24):** the chat client is a Store plugin
+(`chatclient_plugin_sicompass`) with any public server (`"allowedHosts":
+["*"]`, the user's choice) and its storage folder. Its `/sync` long poll is a
+task, and its sign-in lives in the storage folder because a plugin cannot
+write the app's settings. The user's decisions for the rest of the step:
+
+- **Any server, approved**, for chat and email. For sockets that is
+  `"*:<port>"`: any public server on that port, names resolved first and
+  internal addresses refused (a name pointing inward gets nowhere either). The
+  Store says "any server on the internet on port 993".
+- **The host runs a browser sign-in** (`desktop.oauth-redirect`, RFC 8252):
+  it listens once on a loopback port and hands back the redirect's query. Only
+  from a task, since it waits.
+- **The browser gets a CDP pipe** (`process.child.spawn-with-channel`,
+  Chrome's `--remote-debugging-pipe` on fds 3 and 4): no network port.
+- **PUT and DELETE** join GET, HEAD and POST in `net.fetch` (Matrix sends with
+  PUT). A task's requests may wait two minutes (a long poll).
+- **Email and the browser keep their slow work in a long-lived task** that the
+  UI instance sends requests to (a task inbox, still to build), because a call
+  into the UI instance gets 10 seconds before the plugin is trapped.
+
 ## 14. Decisions on the former open questions (2026-09-24)
 
 1. **Store key custody:** a key file on the maintainer's machine, outside

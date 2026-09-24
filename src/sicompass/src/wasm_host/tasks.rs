@@ -197,6 +197,8 @@ fn run(
         spec.plugin_dir.clone(),
         spec.grants.clone(),
     )?;
+    // A task holds up no frame, so its requests may wait out a long poll.
+    state.fetch_policy.for_task();
     state.tasks = TaskRole::Worker {
         id,
         cancel: cancel.clone(),

@@ -1,6 +1,12 @@
 # Chat-client provider strings — Belgian Dutch (Flemish).
 
 chatclient-display-name = chatclient
+chatclient-description = Matrix-chat als lijst: je kamers, hun berichten en leden. Meld je aan bij de homeserver die je kiest, en schrijf met i.
+chatclient-setting-homeserver = homeserver-URL
+chatclient-setting-access-token = toegangstoken
+chatclient-setting-username = gebruikersnaam
+chatclient-setting-password = wachtwoord
+chatclient-setting-email = e-mail
 
 # Error messages — nl-BE
 

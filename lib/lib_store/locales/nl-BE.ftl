@@ -24,6 +24,7 @@ store-access-hosts = Toegang: maakt verbinding met { $list }
 store-access-files = Toegang: leest en schrijft je bestanden in { $list }
 store-access-programs = Toegang: start { $list }
 store-access-sockets = Toegang: maakt verbinding met { $list }
+store-access-any-server-ports = Toegang: maakt verbinding met elke server op het internet op poort { $list }, nooit met je eigen computer of lokale netwerk
 store-uses-service = Gebruikt een betaalde dienst: { $tier }
 store-paid-features = Heeft eigen betaalde functies
 store-needs-app = Heeft sicompass { $version } of nieuwer nodig

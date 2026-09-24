@@ -1,0 +1,45 @@
+{
+  "name": "chatclient",
+  "displayName": "chat client",
+  "type": "wasm",
+  "entry": "plugin.wasm",
+  "version": "0.2.0",
+  "minAppVersion": "0.1.21",
+  "description": "chatclient-description",
+  "settings": [
+    {
+      "type": "text",
+      "label": "chatclient-setting-homeserver",
+      "key": "chatHomeserver",
+      "default": "https://matrix.org"
+    },
+    {
+      "type": "password",
+      "label": "chatclient-setting-access-token",
+      "key": "chatAccessToken",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "label": "chatclient-setting-username",
+      "key": "chatUsername",
+      "default": ""
+    },
+    {
+      "type": "password",
+      "label": "chatclient-setting-password",
+      "key": "chatPassword",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "label": "chatclient-setting-email",
+      "key": "chatEmail",
+      "default": ""
+    }
+  ],
+  "permissions": {
+    "storage": true,
+    "allowedHosts": ["*"]
+  }
+}

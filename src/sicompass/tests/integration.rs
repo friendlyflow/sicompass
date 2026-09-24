@@ -7860,87 +7860,6 @@ fn compose_body_delete_undo_single_element_no_extra_placeholder() {
 }
 
 // ---------------------------------------------------------------------------
-// Chat client: needs_refresh flag drives FFON rebuild
-// ---------------------------------------------------------------------------
-
-/// Verify that when the chat client's needs_refresh flag is set (as the /sync
-/// background thread would do), the renderer picks it up, clears it, and rebuilds
-/// the FFON tree with the rooms from the cache.
-///
-/// No HTTP is made — the cache is seeded via test helpers and the sync thread is
-/// disabled (wiremock requires tokio; the integration suite is sync).
-#[test]
-fn chat_client_needs_refresh_drives_renderer_redraw() {
-    // Build a ChatClientProvider with no sync thread — flag is driven manually.
-    let mut chat = sicompass_chatclient::ChatClientProvider::new().with_sync_disabled();
-
-    // Set credentials so fetch() returns the rooms list, not the "configure…" placeholder.
-    chat.test_set_credentials("https://matrix.org", "test_token");
-
-    // Seed the cache as the sync thread would after a /sync response.
-    chat.test_seed_room("!abc:x", "Test Room");
-    chat.test_seed_room("!def:x", "Another Room");
-
-    // Pre-set the flag before boxing — simulates the sync thread firing mid-idle.
-    chat.test_set_needs_refresh();
-
-    // Register: init() + fetch() populates the FFON tree from cache.
-    let mut renderer = app_renderer();
-    let display_name = chat.display_name().to_owned();
-    let children = chat.fetch();
-    let mut root = FfonElement::new_obj(&display_name);
-    for child in children {
-        root.as_obj_mut().unwrap().push(child);
-    }
-    renderer.ffon.push(root);
-    renderer.providers.push(Box::new(chat));
-
-    renderer.current_id = {
-        let mut id = sicompass_sdk::ffon::IdArray::new();
-        id.push(0);
-        id
-    };
-
-    // The flag must still be set (no drain has run yet).
-    assert!(
-        renderer.providers[0].needs_refresh(),
-        "flag must be set before drain"
-    );
-
-    // Simulate the per-frame needs_refresh drain from view.rs:
-    // clear the flag *before* rebuild so a signal arriving mid-rebuild is preserved.
-    renderer.providers[0].clear_needs_refresh();
-    sicompass::provider::refresh_current_directory(&mut renderer);
-    sicompass::list::create_list_current_layer(&mut renderer);
-
-    // Flag must be cleared after the drain.
-    assert!(
-        !renderer.providers[0].needs_refresh(),
-        "flag must be cleared after drain"
-    );
-
-    // FFON tree must contain both rooms (rebuilt from cache).
-    let root = &renderer.ffon[0];
-    let children = &root.as_obj().unwrap().children;
-    let has_test_room = children
-        .iter()
-        .any(|e| e.as_obj().map_or(false, |o| o.key == "Test Room"));
-    let has_another = children
-        .iter()
-        .any(|e| e.as_obj().map_or(false, |o| o.key == "Another Room"));
-    assert!(
-        has_test_room,
-        "FFON must contain 'Test Room' after refresh; children: {:?}",
-        children
-    );
-    assert!(
-        has_another,
-        "FFON must contain 'Another Room' after refresh; children: {:?}",
-        children
-    );
-}
-
-// ---------------------------------------------------------------------------
 // F5 hard-refresh via dispatch_refresh_command
 // ---------------------------------------------------------------------------
 
@@ -8117,80 +8036,6 @@ fn webbrowser_form_commit_returns_false_and_patches_cache() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// Chat client: navigate_right eagerly loads room messages (no F5 needed)
-// ---------------------------------------------------------------------------
-
-/// Right-arrow into a Matrix room must populate its messages without requiring
-/// an explicit F5 refresh. The root Obj key becomes the room name inside the
-/// room so the parent label in the UI shows the room name.
-#[test]
-fn chat_navigate_right_loads_room_without_f5() {
-    let mut chat = sicompass_chatclient::ChatClientProvider::new().with_sync_disabled();
-    chat.test_set_credentials("https://matrix.org", "test_token");
-    chat.test_seed_room("!abc:matrix.org", "Matrix.org");
-
-    let mut renderer = app_renderer();
-    let display_name = chat.display_name().to_owned();
-    let children = chat.fetch();
-    let mut root = FfonElement::new_obj(&display_name);
-    for child in children {
-        root.as_obj_mut().unwrap().push(child);
-    }
-    renderer.ffon.push(root);
-    renderer.providers.push(Box::new(chat));
-
-    renderer.current_id = {
-        let mut id = sicompass_sdk::ffon::IdArray::new();
-        id.push(0);
-        id
-    };
-    sicompass::list::create_list_current_layer(&mut renderer);
-
-    // Enter provider root (depth 1 → depth 2: cursor on "Matrix.org" room).
-    press_right(&mut renderer);
-    assert_eq!(renderer.current_id.depth(), 2, "should be at room list");
-    assert_eq!(
-        renderer.ffon[0].as_obj().unwrap().key,
-        "chat client",
-        "root key must be 'chat client' at room list"
-    );
-
-    // Enter the room — navigate-right fetches the room contents and grafts
-    // them onto the room Obj, descending one level.
-    let room_pos = renderer.current_id.get(1).unwrap_or(0);
-    press_right(&mut renderer);
-    assert_eq!(renderer.current_id.depth(), 3, "descends into the room");
-
-    // The room contents were fetched without F5 and grafted onto the room Obj.
-    let room_children = sicompass_sdk::ffon::get_ffon_at_id(&renderer.ffon, &renderer.current_id)
-        .map(<[_]>::to_vec)
-        .unwrap_or_default();
-    let has_input = room_children
-        .iter()
-        .any(|e| e.as_str().map_or(false, |s| s.contains("<input>")));
-    assert!(
-        has_input,
-        "room must have <input> child after right-arrow (no F5); children: {room_children:?}"
-    );
-    // The provider root key stays the display name in the deep model.
-    assert_eq!(renderer.ffon[0].as_obj().unwrap().key, "chat client");
-    let _ = room_pos;
-
-    // Navigate left — back to the rooms list (one level up).
-    press_left(&mut renderer);
-    assert_eq!(renderer.current_id.depth(), 2);
-    assert_eq!(renderer.ffon[0].as_obj().unwrap().key, "chat client");
-    let children = &renderer.ffon[0].as_obj().unwrap().children;
-    let has_room = children
-        .iter()
-        .any(|e| e.as_obj().map_or(false, |o| o.key == "Matrix.org"));
-    assert!(
-        has_room,
-        "rooms list must reappear after left; children: {children:?}"
-    );
-}
-
 /// Pressing Enter on a bare `<input></input>` element (empty old content) must
 /// route through `commit_edit`, not skip it in favour of a plain FFON update.
 /// Verified by a provider that records what was committed and returns `true`.
@@ -8261,67 +8106,45 @@ fn empty_input_enter_calls_commit_edit() {
 }
 
 // ---------------------------------------------------------------------------
-// Chat client: unread badge renders in the FFON tree
+// Chat client (a plugin from the Store)
 // ---------------------------------------------------------------------------
 
-/// When a room has unread messages the badge must be embedded in the Obj's key
-/// (not as a child). An obj with children is expanded in-place by the renderer
-/// rather than triggering a provider fetch, which would prevent navigating into
-/// the room.
+fn chat_rows(p: &mut Box<dyn Provider>) -> Vec<String> {
+    p.fetch()
+        .iter()
+        .map(|e| match e {
+            FfonElement::Str(s) => s.clone(),
+            FfonElement::Obj(o) => o.key.clone(),
+        })
+        .collect()
+}
+
 #[test]
-fn chat_unread_badge_embedded_in_key() {
-    let mut chat = sicompass_chatclient::ChatClientProvider::new().with_sync_disabled();
-    chat.test_set_credentials("https://matrix.org", "tok");
-
-    chat.test_seed_room("!noisy:s", "Noisy Channel");
-    chat.test_set_unread("Noisy Channel", 3, 1);
-
-    let children = chat.fetch();
-
-    // Badge is in the key; no child nodes.
-    let room_obj = children.iter().find(|e| {
-        e.as_obj()
-            .map_or(false, |o| o.key == "Noisy Channel [mention:1]")
-    });
+fn chatclient_plugin_opens_on_its_sign_in_form() {
+    let tmp = TempDir::new().unwrap();
+    let mut p = plugin_provider("chatclient", &tmp.path().join("chatclient"));
+    let rows = chat_rows(&mut p);
     assert!(
-        room_obj.is_some(),
-        "room with badge key must appear; got: {children:?}"
-    );
-    assert!(
-        room_obj.unwrap().as_obj().unwrap().children.is_empty(),
-        "room obj must have no children so navigation reaches the provider fetch"
+        rows.iter().any(|r| r.contains("<button>login</button>")),
+        "{rows:?}"
     );
 }
 
-// ---------------------------------------------------------------------------
-// Chat client: room info command surface
-// ---------------------------------------------------------------------------
-
-/// The "room info" command must return a string that includes the room ID,
-/// even without a live homeserver.  This confirms the provider wires topic/
-/// member/encryption data through without touching the network.
+/// "Any server" is any *public* server: a homeserver on the local network is
+/// refused by the host before anything is sent.
 #[test]
-fn chat_room_info_returns_room_id() {
-    let mut chat = sicompass_chatclient::ChatClientProvider::new().with_sync_disabled();
-    chat.test_set_credentials("https://matrix.org", "tok");
-    chat.test_seed_room("!info:s", "Info Room");
-    // Navigate into the room so "room info" finds it.
-    chat.push_path("Info Room");
-
-    let mut err = String::new();
-    let result = chat.handle_command("room info", "Info Room", 0, &mut err);
-    assert!(err.is_empty(), "room info must not error: {err}");
-    assert!(result.is_some(), "room info must return a result element");
-    let text = result.unwrap();
-    assert!(
-        text.as_str().map_or(false, |s| s.contains("!info:s")),
-        "room info must contain the room ID; got: {text:?}"
-    );
+fn chatclient_plugin_never_reaches_the_local_network() {
+    let tmp = TempDir::new().unwrap();
+    let mut p = plugin_provider("chatclient", &tmp.path().join("chatclient"));
+    p.on_setting_change("chatHomeserver", "http://127.0.0.1:9");
+    p.on_setting_change("chatUsername", "someone");
+    p.on_setting_change("chatPassword", "secret");
+    chat_rows(&mut p);
+    p.on_button_press("login");
+    p.tick();
+    let err = p.take_error().expect("the sign-in fails");
+    assert!(err.contains("internal address"), "{err}");
 }
-
-// ---------------------------------------------------------------------------
-// Chat client: mark read command
-// ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
 // Email client: compose with Cc / Bcc
@@ -8430,43 +8253,6 @@ fn email_compose_commit_to_field_keeps_cursor_on_to() {
         "cursor must stay on the To field after commit, not jump to an empty \
          Cc/Bcc/Subject field; got id {:?}",
         renderer.current_id
-    );
-}
-
-/// "mark read" must clear the local unread count immediately (even if the
-/// receipt HTTP call fails). The badge disappears from the room list after the
-/// command runs.
-#[test]
-fn chat_mark_read_clears_local_unread_count() {
-    let mut chat = sicompass_chatclient::ChatClientProvider::new().with_sync_disabled();
-    // Unreachable server: the receipt POST will fail silently; the local
-    // optimistic update must still apply.
-    chat.test_set_credentials("http://127.0.0.1:1", "tok");
-    chat.test_seed_room("!r:s", "General");
-    chat.test_set_unread("General", 2, 0);
-
-    // Sanity: badge in room list before marking read.
-    let list_before = chat.fetch();
-    assert!(
-        list_before
-            .iter()
-            .any(|e| e.as_obj().map_or(false, |o| o.key == "General [unread:2]")),
-        "unread badge must be in key before mark read; got: {list_before:?}"
-    );
-
-    // Navigate into the room so the command knows which room to mark.
-    chat.push_path("General");
-    let mut err = String::new();
-    chat.handle_command("mark read", "", 0, &mut err);
-
-    // Navigate back to root and verify badge is gone.
-    chat.pop_path();
-    let list_after = chat.fetch();
-    assert!(
-        list_after
-            .iter()
-            .any(|e| e.as_obj().map_or(false, |o| o.key == "General")),
-        "badge must be gone after mark read; got: {list_after:?}"
     );
 }
 

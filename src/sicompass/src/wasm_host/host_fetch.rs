@@ -61,8 +61,14 @@ const ROBOTS_TTL: Duration = Duration::from_secs(3600);
 /// surfaces as a fetch error rather than as the plugin being killed.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(8);
 
-/// Methods a plugin may use.
-const ALLOWED_METHODS: &[&str] = &["GET", "HEAD", "POST"];
+/// The timeout for a request made from a task, which has no deadline and holds
+/// up no frame: long enough for a long poll (Matrix `/sync` waits 30 s).
+const TASK_REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// Methods a plugin may use. The allowlist, not the method, is what bounds a
+/// plugin's reach, and REST APIs write with PUT and DELETE (Matrix sends a
+/// message with PUT).
+const ALLOWED_METHODS: &[&str] = &["GET", "HEAD", "POST", "PUT", "DELETE"];
 
 /// Headers a guest may not set. `host` and the length/framing headers would let a
 /// request address somewhere other than the URL that was checked; the rest control
@@ -90,6 +96,9 @@ pub struct FetchPolicy {
     allowed_hosts: Vec<String>,
     /// Recent request times per host, for the quota window.
     recent: HashMap<String, VecDeque<Instant>>,
+    /// Per-request timeout: [`REQUEST_TIMEOUT`], or [`TASK_REQUEST_TIMEOUT`]
+    /// in a task's instance.
+    timeout: Duration,
 }
 
 impl FetchPolicy {
@@ -101,7 +110,13 @@ impl FetchPolicy {
                 .map(|h| h.trim().to_lowercase())
                 .collect(),
             recent: HashMap::new(),
+            timeout: REQUEST_TIMEOUT,
         }
+    }
+
+    /// This policy is a task's: its requests may wait as long as a long poll.
+    pub fn for_task(&mut self) {
+        self.timeout = TASK_REQUEST_TIMEOUT;
     }
 
     /// Whether `host` is on this plugin's allowlist. `*` (approved by the
@@ -458,7 +473,6 @@ fn client() -> &'static reqwest::blocking::Client {
         reqwest::blocking::Client::builder()
             .user_agent(USER_AGENT)
             .redirect(reqwest::redirect::Policy::none())
-            .timeout(REQUEST_TIMEOUT)
             .build()
             .expect("build the plugin HTTP client")
     })
@@ -512,7 +526,7 @@ pub fn perform(policy: &mut FetchPolicy, req: HttpRequest) -> Result<HttpRespons
         policy.take_quota(&host)?;
 
         let (status, resp_headers, resp_body, location) =
-            send_once(&method, &url, &headers, body.clone())?;
+            send_once(&method, &url, &headers, body.clone(), policy.timeout)?;
 
         let is_redirect = matches!(status, 301 | 302 | 303 | 307 | 308);
         match location {
@@ -554,6 +568,7 @@ fn send_once(
     url: &str,
     headers: &[(String, String)],
     body: Option<Vec<u8>>,
+    timeout: Duration,
 ) -> Result<RawResponse, String> {
     let method = method.to_owned();
     let url = url.to_owned();
@@ -562,7 +577,7 @@ fn send_once(
     off_runtime(move || {
         let m = reqwest::Method::from_bytes(method.as_bytes())
             .map_err(|e| format!("bad method: {e}"))?;
-        let mut builder = client().request(m, &url);
+        let mut builder = client().request(m, &url).timeout(timeout);
         for (k, v) in &headers {
             builder = builder.header(k, v);
         }
@@ -870,10 +885,11 @@ mod tests {
     // --- misc ---
 
     #[test]
-    fn only_safe_methods_are_offered() {
-        // No PUT/DELETE/PATCH: a plugin that can mutate remote state is a much
-        // bigger promise than "may read from these hosts".
-        assert_eq!(ALLOWED_METHODS, &["GET", "HEAD", "POST"]);
+    fn only_the_rest_methods_are_offered() {
+        // PUT and DELETE since Step 10 (the user's decision): POST could
+        // already change remote state, so the allowlist is what bounds a
+        // plugin, and Matrix sends every message with PUT. Nothing beyond them.
+        assert_eq!(ALLOWED_METHODS, &["GET", "HEAD", "POST", "PUT", "DELETE"]);
     }
 
     #[test]
@@ -1116,15 +1132,33 @@ mod tests {
         }
 
         #[tokio::test(flavor = "multi_thread")]
+        async fn a_put_with_a_body_reaches_the_server() {
+            let server = MockServer::start().await;
+            arrange(&server);
+            Mock::given(method("PUT"))
+                .and(path("/rooms/r/send/m.room.message/t1"))
+                .respond_with(ResponseTemplate::new(200).set_body_string("{}"))
+                .mount(&server)
+                .await;
+            let mut p = policy_for(&server);
+            let mut req = get(&format!("{}/rooms/r/send/m.room.message/t1", server.uri()));
+            req.method = "PUT".to_owned();
+            req.body = Some(br#"{"body":"hi"}"#.to_vec());
+            let resp = perform(&mut p, req).unwrap();
+            assert_eq!(resp.status, 200);
+        }
+
+        #[tokio::test(flavor = "multi_thread")]
         async fn a_disallowed_method_is_refused_before_any_request() {
             let server = MockServer::start().await;
             arrange(&server);
             let mut p = policy_for(&server);
-            let mut req = get(&format!("{}/x", server.uri()));
-            req.method = "DELETE".to_owned();
-
-            let err = perform(&mut p, req).unwrap_err();
-            assert!(err.contains("not permitted"), "{err}");
+            for method in ["PATCH", "CONNECT", "TRACE", "OPTIONS"] {
+                let mut req = get(&format!("{}/x", server.uri()));
+                req.method = method.to_owned();
+                let err = perform(&mut p, req).unwrap_err();
+                assert!(err.contains("not permitted"), "{method}: {err}");
+            }
         }
     }
 }

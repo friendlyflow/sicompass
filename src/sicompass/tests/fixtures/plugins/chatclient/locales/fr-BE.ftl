@@ -1,6 +1,12 @@
 # Chat-client provider strings — Belgian French.
 
 chatclient-display-name = client de chat
+chatclient-description = Le chat Matrix sous forme de liste : vos salons, leurs messages et leurs membres. Connectez-vous au serveur d'accueil de votre choix, et écrivez avec i.
+chatclient-setting-homeserver = URL du serveur d'accueil
+chatclient-setting-access-token = jeton d'accès
+chatclient-setting-username = nom d'utilisateur
+chatclient-setting-password = mot de passe
+chatclient-setting-email = e-mail
 
 # Error messages — fr-BE
 

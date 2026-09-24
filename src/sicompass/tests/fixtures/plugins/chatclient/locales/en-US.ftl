@@ -1,6 +1,12 @@
 # Chat-client provider strings — English (source/fallback).
 
 chatclient-display-name = chat client
+chatclient-description = Matrix chat as a list: your rooms, their messages and members. Sign in to the homeserver you choose, and write with i.
+chatclient-setting-homeserver = homeserver URL
+chatclient-setting-access-token = access token
+chatclient-setting-username = username
+chatclient-setting-password = password
+chatclient-setting-email = email
 
 # Error messages — en-US
 

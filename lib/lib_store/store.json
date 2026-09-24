@@ -55,6 +55,12 @@
       "repo": "friendlyflow/claude_plugin_sicompass",
       "pubkey": "f8vpfY+RSWtOsXz/n9dLf742aymiQHPAfrbPh1r6mhE=",
       "category": "development"
+    },
+    {
+      "name": "chatclient",
+      "repo": "friendlyflow/chatclient_plugin_sicompass",
+      "pubkey": "cK0H0GI2m7DlGnTzrbUBhywmo6K4yLKTCRwiqWGfzWg=",
+      "category": "communication"
     }
   ]
 }
