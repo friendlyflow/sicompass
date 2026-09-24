@@ -20,6 +20,11 @@
       "name": "desicompass",
       "path": "../desicompass",
       "kind": "compositor"
+    },
+    {
+      "name": "loginsicompass",
+      "path": "../loginsicompass",
+      "kind": "greeter"
     }
   ]
 }

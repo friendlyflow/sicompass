@@ -19,12 +19,9 @@ members = [
     "lib/lib_builtins",
     "lib/lib_updater",
     "src/sicompass",
-    # Linux-only binary: the greetd greeter. Every dependency sits behind
-    # `[target.'cfg(target_os = "linux")'.dependencies]`, so on macOS and
-    # Windows it builds an empty `main()` and the workspace-wide
-    # `cargo test` / `cargo clippy --all-targets` legs in CI stay green.
-    # (The compositor, desicompass, is its own repo: ../desicompass.)
-    "src/loginsicompass",
+    # The compositor (desicompass), the greetd greeter (loginsicompass) and the
+    # renderer they share with the app (sicompass-ui) are sibling repos, see
+    # .claude/repos.json.
 ]
 resolver = "2"
 
@@ -136,7 +133,7 @@ whatlang = "0.18"
 unicode-normalization = "0.1"
 
 # Wiping a typed password out of the buffers that held it, rather than only
-# setting their length to zero. Used by sicompass-ui and loginsicompass.
+# setting their length to zero.
 zeroize = "1"
 
 # Fuzzy search

@@ -61,6 +61,7 @@ them. So far:
 - `../desicompass`, the Wayland compositor, together with the NixOS module
   (`services.desicompass.*`) that wires it, the app and the greeter into a
   session.
+- `../loginsicompass`, the greetd login screen.
 - `../sicompass-ui`, the renderer shared with the greeter, with the shaders
   and the embedded fonts. A git dependency, see "the sicompass-ui split" below.
 - `../sicompass-plugin-sdk`, the SDK and the WASM plugin kit (on crates.io).
@@ -218,12 +219,12 @@ at the end of each Claude turn.
 
 ## Architecture: the greeter
 
-The greetd login screen is `src/loginsicompass`, a separate binary that draws
-with the app's own renderer. See [docs/greeter.md](docs/greeter.md) for the
-page it shows, the greetd conversation (including the native-byte-order framing
-that must not regress), user and session enumeration, the password's lifetime,
-the GPU-failure supervisor, and how to run the whole thing nested without
-touching the boot path.
+The greetd login screen is its own repo, `../loginsicompass`
+(github:friendlyflow/loginsicompass), a separate binary that draws with the
+app's renderer (`sicompass-ui`) and must never link this app crate. Its
+`docs/greeter.md` covers the page it shows, the greetd conversation, user and
+session enumeration, the password's lifetime, the GPU-failure supervisor, and
+how to run it nested without touching the boot path.
 
 ## Architecture: the sicompass-ui split (hard rule)
 

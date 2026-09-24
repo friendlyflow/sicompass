@@ -173,7 +173,7 @@
               udev
               # gbm is its own package in this nixpkgs (mesa-libgbm); it is no
               # longer part of the mesa output, so `gbm.pc` is only found with
-              # this listed explicitly. loginsicompass links it.
+              # this listed explicitly. The bundled SDL build probes for it.
               libgbm
             ] ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isDarwin [
               # MoltenVK is the only Vulkan driver on macOS: it implements
@@ -216,8 +216,7 @@
               # curl.out, not curl: curl's *default* output is `bin`, which
               # holds no lib directory at all, so a bare ${curl}/lib here was
               # a path that has never existed.
-              # libGL (libglvnd) and libgbm are here for loginsicompass, not
-              # for the app. Note what is *not* here: nixpkgs' `mesa`. These two
+              # libGL (libglvnd) and libgbm are dispatch libraries. Note what is *not* here: nixpkgs' `mesa`. These two
               # are dispatch libraries, which is exactly why they are safe to
               # take from the shell — they load a vendor at runtime and the
               # vendor has to be the system's, see the block below.
@@ -648,108 +647,15 @@
               platforms = platforms.unix;
             };
           };
-        } // pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
-
-          # The greeter is a separate derivation rather than extra
-          # `cargoBuildFlags` on the one above. That package's postInstall
-          # wraps `$out/bin/sicompass` by name, its `apps` entry hardcodes the
-          # same, and its meta claims `platforms.unix`, none of which fits a
-          # Linux-only binary with entirely different runtime needs.
-          #
-          # The compositor, desicompass, and the NixOS module that wires both
-          # into a session are in their own repo:
-          # github:friendlyflow/desicompass.
-          loginsicompass = buildMember {
-            pname = "loginsicompass";
-            cargoExtraArgs = "--locked -p loginsicompass";
-
-            # This used to say "it draws with tiny-skia into shared memory, so
-            # it needs no GPU stack at all". That stopped being true when the
-            # greeter grew a real login screen: it links `sicompass-ui`, the
-            # app's own SDL3/Vulkan renderer, so that the login screen speaks
-            # to a screen reader and renders text at all. The tiny-skia box is
-            # still in there as `--render-backend shm`, reached only when the
-            # Vulkan path cannot start.
-            #
-            # What it deliberately does NOT link is the `sicompass`
-            # application crate, which would drag wasmtime, a bundled SQLite,
-            # a headless-Chromium driver and an IMAP/SMTP stack into a login
-            # screen. See sicompass-ui's Cargo.toml.
-            nativeBuildInputs = with pkgs; [
-              pkg-config
-              # aws-lc-sys and libsqlite3-sys are not in this graph, but
-              # bindgen still is (freetype-sys, sdl3-sys).
-              rustPlatform.bindgenHook
-              makeWrapper
-            ];
-
-            buildInputs = with pkgs; [
-              # System SDL3, matching the main package: inside a Nix build
-              # there is no reason to compile a vendored copy.
-              sdl3
-              freetype
-              libwebp
-              libxkbcommon
-              wayland
-              # accesskit_unix speaks AT-SPI2 over D-Bus. A greeter that
-              # cannot reach it still renders; it is simply mute, which for
-              # this application is the failure the whole project exists to
-              # prevent.
-              at-spi2-core
-              dbus
-              # The GL/GBM dispatch libraries, same pair as desicompass: the
-              # loader goes on LD_LIBRARY_PATH below, the vendor comes from
-              # /run/opengl-driver.
-              libGL
-              libgbm
-              libdrm
-            ];
-
-            # Same shape as desicompass's wrapper (github:friendlyflow/desicompass),
-            # and for the same reasons.
-            #
-            # vulkan-loader on LD_LIBRARY_PATH is what lets `ash::Entry::load()`
-            # dlopen libvulkan.so.1 — it is not in the binary's DT_NEEDED, so a
-            # missing loader is a startup failure rather than a link error.
-            # Deliberately no VK_ICD_FILENAMES: on NixOS the drivers live in
-            # /run/opengl-driver and the loader finds them itself, and pinning a
-            # path that does not exist makes it report zero ICDs.
-            #
-            # The three vendor variables are `--set-default` rather than
-            # `--set`, so a non-NixOS host or a deliberate driver test still
-            # wins. nixpkgs' own libgbm next to a system EGL of a different
-            # version segfaulted inside libEGL_mesa on the GBM path, which is
-            # why desicompass points at the system one; the greeter shares a
-            # display with it, so it points at the same.
-            postInstall = ''
-              wrapProgram $out/bin/loginsicompass \
-                --prefix LD_LIBRARY_PATH : "${pkgs.lib.makeLibraryPath (with pkgs; [
-                  vulkan-loader
-                  sdl3
-                  libGL
-                  libgbm
-                  libxkbcommon
-                  wayland
-                ])}" \
-                --set-default __EGL_VENDOR_LIBRARY_DIRS /run/opengl-driver/share/glvnd/egl_vendor.d \
-                --set-default LIBGL_DRIVERS_PATH        /run/opengl-driver/lib/dri \
-                --set-default GBM_BACKENDS_PATH         /run/opengl-driver/lib/gbm
-            '';
-
-            meta = with pkgs.lib; {
-              description = "greetd login screen for sicompass";
-              homepage = "https://github.com/friendlyflow/sicompass";
-              license = licenses.gpl3Only;
-              mainProgram = "loginsicompass";
-              platforms = platforms.linux;
-            };
-          };
-
-        });
+        }
+        # The greetd greeter (loginsicompass) and the compositor (desicompass)
+        # are packaged by their own repos' flakes.
+      );
 
       # The NixOS module (services.desicompass.{enable,greeter.enable}) moved
       # to github:friendlyflow/desicompass, next to the compositor it starts.
-      # It takes `sicompass` and `loginsicompass` from this flake.
+      # It takes the `sicompass` package from this flake, and the greeter from
+      # github:friendlyflow/loginsicompass.
 
       apps = forAllSystems (system: {
         default = {
