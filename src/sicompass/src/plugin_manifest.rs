@@ -144,6 +144,10 @@ pub fn grants_for(
                     .iter()
                     .map(|s| format!("connection to {s}")),
             )
+            .chain(
+                sicompass_sdk::plugin_abi::reaches_any_server(&m.allowed_hosts())
+                    .then(|| "any server on the internet".to_owned()),
+            )
             .collect();
         return Err(format!(
             "it asks for access you have not approved ({}); approve it in the Store",

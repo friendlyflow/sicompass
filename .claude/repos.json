@@ -30,6 +30,11 @@
       "name": "salesdemo_plugin_sicompass",
       "path": "../salesdemo_plugin_sicompass",
       "kind": "plugin"
+    },
+    {
+      "name": "remote_plugin_sicompass",
+      "path": "../remote_plugin_sicompass",
+      "kind": "plugin"
     }
   ]
 }

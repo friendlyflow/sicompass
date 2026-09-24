@@ -630,11 +630,19 @@ element:" is, the diagram only at the root), so `poll-result` gained
 `structural-edit-here` and `dashboard-here`, and the host polls again after
 every navigation.
 
-**Step 6 dropped (2026-09-24):** remote services (`lib_remote`, a provider per
-user-configured FFON server) were removed rather than ported. A plugin reaches
-only the hosts its `plugin.json` names, and a remote server is whatever the
-user types in. Link rows (`<link>` to a JSON FFON page or a web page) are an app
-feature and keep working; `tests/links.rs` follows one end to end.
+**Step 6 done (2026-09-24), after a detour:** remote services were first
+removed, because a plugin could reach only the hosts its `plugin.json` names,
+and a remote server is whatever the user types in. They came back as
+github.com/friendlyflow/remote_plugin_sicompass once plugins could ask for
+**any public server**: `"allowedHosts": ["*"]`, which needs the user's approval
+(shown in the Store as "connects to any server on the internet, never to your
+own computer or local network") and is in the approval fingerprint. The host
+still refuses internal addresses and honours robots.txt. One plugin serves every
+server: `servers` (one `name URL` per line) and `apiKeys` (a new password
+setting kind) in its settings section, and `migrate_remotes_to_plugin` moves
+the old per-server sections there. It fetches each level itself with the key
+as a bearer token, instead of leaving `<link>`s for the app to follow. Link
+rows are an app feature regardless; `tests/links.rs` follows one end to end.
 
 ## 14. Decisions on the former open questions (2026-09-24)
 

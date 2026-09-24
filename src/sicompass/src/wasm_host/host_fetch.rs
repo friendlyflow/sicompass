@@ -104,10 +104,14 @@ impl FetchPolicy {
         }
     }
 
-    /// Whether `host` is on this plugin's allowlist.
+    /// Whether `host` is on this plugin's allowlist. `*` (approved by the
+    /// user, see `plugin_abi::reaches_any_server`) allows any host; internal
+    /// addresses are refused separately, whatever the list says.
     pub fn host_allowed(&self, host: &str) -> bool {
         let host = host.to_lowercase();
-        self.allowed_hosts.contains(&host)
+        self.allowed_hosts
+            .iter()
+            .any(|h| h == &host || h == sicompass_sdk::plugin_abi::ANY_SERVER)
     }
 
     /// Record a request and report whether it fits in the budget.
@@ -703,6 +707,26 @@ mod tests {
         for host in ["example.com", "8.8.8.8", "1.1.1.1", "[2606:4700::1111]"] {
             assert!(!is_internal_host(host), "{host} should be allowed");
         }
+    }
+
+    #[test]
+    fn any_server_allows_public_hosts_and_never_internal_ones() {
+        let p = FetchPolicy::new("remote", &["*".to_owned()]);
+        assert!(vet_url(&p, "https://example.com/root").is_ok());
+        assert!(vet_url(&p, "https://ffon.example.org:8443/a/b").is_ok());
+        assert!(vet_url(&p, "file:///etc/passwd").is_err());
+        if internal_check_active() {
+            for internal in [
+                "http://127.0.0.1/",
+                "http://localhost:8080/",
+                "http://10.0.0.2/",
+            ] {
+                assert!(vet_url(&p, internal).is_err(), "{internal}");
+            }
+        }
+        // A named list is unchanged: only what it names.
+        let named = FetchPolicy::new("demo", &["example.com".to_owned()]);
+        assert!(vet_url(&named, "https://other.example/").is_err());
     }
 
     #[test]

@@ -7,6 +7,12 @@
       "repo": "friendlyflow/salesdemo_plugin_sicompass",
       "pubkey": "iKfXFRrUlgx/hg34tBO53+LGizSCuwzYfwEuTSjr/4Q=",
       "category": "demo"
+    },
+    {
+      "name": "remote",
+      "repo": "friendlyflow/remote_plugin_sicompass",
+      "pubkey": "49CDtq4mYpIQ4fNxioeI2BslQfzCX4+4OV6Wffr6aF4=",
+      "category": "network"
     }
   ]
 }

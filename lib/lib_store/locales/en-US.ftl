@@ -15,6 +15,7 @@ store-version = Latest version: { $version }
 store-category = Category: { $category }
 store-access-none = Access: nothing outside the program itself
 store-access-own-folder = Access: only its own folder
+store-access-any-server = Access: connects to any server on the internet, never to your own computer or local network
 store-access-hosts = Access: connects to { $list }
 store-access-files = Access: reads and writes your files in { $list }
 store-access-programs = Access: runs { $list }

@@ -641,6 +641,16 @@ fn button(action: &str, name: &str, label: String) -> FfonElement {
 fn access_lines(release: &ReleaseInfo) -> Vec<String> {
     let p = &release.permissions;
     let mut out = Vec::new();
+    let any_server = sicompass_sdk::plugin_abi::reaches_any_server(&release.allowed_hosts);
+    if any_server {
+        out.push(localize::t("store-access-any-server"));
+    }
+    let named: Vec<String> = release
+        .allowed_hosts
+        .iter()
+        .filter(|h| h.trim() != sicompass_sdk::plugin_abi::ANY_SERVER)
+        .cloned()
+        .collect();
     let mut add = |key: &str, items: &[String]| {
         if !items.is_empty() {
             let mut a = localize::Args::new();
@@ -648,7 +658,7 @@ fn access_lines(release: &ReleaseInfo) -> Vec<String> {
             out.push(localize::t_args(key, &a));
         }
     };
-    add("store-access-hosts", &release.allowed_hosts);
+    add("store-access-hosts", &named);
     add("store-access-files", &p.filesystem);
     add("store-access-programs", &p.process);
     add("store-access-sockets", &p.sockets);

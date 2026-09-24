@@ -15,6 +15,7 @@ store-version = Laatste versie: { $version }
 store-category = Categorie: { $category }
 store-access-none = Toegang: niets buiten het programma zelf
 store-access-own-folder = Toegang: alleen zijn eigen map
+store-access-any-server = Toegang: maakt verbinding met elke server op het internet, nooit met je eigen computer of lokale netwerk
 store-access-hosts = Toegang: maakt verbinding met { $list }
 store-access-files = Toegang: leest en schrijft je bestanden in { $list }
 store-access-programs = Toegang: start { $list }

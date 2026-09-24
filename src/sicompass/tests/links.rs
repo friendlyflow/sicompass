@@ -75,7 +75,10 @@ fn a_link_row_opens_the_json_page_it_points_at() {
         panic!("the link row is still an Obj")
     };
     assert_eq!(row.key, link);
-    assert_eq!(keys(&row.children), vec!["alpha".to_owned(), "beta".to_owned()]);
+    assert_eq!(
+        keys(&row.children),
+        vec!["alpha".to_owned(), "beta".to_owned()]
+    );
     let received = rt.block_on(server.received_requests()).unwrap();
     assert_eq!(received.len(), 1, "fetched once");
 }

@@ -15,6 +15,7 @@ store-version = Neueste Version: { $version }
 store-category = Kategorie: { $category }
 store-access-none = Zugriff: nichts außerhalb des Programms selbst
 store-access-own-folder = Zugriff: nur der eigene Ordner
+store-access-any-server = Zugriff: verbindet sich mit jedem Server im Internet, nie mit Ihrem eigenen Computer oder lokalen Netzwerk
 store-access-hosts = Zugriff: verbindet sich mit { $list }
 store-access-files = Zugriff: liest und schreibt Ihre Dateien in { $list }
 store-access-programs = Zugriff: startet { $list }

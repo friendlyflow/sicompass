@@ -856,3 +856,21 @@ fn a_data_folder_a_built_in_program_shares_is_never_offered() {
     assert!(store.data_folder("sharedname").is_none());
     assert!(store.data_folder("other").is_some());
 }
+
+#[test]
+fn any_server_is_said_plainly_and_never_as_a_star() {
+    let (server, keys) = (Server::start(), keys());
+    server.serve_store(&keys, &keys.store_secret, &[]);
+    server.serve_release(&release(&keys, "1.0.0", r#""allowedHosts": ["*"]"#));
+    let mut h = harness(&server, &keys);
+    h.open_programs();
+    let entry = h.entry();
+    assert!(
+        has(&entry, &localize::t("store-access-any-server")),
+        "{entry:?}"
+    );
+    assert!(
+        !entry.iter().any(|l| l.contains("connects to *")),
+        "{entry:?}"
+    );
+}

@@ -585,7 +585,11 @@ fn to_sdk_frame(f: wit_types::Frame) -> Option<DashboardFrame> {
             rows: s.rows.min(f.rows - s.row),
         })
     });
-    let half_gap_rows = f.half_gap_rows.into_iter().filter(|r| *r < f.rows).collect();
+    let half_gap_rows = f
+        .half_gap_rows
+        .into_iter()
+        .filter(|r| *r < f.rows)
+        .collect();
 
     Some(DashboardFrame {
         cols: f.cols,
@@ -967,7 +971,6 @@ impl Provider for WasmProvider {
     fn has_editor_semantics(&self) -> bool {
         self.descriptor.has_editor_semantics
     }
-
 
     // ---- Persistent config -------------------------------------------------
     //

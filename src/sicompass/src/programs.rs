@@ -655,6 +655,9 @@ fn inject_plugin_settings(settings: &mut dyn Provider, manifest: &PluginManifest
             SettingKind::Text => {
                 settings.add_text_setting(&manifest.display_name, &s.label, &s.key, &s.default);
             }
+            SettingKind::Password => {
+                settings.add_password_setting(&manifest.display_name, &s.label, &s.key, &s.default);
+            }
             SettingKind::Checkbox => {
                 settings.add_checkbox_setting(
                     &manifest.display_name,
@@ -862,6 +865,84 @@ fn migrate_programs_to_load(path: &Path) {
 /// its inner `"editorPath"` key to `"textEditorPath"`), and the
 /// `Available programs:.enable_editor` toggle to `enable_text editor`. Runs
 /// once at startup; if no old keys are present the function is a no-op.
+/// Move the built-in remote services' settings into the remote plugin's.
+///
+/// Remote services used to be one built-in program per server: a section named
+/// after it with `remoteUrl` and `apiKey`, switched on by `enable_<name>`. The
+/// remote plugin (installed from the Store) serves them all from its own
+/// section, `remote`, as one `name URL` per line in `servers` and one
+/// `name key` per line in `apiKeys`. Runs once at startup; with nothing to move,
+/// the file is left as it is. A `remote` section that already has servers is
+/// never overwritten.
+fn migrate_remotes_to_plugin(path: &Path) {
+    let Ok(data) = std::fs::read_to_string(path) else {
+        return;
+    };
+    let Ok(serde_json::Value::Object(mut root)) = serde_json::from_str::<serde_json::Value>(&data)
+    else {
+        return;
+    };
+    let remotes: Vec<(String, String, String)> = root
+        .iter()
+        .filter(|(name, _)| name.as_str() != "remote")
+        .filter_map(|(name, v)| {
+            let sec = v.as_object()?;
+            let url = sec.get("remoteUrl")?.as_str()?.trim();
+            (!url.is_empty()).then(|| {
+                let key = sec
+                    .get("apiKey")
+                    .and_then(|k| k.as_str())
+                    .unwrap_or("")
+                    .trim()
+                    .to_owned();
+                (name.clone(), url.to_owned(), key)
+            })
+        })
+        .collect();
+    if remotes.is_empty() {
+        return;
+    }
+    let has_servers = root
+        .get("remote")
+        .and_then(|r| r.get("servers"))
+        .and_then(|s| s.as_str())
+        .is_some_and(|s| !s.trim().is_empty());
+    if !has_servers {
+        // A name with a space would not survive "name URL", so it is joined.
+        let line_name = |n: &str| n.split_whitespace().collect::<Vec<_>>().join("-");
+        let servers: Vec<String> = remotes
+            .iter()
+            .map(|(n, url, _)| format!("{} {url}", line_name(n)))
+            .collect();
+        let keys: Vec<String> = remotes
+            .iter()
+            .filter(|(_, _, k)| !k.is_empty())
+            .map(|(n, _, k)| format!("{} {k}", line_name(n)))
+            .collect();
+        let section = root
+            .entry("remote".to_owned())
+            .or_insert_with(|| serde_json::Value::Object(Default::default()));
+        if let Some(m) = section.as_object_mut() {
+            m.insert("servers".into(), servers.join("\n").into());
+            if !keys.is_empty() {
+                m.insert("apiKeys".into(), keys.join("\n").into());
+            }
+        }
+    }
+    for (name, _, _) in &remotes {
+        root.remove(name);
+        if let Some(available) = root
+            .get_mut("Available programs:")
+            .and_then(|a| a.as_object_mut())
+        {
+            available.remove(&format!("enable_{name}"));
+        }
+    }
+    if let Ok(json) = serde_json::to_string_pretty(&serde_json::Value::Object(root)) {
+        let _ = sicompass_sdk::platform::atomic_write(path, &json);
+    }
+}
+
 fn migrate_editor_to_text_editor(path: &Path) {
     let Ok(data) = std::fs::read_to_string(path) else {
         return;
@@ -2240,6 +2321,69 @@ mod tests {
 
         let data = std::fs::read_to_string(&path).unwrap();
         assert_eq!(data, original, "file must be left byte-identical");
+    }
+
+    // --- migrate_remotes_to_plugin ---
+
+    #[test]
+    fn migrate_remotes_moves_every_server_into_the_plugin_section() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        std::fs::write(
+            &path,
+            r#"{
+            "products": { "remoteUrl": "https://ffon.example/api", "apiKey": "k1" },
+            "my wiki": { "remoteUrl": "https://wiki.example" },
+            "notes": { "notesCloudBackup": true },
+            "Available programs:": { "enable_products": true, "enable_my wiki": true,
+                                     "enable_notes": true }
+        }"#,
+        )
+        .unwrap();
+
+        migrate_remotes_to_plugin(&path);
+
+        let root: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        let servers = root["remote"]["servers"].as_str().unwrap();
+        let mut lines: Vec<&str> = servers.lines().collect();
+        lines.sort();
+        assert_eq!(
+            lines,
+            vec![
+                "my-wiki https://wiki.example",
+                "products https://ffon.example/api"
+            ]
+        );
+        assert_eq!(root["remote"]["apiKeys"].as_str(), Some("products k1"));
+        assert!(root.get("products").is_none() && root.get("my wiki").is_none());
+        let available = root["Available programs:"].as_object().unwrap();
+        assert!(!available.contains_key("enable_products"));
+        assert!(!available.contains_key("enable_my wiki"));
+        // Everything else is untouched.
+        assert_eq!(root["notes"]["notesCloudBackup"], true);
+        assert_eq!(available["enable_notes"], true);
+    }
+
+    #[test]
+    fn migrate_remotes_never_overwrites_configured_servers_and_is_otherwise_a_noop() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        let original = r#"{"sicompass":{"colorScheme":"dark"}}"#;
+        std::fs::write(&path, original).unwrap();
+        migrate_remotes_to_plugin(&path);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), original);
+
+        std::fs::write(
+            &path,
+            r#"{ "remote": { "servers": "mine https://mine.example" },
+                 "old": { "remoteUrl": "https://old.example" } }"#,
+        )
+        .unwrap();
+        migrate_remotes_to_plugin(&path);
+        let root: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(root["remote"]["servers"], "mine https://mine.example");
     }
 
     // --- enable_provider with user plugin cache ---
