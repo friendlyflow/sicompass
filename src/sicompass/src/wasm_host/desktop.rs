@@ -116,6 +116,87 @@ fn trash_restore(original: &Path) -> Result<(), String> {
     std::fs::rename(&moved, &orig).map_err(|e| e.to_string())
 }
 
+/// `ls -l`'s view of `meta`, for `desktop.stat`.
+fn file_info(meta: &std::fs::Metadata) -> wit::desktop::FileInfo {
+    let modified = meta
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map_or(0, |d| d.as_secs() as i64);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        wit::desktop::FileInfo {
+            size: meta.len(),
+            modified,
+            utc_offset: utc_offset_at(modified),
+            mode: Some(meta.mode()),
+            links: Some(meta.nlink()),
+            owner: Some(user_name(meta.uid())),
+            group: Some(group_name(meta.gid())),
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        wit::desktop::FileInfo {
+            size: meta.len(),
+            modified,
+            utc_offset: 0,
+            mode: None,
+            links: None,
+            owner: None,
+            group: None,
+        }
+    }
+}
+
+/// The local UTC offset at `secs` (seconds east), daylight saving included.
+#[cfg(unix)]
+fn utc_offset_at(secs: i64) -> i32 {
+    let t = secs as libc::time_t;
+    // SAFETY: `localtime_r` writes only into `tm`, which lives on this frame.
+    let mut tm: libc::tm = unsafe { std::mem::zeroed() };
+    if unsafe { libc::localtime_r(&t, &mut tm) }.is_null() {
+        return 0;
+    }
+    tm.tm_gmtoff as i32
+}
+
+/// A user's name, or the number when there is none (`ls` does the same).
+#[cfg(unix)]
+fn user_name(uid: u32) -> String {
+    let mut buf = vec![0 as libc::c_char; 4096];
+    // SAFETY: `pwd` and `buf` outlive the call, and `buf.len()` is its size;
+    // the name is read only when the call reports it found an entry.
+    unsafe {
+        let mut pwd: libc::passwd = std::mem::zeroed();
+        let mut out: *mut libc::passwd = std::ptr::null_mut();
+        if libc::getpwuid_r(uid, &mut pwd, buf.as_mut_ptr(), buf.len(), &mut out) == 0
+            && !out.is_null()
+        {
+            return std::ffi::CStr::from_ptr(pwd.pw_name).to_string_lossy().into_owned();
+        }
+    }
+    uid.to_string()
+}
+
+/// A group's name, or the number when there is none.
+#[cfg(unix)]
+fn group_name(gid: u32) -> String {
+    let mut buf = vec![0 as libc::c_char; 4096];
+    // SAFETY: as in `user_name`.
+    unsafe {
+        let mut grp: libc::group = std::mem::zeroed();
+        let mut out: *mut libc::group = std::ptr::null_mut();
+        if libc::getgrgid_r(gid, &mut grp, buf.as_mut_ptr(), buf.len(), &mut out) == 0
+            && !out.is_null()
+        {
+            return std::ffi::CStr::from_ptr(grp.gr_name).to_string_lossy().into_owned();
+        }
+    }
+    gid.to_string()
+}
+
 impl HostState {
     /// The host path for a guest path, if it lies inside a granted directory.
     ///
@@ -196,6 +277,49 @@ impl wit::desktop::Host for HostState {
         }
     }
 
+    /// Read from the system each time, so an application installed while
+    /// sicompass runs is there. The id is the command the system launches it
+    /// with, which `open-with` checks against this same list.
+    fn applications(&mut self) -> Vec<wit::desktop::Application> {
+        sicompass_sdk::platform::get_applications()
+            .into_iter()
+            .map(|a| wit::desktop::Application {
+                name: a.name,
+                id: a.exec,
+            })
+            .collect()
+    }
+
+    /// Only an id `applications` lists: a plugin can choose among the user's
+    /// installed applications, never name a program of its own.
+    fn open_with(&mut self, id: String, path: String) -> Result<(), String> {
+        let host = self.confine_granted(&path, true)?;
+        if !sicompass_sdk::platform::get_applications()
+            .iter()
+            .any(|a| a.exec == id)
+        {
+            return Err("that is not an installed application".to_owned());
+        }
+        if no_open() {
+            if let Ok(mut r) = RECORDED.lock() {
+                r.push(format!("open-with:{id}:{}", host.display()));
+            }
+            return Ok(());
+        }
+        if sicompass_sdk::platform::open_with(&id, &host.to_string_lossy()) {
+            Ok(())
+        } else {
+            Err("the application could not be started".to_owned())
+        }
+    }
+
+    /// The entry itself, like `ls -l`: a symlink is described, not followed.
+    fn stat(&mut self, path: String) -> Result<wit::desktop::FileInfo, String> {
+        let host = self.confine_granted(&path, false)?;
+        let meta = std::fs::symlink_metadata(&host).map_err(|e| format!("{path}: {e}"))?;
+        Ok(file_info(&meta))
+    }
+
     /// The item itself goes to the trash: for a symlink, the link, never what
     /// it points to. So its folder is confined (resolved), and the name is not.
     fn trash(&mut self, path: String) -> Result<(), String> {
@@ -253,6 +377,54 @@ mod tests {
         std::os::unix::fs::symlink("/etc", host.path().join("escape")).unwrap();
         let s = state(vec![(PathBuf::from("/storage"), host.path().to_path_buf())]);
         assert!(s.confine_granted("/storage/escape/passwd", true).is_err());
+    }
+
+    /// `stat` describes the entry itself: a link's own mode, and names for
+    /// its owner and group; nothing outside the grants.
+    #[cfg(unix)]
+    #[test]
+    fn stat_describes_the_entry_like_ls() {
+        use std::os::unix::fs::PermissionsExt;
+        use wit::desktop::Host;
+        let granted = tempfile::tempdir().unwrap();
+        let root = granted.path().canonicalize().unwrap();
+        std::fs::write(root.join("a.txt"), "hello").unwrap();
+        std::fs::set_permissions(root.join("a.txt"), std::fs::Permissions::from_mode(0o640))
+            .unwrap();
+        std::os::unix::fs::symlink(root.join("a.txt"), root.join("link")).unwrap();
+        let mut s = state(vec![(root.clone(), root.clone())]);
+
+        let f = s.stat(root.join("a.txt").to_string_lossy().into_owned()).unwrap();
+        assert_eq!(f.size, 5);
+        assert_eq!(f.mode.unwrap() & 0o777, 0o640);
+        assert_eq!(f.links, Some(1));
+        let me = user_name(unsafe { libc::getuid() });
+        assert_eq!(f.owner.as_deref(), Some(me.as_str()));
+        assert!(f.group.is_some_and(|g| !g.is_empty()));
+        assert!(f.modified > 0);
+
+        let l = s.stat(root.join("link").to_string_lossy().into_owned()).unwrap();
+        assert_eq!(l.mode.unwrap() & libc::S_IFMT, libc::S_IFLNK, "the link, not its target");
+        assert!(s.stat("/etc/passwd".to_owned()).is_err(), "outside the grants");
+    }
+
+    /// Only an application the host listed can be asked for, and only for a
+    /// file inside the grants.
+    #[test]
+    fn open_with_takes_only_a_listed_application() {
+        use wit::desktop::Host;
+        _set_test_no_open(true);
+        let granted = tempfile::tempdir().unwrap();
+        let root = granted.path().canonicalize().unwrap();
+        std::fs::write(root.join("a.txt"), "x").unwrap();
+        let mut s = state(vec![(root.clone(), root.clone())]);
+        let file = root.join("a.txt").to_string_lossy().into_owned();
+
+        assert!(s.open_with("rm -rf ~".to_owned(), file.clone()).is_err());
+        if let Some(app) = s.applications().into_iter().next() {
+            s.open_with(app.id.clone(), file).unwrap();
+            assert!(s.open_with(app.id, "/etc/passwd".to_owned()).is_err());
+        }
     }
 
     /// Trashing a symlink takes the link, never its target: deleting a link

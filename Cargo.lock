@@ -4490,6 +4490,7 @@ dependencies = [
  "freetype",
  "glam",
  "image",
+ "libc",
  "mockall",
  "nucleo-matcher",
  "portable-pty",
@@ -4605,7 +4606,7 @@ dependencies = [
 [[package]]
 name = "sicompass-sdk"
 version = "0.8.0"
-source = "git+https://github.com/friendlyflow/sicompass-plugin-sdk?rev=f32563c609508b033b71f06d17feaf43e6c6e67b#f32563c609508b033b71f06d17feaf43e6c6e67b"
+source = "git+https://github.com/friendlyflow/sicompass-plugin-sdk?rev=942ac5fb925cd0ab301e41df60acfd7f84c2d54e#942ac5fb925cd0ab301e41df60acfd7f84c2d54e"
 dependencies = [
  "async-trait",
  "base64 0.23.1",

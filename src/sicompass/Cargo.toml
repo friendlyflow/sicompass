@@ -377,6 +377,11 @@ portable-pty = { workspace = true }
 [target.'cfg(target_os = "linux")'.dependencies]
 accesskit_unix = { workspace = true }
 
+[target.'cfg(unix)'.dependencies]
+# A plugin's `desktop.stat`: owner and group names, and the local UTC offset
+# (wasm_host/desktop.rs).
+libc = { workspace = true }
+
 [target.'cfg(target_os = "windows")'.dependencies]
 accesskit_windows = { workspace = true }
 windows = { workspace = true }

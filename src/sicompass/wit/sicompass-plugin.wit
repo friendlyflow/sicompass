@@ -459,6 +459,47 @@ interface desktop {
   /// granted folder; the target may point anywhere, and reaching it is still
   /// subject to the grants. Fails when `path` is not a symlink.
   read-link: func(path: string) -> result<string, string>;
+
+  /// An application installed on the user's system.
+  record application {
+    /// What the user reads, e.g. "Firefox".
+    name: string,
+    /// What `open-with` takes. Opaque: only ids from `applications` work.
+    id: string,
+  }
+
+  /// The applications installed on the user's system, for an "open with"
+  /// choice. May be empty (a headless machine).
+  applications: func() -> list<application>;
+
+  /// Open the file at `path` with application `id` from `applications`.
+  /// `path` must lie inside a granted folder. An id the host did not list is
+  /// refused, so this starts only what the user has installed as an
+  /// application, never an arbitrary program.
+  open-with: func(id: string, path: string) -> result<_, string>;
+
+  /// What `ls -l` shows for an entry.
+  record file-info {
+    size: u64,
+    /// Last modified, seconds since the Unix epoch.
+    modified: s64,
+    /// The user's UTC offset at `modified`, in seconds east. A plugin has no
+    /// time zone of its own, so this is how it shows a local time.
+    utc-offset: s32,
+    /// Type and permission bits (`st_mode`), where the system has them.
+    mode: option<u32>,
+    /// Hard links, where the system has them.
+    links: option<u64>,
+    /// Owner and group names (the number when a name is unknown), where the
+    /// system has them.
+    owner: option<string>,
+    group: option<string>,
+  }
+
+  /// The entry at `path` itself (a symlink is not followed), which must lie
+  /// inside a granted folder. WASI's own metadata has no permission bits,
+  /// owner or group.
+  stat: func(path: string) -> result<file-info, string>;
 }
 
 /// Background work. Every call into a provider runs on the UI thread under a

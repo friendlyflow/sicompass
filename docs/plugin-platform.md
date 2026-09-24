@@ -688,8 +688,10 @@ A plugin setting's default may be `~`, which the host expands to the home
 folder (the text editor's `textEditorPath`), and `get-setting` answers with the
 default until the user saves a value. The Store points out the programs that
 came with the app until 0.2.0 when the user had them (their data folder or
-their settings section is still there). "Open file with" is gone: a sandboxed
-plugin cannot list the system's applications.
+their settings section is still there). "Open file with" and the full properties line came back through three more
+`desktop` functions: `applications` and `open-with` (only an id the host
+listed, for a file inside the grants), and `stat` (permission bits, owner,
+group and the local UTC offset, which WASI's metadata lacks).
 
 ## 14. Decisions on the former open questions (2026-09-24)
 

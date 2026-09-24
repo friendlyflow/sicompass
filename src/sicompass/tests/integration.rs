@@ -3274,6 +3274,94 @@ fn open_file_with_secondary_list_uses_nav_path_not_data() {
     }
 }
 
+/// End-to-end variant against the real filebrowser, a plugin now: the list
+/// comes from the host (`desktop.applications`). Only asserts when the host
+/// actually has `.desktop` entries — a bare container or a distribution whose
+/// entries the SDK cannot see would otherwise fail here for reasons unrelated to
+/// the code under test. The invariant itself is covered unconditionally by
+/// `open_file_with_secondary_list_uses_nav_path_not_data`.
+#[test]
+fn filebrowser_open_file_with_lists_installed_applications() {
+    if sicompass_sdk::platform::get_applications().is_empty() {
+        eprintln!("skipping: no .desktop applications visible on this host");
+        return;
+    }
+
+    let mut h = Harness::new();
+    let fb_idx = h
+        .provider_idx("filebrowser")
+        .expect("filebrowser not found");
+    navigate_to_provider(h.r(), fb_idx);
+    press_right(h.r());
+
+    // Navigate to the first file (non-directory) in the listing
+    let file_idx = h.renderer.total_list.iter().position(|item| {
+        // Objects are directories; strings are files
+        !item.label.is_empty() && item.data.is_none()
+    });
+    if let Some(idx) = file_idx {
+        move_to_index(&mut h, idx);
+    }
+
+    select_open_file_with(&mut h);
+
+    assert_eq!(
+        h.renderer.current_command,
+        sicompass::app_state::CommandPhase::Provider,
+        "should be in Provider phase after selecting 'open file with'"
+    );
+    assert!(
+        !h.renderer.total_list.is_empty(),
+        "open file with should show at least one application"
+    );
+    for item in &h.renderer.total_list {
+        assert!(
+            item.data.is_none(),
+            "item '{}': data should be None (exec must be in nav_path to avoid image load)",
+            item.label
+        );
+        assert!(
+            item.nav_path.is_some(),
+            "item '{}': nav_path should hold the exec command",
+            item.label
+        );
+    }
+}
+
+/// "show properties" through the sandbox: the whole `ls -l` line, with the
+/// permission bits and owner WASI's metadata lacks, from `desktop.stat`.
+#[cfg(unix)]
+#[test]
+fn filebrowser_properties_show_permissions_and_owner_through_the_host() {
+    use std::os::unix::fs::PermissionsExt;
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    std::fs::write(root.join("a.txt"), "hello").unwrap();
+    std::fs::set_permissions(root.join("a.txt"), std::fs::Permissions::from_mode(0o640)).unwrap();
+    std::fs::create_dir(root.join("sub")).unwrap();
+    let mut p = fs_plugin("filebrowser");
+    p.set_current_path(root.to_str().unwrap());
+    let mut err = String::new();
+    p.handle_command("show/hide properties", "", 0, &mut err);
+    let rows: Vec<String> = p
+        .fetch()
+        .iter()
+        .map(|e| match e {
+            FfonElement::Str(s) => s.clone(),
+            FfonElement::Obj(o) => o.key.clone(),
+        })
+        .collect();
+    let file = rows.iter().find(|r| r.contains("a.txt")).expect("a.txt listed");
+    let dir = rows.iter().find(|r| r.contains(">sub<")).expect("sub listed");
+    assert!(file.starts_with("-rw-r----- "), "{file}");
+    assert!(dir.starts_with("drwx"), "{dir}");
+    let me = std::env::var("USER").unwrap_or_default();
+    if !me.is_empty() {
+        assert!(file.contains(&format!(" {me} ")), "owner by name: {file}");
+    }
+    assert!(file.contains(" 5 "), "size: {file}");
+}
+
 // ---------------------------------------------------------------------------
 // Tests: Undo/redo available from all modes
 // ---------------------------------------------------------------------------
