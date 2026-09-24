@@ -1,0 +1,29 @@
+name: CI
+
+# Builds the component and audits it, runs clippy and the format check. Manual
+# only, like every workflow in the sicompass repos: Actions -> CI -> Run
+# workflow. The toolchain is the flake's dev shell, the same one used locally.
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: cachix/install-nix-action@v31
+      - name: Install the release tool
+        run: |
+          nix develop -c cargo install --git https://github.com/friendlyflow/sicompass-plugin-sdk \
+            --rev @SDK_REV@ sicompass-plugin --root "$RUNNER_TEMP/tool"
+          echo "SICOMPASS_PLUGIN=$RUNNER_TEMP/tool/bin/sicompass-plugin" >> "$GITHUB_ENV"
+      - name: Build, pack and audit (dry run)
+        run: nix develop -c ./scripts/release-plugin.sh --dry-run
+      - name: Clippy
+        run: nix develop -c cargo clippy --target wasm32-wasip2 -- -D warnings
+      - name: Format
+        run: nix develop -c cargo fmt --check

@@ -157,13 +157,23 @@ the icon.
 - **Native accessibility**: built-in screen reader support on Linux, macOS, and Windows
 - **Cross-platform**: packaged for Windows, macOS, and Linux, with paths, shells, and PTYs routed through platform helpers
 - **High-performance rendering**: Vulkan graphics with a FreeType2 glyph atlas
-- **Extensible**: provider-based plugin system with a built-in store for hot enable/disable
+- **Extensible**: sandboxed plugins, installed and updated from the built-in Store without a restart
 
 ## Built-in providers
 
 Each provider turns a different data source into the same keyboard-navigable
 tree: File Browser, Text Editor, Notes, Project Management, Email, Chat, Web
-Browser, Terminal, Git Client, Claude, Plugin Store, and Settings.
+Browser, Terminal, Git Client, Claude, Store, and Settings.
+
+The Store lists the programs you can add. Each one says what it may reach
+before you install it (a server, your files, another program) and whether it
+uses a paid service. Installing and updating is free, and a program is ready
+the moment it is installed. Plugins run in a sandbox, so a program can reach
+only what its entry says. The Store also holds the paid tiers: Sicompass Cloud
+(cloud backup of your notes and board), Sicompass Commercial (Cloud plus the
+commercial licence), Sponsor and Support. Your own data never depends on
+paying: without a subscription your notes and board stay on your computer,
+fully usable.
 
 Project Management holds a kanban board. The root lists the columns and each
 column lists its cards, so the whole board is navigable as an ordinary tree.

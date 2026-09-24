@@ -378,9 +378,21 @@ sicompass-plugin sign --key <file>     # writes release.json(.sig)
 sicompass-plugin verify <dir|url>      # what the Store does, runnable by hand
 ```
 
-The plugin template's `release.yml`: tag, then `nix build`, then `pack`, then
+The plugin template's `release.yml`: tag, then build, then `pack`, then
 `sign` (key from the `PLUGIN_SIGNING_KEY` repo secret), then attach to the
 release.
+
+**Built in 4.10:** `/split-repo --kind plugin` uses `template/plugin/`: a
+rust-overlay flake with `wasm32-wasip2`, `scripts/release-plugin.sh` (build,
+pack and audit, sign, verify as the Store will, with `--dry-run` signing with a
+throwaway key), and `release.yml`/`ci.yml` that run it. The release job also
+checks the tag against `plugin.json`'s version and the signing key against the
+`PLUGIN_PUBLIC_KEY` variable (the key the store list names), so neither mistake
+reaches a user. Dry-run on a copy of `hello-plugin` outside the SDK tree: it
+packs, signs and verifies, and a wrong key or tag is refused. Plugin keys are
+kept in `~/.config/sicompass/plugin-keys/` and set as repo secrets with `gh`.
+docs/wasm-plugins.md has "Publishing a plugin", the README and the tutorial
+mention the Store.
 
 ## 8. The store
 

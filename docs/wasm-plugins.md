@@ -52,10 +52,25 @@ instantiation already live here, so the host belongs with them.
 
 ## Capabilities
 
-A plugin can call exactly what `linker_for` links, and nothing else. There is no
-`wasi:cli`, no `wasi:filesystem`, no `wasi:sockets`, no environment access — so
-`std::fs` and `std::net` inside a guest compile and then fail, rather than reaching
-anything.
+A plugin can call exactly what `linker_for` links, and nothing else. Every plugin
+gets the inert WASI baseline (below) and the always-linked interfaces; the rest is
+linked only when `plugin.json`'s `permissions` grant it and, where it reaches
+outside the sandbox, the user approved it (docs/plugin-platform.md §4 and §5):
+
+| Interface | Linked | Gives |
+|---|---|---|
+| `host` | always | logging, the plugin's own settings, time, translations, its own assets |
+| `desktop` | always | open a URL or a file, trash and restore, paths confined to granted folders |
+| `tasks` | always | background work in a fresh instance of the same plugin |
+| `license` | always | whether the user holds a paid tier (third parties), never a key |
+| `net` | `allowedHosts` | HTTP to those hosts only |
+| `process` | `permissions.process`, approved | start the listed programs, optionally on a PTY |
+| `sockets` + `wasi:sockets` | `permissions.sockets`, approved | TCP to the listed `host:port` pairs |
+| `wasi:filesystem` preopens | `storage`, `filesystem` (approved) | the plugin's own folder at `/storage`, granted folders at their own paths |
+
+Without a preopen, `std::fs` finds nothing, and without a sockets grant
+`std::net` cannot connect: the calls compile and then fail, rather than
+reaching anything.
 
 **`interface host`** — always linked, grants no ambient authority:
 
@@ -122,6 +137,13 @@ notably one importing `net` with no `allowedHosts` declared.
 Instantiation would refuse it anyway, since the interface would not be linked. The
 value is a clear, early diagnostic naming the mismatch instead of an opaque link
 failure.
+
+The same audit runs three times, from one definition
+(`sicompass_sdk::plugin_abi::audit_imports`): in `sicompass-plugin pack` when the
+author builds a release, in the Store before it swaps a downloaded release into
+`plugins/` (`wasm_host::audit_plugin_bytes`, registered with
+`sicompass_sdk::package::register_component_auditor`), and here before every
+instantiation.
 
 ## Containment
 
@@ -292,17 +314,45 @@ file manager, not a secret. `read-asset` has no such hole — it is scoped to th
 calling plugin — and `dashboard-image-path` is checked against the manifest name,
 because there the host knows who is asking.
 
+## Publishing a plugin
+
+A release is three files on a GitHub release, under fixed names so
+`releases/latest/download/<file>` always works: `plugin.tar.gz` (everything the
+plugin ships), `release.json` (name, version, ABI, permissions, the archive's
+SHA-256) and `release.json.sig` (Ed25519 over `release.json`, by the plugin's
+own key). docs/plugin-platform.md §7 has the format.
+
+1. **A key**, once: `sicompass-plugin keygen --out <file>` writes the secret and
+   prints the public half. Keep the secret offline or in the repo's
+   `PLUGIN_SIGNING_KEY` secret, never in the repo.
+2. **Before tagging**, `./scripts/release-plugin.sh --dry-run` (a plugin repo made
+   with `/split-repo --kind plugin` has it) builds for `wasm32-wasip2`, packs
+   (auditing the imports against `plugin.json`), signs with a throwaway key and
+   verifies the way the Store will.
+3. **Tag `vX.Y.Z`** equal to `plugin.json`'s version. The release workflow runs
+   the same script with the real key, checks it matches the `PLUGIN_PUBLIC_KEY`
+   variable, and attaches the three files.
+4. **The store list** (`lib/lib_store/store.json`, signed, maintained with
+   `/store`) names the plugin, its repo and its public key, once. Releases after
+   that need no change in sicompass: the Store reads the latest `release.json`.
+   A third party proposes an entry by pull request; only the maintainer's store
+   key makes the app believe it.
+
+**Installed by hand** (copied into `plugins/<name>/`): with `updateUrl` (the folder
+holding the three files) and `pubkey` in `plugin.json`, the Store offers its
+updates in the same format, and refuses one that names another key.
+
 ## Testing
 
 ```sh
 cargo test -p sicompass wasm_host          # unit
 cargo test -p sicompass --test wasm_plugin # against a real component
 cargo test -p sicompass --no-default-features --features no-jit-wasm
-./scripts/verify-guest.sh                  # in the SDK repo: builds and audits a guest
+./scripts/verify-guest.sh                  # in the SDK repo: builds and audits every example
 ```
 
-`tests/fixtures/wasm/hello.wasm` and `net.wasm` are built from the SDK's
-`examples/`. They are committed rather than built here so `cargo test` does not need
+`tests/fixtures/wasm/*.wasm` are built from the SDK's `examples/` (one per
+capability: hello, net, fs, task, process, socket). They are committed rather than built here so `cargo test` does not need
 the wasm toolchain; the regeneration commands are in `tests/wasm_plugin.rs`.
 `tests/fixtures/wasm/` doubles as a plugin directory, so
 `tests/fixtures/wasm/assets/hello-asset.txt` is the hello fixture's own asset — the

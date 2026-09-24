@@ -81,7 +81,7 @@ tutorial-hiw-accessibility = Screen reader support is built in through AccessKit
 # 4. The programs (one short leaf each)
 # ---------------------------------------------------------------------------
 tutorial-sec-programs = The programs
-tutorial-prog-intro = Sicompass turns each data source into the same navigable tree. Enable or disable programs in Settings under 'Available programs'. Here is what ships with the app.
+tutorial-prog-intro = Sicompass turns each data source into the same navigable tree. Enable or disable programs in Settings under 'Available programs'. Programs that do not ship with the app are installed from the Store. Here is what ships with the app.
 tutorial-prog-filebrowser = File browser: your filesystem as a tree. Enter directories with Right, rename with i, and create, copy, paste, or delete items inline. Dot-prefixed files are hidden, run the colon command show/hide hidden files to see them.
 tutorial-prog-texteditor = Text editor: press Right on a file to open its contents as a tree and edit the lines inline. Every change is on the undo timeline.
 tutorial-prog-notes = Notes: press ctrl+a to write a note, Right to open it, and ctrl+a again inside it to add a line. Notes nest as deep as you like, and every change is on the undo timeline. The first row of a note is its list meta, where you set whether the note is private or public.
@@ -100,6 +100,7 @@ tutorial-prog-email = Email: IMAP and SMTP with Gmail OAuth. Folders and message
 tutorial-prog-email-gmail = Set up Gmail: Gmail uses OAuth, not a password. In the Google Cloud Console, create a project, enable the Gmail API, and on the OAuth consent screen add the scope https://mail.google.com/. That mail scope is the one that matters. Without it, Google issues a token with no mail access and login fails with invalid credentials. Then create an OAuth client ID, paste its client ID and secret into Settings, and log in. Watch that the Google consent screen actually asks to read and send your mail. If you get stuck, run the colon command :refresh to force a re-fetch, and to re-authorize run :logout and then log in again so a fresh token is minted with the mail scope.
 tutorial-prog-salesdemo = Sales demo: an air handling unit configurator that shows how complex, editable, hierarchical data works in Sicompass.
 tutorial-prog-remote = Remote services: connect to FFON providers served over HTTP. Set a remote URL and key in Settings, and content is fetched as you navigate.
+tutorial-prog-store = Store: adds, updates and removes programs. Open store, then programs, pick one, and press Enter on install. Each program says what it may reach before you install it, and installing is free. Under tiers are Sicompass Cloud, Sicompass Commercial, Sponsor and Support.
 tutorial-prog-settings = Settings: always the last item at the root. It configures Sicompass and every program, and changes take effect immediately.
 
 # ---------------------------------------------------------------------------

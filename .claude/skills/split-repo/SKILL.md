@@ -103,6 +103,38 @@ with `command -v git-filter-repo`, and fall back to `nix develop -c`.
      `lib.fileset`, or the Nix build fails even though `cargo build` works.
    - `chmod +x .claude/hooks/*.sh`.
 
+3b. **A plugin (`--kind plugin`) takes `template/plugin/` instead** of the
+   top-level `flake.nix` and `dot-github/workflows/ci.yml`:
+   - `flake.nix`: rust-overlay's toolchain with the `wasm32-wasip2` target,
+     `wasm-tools` and `jq`. There is no `packages.default`: a plugin ships as a
+     signed archive, not a Nix package.
+   - `scripts/release-plugin.sh` (keep it executable): build the component,
+     `sicompass-plugin pack` (which audits its imports against `plugin.json`),
+     sign, and verify the way the Store will. `--dry-run` signs with a
+     throwaway key. The workflows call it, and so can a person before tagging.
+   - `dot-github/workflows/release.yml` (tag `vX.Y.Z`: runs the script, then
+     attaches `plugin.tar.gz`, `release.json`, `release.json.sig` to the
+     GitHub release) and `dot-github/workflows/ci.yml`. Fill `@SDK_REV@` with
+     the SDK commit the plugin builds against.
+   - The crate is a `cdylib` built for `wasm32-wasip2` with the pdk, like the
+     SDK's `examples/*`, and has a `plugin.json` with `version` and
+     `permissions` (docs/plugin-platform.md §4). Its strings are
+     `locales/<lang>.ftl` with ids prefixed `<name>-`, in all four languages.
+   - **Its signing key**, once per plugin. Ask the user before creating it, and
+     never print, copy or commit the secret half:
+     ```sh
+     sicompass-plugin keygen --out ~/.config/sicompass/plugin-keys/<name>.key
+     gh secret set PLUGIN_SIGNING_KEY -R friendlyflow/<new-repo-name> \
+       < ~/.config/sicompass/plugin-keys/<name>.key
+     gh variable set PLUGIN_PUBLIC_KEY -R friendlyflow/<new-repo-name> \
+       --body "$(sicompass-plugin pubkey --key ~/.config/sicompass/plugin-keys/<name>.key)"
+     ```
+     (the `gh` steps after step 8, when the repo exists). The public key goes
+     into the store list with `/store add <name> friendlyflow/<new-repo-name>
+     <pubkey>`. Losing the key is survivable: the store list names a new one.
+   - Check with `nix develop -c ./scripts/release-plugin.sh --dry-run` in step 5
+     instead of `nix build`.
+
 4. **Make `Cargo.toml` standalone.**
    - Replace every `*.workspace = true` with a real value. The version is
      `0.2.0`, the edition `2024` and the license `GPL-3.0-only`. Dependencies

@@ -52,9 +52,16 @@ delete a pushed tag. If a release is broken, release the next patch.
    git tag -a vX.Y.Z -m "Release vX.Y.Z"
    git push origin vX.Y.Z
    ```
+   A **plugin** is released the same way. Before tagging, run
+   `nix develop -c ./scripts/release-plugin.sh --dry-run`: it builds, audits,
+   signs with a throwaway key and verifies, so a release that would fail is
+   caught before the tag exists. The tag's version must equal `plugin.json`'s.
 7. **Follow the workflow**, if there is one:
    `gh run list --workflow=release.yml --limit 1`. Judge success by the release
    page and its assets, not only the run status.
+   For a plugin, the release has to carry `plugin.tar.gz`, `release.json` and
+   `release.json.sig`: `gh release view vX.Y.Z --json assets`. The Store picks
+   it up from `releases/latest/download/` with no change in sicompass.
 8. **Report** the tag, and name the repos that pin this one and now need their
    `rev`/`tag` moved. Those are the entries in `../sicompass/.claude/repos.json`
    whose `Cargo.toml` or `flake.nix` mentions this repo.

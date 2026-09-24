@@ -1,0 +1,71 @@
+name: Release
+
+# A plugin release is a vX.Y.Z tag (the /release skill pushes one). This builds
+# the component, packs it, signs it with the plugin's key and attaches the
+# three files the sicompass Store downloads to the GitHub release:
+#   plugin.tar.gz  release.json  release.json.sig
+# The Store reads them from releases/latest/download/, so nothing in sicompass
+# changes when a plugin is released.
+#
+# Needs, in the repo settings:
+#   secret PLUGIN_SIGNING_KEY  the secret key from `sicompass-plugin keygen`
+#   variable PLUGIN_PUBLIC_KEY its public half, the one in the store list
+#
+# Run it by hand with dry_run (Actions -> Release -> Run workflow) to check a
+# release end to end with a throwaway key and without publishing anything.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Build, pack, sign with a throwaway key and verify, but publish nothing"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: cachix/install-nix-action@v31
+
+      - name: Install the release tool
+        # The same tool the Store's checks come from, pinned to the SDK rev
+        # this plugin builds against.
+        run: |
+          nix develop -c cargo install --git https://github.com/friendlyflow/sicompass-plugin-sdk \
+            --rev @SDK_REV@ sicompass-plugin --root "$RUNNER_TEMP/tool"
+          echo "SICOMPASS_PLUGIN=$RUNNER_TEMP/tool/bin/sicompass-plugin" >> "$GITHUB_ENV"
+
+      - name: Build, pack, sign, verify
+        env:
+          PLUGIN_SIGNING_KEY: ${{ secrets.PLUGIN_SIGNING_KEY }}
+          PLUGIN_PUBLIC_KEY: ${{ vars.PLUGIN_PUBLIC_KEY }}
+          RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.dry_run }}" = "true" ]; then
+            nix develop -c ./scripts/release-plugin.sh --dry-run
+          else
+            nix develop -c ./scripts/release-plugin.sh
+          fi
+
+      - name: Publish
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 \
+            || gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes "See CHANGELOG.md."
+          gh release upload "$GITHUB_REF_NAME" \
+            dist/plugin.tar.gz dist/release.json dist/release.json.sig --clobber
+
+      - name: Keep the dry run's files
+        if: github.ref_type != 'tag'
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
