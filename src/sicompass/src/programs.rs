@@ -859,12 +859,6 @@ fn migrate_programs_to_load(path: &Path) {
     }
 }
 
-/// Migrate the renamed "editor" plugin to "text editor".
-///
-/// Renames the top-level `"editor"` settings section to `"text editor"` (and
-/// its inner `"editorPath"` key to `"textEditorPath"`), and the
-/// `Available programs:.enable_editor` toggle to `enable_text editor`. Runs
-/// once at startup; if no old keys are present the function is a no-op.
 /// Move the built-in remote services' settings into the remote plugin's.
 ///
 /// Remote services used to be one built-in program per server: a section named
@@ -943,6 +937,12 @@ fn migrate_remotes_to_plugin(path: &Path) {
     }
 }
 
+/// Migrate the renamed "editor" plugin to "text editor".
+///
+/// Renames the top-level `"editor"` settings section to `"text editor"` (and
+/// its inner `"editorPath"` key to `"textEditorPath"`), and the
+/// `Available programs:.enable_editor` toggle to `enable_text editor`. Runs
+/// once at startup; if no old keys are present the function is a no-op.
 fn migrate_editor_to_text_editor(path: &Path) {
     let Ok(data) = std::fs::read_to_string(path) else {
         return;

@@ -11,17 +11,18 @@
 //! the refresh with the typed token in it, and the row above it shows the new
 //! status.
 //!
-//! The controls are handled by `sicompass_payments::tier_input::TierSession`,
-//! the same code notes and the board use for their cloud row. The server URL
-//! and the redeem tokens are kept in `settings.json` under `Store`, where
-//! `sicompass_payments::config` reads them.
+//! The controls are handled by `crate::payments::tier_input::TierSession`.
+//! The server URL and the redeem tokens are kept in `settings.json` under
+//! `Store`, where `crate::payments::config` reads them. What the cloud backup
+//! uses is asked of the server (`GET /usage`) once a session, when the list is
+//! first shown, because the uploads are the plugins' own.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::mpsc;
 
-use sicompass_payments::cert::{self, TierStatus, tier};
-use sicompass_payments::tier_input::TierSession;
+use crate::payments::cert::{self, TierStatus, tier};
+use crate::payments::tier_input::TierSession;
 use sicompass_sdk::ffon::FfonElement;
 use sicompass_sdk::localize;
 use sicompass_sdk::tags;
@@ -57,6 +58,9 @@ pub struct Tiers {
         mpsc::Receiver<Result<Vec<FfonElement>, String>>,
     )>,
     error: Option<String>,
+    /// `GET /usage` in flight; it answers whether a report arrived.
+    usage_loading: Option<mpsc::Receiver<bool>>,
+    usage_asked: bool,
     /// Keys the app should hear about through the apply callback.
     changed: Vec<(String, String)>,
 }
@@ -70,6 +74,8 @@ impl Tiers {
             pages: HashMap::new(),
             loading: None,
             error: None,
+            usage_loading: None,
+            usage_asked: false,
             changed: Vec::new(),
         }
     }
@@ -90,7 +96,7 @@ impl Tiers {
     }
 
     pub fn is_loading(&self) -> bool {
-        self.loading.is_some()
+        self.loading.is_some() || self.usage_loading.is_some()
     }
 
     pub fn take_error(&mut self) -> Option<String> {
@@ -150,7 +156,7 @@ impl Tiers {
             .iter()
             .map(|(_, title, tier_id)| FfonElement::new_obj(Self::row_key(title, *tier_id)))
             .collect();
-        if let Some(usage) = sicompass_payments::usage::last() {
+        if let Some(usage) = crate::payments::usage::last() {
             out.extend(usage.lines().into_iter().map(FfonElement::new_str));
         }
         out.push(FfonElement::new_str(format!(
@@ -173,6 +179,7 @@ impl Tiers {
     /// Below `tiers`: a page, or an object inside one.
     pub fn fetch_at(&mut self, segments: &[String]) -> Vec<FfonElement> {
         let Some((first, rest)) = segments.split_first() else {
+            self.ask_usage();
             return self.list();
         };
         let Some(page) = Self::page_of(first) else {
@@ -219,8 +226,48 @@ impl Tiers {
         }
     }
 
-    /// Pick up a finished page load. Returns whether something changed.
+    /// Ask the server what the cloud backup uses, once a session, when there
+    /// is a Sicompass Cloud token to ask with. A failure is not shown: the
+    /// usage lines are information, and the last report stays on screen.
+    fn ask_usage(&mut self) {
+        if self.usage_asked {
+            return;
+        }
+        self.usage_asked = true;
+        let token = crate::payments::config::redeem_token();
+        if token.is_empty() {
+            return;
+        }
+        let server = self.session.store_url().to_owned();
+        let (tx, rx) = mpsc::channel();
+        let spawned = std::thread::Builder::new()
+            .name("store:usage".into())
+            .spawn(move || {
+                let _ = tx.send(crate::payments::usage::fetch(&server, &token).is_ok());
+            });
+        if spawned.is_ok() {
+            self.usage_loading = Some(rx);
+        }
+    }
+
+    /// Pick up a finished page load or usage report. Returns whether
+    /// something changed.
     pub fn tick(&mut self) -> bool {
+        let usage_arrived = match self.usage_loading.as_ref().map(|rx| rx.try_recv()) {
+            Some(Ok(arrived)) => {
+                self.usage_loading = None;
+                arrived
+            }
+            Some(Err(mpsc::TryRecvError::Disconnected)) => {
+                self.usage_loading = None;
+                false
+            }
+            _ => false,
+        };
+        self.tick_page() || usage_arrived
+    }
+
+    fn tick_page(&mut self) -> bool {
         let Some((page, rx)) = &self.loading else {
             return false;
         };

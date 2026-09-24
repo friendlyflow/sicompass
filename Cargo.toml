@@ -3,7 +3,6 @@ members = [
     "lib/lib_tutorial",
     "lib/lib_settings",
     "lib/lib_store",
-    "lib/lib_payments",
     "lib/lib_filebrowser",
     "lib/lib_webbrowser",
     "lib/lib_chatclient",
@@ -13,8 +12,6 @@ members = [
     "lib/lib_terminal",
     "lib/lib_claude",
     "lib/lib_gitclient",
-    "lib/lib_notes",
-    "lib/lib_project_management",
     "lib/lib_builtins",
     "lib/lib_updater",
     "src/sicompass",
@@ -54,7 +51,6 @@ sicompass-sdk = "0.8.0"
 sicompass-tutorial = { path = "lib/lib_tutorial" }
 sicompass-settings = { path = "lib/lib_settings" }
 sicompass-store = { path = "lib/lib_store" }
-sicompass-payments = { path = "lib/lib_payments" }
 sicompass-filebrowser = { path = "lib/lib_filebrowser" }
 sicompass-webbrowser = { path = "lib/lib_webbrowser" }
 sicompass-chatclient = { path = "lib/lib_chatclient" }
@@ -64,8 +60,6 @@ sicompass-shell = { path = "lib/lib_shell" }
 sicompass-terminal = { path = "lib/lib_terminal" }
 sicompass-claude = { path = "lib/lib_claude" }
 sicompass-gitclient = { path = "lib/lib_gitclient" }
-sicompass-notes = { path = "lib/lib_notes" }
-sicompass-project-management = { path = "lib/lib_project_management" }
 sicompass-builtins = { path = "lib/lib_builtins" }
 sicompass-updater = { path = "lib/lib_updater" }
 # The renderer shared with the login greeter, in its own repo

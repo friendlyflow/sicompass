@@ -421,11 +421,6 @@ sicompass-claude = { workspace = true }
 # `ensure_builtins`. Without it a fixture repository with a remote configured
 # would have these tests contacting it.
 sicompass-gitclient = { workspace = true }
-sicompass-notes = { workspace = true }
-# Only to switch persistence off for the test binary — see
-# `ensure_builtins`. Without it the kanban board would reconcile the
-# developer's real board directory against whatever a test built.
-sicompass-project-management = { workspace = true }
 sicompass-chatclient = { workspace = true }
 sicompass-emailclient = { workspace = true }
 # Only to switch OS-trash deletes off for the test binary — see

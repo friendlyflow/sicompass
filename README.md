@@ -162,8 +162,9 @@ the icon.
 ## Built-in providers
 
 Each provider turns a different data source into the same keyboard-navigable
-tree: File Browser, Text Editor, Notes, Project Management, Email, Chat, Web
-Browser, Terminal, Git Client, Claude, Store, and Settings.
+tree: File Browser, Text Editor, Email, Chat, Web Browser, Terminal, Git Client,
+Claude, Store, and Settings. Notes, Project Management, Remote and the Sales
+demo are installed from the Store.
 
 The Store lists the programs you can add. Each one says what it may reach
 before you install it (a server, your files, another program) and whether it
@@ -175,7 +176,7 @@ commercial licence), Sponsor and Support. Your own data never depends on
 paying: without a subscription your notes and board stay on your computer,
 fully usable.
 
-Project Management holds a kanban board. The root lists the columns and each
+Project Management, from the Store, holds a kanban board. The root lists the columns and each
 column lists its cards, so the whole board is navigable as an ordinary tree.
 Press d to see it drawn as a board instead, with the columns side by side. The
 cursor sits on a card, and the one card it is on is the only thing highlighted.

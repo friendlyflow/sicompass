@@ -13,6 +13,18 @@
       "repo": "friendlyflow/remote_plugin_sicompass",
       "pubkey": "49CDtq4mYpIQ4fNxioeI2BslQfzCX4+4OV6Wffr6aF4=",
       "category": "network"
+    },
+    {
+      "name": "notes",
+      "repo": "friendlyflow/notes_plugin_sicompass",
+      "pubkey": "sSg9dF25eDkWhcUMUXYH9XUvt8F3Vb16qyrRDoAYA78=",
+      "category": "productivity"
+    },
+    {
+      "name": "projectmanagement",
+      "repo": "friendlyflow/projectmanagement_plugin_sicompass",
+      "pubkey": "mKWfeJ8vM7+ui0mEtIQkcXTXNQM0ZhwdCOi3h+r3070=",
+      "category": "productivity"
     }
   ]
 }

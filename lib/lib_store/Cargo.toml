@@ -11,10 +11,14 @@ sicompass-sdk = { workspace = true, features = ["package"] }
 serde_json = { workspace = true }
 reqwest = { workspace = true, features = ["blocking"] }
 semver = { workspace = true }
-# The tiers section: certificates, checkout and the redeem tokens.
-sicompass-payments = { workspace = true }
+serde = { workspace = true }
+# The tiers section (`payments`): verifying license certificates offline.
+ed25519-dalek = { workspace = true }
+base64 = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+# `.json(...)` in the live-server tests' license minting.
+reqwest = { workspace = true, features = ["blocking", "json"] }
 wiremock = { workspace = true }
 tokio = { workspace = true }

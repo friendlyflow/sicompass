@@ -4,9 +4,8 @@
 //! shows it as a link row, and Right fetches the URL through the HTTP client
 //! the app registers (`boot::register_http_client`) and shows the page in
 //! place: a JSON FFON document as it is, an HTML page through the web
-//! pipeline. The notes and board cloud row leads to its tier page this way.
-//! Remote services used it too until they were removed, and it did not depend
-//! on them, which is what this pins.
+//! pipeline. Remote services and the cloud backup rows used it once, and it did
+//! not depend on them, which is what this pins.
 //!
 //! Its own test binary because the HTTP client is registered once per process.
 

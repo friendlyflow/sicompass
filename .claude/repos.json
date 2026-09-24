@@ -35,6 +35,21 @@
       "name": "remote_plugin_sicompass",
       "path": "../remote_plugin_sicompass",
       "kind": "plugin"
+    },
+    {
+      "name": "payments_plugin_sicompass",
+      "path": "../payments_plugin_sicompass",
+      "kind": "crate"
+    },
+    {
+      "name": "notes_plugin_sicompass",
+      "path": "../notes_plugin_sicompass",
+      "kind": "plugin"
+    },
+    {
+      "name": "projectmanagement_plugin_sicompass",
+      "path": "../projectmanagement_plugin_sicompass",
+      "kind": "plugin"
     }
   ]
 }

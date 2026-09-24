@@ -19,5 +19,3 @@ sicompass-store = { workspace = true }
 sicompass-terminal = { workspace = true }
 sicompass-claude = { workspace = true }
 sicompass-gitclient = { workspace = true }
-sicompass-notes = { workspace = true }
-sicompass-project-management = { workspace = true }

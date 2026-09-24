@@ -478,8 +478,8 @@ Store
   update. Store plugins update through their `release.json`. A plugin copied in
   by hand with an `updateUrl` uses the same format.
 - **The tier pages move here from Settings**, with the licence redeem and the
-  store URL. `lib_store` depends on `sicompass-payments`, and `lib_settings`
-  stops depending on it.
+  store URL. They became `lib_store`'s `payments` module in Step 7, and
+  `lib_settings` stopped depending on them.
 - **Uninstall** removes the program. It asks separately, defaulting to no,
   whether to delete the plugin's storage folder. That folder is user data.
 - First-run: the tutorial points at the Store for the programs it describes, per
@@ -560,9 +560,11 @@ tier links in Settings and serves the server's tier pages from the Store's own
 tree (a `<link>` graft has no path, so the refresh after redeeming a token put
 the tiers list where the page was); the usage lines under the tiers; the
 `license` import. `lib_settings` no longer depends on `sicompass-payments`.
-Checked against a local server by `lib/lib_payments/tests/live_server.rs`
-(run by hand, see its header): certificates per tier, Commercial including
-Cloud, grace on both sides, usage, and a support licence refused for backup.
+Checked against a local server by hand (see each file's header): the
+certificates per tier, Commercial including Cloud and grace on the client in
+`lib/lib_store/tests/live_server.rs`, and grace on the server, usage and a
+support licence refused for backup in `payments_plugin_sicompass`'s
+`tests/live_server.rs`.
 
 ## 11. Host changes in sicompass
 
@@ -643,6 +645,24 @@ setting kind) in its settings section, and `migrate_remotes_to_plugin` moves
 the old per-server sections there. It fetches each level itself with the key
 as a bearer token, instead of leaving `<link>`s for the app to follow. Link
 rows are an app feature regardless; `tests/links.rs` follows one end to end.
+
+**Step 7 (2026-09-24):** plugins do their own cloud backup, the way a third
+party's would. The `sicompass-payments` guest library
+(`payments_plugin_sicompass`) holds the snapshot format, the backup protocol
+over a plugin's `net`, the debounce, and `cloud::Cloud`, the service as a
+plugin runs it (switch, row, uploads and restores as background tasks). The
+host adds `license.standing` and `license.token`, the token only for the tier a
+manifest names as its `service`. Notes and project management became
+`notes_plugin_sicompass` and `projectmanagement_plugin_sicompass`, with
+`storage` mapped to the folders the built-ins used, so existing notes and
+boards open unchanged, and settings sections that keep their names. The backup
+row no longer links to a tier page: it says where the user stands and points to
+store, tiers. What was left of `lib_payments` became `lib_store`'s `payments`
+module, and the Store asks `GET /usage` itself. The integration tests that
+drove the built-in notes and board now load the released plugins from
+`tests/fixtures/plugins`, which found two host bugs: a guest writing a file
+during undo panicked (a nested tokio runtime), and a navigation request made in
+`leave-dashboard` was only seen a frame later.
 
 ## 14. Decisions on the former open questions (2026-09-24)
 

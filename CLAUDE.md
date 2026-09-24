@@ -25,14 +25,7 @@ produce the installable Linux package. It reads the version from
   by `[ -t 0 ]` on purpose: without the guard it replaces the process for
   `nix develop -c <cmd>`, and the command silently never runs (exit 0, no output).
 - Crate package names differ from directory names: `lib/lib_<x>` is package
-  `sicompass-<x>` (exceptions: `lib/lib_texteditor` is `sicompass-text-editor`,
-  and `lib/lib_project_management` is `sicompass-project-management`, whose
-  provider *name* is the space-free `projectmanagement` so that
-  `display_name().replace(' ', "")` still equals it).
-  `lib/lib_payments` is `sicompass-payments`, and is the one `lib/lib_*` that
-  is not a provider: it registers no factory and hosts the commercial client
-  (checkout, license certificates, tiers, cloud backup) that `lib_store`,
-  `lib_notes` and `lib_project_management` share.
+  `sicompass-<x>` (exception: `lib/lib_texteditor` is `sicompass-text-editor`).
   Crates under `src/` keep their directory name. `cargo test -p` takes the
   package name.
 - The dev shell is platform-split. `aarch64-darwin` gets MoltenVK,
@@ -147,27 +140,31 @@ See [docs/releasing.md](docs/releasing.md).
 
 ## Architecture: paid cloud backup
 
-The commercial client lives in `lib/lib_payments` (`sicompass-payments`), and
-the server is the **separate, private** repo `../server` (the Ed25519 signing
-key must never sit in GPL client code). Notes and the kanban board mirror their
-store directories to `PUT /plugins/{notes,kanban}` when the user ticks "enable
-cloud backup" in that provider's settings section.
+The app's half of the commercial client is `lib_store`'s `payments` module
+(certificates, checkout, the tier pages' controls, redeem tokens, usage), shown
+in Store > tiers. The server is the **separate, private** repo `../server` (the
+Ed25519 signing key must never sit in GPL client code).
+
+The backups themselves are the plugins'. Notes and project management are
+plugins now (`../notes_plugin_sicompass`, `../projectmanagement_plugin_sicompass`)
+and back up the way a third party's plugin would, with the `sicompass-payments`
+guest library (`../payments_plugin_sicompass`). The host gives a plugin two
+things through the `license` interface: where the user stands with a tier
+(`license.standing`), and the redeem token, only for the tier its `plugin.json`
+names as `service` (`license.token`, gated by `Grants::service_tier`).
 
 Three things are easy to get wrong here:
 
-- **The paywall is on the service, never on the data.** `store/cert.rs` says
-  verification is display-only, and that stays true: with the switch on and
-  nothing paid, the provider still lists the user's notes and board and still
-  saves them to disk. Only the copy on our server is gated.
-- **A tier tree is grafted into whichever provider the user followed the link
-  from**, and the app dispatches `<button>` presses, `<radio>` changes and list
-  edits to *that* provider. Hence `payments::tier_input` (shared handlers) and
-  `payments::cloud::is_grafted_page` (which keeps an edit on the payment page
-  from being reconciled into the user's store). Both are load-bearing; the
-  tests that cover them fail loudly if either is removed.
-- **A provider's save path runs on the UI thread, once per keystroke.**
-  `CloudBackup::mark_dirty` only queues; the upload is a worker thread with a
-  debounce.
+- **The paywall is on the service, never on the data.** `payments/cert.rs`
+  says verification is display-only, and that stays true: a plugin shows and
+  saves the user's data whatever `license.standing` says. Only the copy on our
+  server is gated.
+- **A token is for one plugin's own service.** `license.token` answers only
+  for `service.tier`. Widening it would hand every plugin the user's
+  credential for a server that holds their data.
+- **Tier pages are served from the Store's own tree**, not grafted into
+  another provider, so a refresh after redeeming keeps the page (and the typed
+  token) where it was.
 
 Restoring never runs over a store that already has files in it. A backup is not
 a sync, and the machine in front of the user wins.

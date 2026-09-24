@@ -1,0 +1,25 @@
+{
+  "name": "notes",
+  "displayName": "notes",
+  "type": "wasm",
+  "entry": "plugin.wasm",
+  "version": "0.2.0",
+  "minAppVersion": "0.1.21",
+  "description": "notes-description",
+  "settings": [
+    {
+      "type": "checkbox",
+      "label": "notes-checkbox-cloud-backup",
+      "key": "notesCloudBackup",
+      "defaultChecked": false
+    }
+  ],
+  "service": {
+    "tier": "friendlyflow/cloud",
+    "what": "notes-service"
+  },
+  "permissions": {
+    "storage": true,
+    "allowedHosts": ["store.sicompass.org"]
+  }
+}

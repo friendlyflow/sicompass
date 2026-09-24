@@ -18,7 +18,7 @@ struct T {
 }
 
 fn store(url: &str) -> T {
-    sicompass_payments::config::_set_test_no_persist(true);
+    crate::payments::config::_set_test_no_persist(true);
     let settings = tempfile::tempdir().unwrap();
     let mut store = StoreProvider::new().with_settings_path(settings.path().join("settings.json"));
     store.tiers_mut().set_store_url(url);
@@ -389,8 +389,8 @@ fn a_store_list_cannot_name_another_issuer_for_our_tiers() {
     .unwrap();
     remember_issuers(&store);
     assert_eq!(
-        sicompass_payments::cert::known_issuer(sicompass_payments::cert::tier::CLOUD),
-        Some(sicompass_payments::cert::LICENSE_PUBLIC_KEY_B64)
+        crate::payments::cert::known_issuer(crate::payments::cert::tier::CLOUD),
+        Some(crate::payments::cert::LICENSE_PUBLIC_KEY_B64)
     );
 }
 
@@ -398,8 +398,8 @@ fn a_store_list_cannot_name_another_issuer_for_our_tiers() {
 fn tokens_are_given_for_our_tiers_only() {
     // Under test the payments config reads no settings, so there is no token
     // for any tier; a third party's tier never has one here.
-    sicompass_payments::config::_set_test_no_persist(true);
-    assert_eq!(license_token(sicompass_payments::cert::tier::CLOUD), None);
+    crate::payments::config::_set_test_no_persist(true);
+    assert_eq!(license_token(crate::payments::cert::tier::CLOUD), None);
     assert_eq!(license_token("acme/pro"), None);
     let s = license_standing("nobody/tier");
     assert_eq!(s, sicompass_sdk::license::Standing::MISSING);

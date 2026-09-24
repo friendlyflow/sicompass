@@ -393,7 +393,8 @@ impl WasmProvider {
 
         // Disjoint field borrows: `guest` reads `instance`, and `store` is separate.
         let guest = inner.instance.sicompass_plugin_provider();
-        match f(guest, &mut inner.store) {
+        let store = &mut inner.store;
+        match outside_async(|| f(guest, store)) {
             Ok(v) => Ok(v),
             Err(e) => {
                 // Fuel exhaustion, epoch deadline, memory cap and guest panic all
@@ -422,6 +423,24 @@ impl WasmProvider {
             Ok(blob) => ffon::deserialize_binary(&blob),
             Err(_) => Vec::new(),
         }
+    }
+}
+
+/// Run a guest call so that WASI may block, even from inside async code.
+///
+/// The app reaches some `Provider` methods from async code: `undo` and `redo`
+/// run inside `sicompass_sdk::block_on`. WASI's synchronous file and clock
+/// calls block on the current tokio runtime when there is one, and tokio
+/// panics when that happens inside the runtime's own `block_on` ("Cannot start
+/// a runtime from within a runtime"). So a plugin that saved to its `/storage`
+/// while undoing took the whole app down. On a multi-thread runtime,
+/// `block_in_place` leaves the async context for the length of the call, which
+/// is what `sicompass_sdk::block_on` does for the same reason. A current-thread
+/// runtime cannot do that, and outside a runtime nothing is needed.
+fn outside_async<T>(f: impl FnOnce() -> T) -> T {
+    match tokio::runtime::Handle::try_current().map(|h| h.runtime_flavor()) {
+        Ok(tokio::runtime::RuntimeFlavor::MultiThread) => tokio::task::block_in_place(f),
+        _ => f(),
     }
 }
 
@@ -1135,8 +1154,13 @@ impl Provider for WasmProvider {
         let _ = self.call("enter-dashboard", |g, s| g.call_enter_dashboard(s));
     }
 
+    /// Polled again straight away: leaving is where a plugin asks for the
+    /// list cursor to follow it (`navigation-request`), and the app applies
+    /// that right after this call, before the next frame's tick would have
+    /// picked it up.
     fn leave_dashboard(&mut self) {
         let _ = self.call("leave-dashboard", |g, s| g.call_leave_dashboard(s));
+        self.repoll();
     }
 }
 
@@ -1161,6 +1185,17 @@ fn to_wit_op(entry: &TimelineEntry) -> Option<wit_types::ProviderOp> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// What WASI does inside a guest call: block on the current runtime.
+    /// Inside `sicompass_sdk::block_on` (the app's undo path) that panicked
+    /// until guest calls went through `outside_async`.
+    #[test]
+    fn a_guest_call_may_block_inside_the_apps_async_undo_path() {
+        let answer = sicompass_sdk::block_on(async {
+            outside_async(|| tokio::runtime::Handle::current().block_on(async { 42 }))
+        });
+        assert_eq!(answer, 42);
+    }
 
     #[test]
     fn default_descriptor_uses_the_manifest_name_until_describe_runs() {

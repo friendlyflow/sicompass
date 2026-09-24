@@ -400,12 +400,11 @@ caret. See [multiline-input.md](multiline-input.md).
   the host's double-Ctrl+C. (The two presses must be **consecutive**; any other key
   between them cancels the gesture, which is what lets a dashboard bind Ctrl+C to
   something of its own without the user being thrown out.)
-- Plugins cannot claim Ctrl+Z either. `Provider::dashboard_uses_app_undo` routes
-  Ctrl+Z and Ctrl+Y in a dashboard to the host's timeline instead of forwarding
-  them, and it is deliberately **absent from the WIT descriptor**: it decides which
-  keys a provider intercepts, which is the same authority the exit key sits behind.
-  A guest keeps the `false` default and the host never asks it. Built-in providers
-  can opt in; `lib_project_management` is the one that does.
+- Ctrl+Z and Ctrl+Y in a dashboard go to the guest as keys, unless its
+  descriptor sets `dashboard-uses-app-undo`. Then the host keeps them and undoes
+  through its own timeline, where the guest's `ProviderOp` entries are. That can
+  only take keys away from a guest, never give it more, so a sandboxed plugin may
+  set it (the project management board does). The exit key stays the host's.
 - A plugin's dashboard cursor is always a filled cell. `cursor_style` is set by
   the host bridge, not carried across the WIT: the bar is the app's own
   insert-mode caret, and a guest drawing a grid wants a grid's cursor.

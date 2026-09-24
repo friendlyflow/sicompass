@@ -60,16 +60,6 @@ fn ensure_builtins() {
     // prompt, or failing differently depending on whether the machine is
     // online.
     sicompass_gitclient::_set_test_no_network(true);
-    // Integration tests compile lib crates *without* `cfg(test)`, so the
-    // crate's own compile-time guard does not apply here. Without this the
-    // notes provider would reconcile the developer's real notes directory
-    // against whatever tree a test built — which does not add notes, it
-    // deletes the ones that are not in it.
-    sicompass_notes::_set_test_no_persist(true);
-    // Same for the kanban board, for the same reason: `save_board` reconciles a
-    // directory against a board, so a test board saved to the real directory
-    // does not add two columns, it deletes every other one.
-    sicompass_project_management::_set_test_no_persist(true);
     // And for the two filesystem providers, whose deletes go to the *OS* trash
     // rather than anywhere sicompass owns — which is why no amount of guarding
     // sicompass's own directories ever caught it. Every harness delete left its
@@ -18372,12 +18362,53 @@ fn harness_with_notes() -> (AppRenderer, TempDir) {
     (renderer, tmp)
 }
 
+/// A program that is a plugin now, loaded the way the app loads an installed
+/// one: its component through the WASM host, its own locales, and its
+/// `/storage` at `storage`. That is the folder the built-in kept its store in,
+/// so these tests also show an existing store opening unchanged.
+///
+/// `tests/fixtures/plugins/<name>` is the plugin's release contents (built
+/// from `../<name>_plugin_sicompass`: `plugin.json`, `locales/`, and
+/// `target/wasm32-wasip2/release/<name>_plugin.wasm` as `plugin.wasm`),
+/// committed like the `hello.wasm` fixture and for the same reason.
+fn plugin_provider(name: &str, storage: &Path) -> Box<dyn Provider> {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/plugins")
+        .join(name);
+    let manifest: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(dir.join("plugin.json")).unwrap()).unwrap();
+    let strings = |key: &str| -> Vec<String> {
+        manifest["permissions"][key]
+            .as_array()
+            .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_owned)).collect())
+            .unwrap_or_default()
+    };
+    std::fs::create_dir_all(storage).unwrap();
+    let grants = sicompass::wasm_host::Grants {
+        allowed_hosts: strings("allowedHosts"),
+        storage_dir: Some(storage.to_path_buf()),
+        settings: manifest["settings"]
+            .as_array()
+            .map(|a| a.iter().filter_map(|s| s["key"].as_str().map(str::to_owned)).collect())
+            .unwrap_or_default(),
+        service_tier: manifest["service"]["tier"].as_str().map(str::to_owned),
+        ..Default::default()
+    };
+    let component = sicompass::wasm_host::load_component(&dir.join("plugin.wasm")).unwrap();
+    let display = manifest["displayName"].as_str().unwrap();
+    Box::new(
+        sicompass::wasm_host::WasmProvider::from_component_with_grants(
+            &component, name, display, &dir, grants,
+        )
+        .unwrap(),
+    )
+}
+
 /// A second app over the same store — what a restart looks like.
 fn notes_app_at(dir: &std::path::Path) -> AppRenderer {
     ensure_builtins();
     let mut renderer = app_renderer();
-    let mut notes = sicompass_sdk::create_provider_by_name("notes").expect("notes provider");
-    notes.set_config_path(dir.join("notes"));
+    let notes = plugin_provider("notes", &dir.join("notes"));
     register(&mut renderer, notes);
     renderer.current_id = IdArray::new();
     renderer.current_id.push(0);
@@ -18400,8 +18431,8 @@ fn add_note(r: &mut AppRenderer, text: &str) {
 
 #[test]
 fn notes_declares_the_structural_edit_capability() {
-    ensure_builtins();
-    let p = sicompass_sdk::create_provider_by_name("notes").unwrap();
+    let tmp = TempDir::new().unwrap();
+    let p = plugin_provider("notes", &tmp.path().join("notes"));
     assert!(
         p.supports_structural_edit(),
         "without this the editing keys never reach it"
@@ -19036,9 +19067,7 @@ fn harness_with_board() -> (AppRenderer, TempDir) {
     ensure_builtins();
     let tmp = TempDir::new().expect("tempdir");
     let mut renderer = app_renderer();
-    let mut board =
-        sicompass_sdk::create_provider_by_name("projectmanagement").expect("board provider");
-    board.set_config_path(tmp.path().join("board"));
+    let board = plugin_provider("projectmanagement", &tmp.path().join("board"));
     register(&mut renderer, board);
     renderer.current_id = IdArray::new();
     renderer.current_id.push(0);
@@ -19447,7 +19476,6 @@ fn two_tabs_board_in_dashboard() -> (AppRenderer, TempDir, TempDir, TempDir) {
     press_ctrl(&mut r, Keycode::T); // tab 1, a fresh board
     assert_eq!(r.active_tab, 1);
     let tab1_tmp = TempDir::new().expect("tab 1 tempdir");
-    r.providers[0].set_config_path(tab1_tmp.path().join("board"));
     press_ctrl(&mut r, Keycode::_1); // back to tab 0
     assert_eq!(r.active_tab, 0);
 
@@ -19557,9 +19585,6 @@ fn ctrl_t_on_the_board_opens_a_new_tab() {
         Coordinate::General,
         "a new tab starts on the list"
     );
-    let tmp = TempDir::new().unwrap();
-    r.providers[0].set_config_path(tmp.path().join("board"));
-
     press_ctrl(&mut r, Keycode::_1);
     assert_eq!(r.coordinate, Coordinate::Dashboard);
 }

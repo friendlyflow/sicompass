@@ -4505,8 +4505,6 @@ dependencies = [
  "sicompass-emailclient",
  "sicompass-filebrowser",
  "sicompass-gitclient",
- "sicompass-notes",
- "sicompass-project-management",
  "sicompass-sdk",
  "sicompass-settings",
  "sicompass-store",
@@ -4542,8 +4540,6 @@ dependencies = [
  "sicompass-emailclient",
  "sicompass-filebrowser",
  "sicompass-gitclient",
- "sicompass-notes",
- "sicompass-project-management",
  "sicompass-sdk",
  "sicompass-settings",
  "sicompass-store",
@@ -4623,47 +4619,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "sicompass-notes"
-version = "0.1.21"
-dependencies = [
- "async-trait",
- "serde",
- "serde_json",
- "sha2 0.11.0",
- "sicompass-payments",
- "sicompass-sdk",
- "tempfile",
-]
-
-[[package]]
-name = "sicompass-payments"
-version = "0.1.21"
-dependencies = [
- "base64 0.23.1",
- "ed25519-dalek",
- "reqwest",
- "serde",
- "serde_json",
- "sha2 0.11.0",
- "sicompass-sdk",
- "tempfile",
- "tokio",
- "wiremock",
-]
-
-[[package]]
-name = "sicompass-project-management"
-version = "0.1.21"
-dependencies = [
- "async-trait",
- "serde",
- "serde_json",
- "sicompass-payments",
- "sicompass-sdk",
- "tempfile",
-]
-
-[[package]]
 name = "sicompass-sdk"
 version = "0.8.0"
 source = "git+https://github.com/friendlyflow/sicompass-plugin-sdk?rev=22929730d8933a3ef1695d85086ae15dd246ff4f#22929730d8933a3ef1695d85086ae15dd246ff4f"
@@ -4712,10 +4667,12 @@ dependencies = [
 name = "sicompass-store"
 version = "0.1.21"
 dependencies = [
+ "base64 0.23.1",
+ "ed25519-dalek",
  "reqwest",
  "semver",
+ "serde",
  "serde_json",
- "sicompass-payments",
  "sicompass-sdk",
  "tempfile",
  "tokio",

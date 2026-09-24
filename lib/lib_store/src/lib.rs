@@ -23,6 +23,7 @@
 //! trash; the app does that (`pluginDataTrash`), with its guarded trash.
 
 pub mod http;
+pub mod payments;
 pub mod install;
 pub mod source;
 pub mod tiers;
@@ -840,7 +841,7 @@ fn remember_issuers(store: &sicompass_sdk::store::Store) {
 /// `tier`, verified against its issuer. Ours are always checked against the
 /// built-in key; a store list cannot name another issuer for them.
 pub fn license_standing(tier_id: &str) -> sicompass_sdk::license::Standing {
-    use sicompass_payments::cert;
+    use crate::payments::cert;
     use sicompass_sdk::license::{LicenseStatus, Standing};
     let issuer = cert::known_issuer(tier_id)
         .map(str::to_owned)
@@ -872,12 +873,12 @@ pub fn license_status(tier_id: &str) -> sicompass_sdk::license::LicenseStatus {
 /// the licence token (one certificate slot); a third party's tiers have none
 /// here yet.
 pub fn license_token(tier_id: &str) -> Option<String> {
-    use sicompass_payments::cert::tier;
+    use crate::payments::cert::tier;
     let token = match tier_id {
         t if t == tier::CLOUD || t == tier::COMMERCIAL => {
-            sicompass_payments::config::redeem_token()
+            crate::payments::config::redeem_token()
         }
-        t if t == tier::SUPPORT => sicompass_payments::config::support_redeem_token(),
+        t if t == tier::SUPPORT => crate::payments::config::support_redeem_token(),
         _ => return None,
     };
     (!token.is_empty()).then_some(token)

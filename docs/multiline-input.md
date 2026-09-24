@@ -50,7 +50,8 @@ drawn masked.
 file does not) and put it back into the tag unchanged on the next `fetch`.
 
 The FFON label is markup, so text that could look like a tag must be escaped.
-`lib_notes`, `lib_gitclient` and `lib_project_management` each carry a small
+`lib_gitclient`, and the notes and project management plugins
+(`../notes_plugin_sicompass`, `../projectmanagement_plugin_sicompass`), each carry a small
 `escape.rs` that escapes `<` and `>` on the way out and undoes it in
 `commit_edit`. Copy that pattern.
 
@@ -70,7 +71,7 @@ Two capability flags change what happens around an edit:
 A dashboard receives raw keys in `dashboard_key` and text in `dashboard_text`, and
 draws its own cell grid. It has no `<input>` to lean on, so it edits text itself.
 Build that on the SDK model, not on a fresh `String` and caret. The project
-management board (`lib/lib_project_management`) is the worked example. A WASM
+management board (`../projectmanagement_plugin_sicompass`) is the worked example. A WASM
 plugin gets the same module as `sicompass_pdk::input`.
 
 The model has two parts:

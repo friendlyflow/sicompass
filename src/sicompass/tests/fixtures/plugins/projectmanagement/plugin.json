@@ -1,0 +1,25 @@
+{
+  "name": "projectmanagement",
+  "displayName": "project management",
+  "type": "wasm",
+  "entry": "plugin.wasm",
+  "version": "0.2.0",
+  "minAppVersion": "0.1.21",
+  "description": "projectmanagement-description",
+  "settings": [
+    {
+      "type": "checkbox",
+      "label": "projectmanagement-checkbox-cloud-backup",
+      "key": "kanbanCloudBackup",
+      "defaultChecked": false
+    }
+  ],
+  "service": {
+    "tier": "friendlyflow/cloud",
+    "what": "projectmanagement-service"
+  },
+  "permissions": {
+    "storage": true,
+    "allowedHosts": ["store.sicompass.org"]
+  }
+}

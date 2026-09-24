@@ -710,14 +710,19 @@ pub const LOCALE_SUBDIR: &str = "locales";
 /// provider and the first definition of an id wins, so without the prefix a
 /// plugin could lose its strings to a built-in, or take over another plugin's.
 ///
-/// Each (plugin, locale) is registered once per process. Fluent cannot replace a
-/// message, so a plugin updated in place keeps its old strings until restart.
+/// Each (plugin, locale) is registered once per process, under one lock, so two
+/// instances starting at once (two tabs, parallel tests) cannot both load a
+/// file and have the second refused for redefining every message. Fluent
+/// cannot replace a message, so a plugin updated in place keeps its old strings
+/// until restart.
 ///
 /// Returns the refusals, one line each, for the caller to log.
 pub fn register_plugin_locales(plugin_name: &str, plugin_dir: &Path) -> Vec<String> {
     static DONE: OnceLock<std::sync::Mutex<std::collections::HashSet<(String, String)>>> =
         OnceLock::new();
-    let done = DONE.get_or_init(Default::default);
+    let Ok(mut done) = DONE.get_or_init(Default::default).lock() else {
+        return vec!["the plugin locale registry is poisoned".to_owned()];
+    };
 
     let mut refusals = Vec::new();
     let Ok(entries) = std::fs::read_dir(plugin_dir.join(LOCALE_SUBDIR)) else {
@@ -735,7 +740,7 @@ pub fn register_plugin_locales(plugin_name: &str, plugin_dir: &Path) -> Vec<Stri
             continue;
         };
         let key = (plugin_name.to_owned(), locale.clone());
-        if done.lock().map(|d| d.contains(&key)).unwrap_or(true) {
+        if done.contains(&key) {
             continue;
         }
         let source = match std::fs::read_to_string(&path) {
@@ -755,9 +760,7 @@ pub fn register_plugin_locales(plugin_name: &str, plugin_dir: &Path) -> Vec<Stri
         }
         match sicompass_sdk::localize::register_bundle(&locale, &source) {
             Ok(()) => {
-                if let Ok(mut d) = done.lock() {
-                    d.insert(key);
-                }
+                done.insert(key);
             }
             Err(e) => refusals.push(format!("{}: {e}", path.display())),
         }
