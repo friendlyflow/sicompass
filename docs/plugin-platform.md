@@ -296,6 +296,16 @@ Reads never block, so a terminal reads its PTY from `poll`, which it already doe
 through `tick` today. The host implements it with `portable-pty`, which the
 workspace already uses in `lib_shell`. `cwd` must be inside a preopen.
 
+Built in 4.6 (`src/wasm_host/process.rs`). As built: `cwd` defaults to the
+user's home; a program is a bare name from the approved list, resolved on
+`PATH`, and `$SHELL` is the login shell from the user database; the child gets
+the host's environment plus the plugin's `env` (the guest's own stays empty);
+unread output is capped at 8 MiB per stream (the program is slowed, not the
+host's memory grown); dropping the resource or the instance kills the program.
+The audit and the linker work from the approved grants, so an unapproved
+`process` import is refused before instantiation. The `process-plugin` example
+is the fixture.
+
 ### sockets (gated)
 
 This is plain `wasi:sockets` with the address check above. It exists for IMAP and

@@ -130,7 +130,7 @@ impl WasmProvider {
         // Audit before instantiating. Instantiation would refuse an over-reaching
         // component anyway (the interface simply would not be linked), but the
         // failure would be an opaque link error; this names the mismatch.
-        super::audit_component_imports(&component, &grants.allowed_hosts)
+        super::audit_component_imports(&component, &grants)
             .map_err(|e| format!("{}: {e}", wasm_path.display()))?;
 
         Self::from_component_with_grants(

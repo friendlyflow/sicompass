@@ -22,15 +22,12 @@ pub use sicompass_sdk::plugin_manifest::{
     parse_manifest,
 };
 
-/// Permissions this sicompass cannot grant yet (parts 4.6-4.7 of
+/// Permissions this sicompass cannot grant yet (part 4.7 of
 /// docs/plugin-platform.md). A plugin asking for one is not loaded at all,
 /// rather than loaded without what it asked for.
 pub fn unsupported_permissions(m: &PluginManifest) -> Vec<&'static str> {
     let p = &m.permissions;
     let mut out = Vec::new();
-    if !p.process.is_empty() {
-        out.push("process");
-    }
     if !p.sockets.is_empty() {
         out.push("sockets");
     }
@@ -66,6 +63,7 @@ pub fn read_approvals() -> std::collections::HashMap<String, String> {
 ///   there, since that is where the built-ins keep it.
 /// - `filesystem`: only if the user approved exactly this manifest's access
 ///   ([`sicompass_sdk::plugin_abi::approval_fingerprint`]); `~` means home.
+/// - `process`: the listed programs, under the same approval.
 ///
 /// `Err` says why the plugin cannot load: a permission this build cannot grant,
 /// or access the user has not approved.
@@ -83,9 +81,16 @@ pub fn grants_for(
     if sicompass_sdk::plugin_abi::needs_approval(m)
         && approvals.get(&m.name) != Some(&sicompass_sdk::plugin_abi::approval_fingerprint(m))
     {
+        let asked: Vec<String> = m
+            .permissions
+            .filesystem
+            .iter()
+            .map(|f| format!("folder {f}"))
+            .chain(m.permissions.process.iter().map(|p| format!("program {p}")))
+            .collect();
         return Err(format!(
             "it asks for access you have not approved ({}); approve it in the Store",
-            m.permissions.filesystem.join(", ")
+            asked.join(", ")
         ));
     }
     let storage_dir = if m.permissions.storage {
@@ -111,6 +116,7 @@ pub fn grants_for(
         allowed_hosts: m.allowed_hosts(),
         storage_dir,
         filesystem,
+        process: m.permissions.process.clone(),
     })
 }
 
@@ -226,8 +232,8 @@ mod tests {
                                   "sockets": ["imap.example.org:993"] } }"#,
         )
         .unwrap();
-        // storage and filesystem are grantable since 4.4.
-        assert_eq!(unsupported_permissions(&m), vec!["process", "sockets"]);
+        // storage and filesystem are grantable since 4.4, process since 4.6.
+        assert_eq!(unsupported_permissions(&m), vec!["sockets"]);
     }
 
     use std::io::Write;

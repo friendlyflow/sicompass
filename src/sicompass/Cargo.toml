@@ -369,6 +369,9 @@ bytes = "1"
 # The OS trash, for a plugin's `desktop.trash` (wasm_host/desktop.rs). Same crate
 # and version lib_filebrowser uses.
 trash = "5"
+# A plugin's `process` children on a pseudo-terminal (wasm_host/process.rs). The
+# workspace version lib_shell uses.
+portable-pty = { workspace = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 accesskit_unix = { workspace = true }

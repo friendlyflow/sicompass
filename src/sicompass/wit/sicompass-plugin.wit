@@ -436,6 +436,56 @@ interface tasks {
   cancelled: func() -> bool;
 }
 
+/// Programs on the user's machine. **The one interface that reaches outside the
+/// sandbox**: a started program runs with the user's full rights, so it is held
+/// the tightest. Linked only when `plugin.json` lists programs in
+/// `permissions.process`, and only those can start (by name, resolved on `PATH`
+/// when started; `$SHELL` is the user's login shell). The user approves the list.
+///
+/// The program gets the host's environment plus the `env` given here (the
+/// plugin's own environment stays empty), and a working directory that must lie
+/// inside a folder the plugin was granted (default: the user's home). Reads never
+/// block, so a terminal reads its PTY from `poll`.
+interface process {
+  /// A terminal size, in cells.
+  record pty-size {
+    rows: u16,
+    cols: u16,
+  }
+
+  resource child {
+    /// Start `program`. With `pty`, it runs attached to a new pseudo-terminal of
+    /// that size (stdout and stderr both arrive through `read`); without, its
+    /// stdin, stdout and stderr are pipes.
+    spawn: static func(
+      program: string,
+      args: list<string>,
+      cwd: option<string>,
+      env: list<tuple<string, string>>,
+      pty: option<pty-size>,
+    ) -> result<child, string>;
+
+    /// Up to `max` bytes of output so far (the PTY, or stdout). Never blocks;
+    /// empty when there is nothing new.
+    read: func(max: u32) -> list<u8>;
+
+    /// Up to `max` bytes of stderr so far. Always empty with a PTY.
+    read-stderr: func(max: u32) -> list<u8>;
+
+    /// Send input (to the PTY, or stdin).
+    write: func(bytes: list<u8>) -> result<_, string>;
+
+    /// Resize the PTY. Ignored without one.
+    resize: func(size: pty-size);
+
+    /// The exit code once it has exited (-1 when killed by a signal).
+    try-wait: func() -> option<s32>;
+
+    /// Stop it.
+    kill: func();
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Guest exports — what a provider implements
 // ---------------------------------------------------------------------------
@@ -632,5 +682,6 @@ world plugin {
   import net;
   import desktop;
   import tasks;
+  import process;
   export provider;
 }

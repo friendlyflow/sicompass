@@ -25,6 +25,7 @@
 pub mod desktop;
 pub mod host_fetch;
 pub mod limits;
+pub mod process;
 pub mod provider;
 pub mod tasks;
 pub mod wasi;
@@ -48,6 +49,10 @@ pub use provider::WasmProvider;
 wasmtime::component::bindgen!({
     path: "wit",
     world: "plugin",
+    with: {
+        // The `child` resource is a running program; see `process`.
+        "sicompass:plugin/process.child": process::ProcessChild,
+    },
 });
 
 // `self::` is load-bearing. bindgen generates a module named after the WIT package
@@ -69,6 +74,9 @@ pub struct Grants {
     pub storage_dir: Option<PathBuf>,
     /// Folders the user approved, preopened at their own paths.
     pub filesystem: Vec<PathBuf>,
+    /// Programs it may start (the approved `permissions.process`). Empty:
+    /// `process` is not linked.
+    pub process: Vec<String>,
 }
 
 impl Grants {
@@ -110,6 +118,8 @@ pub struct HostState {
     pub granted_roots: Vec<(PathBuf, PathBuf)>,
     /// The UI instance's task manager, or which task this worker instance runs.
     pub tasks: tasks::TaskRole,
+    /// Programs this instance may start. Empty: `process` is not linked.
+    pub process_allowed: Vec<String>,
 }
 
 impl HostState {
@@ -160,6 +170,7 @@ impl HostState {
             table: wasi::resource_table(),
             granted_roots,
             tasks: tasks::TaskRole::Unmanaged,
+            process_allowed: grants.process,
         })
     }
 
@@ -508,6 +519,16 @@ pub fn linker_for(state: &HostState) -> Result<Linker<HostState>, String> {
     )
     .map_err(|e| format!("link sicompass:plugin/desktop: {e}"))?;
 
+    // Linked only when the plugin may start programs: the one capability that
+    // reaches outside the sandbox.
+    if !state.process_allowed.is_empty() {
+        wit::process::add_to_linker::<_, wasmtime::component::HasSelf<_>>(
+            &mut linker,
+            |s: &mut HostState| s,
+        )
+        .map_err(|e| format!("link sicompass:plugin/process: {e}"))?;
+    }
+
     if state.may_use_network() {
         // Step 3 fills this in with the mediated fetch (allowlist, robots.txt,
         // crawl-delay, per-domain quotas). Until then, declaring `allowedHosts`
@@ -568,10 +589,7 @@ impl wit::net::Host for HostState {
 /// Instantiation would refuse it anyway, since the `net` interface would not be
 /// linked. The value here is a clear, early diagnostic naming the mismatch instead
 /// of an opaque link failure — and a place to hang the same check at install time.
-pub fn audit_component_imports(
-    component: &Component,
-    allowed_hosts: &[String],
-) -> Result<(), String> {
+pub fn audit_component_imports(component: &Component, grants: &Grants) -> Result<(), String> {
     use wasmtime::component::types::ComponentItem;
     let engine = engine();
     let ty = component.component_type();
@@ -596,14 +614,20 @@ pub fn audit_component_imports(
         .collect();
     let exports: Vec<String> = ty.exports(engine).map(|(n, _)| n.to_owned()).collect();
 
-    // Only `allowedHosts` is grantable at this stage (docs/plugin-platform.md
-    // 4.4-4.7 add the rest), so the other permissions are passed as not granted.
-    sicompass_sdk::plugin_abi::audit_imports(
-        &imports,
-        &exports,
-        &sicompass_sdk::plugin_manifest::Permissions::default(),
-        allowed_hosts,
-    )
+    // What was actually granted (approved), not what the manifest asked for:
+    // an import beyond the grants is refused before anything runs.
+    let permissions = sicompass_sdk::plugin_manifest::Permissions {
+        allowed_hosts: grants.allowed_hosts.clone(),
+        storage: grants.storage_dir.is_some(),
+        filesystem: grants
+            .filesystem
+            .iter()
+            .map(|p| p.to_string_lossy().into_owned())
+            .collect(),
+        process: grants.process.clone(),
+        sockets: Vec::new(),
+    };
+    sicompass_sdk::plugin_abi::audit_imports(&imports, &exports, &permissions, &grants.allowed_hosts)
 }
 
 // ---------------------------------------------------------------------------
@@ -746,6 +770,9 @@ pub use sicompass_sdk::plugin_abi::DESKTOP_FUNCTIONS as DESKTOP_IMPORTS;
 
 /// `sicompass:plugin/tasks`: always linked.
 pub use sicompass_sdk::plugin_abi::TASK_FUNCTIONS as TASK_IMPORTS;
+
+/// `sicompass:plugin/process`: linked only for listed programs.
+pub use sicompass_sdk::plugin_abi::PROCESS_FUNCTIONS as PROCESS_IMPORTS;
 
 #[cfg(test)]
 mod tests {

@@ -871,6 +871,8 @@ fn wit_vendor_matches_host_tables() {
         .chain(wasm_host::DESKTOP_IMPORTS.iter())
         // ABI 0.2 (4.5): background tasks.
         .chain(wasm_host::TASK_IMPORTS.iter())
+        // ABI 0.2 (4.6): processes.
+        .chain(wasm_host::PROCESS_IMPORTS.iter())
         .map(|(i, f)| (i.to_string(), f.to_string()))
         .collect();
     expected.sort();
@@ -1416,4 +1418,83 @@ fn dropping_the_provider_stops_its_tasks() {
         assert!(std::time::Instant::now() < deadline, "the task outlived its provider");
         std::thread::sleep(std::time::Duration::from_millis(20));
     }
+}
+
+// ---------------------------------------------------------------------------
+// 4.6: processes
+// ---------------------------------------------------------------------------
+
+fn open_process(grants: wasm_host::Grants) -> Result<WasmProvider, String> {
+    WasmProvider::open_with_grants(
+        &fixture_dir().join("process.wasm"),
+        "process",
+        "process",
+        &fixture_dir(),
+        grants,
+    )
+}
+
+fn process_grants() -> wasm_host::Grants {
+    wasm_host::Grants {
+        process: vec!["echo".into(), "cat".into(), "sh".into()],
+        ..Default::default()
+    }
+}
+
+#[test]
+fn a_plugin_that_starts_programs_needs_them_granted() {
+    let e = match open_process(wasm_host::Grants::default()) {
+        Ok(_) => panic!("process must not be linked without a grant"),
+        Err(e) => e,
+    };
+    assert!(e.contains("permissions.process"), "{e}");
+}
+
+#[test]
+fn a_listed_program_runs_on_pipes() {
+    let mut p = open_process(process_grants()).unwrap();
+    assert_eq!(fs_cmd(&mut p, "run", "echo hello there"), "exit 0: hello there\n");
+}
+
+#[test]
+fn a_program_not_listed_is_refused() {
+    let mut p = open_process(process_grants()).unwrap();
+    let a = fs_cmd(&mut p, "run", "rm -rf /tmp/sicompass-never");
+    assert!(a.starts_with("err:") && a.contains("not among"), "{a}");
+}
+
+#[test]
+fn a_program_runs_on_a_pty() {
+    let mut p = open_process(process_grants()).unwrap();
+    let a = fs_cmd(&mut p, "pty", "");
+    assert!(a.starts_with("exit 3:") && a.contains("pty-42"), "{a}");
+}
+
+#[test]
+fn stdin_reaches_the_program() {
+    let mut p = open_process(process_grants()).unwrap();
+    assert_eq!(fs_cmd(&mut p, "stdin", ""), "piped through\n");
+}
+
+#[test]
+fn the_plugin_sets_the_programs_environment() {
+    let mut p = open_process(process_grants()).unwrap();
+    assert_eq!(fs_cmd(&mut p, "env", ""), "exit 0: from-the-plugin\n");
+}
+
+#[test]
+fn the_working_directory_must_be_granted() {
+    let dir = tempfile::tempdir().unwrap();
+    let granted = dir.path().canonicalize().unwrap();
+    let mut grants = process_grants();
+    grants.filesystem = vec![granted.clone()];
+    let mut p = open_process(grants).unwrap();
+    let sub = granted.join("work");
+    std::fs::create_dir(&sub).unwrap();
+    assert_eq!(
+        fs_cmd(&mut p, "cwd", sub.to_str().unwrap()),
+        format!("exit 0: {}\n", sub.display())
+    );
+    let outside = fs_cmd(&mut p, "cwd", "/etc");
+    assert!(outside.starts_with("err:"), "{outside}");
 }
