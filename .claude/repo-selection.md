@@ -36,15 +36,9 @@ Resolve it before doing anything else:
   not. Do not mix steps from the two. Every command still gets
   `cd <absolute PROJECT_ROOT> &&`, because the shell's working directory
   persists between calls and a stray command lands in the wrong repo.
-- **Target has no skill of its own.** At the moment this only applies to
-  `sicompass-plugin-sdk`, which has no `.claude/skills/`.
-  - `/commit-and-push` and `/sync`: follow the steps in this skill in that repo,
-    but skip everything that names sicompass files (shaders, icons,
-    `THIRD-PARTY-LICENSES.html`, `release.yml`, `-p sicompass`, `--workspace`
-    Pulley runs).
-  - `/release`: for the SDK, use `/release-sdk`. Otherwise stop and say the repo
-    has no release procedure yet.
-  - `/update-cargo`: stop. The SDK is covered by the canary in sicompass's own
-    `/update-cargo`.
+- **Target has no skill of its own.** Every repo in `repos.json` has all four
+  today, so this should not happen. If it does, stop and say which skill the
+  repo is missing rather than improvising one: `/split-repo`'s template has
+  them all.
 
 Report which repo you acted on in the first line of the result.

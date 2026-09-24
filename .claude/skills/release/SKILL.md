@@ -69,7 +69,7 @@ every command with `cd PROJECT_ROOT &&` (the actual absolute project root).**
    its last tag, run `/release sicompass-ui` first, then move the pin to the
    new tag and `cargo metadata` to rewrite its `Cargo.lock` line.
 
-   If the version it needs is not on crates.io yet, stop: run `/release-sdk`
+   If the version it needs is not on crates.io yet, stop: run `/release sicompass-plugin-sdk`
    first. That skill publishes the crate from the sibling
    `../sicompass-plugin-sdk` checkout, which is a step this one does not do and
    cannot do for you.

@@ -73,9 +73,11 @@ Check `command -v cargo` once. Non-empty: run `cargo ...` directly. Empty:
 prefix every toolchain command with `nix develop -c` (the `warning: Git tree
 ... is dirty` line on stderr is noise). Stick with the answer for the session.
 
-The dev shell belongs to *this* workspace, but it is a plain Rust toolchain on
-`PATH`, so the same answer holds for the SDK repo. That repo has **no
-`flake.nix`** of its own — never try to `nix develop` in it.
+The SDK repo has its **own** flake, whose Rust comes from rust-overlay with the
+`wasm32-wasip2` target that this workspace's nixpkgs rustc lacks. Run the step 9
+canary inside it: `cd ../sicompass-plugin-sdk && nix develop -c ...`. For a
+fuller refresh of that repo (its `flake.lock` too), use
+`/update-cargo sicompass-plugin-sdk`, which follows that repo's own skill.
 
 ## Steps
 
@@ -176,7 +178,8 @@ The dev shell belongs to *this* workspace, but it is a plain Rust toolchain on
       - `cargo update` in `../sicompass-plugin-sdk`
       - `cargo update` in `../sicompass-plugin-sdk/sicompass-pdk`
 
-   c. No `nix flake update` — that repo has no flake.
+   c. No `nix flake update` here: that repo's `flake.lock` is refreshed by its
+      own `/update-cargo sicompass-plugin-sdk`, and this canary makes no commit.
 
    d. **Check the SDK root in both feature configurations.** `host` is a
       default-on *additive* feature; WASM guests depend on the SDK with
