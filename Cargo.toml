@@ -9,7 +9,6 @@ members = [
     "lib/lib_chatclient",
     "lib/lib_emailclient",
     "lib/lib_texteditor",
-    "lib/lib_remote",
     "lib/lib_shell",
     "lib/lib_terminal",
     "lib/lib_claude",
@@ -61,7 +60,6 @@ sicompass-webbrowser = { path = "lib/lib_webbrowser" }
 sicompass-chatclient = { path = "lib/lib_chatclient" }
 sicompass-emailclient = { path = "lib/lib_emailclient" }
 sicompass-text-editor = { path = "lib/lib_texteditor" }
-sicompass-remote = { path = "lib/lib_remote" }
 sicompass-shell = { path = "lib/lib_shell" }
 sicompass-terminal = { path = "lib/lib_terminal" }
 sicompass-claude = { path = "lib/lib_claude" }

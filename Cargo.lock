@@ -4507,7 +4507,6 @@ dependencies = [
  "sicompass-gitclient",
  "sicompass-notes",
  "sicompass-project-management",
- "sicompass-remote",
  "sicompass-sdk",
  "sicompass-settings",
  "sicompass-store",
@@ -4545,7 +4544,6 @@ dependencies = [
  "sicompass-gitclient",
  "sicompass-notes",
  "sicompass-project-management",
- "sicompass-remote",
  "sicompass-sdk",
  "sicompass-settings",
  "sicompass-store",
@@ -4663,17 +4661,6 @@ dependencies = [
  "sicompass-payments",
  "sicompass-sdk",
  "tempfile",
-]
-
-[[package]]
-name = "sicompass-remote"
-version = "0.1.21"
-dependencies = [
- "reqwest",
- "serde_json",
- "sicompass-sdk",
- "tokio",
- "wiremock",
 ]
 
 [[package]]

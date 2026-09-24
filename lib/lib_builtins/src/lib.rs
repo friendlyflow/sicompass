@@ -29,7 +29,6 @@ pub fn register_all() {
         sicompass_webbrowser::register();
         sicompass_chatclient::register();
         sicompass_emailclient::register();
-        sicompass_remote::register();
         sicompass_settings::register();
         sicompass_store::register();
         sicompass_terminal::register();
@@ -38,19 +37,6 @@ pub fn register_all() {
         sicompass_notes::register();
         sicompass_project_management::register();
     });
-}
-
-/// Instantiate a `RemoteProvider` for a named remote service.
-///
-/// `RemoteProvider` cannot fit the zero-arg factory signature, so it is
-/// exposed as a named helper here.  The app calls this from `load_remote_programs`
-/// and `enable_provider` instead of constructing `RemoteProvider` directly.
-pub fn create_remote(
-    name: &str,
-    remote_url: String,
-    api_key: String,
-) -> Box<dyn sicompass_sdk::Provider> {
-    sicompass_remote::create_remote(name, remote_url, api_key)
 }
 
 #[cfg(test)]
@@ -252,12 +238,6 @@ mod tests {
             keys.contains(&"claudePermissionMode"),
             "claude manifest must include claudePermissionMode; got {keys:?}"
         );
-    }
-
-    #[test]
-    fn create_remote_returns_provider() {
-        let p = create_remote("myservice", "http://example.com".to_owned(), String::new());
-        assert_eq!(p.name(), "myservice");
     }
 
     #[test]

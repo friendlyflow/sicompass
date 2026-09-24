@@ -55,9 +55,9 @@ pub(crate) fn _reset_user_plugin_cache(plugins: Vec<DiscoveredPlugin>) {
 }
 
 /// Re-instantiate a fresh provider instance by name, mirroring `enable_provider`'s
-/// resolution order: built-ins first, then the user-plugin cache, then a remote
-/// FFON service. Returns `None` only when the name matches none of these — the
-/// caller substitutes a placeholder so per-tab provider indices stay aligned.
+/// resolution order: built-ins first, then the user-plugin cache. Returns `None`
+/// only when the name matches neither — the caller substitutes a placeholder so
+/// per-tab provider indices stay aligned.
 fn reinstantiate_provider(name: &str) -> Option<Box<dyn Provider>> {
     if let Some(p) = instantiate_builtin(name) {
         return Some(p);
@@ -73,12 +73,6 @@ fn reinstantiate_provider(name: &str) -> Option<Box<dyn Provider>> {
         if let Some(p) = instantiate_user_plugin(&plugin) {
             return Some(p);
         }
-    }
-    if let Some((remote_url, api_key)) = read_remote_config(name) {
-        if !api_key.is_empty() {
-            sicompass_ui::provider::register_auth(&remote_url, &api_key);
-        }
-        return Some(sicompass_builtins::create_remote(name, remote_url, api_key));
     }
     None
 }
@@ -340,9 +334,8 @@ pub fn load_content_providers(renderer: &mut AppRenderer, mut settings: Option<&
         }
     }
 
-    // User-installed plugins, then remote services.
+    // User-installed plugins.
     load_user_plugins(renderer, settings.as_deref_mut());
-    load_remote_programs(renderer, settings.as_deref_mut());
 
     // Sort content providers alphabetically (settings is appended afterwards).
     sort_providers_alphabetically(renderer);
@@ -1174,103 +1167,11 @@ pub fn read_font_scale() -> f32 {
         .unwrap_or(DEFAULT_FONT_SCALE)
 }
 
-/// Read `remoteUrl` and `apiKey` from settings.json for the given section.
-/// Returns `None` if the file or section is absent, or if `remoteUrl` is empty.
-fn read_remote_config(section: &str) -> Option<(String, String)> {
-    let path = sicompass_sdk::platform::main_config_path()?;
-    let data = std::fs::read_to_string(&path).ok()?;
-    let root = serde_json::from_str::<serde_json::Value>(&data).ok()?;
-    let sec = root.get(section)?.as_object()?;
-    let remote_url = sec.get("remoteUrl")?.as_str()?.to_owned();
-    if remote_url.is_empty() {
-        return None;
-    }
-    let api_key = sec
-        .get("apiKey")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_owned();
-    Some((remote_url, api_key))
-}
-
-/// Scan `Available programs:` for `enable_*=true` entries whose names don't
-/// match any known built-in or user plugin, and register them as remote FFON
-/// providers.  Mirrors the "unknown program → remote service" branch of C's
-/// `loadProgram` (src/sicompass/programs.c:247-273) but applied at startup so
-/// remote services are reachable without requiring a hot-enable action.
-fn load_remote_programs(renderer: &mut AppRenderer, mut settings: Option<&mut dyn Provider>) {
-    let path = match sicompass_sdk::platform::main_config_path() {
-        Some(p) => p,
-        None => return,
-    };
-    let data = match std::fs::read_to_string(&path) {
-        Ok(d) => d,
-        Err(_) => return,
-    };
-    let root = match serde_json::from_str::<serde_json::Value>(&data) {
-        Ok(v) => v,
-        Err(_) => return,
-    };
-    let available = match root.get("Available programs:").and_then(|v| v.as_object()) {
-        Some(m) => m,
-        None => return,
-    };
-
-    let builtin_manifests = sicompass_sdk::builtin_manifests();
-    for (key, val) in available {
-        // Only process enable_*=true keys.
-        let name = match key.strip_prefix("enable_") {
-            Some(n) => n,
-            None => continue,
-        };
-        if val.as_bool() != Some(true) {
-            continue;
-        }
-
-        // Skip known builtins and already-registered providers.
-        if builtin_manifests
-            .iter()
-            .any(|m| m.display_name == name || m.name == name)
-        {
-            continue;
-        }
-        if renderer
-            .providers
-            .iter()
-            .any(|p| name_matches_provider(name, p.name()))
-        {
-            continue;
-        }
-
-        // Read remoteUrl; skip if absent.
-        let (remote_url, api_key) = match read_remote_config(name) {
-            Some(cfg) => cfg,
-            None => continue,
-        };
-
-        if !api_key.is_empty() {
-            sicompass_ui::provider::register_auth(&remote_url, &api_key);
-        }
-
-        let provider: Box<dyn Provider> =
-            sicompass_builtins::create_remote(name, remote_url, api_key);
-        register_provider(renderer, provider);
-
-        // Register the two settings text entries for this remote service.
-        if let Some(s) = settings.as_deref_mut() {
-            s.add_text_setting(name, "remote URL", "remoteUrl", "");
-            s.add_password_setting(name, "API key", "apiKey", "");
-            s.add_settings_section(name);
-        }
-    }
-}
-
 /// Enable a provider by name at runtime (hot-load).
 ///
 /// Checks built-in names first, then looks up the `USER_PLUGIN_CACHE` for
-/// user-installed plugins. Unknown names are tried as remote FFON services if
-/// `settings.json` contains a `remoteUrl` for them. Mirrors C's
-/// `programsEnableProvider` + `findManifest`.
+/// user-installed plugins. An unknown name is logged and ignored (a leftover
+/// `enable_<name>` from a program that no longer exists, for example).
 ///
 /// The new provider is inserted alphabetically by name between the filebrowser
 /// (always index 0) and settings (always last). If the current root navigation
@@ -1331,27 +1232,6 @@ pub fn enable_provider(renderer: &mut AppRenderer, name: &str) {
         }
     }
 
-    // Unknown name: try remote FFON service fallback. Mirrors the
-    // loadProgram remote branch in src/sicompass/programs.c:247-273.
-    if let Some((remote_url, api_key)) = read_remote_config(name) {
-        if !api_key.is_empty() {
-            sicompass_ui::provider::register_auth(&remote_url, &api_key);
-        }
-        let provider: Box<dyn Provider> =
-            sicompass_builtins::create_remote(name, remote_url, api_key);
-        let section_name = name.to_owned();
-        insert_provider_alphabetically(
-            renderer,
-            provider,
-            Some(Box::new(move |settings: &mut dyn Provider| {
-                settings.add_text_setting(&section_name, "remote URL", "remoteUrl", "");
-                settings.add_password_setting(&section_name, "API key", "apiKey", "");
-            })),
-            None,
-        );
-        return;
-    }
-
     eprintln!("sicompass: cannot enable unknown provider '{name}'");
 }
 
@@ -1391,8 +1271,7 @@ type ExtraSettings = Option<Box<dyn FnOnce(&mut dyn Provider)>>;
 /// (case-insensitive ASCII). Falls back to just before settings.
 ///
 /// `extra_settings` — optional closure called on the settings provider (the
-/// last entry) after the section is registered.  Used by the remote-service
-/// fallback to inject `remoteUrl` / `apiKey` text entries.
+/// last entry) after the section is registered: the settings entries to inject.
 fn insert_provider_alphabetically(
     renderer: &mut AppRenderer,
     provider: Box<dyn Provider>,

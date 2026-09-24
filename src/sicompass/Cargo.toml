@@ -428,7 +428,6 @@ sicompass-notes = { workspace = true }
 sicompass-project-management = { workspace = true }
 sicompass-chatclient = { workspace = true }
 sicompass-emailclient = { workspace = true }
-sicompass-remote = { workspace = true }
 # Only to switch OS-trash deletes off for the test binary — see
 # `ensure_builtins`. Without it every delete a test drives leaves its fixture in
 # the developer's real trash, permanently.

@@ -366,7 +366,7 @@ mod tests {
     }
 
     /// wiremock needs an async runtime, but `reqwest::blocking` panics if it is
-    /// dropped inside one. Same split `lib_remote` uses: the runtime only
+    /// dropped inside one. Same split lib_store's tests use: the runtime only
     /// starts and mounts, the blocking call happens in sync context.
     fn mock_server() -> (tokio::runtime::Runtime, MockServer) {
         let rt = tokio::runtime::Runtime::new().unwrap();

@@ -236,7 +236,6 @@ static SECTIONS: &[Node] = &[
             Leaf("tutorial-prog-email"),
             Leaf("tutorial-prog-email-gmail"),
             Leaf("tutorial-prog-salesdemo"),
-            Leaf("tutorial-prog-remote"),
             Leaf("tutorial-prog-store"),
             Leaf("tutorial-prog-settings"),
         ],

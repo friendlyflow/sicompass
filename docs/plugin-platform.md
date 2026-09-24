@@ -630,6 +630,12 @@ element:" is, the diagram only at the root), so `poll-result` gained
 `structural-edit-here` and `dashboard-here`, and the host polls again after
 every navigation.
 
+**Step 6 dropped (2026-09-24):** remote services (`lib_remote`, a provider per
+user-configured FFON server) were removed rather than ported. A plugin reaches
+only the hosts its `plugin.json` names, and a remote server is whatever the
+user types in. Link rows (`<link>` to a JSON FFON page or a web page) are an app
+feature and keep working; `tests/links.rs` follows one end to end.
+
 ## 14. Decisions on the former open questions (2026-09-24)
 
 1. **Store key custody:** a key file on the maintainer's machine, outside

@@ -214,8 +214,7 @@ Stop hook) may import any `lib_*` crate directly. All communication flows throug
 trait, the factory registry, setting-injection hooks) plus the thin registration
 crate `sicompass-builtins`. No exceptions — this includes `sicompass-settings`,
 which is reached via `sdk::create_provider_by_name("settings")` and configured
-through the `Provider` trait, and `sicompass-remote`, which is reached via
-`sicompass_builtins::create_remote(name, url, key)`.
+through the `Provider` trait.
 
 Tests (`src/sicompass/tests/**` and `#[cfg(test)]` blocks) may import concrete
 lib crates for mock injection — these deps live in `[dev-dependencies]`.

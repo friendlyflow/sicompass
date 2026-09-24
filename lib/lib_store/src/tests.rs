@@ -3,7 +3,7 @@
 //!
 //! wiremock needs an async runtime to start and program the server, while the
 //! Store downloads with blocking reqwest on its own threads. So each test owns
-//! a runtime used only for the server (the lib_remote pattern), and drives the
+//! a runtime used only for the server, and drives the
 //! provider from plain synchronous code.
 
 use std::sync::{Arc, Mutex};
