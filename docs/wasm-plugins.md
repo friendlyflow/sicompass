@@ -59,12 +59,12 @@ outside the sandbox, the user approved it (docs/plugin-platform.md §4 and §5):
 
 | Interface | Linked | Gives |
 |---|---|---|
-| `host` | always | logging, the plugin's own settings, time, translations, its own assets |
+| `host` | always | logging, the plugin's own settings (a leading `~` is the home folder), time, translations, its own assets, and saying where it moved to (`moved-to`, which `export_plugin!` calls itself) |
 | `desktop` | always | open a URL or a file, trash and restore, read a symlink's target (WASI never follows an absolute one: use `sicompass_sdk::fs_links`), `stat` (permission bits, owner, group, UTC offset), the user's `applications` and `open-with` one of them, paths confined to granted folders |
 | `tasks` | always | background work in a fresh instance of the same plugin |
 | `license` | always | whether the user holds a paid tier (third parties), never a key |
 | `net` | `allowedHosts` | HTTP to those hosts only |
-| `process` | `permissions.process`, approved | start the listed programs, optionally on a PTY |
+| `process` | `permissions.process`, approved | start the listed programs (on `PATH`, then `~/.local/bin`), optionally on a PTY; `which` one would start; a running one's `cwd` and whether a command holds its PTY (`foreground-busy`) |
 | `sockets` + `wasi:sockets` | `permissions.sockets`, approved | TCP to the listed `host:port` pairs |
 | `wasi:filesystem` preopens | `storage`, `filesystem` (approved) | the plugin's own folder at `/storage`, granted folders at their own paths |
 

@@ -69,9 +69,9 @@
               # guest imports, which is its capability set.
               wasm-tools
 
-              # git: the sicompass-gitclient provider shells out to it rather
-              # than linking libgit2, so it is a runtime dependency of that
-              # provider and a test dependency of its crate. Pinned here so
+              # git: the git client plugin (from the Store) shells out to it
+              # rather than linking libgit2, and the integration tests drive
+              # that plugin against throwaway repositories. Pinned here so
               # `nix develop -c cargo test` does not silently depend on
               # whatever git happens to be on the contributor's PATH.
               git

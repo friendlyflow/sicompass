@@ -55,6 +55,21 @@
       "name": "texteditor_plugin_sicompass",
       "path": "../texteditor_plugin_sicompass",
       "kind": "plugin"
+    },
+    {
+      "name": "gitclient_plugin_sicompass",
+      "path": "../gitclient_plugin_sicompass",
+      "kind": "plugin"
+    },
+    {
+      "name": "terminal_plugin_sicompass",
+      "path": "../terminal_plugin_sicompass",
+      "kind": "plugin"
+    },
+    {
+      "name": "claude_plugin_sicompass",
+      "path": "../claude_plugin_sicompass",
+      "kind": "plugin"
     }
   ]
 }

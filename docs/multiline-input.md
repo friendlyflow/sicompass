@@ -50,8 +50,9 @@ drawn masked.
 file does not) and put it back into the tag unchanged on the next `fetch`.
 
 The FFON label is markup, so text that could look like a tag must be escaped.
-`lib_gitclient`, and the notes and project management plugins
-(`../notes_plugin_sicompass`, `../projectmanagement_plugin_sicompass`), each carry a small
+The git client, notes and project management plugins
+(`../gitclient_plugin_sicompass`, `../notes_plugin_sicompass`,
+`../projectmanagement_plugin_sicompass`) each carry a small
 `escape.rs` that escapes `<` and `>` on the way out and undoes it in
 `commit_edit`. Copy that pattern.
 

@@ -123,11 +123,14 @@ enum Job {
 
 /// The programs that came with sicompass until 0.2.0 and are plugins in the
 /// store now, with the settings section each one had (its `displayName`).
-const CAME_WITH_THE_APP: [(&str, &str); 4] = [
+const CAME_WITH_THE_APP: [(&str, &str); 7] = [
     ("filebrowser", "file browser"),
     ("texteditor", "text editor"),
     ("notes", "notes"),
     ("projectmanagement", "project management"),
+    ("gitclient", "git client"),
+    ("terminal", "terminal"),
+    ("claude", "claude"),
 ];
 
 pub struct StoreProvider {

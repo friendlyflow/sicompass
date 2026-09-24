@@ -37,6 +37,24 @@
       "repo": "friendlyflow/texteditor_plugin_sicompass",
       "pubkey": "3TQyCQUOyT9RuZy3ClqvB/JF3s8CSzPQZNWtlf7CFmA=",
       "category": "files"
+    },
+    {
+      "name": "gitclient",
+      "repo": "friendlyflow/gitclient_plugin_sicompass",
+      "pubkey": "LJUlsAbot7VyF35vKQ6azyAWR5GmgjVhmzr6bDPFMOU=",
+      "category": "development"
+    },
+    {
+      "name": "terminal",
+      "repo": "friendlyflow/terminal_plugin_sicompass",
+      "pubkey": "a6w+En0gtnrSuaqh371br2ZNN0y73MSU6ir/QSrzF1o=",
+      "category": "development"
+    },
+    {
+      "name": "claude",
+      "repo": "friendlyflow/claude_plugin_sicompass",
+      "pubkey": "f8vpfY+RSWtOsXz/n9dLf742aymiQHPAfrbPh1r6mhE=",
+      "category": "development"
     }
   ]
 }

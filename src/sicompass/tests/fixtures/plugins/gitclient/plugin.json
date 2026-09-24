@@ -1,0 +1,21 @@
+{
+  "name": "gitclient",
+  "displayName": "git client",
+  "type": "wasm",
+  "entry": "plugin.wasm",
+  "version": "0.2.0",
+  "minAppVersion": "0.1.21",
+  "description": "gitclient-description",
+  "settings": [
+    {
+      "type": "text",
+      "label": "gitclient-setting-autofetch",
+      "key": "gitAutofetchMinutes",
+      "default": "0"
+    }
+  ],
+  "permissions": {
+    "filesystem": ["/"],
+    "process": ["git"]
+  }
+}

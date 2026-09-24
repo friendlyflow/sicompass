@@ -106,8 +106,8 @@ few sites detect and block. If a page refuses to load, install `xvfb` with
 
 ### The git client
 
-The git client runs the `git` you already have, so install it if you want to use
-that provider. Most systems have it. If yours does not, `sudo apt install git` or
+The git client, from the Store, runs the `git` you already have, so install it
+if you want to use that program. Most systems have it. If yours does not, `sudo apt install git` or
 `sudo dnf install git` is all it needs. It uses your own git config, your own ssh
 agent and your own credential helpers, exactly as your shell would, so a
 repository you can push from a terminal is one you can push from here. Nothing is
@@ -115,10 +115,10 @@ fetched in the background unless you ask for it in Settings.
 
 ### Claude Code
 
-The Claude provider drives the `claude` command line tool, so install Claude
-Code if you want to use it. It runs with the login that tool already has, so
-there is no key to paste here. If it is not on your `PATH`, point Settings at
-the binary.
+Claude, from the Store, drives the `claude` command line tool, so install
+Claude Code if you want to use it. It runs with the login that tool already
+has, so there is no key to paste here. Sicompass finds `claude` on your `PATH`
+or in `~/.local/bin`, where Claude Code's installer puts it.
 
 ### Checking that it worked
 
@@ -162,9 +162,9 @@ the icon.
 ## Built-in providers
 
 Each provider turns a different data source into the same keyboard-navigable
-tree: Email, Chat, Web Browser, Terminal, Git Client, Claude, Store, and
-Settings. The File Browser, the Text Editor, Notes, Project Management, Remote
-and the Sales demo are installed from the Store. Saving and opening a file
+tree: Email, Chat, Web Browser, Store, and Settings. The File Browser, the
+Text Editor, Notes, Project Management, the Git Client, the Terminal, Claude,
+Remote and the Sales demo are installed from the Store. Saving and opening a file
 (ctrl+s, ctrl+o) go through the File Browser, so install it first.
 
 The Store lists the programs you can add. Each one says what it may reach
@@ -207,9 +207,9 @@ opens in its own tab.
 - **Terminal** turns that folder into a real shell. Full screen programs like
   vim and htop get an interactive mode that hands them the raw keys.
 
-The last three start out off, because each drives a tool you may not have. Turn
-them on in Settings. They use your own `git`, shell and `claude`, with your own
-config and credentials. There is no shared project root, you point each one at
+All five come from the Store. The git client, Claude and the terminal each
+drive a tool you may already have, and they use your own `git`, shell and
+`claude`, with your own config and credentials. There is no shared project root, you point each one at
 the folder you want, so one repository across all four is four tabs you move
 between with ctrl+tab. The tab keys work from anywhere, a board or a full screen
 program included, and each tab comes back the way you left it.

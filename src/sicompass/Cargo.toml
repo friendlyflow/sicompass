@@ -370,8 +370,7 @@ wasmtime-wasi = { workspace = true }
 bytes = "1"
 # The OS trash, for a plugin's `desktop.trash` (wasm_host/desktop.rs).
 trash = "5"
-# A plugin's `process` children on a pseudo-terminal (wasm_host/process.rs). The
-# workspace version lib_shell uses.
+# A plugin's `process` children on a pseudo-terminal (wasm_host/process.rs).
 portable-pty = { workspace = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
@@ -415,15 +414,12 @@ sicompass-webbrowser = { workspace = true }
 # Only to switch its recall history off for the test binary — see
 # `ensure_builtins`. Without it, every run appends the commands these tests run
 # to the developer's own shell history.
-sicompass-terminal = { workspace = true }
 # Only to switch personal-skill discovery off for the test binary — see
 # `ensure_builtins`. Without it the skills-palette tests would see whatever
 # lives in the developer's own `~/.claude/skills`.
-sicompass-claude = { workspace = true }
 # Only to switch network access off for the test binary — see
 # `ensure_builtins`. Without it a fixture repository with a remote configured
 # would have these tests contacting it.
-sicompass-gitclient = { workspace = true }
 sicompass-chatclient = { workspace = true }
 sicompass-emailclient = { workspace = true }
 mockall = { workspace = true }

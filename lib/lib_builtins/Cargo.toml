@@ -14,6 +14,3 @@ sicompass-chatclient = { workspace = true }
 sicompass-emailclient = { workspace = true }
 sicompass-settings = { workspace = true }
 sicompass-store = { workspace = true }
-sicompass-terminal = { workspace = true }
-sicompass-claude = { workspace = true }
-sicompass-gitclient = { workspace = true }

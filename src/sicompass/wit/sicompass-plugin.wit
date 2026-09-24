@@ -355,6 +355,12 @@ interface host {
   /// `asset:<plugin-name>/<file>` in an `<image>` tag and let the host resolve it:
   /// no copy through guest memory, no decoding in the guest.
   read-asset: func(rel: string) -> option<list<u8>>;
+
+  /// Where the plugin is now, after a call that moved it other than through
+  /// `push-path`, `pop-path` or `set-current-path` (which return the path): a
+  /// command, an edit, background work such as a shell's `cd`. The pdk's
+  /// `export_plugin!` calls it itself whenever `current_path` changed.
+  moved-to: func(path: string);
 }
 
 /// Network egress. **A separate interface from `host` on purpose.**
@@ -546,15 +552,26 @@ interface process {
     cols: u16,
   }
 
+  /// Where `program` (a name `permissions.process` lists) would start from,
+  /// the file `spawn` resolves it to. Knowing a path grants nothing: reading
+  /// the file still needs a folder grant.
+  which: func(program: string) -> result<string, string>;
+
   resource child {
     /// Start `program`. With `pty`, it runs attached to a new pseudo-terminal of
     /// that size (stdout and stderr both arrive through `read`); without, its
     /// stdin, stdout and stderr are pipes.
+    ///
+    /// The program inherits sicompass's environment (the user's `PATH`,
+    /// `HOME`, SSH agent and so on). `env` sets variables on top of it, and
+    /// `unset` removes inherited ones: a plugin that must not be steered by,
+    /// say, a stray `GIT_DIR` removes it here.
     spawn: static func(
       program: string,
       args: list<string>,
       cwd: option<string>,
       env: list<tuple<string, string>>,
+      unset: list<string>,
       pty: option<pty-size>,
     ) -> result<child, string>;
 
@@ -571,8 +588,21 @@ interface process {
     /// Resize the PTY. Ignored without one.
     resize: func(size: pty-size);
 
-    /// The exit code once it has exited (-1 when killed by a signal).
+    /// The exit code once it has exited (-1 when killed by a signal) and its
+    /// output has arrived, so the `read`s after this return the rest of it.
+    /// (A program it left running in the background can hold its output open;
+    /// the exit is reported half a second later regardless.)
     try-wait: func() -> option<s32>;
+
+    /// Its working directory right now, which a shell's `cd` moves. Absent
+    /// once it has exited, and where the system does not say (only Linux
+    /// does, today).
+    cwd: func() -> option<string>;
+
+    /// Whether a program it started holds its terminal's foreground: a shell
+    /// running a command rather than sitting at its prompt. False without a
+    /// PTY, and where the system does not say.
+    foreground-busy: func() -> bool;
 
     /// Stop it.
     kill: func();

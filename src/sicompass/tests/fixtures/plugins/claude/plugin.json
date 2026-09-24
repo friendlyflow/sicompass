@@ -1,0 +1,46 @@
+{
+  "name": "claude",
+  "displayName": "claude",
+  "type": "wasm",
+  "entry": "plugin.wasm",
+  "version": "0.2.0",
+  "minAppVersion": "0.1.21",
+  "description": "claude-description",
+  "settings": [
+    {
+      "type": "radio",
+      "label": "claude-radio-permission-mode",
+      "key": "claudePermissionMode",
+      "options": ["default", "acceptEdits", "plan", "bypassPermissions"],
+      "default": "default"
+    },
+    {
+      "type": "text",
+      "label": "claude-setting-model",
+      "key": "claudeModel",
+      "default": ""
+    },
+    {
+      "type": "text",
+      "label": "claude-setting-extra-args",
+      "key": "claudeExtraArgs",
+      "default": ""
+    },
+    {
+      "type": "checkbox",
+      "label": "claude-checkbox-stream-partial",
+      "key": "claudeStreamPartial",
+      "defaultChecked": true
+    },
+    {
+      "type": "text",
+      "label": "claude-setting-folder",
+      "key": "claudeFolder",
+      "default": "~/.claude"
+    }
+  ],
+  "permissions": {
+    "filesystem": ["/"],
+    "process": ["claude"]
+  }
+}

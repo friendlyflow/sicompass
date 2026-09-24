@@ -15,7 +15,7 @@ set -uo pipefail
 ROOT="${CLAUDE_PROJECT_DIR:-.}"
 status=0
 
-LIB_CRATES='filebrowser|settings|chatclient|emailclient|webbrowser|tutorial|shell|terminal|claude|gitclient|store|text_editor|builtins|updater'
+LIB_CRATES='filebrowser|settings|chatclient|emailclient|webbrowser|tutorial|store|text_editor|builtins|updater'
 
 for dir in src/sicompass/src; do
   [ -d "$ROOT/$dir" ] || continue

@@ -1519,6 +1519,16 @@ fn the_plugin_sets_the_programs_environment() {
     assert_eq!(fs_cmd(&mut p, "env", ""), "exit 0: from-the-plugin\n");
 }
 
+/// A program inherits sicompass's environment, and the plugin can remove an
+/// inherited variable (the git client removes `GIT_DIR` and its kind, so a
+/// stray one can never point it at another repository). `HOME` is always
+/// inherited, which makes it a reliable one to remove here.
+#[test]
+fn the_plugin_can_unset_an_inherited_variable() {
+    let mut p = open_process(process_grants()).unwrap();
+    assert_eq!(fs_cmd(&mut p, "unset", "HOME"), "exit 0: unset\n");
+}
+
 #[test]
 fn the_working_directory_must_be_granted() {
     let dir = tempfile::tempdir().unwrap();

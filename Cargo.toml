@@ -6,10 +6,6 @@ members = [
     "lib/lib_webbrowser",
     "lib/lib_chatclient",
     "lib/lib_emailclient",
-    "lib/lib_shell",
-    "lib/lib_terminal",
-    "lib/lib_claude",
-    "lib/lib_gitclient",
     "lib/lib_builtins",
     "lib/lib_updater",
     "src/sicompass",
@@ -35,7 +31,7 @@ license = "GPL-3.0-only"
 # `app_state_dir` / `app_cache_dir` helpers, which are what keep a debug build's
 # config, state, data and cache out of an installed release build's. Every
 # provider that persists anything calls one of them unconditionally
-# (lib_notes, lib_terminal, lib_webbrowser, lib_emailclient,
+# (lib_notes, lib_webbrowser, lib_emailclient,
 # lib_project_management) as does the app's own clipboard cache, and there is no
 # fallback path: on 0.6.0 they do not compile. (Carries forward
 # `take_announcement` and `dashboard_uses_app_undo` from 0.6.0, both used
@@ -52,10 +48,6 @@ sicompass-store = { path = "lib/lib_store" }
 sicompass-webbrowser = { path = "lib/lib_webbrowser" }
 sicompass-chatclient = { path = "lib/lib_chatclient" }
 sicompass-emailclient = { path = "lib/lib_emailclient" }
-sicompass-shell = { path = "lib/lib_shell" }
-sicompass-terminal = { path = "lib/lib_terminal" }
-sicompass-claude = { path = "lib/lib_claude" }
-sicompass-gitclient = { path = "lib/lib_gitclient" }
 sicompass-builtins = { path = "lib/lib_builtins" }
 sicompass-updater = { path = "lib/lib_updater" }
 # The renderer shared with the login greeter, in its own repo
@@ -170,11 +162,8 @@ wasmtime = { version = "48", default-features = false, features = [
 # built for the old preview-1 target, which none are.
 wasmtime-wasi = { version = "48", default-features = false, features = ["p2"] }
 
-# PTY (interactive shell sessions used by sicompass-shell)
+# PTY: a plugin's `process` children on a pseudo-terminal (the terminal's shell)
 portable-pty = "0.9"
-
-# ANSI/VT parser (interactive terminal emulator inside sicompass-terminal)
-vte = "0.15"
 
 # Logging
 tracing = "0.1"
@@ -218,7 +207,7 @@ wiremock = "0.6"
 # unreleased, so it still satisfies the `0.8.0` requirements. Remove this block
 # when the pins move to the published 0.9.0.
 [patch.crates-io]
-sicompass-sdk = { git = "https://github.com/friendlyflow/sicompass-plugin-sdk", rev = "942ac5fb925cd0ab301e41df60acfd7f84c2d54e" }
+sicompass-sdk = { git = "https://github.com/friendlyflow/sicompass-plugin-sdk", rev = "ee8da2906073c5f29e9f7004c9ba13c6645e0d15" }
 #
 # The same rule, for working on the renderer and the app together:
 #

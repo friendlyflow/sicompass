@@ -98,12 +98,15 @@ impl WasmProvider {
     /// Keep a poll's answers. An error goes to the pending slot; a request an
     /// earlier poll left untaken survives a poll that has none.
     fn take_poll(&mut self, mut p: wit_types::PollResult) {
-        if let Some(err) = p.error.take() {
+        {
             let mut inner = self.inner.borrow_mut();
-            if inner.pending_error.is_none() {
+            if let Some(err) = p.error.take()
+                && inner.pending_error.is_none()
+            {
                 inner.pending_error = Some(err);
             }
         }
+        self.take_moved_to();
         if p.dashboard_request.is_none() {
             p.dashboard_request = self.polled.dashboard_request.take();
         }
@@ -115,6 +118,15 @@ impl WasmProvider {
         }
         p.needs_refresh |= self.polled.needs_refresh;
         self.polled = p;
+    }
+
+    /// A plugin that moved without a navigation call said so
+    /// (`host.moved-to`), during whichever call moved it.
+    fn take_moved_to(&mut self) {
+        let moved = self.inner.borrow_mut().store.data_mut().moved_to.take();
+        if let Some(path) = moved {
+            self.current_path = path;
+        }
     }
 
     /// Poll right after navigating, so the per-level answers (at root,
@@ -727,6 +739,12 @@ impl Provider for WasmProvider {
         self.polled.is_busy
     }
 
+    /// The oldest program this plugin runs, for the tab switcher.
+    fn process_id(&self) -> Option<u32> {
+        let inner = self.inner.try_borrow().ok()?;
+        inner.store.data().child_pids.first().map(|(_, pid)| *pid)
+    }
+
     fn at_root(&self) -> bool {
         self.polled.at_root
     }
@@ -788,8 +806,15 @@ impl Provider for WasmProvider {
     // ---- Editing and file operations ---------------------------------------
 
     fn commit_edit(&mut self, old: &str, new: &str) -> bool {
-        self.call("commit-edit", |g, s| g.call_commit_edit(s, old, new))
-            .unwrap_or(false)
+        let done = self
+            .call("commit-edit", |g, s| g.call_commit_edit(s, old, new))
+            .unwrap_or(false);
+        // An edit can move the plugin (a `cd` typed into the terminal), and
+        // the app reads the path straight after. Not a whole poll: that would
+        // run the plugin's background work before the edit has had any effect
+        // outside it (the shell has not run the `cd` yet).
+        self.take_moved_to();
+        done
     }
 
     fn create_directory(&mut self, name: &str) -> bool {
@@ -839,7 +864,7 @@ impl Provider for WasmProvider {
         elem_type: i32,
         error: &mut String,
     ) -> Option<FfonElement> {
-        match self.call("handle-command", |g, s| {
+        let out = match self.call("handle-command", |g, s| {
             g.call_handle_command(s, cmd, elem_key, elem_type)
         }) {
             // The guest reported a domain error through `result<_, string>`.
@@ -852,7 +877,12 @@ impl Provider for WasmProvider {
                 *error = trap;
                 None
             }
-        }
+        };
+        // A command can move the plugin (the git client's `:` opens the
+        // repository at its root), and the app asks `at_root` straight after
+        // to decide how to rebuild the list, before the next frame's poll.
+        self.repoll();
+        out
     }
 
     fn command_list_items(&self, cmd: &str) -> Vec<ListItem> {
@@ -872,10 +902,14 @@ impl Provider for WasmProvider {
     }
 
     fn execute_command(&mut self, cmd: &str, selection: &str) -> bool {
-        self.call("execute-command", |g, s| {
-            g.call_execute_command(s, cmd, selection)
-        })
-        .unwrap_or(false)
+        let done = self
+            .call("execute-command", |g, s| {
+                g.call_execute_command(s, cmd, selection)
+            })
+            .unwrap_or(false);
+        // As after `handle_command`: the answer can have moved the plugin.
+        self.repoll();
+        done
     }
 
     fn create_element(&mut self, key: &str) -> Option<FfonElement> {
@@ -917,8 +951,10 @@ impl Provider for WasmProvider {
         if !hears_setting(&self.setting_keys, key) {
             return;
         }
+        // `~` is the home folder, as `get-setting` answers.
+        let value = crate::plugin_manifest::expand_home(value);
         let _ = self.call("on-setting-change", |g, s| {
-            g.call_on_setting_change(s, key, value)
+            g.call_on_setting_change(s, key, &value)
         });
     }
 

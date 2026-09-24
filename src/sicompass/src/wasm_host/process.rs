@@ -10,12 +10,16 @@
 //! - its working directory must lie inside a folder the plugin was granted, or
 //!   is the user's home;
 //! - reads never block (a reader thread per stream fills a capped buffer);
+//! - `try-wait` reports the exit only once that output has all arrived, so a
+//!   plugin that reads until then has the whole of it;
 //! - dropping the resource, or the whole instance, kills the program, so a
 //!   plugin cannot leave processes behind.
 
 use std::io::{Read, Write};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use portable_pty::{CommandBuilder, MasterPty, PtySize, native_pty_system};
 use wasmtime::component::Resource;
@@ -28,12 +32,22 @@ use super::sicompass::plugin as wit;
 /// growing host memory.
 const MAX_BUFFERED: usize = 8 * 1024 * 1024;
 
+/// How long after a program exits `try-wait` still waits for its output to
+/// arrive. Normally the streams end with the program, well within this. A
+/// program it started in the background can keep one open for as long as that
+/// runs, and the exit must not wait on that.
+const OUTPUT_GRACE: Duration = Duration::from_millis(500);
+
 /// A running program: the host side of the `child` resource.
 pub struct ProcessChild {
     out: Arc<Mutex<Vec<u8>>>,
     err: Arc<Mutex<Vec<u8>>>,
     writer: Option<Box<dyn Write + Send>>,
     kind: Kind,
+    /// Reader threads still copying output into `out` and `err`.
+    open: Arc<AtomicUsize>,
+    /// The exit code, and when it was first seen.
+    exited: Option<(i32, Instant)>,
 }
 
 enum Kind {
@@ -57,7 +71,24 @@ impl ProcessChild {
         }
     }
 
+    /// The exit code once the program has exited and its output has arrived
+    /// (or [`OUTPUT_GRACE`] has passed), so a `read` after this returns the
+    /// rest of it. Reporting the bare exit would let a plugin stop reading
+    /// with the last of the output still in a pipe, and a truncated
+    /// `git status` reads as a clean tree.
     fn try_wait(&mut self) -> Option<i32> {
+        let (code, at) = match self.exited {
+            Some(e) => e,
+            None => {
+                let e = (self.exit_code()?, Instant::now());
+                self.exited = Some(e);
+                e
+            }
+        };
+        (self.open.load(Ordering::Acquire) == 0 || at.elapsed() >= OUTPUT_GRACE).then_some(code)
+    }
+
+    fn exit_code(&mut self) -> Option<i32> {
         match &mut self.kind {
             Kind::Pty { child, .. } => child
                 .try_wait()
@@ -81,21 +112,90 @@ impl ProcessChild {
             Kind::Pipes(child) => Some(child.id()),
         }
     }
+
+    /// Its working directory now (Linux: `/proc/<pid>/cwd`).
+    fn cwd(&mut self) -> Option<String> {
+        if self.exited.is_some() || self.exit_code().is_some() {
+            return None;
+        }
+        #[cfg(target_os = "linux")]
+        {
+            let pid = self.pid()?;
+            std::fs::read_link(format!("/proc/{pid}/cwd"))
+                .ok()
+                .map(|p| p.to_string_lossy().into_owned())
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            None
+        }
+    }
+
+    /// Whether another process group holds its PTY's foreground.
+    ///
+    /// Linux: the program's `/proc/<pid>/stat` has its own process group
+    /// (`pgrp`) and its terminal's foreground group (`tpgid`). At a prompt the
+    /// shell *is* the foreground group; while a command runs the shell has put
+    /// that command in a group of its own, and the two differ.
+    fn foreground_busy(&self) -> bool {
+        if !matches!(self.kind, Kind::Pty { .. }) {
+            return false;
+        }
+        #[cfg(target_os = "linux")]
+        {
+            let Some(pid) = self.pid() else {
+                return false;
+            };
+            let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) else {
+                return false;
+            };
+            // `comm` (field 2) is parenthesised and may itself hold spaces or
+            // parentheses, so the fields are counted after the last `)`:
+            // state, ppid, pgrp, session, tty_nr, tpgid.
+            let Some(rparen) = stat.rfind(')') else {
+                return false;
+            };
+            let fields: Vec<&str> = stat[rparen + 1..].split_whitespace().collect();
+            let pgrp = fields.get(2).and_then(|s| s.parse::<i32>().ok());
+            let tpgid = fields.get(5).and_then(|s| s.parse::<i32>().ok());
+            matches!((pgrp, tpgid), (Some(pg), Some(tp)) if tp >= 0 && tp != pg)
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            false
+        }
+    }
 }
 
 impl Drop for ProcessChild {
     fn drop(&mut self) {
-        if self.try_wait().is_none() {
+        if self.exited.is_none() && self.exit_code().is_none() {
             self.kill();
         }
     }
 }
 
-/// Copy a stream into a shared buffer until it ends.
-fn pump(mut from: impl Read + Send + 'static, into: Arc<Mutex<Vec<u8>>>, what: &'static str) {
+/// Copy a stream into a shared buffer until it ends. `open` counts the pumps
+/// still running.
+fn pump(
+    mut from: impl Read + Send + 'static,
+    into: Arc<Mutex<Vec<u8>>>,
+    open: &Arc<AtomicUsize>,
+    what: &'static str,
+) {
+    struct Done(Arc<AtomicUsize>);
+    impl Drop for Done {
+        fn drop(&mut self) {
+            self.0.fetch_sub(1, Ordering::AcqRel);
+        }
+    }
+    open.fetch_add(1, Ordering::AcqRel);
+    // Dropped when the thread ends, or right here if it never started.
+    let done = Done(open.clone());
     let _ = std::thread::Builder::new()
         .name(format!("plugin-{what}"))
         .spawn(move || {
+            let _done = done;
             let mut chunk = [0u8; 16 * 1024];
             loop {
                 while into.lock().map(|b| b.len() >= MAX_BUFFERED).unwrap_or(false) {
@@ -156,20 +256,46 @@ pub fn resolve_program(program: &str, allowed: &[String]) -> Result<PathBuf, Str
         return Err(format!("`{program}` must be a program name, not a path"));
     }
     let path = std::env::var_os("PATH").unwrap_or_default();
-    for dir in std::env::split_paths(&path) {
-        let candidate = dir.join(program);
-        if is_executable(&candidate) {
-            return Ok(candidate);
-        }
-        #[cfg(windows)]
-        {
-            let exe = dir.join(format!("{program}.exe"));
-            if exe.is_file() {
-                return Ok(exe);
+    // After PATH, the user's own `~/.local/bin`, where per-user installers
+    // (Claude Code's, pip's) put programs. A desktop session's PATH often
+    // lacks it, and one started before the installer ran always does.
+    let own_bin = sicompass_sdk::platform::home_dir().map(|h| h.join(".local").join("bin"));
+    find_program(program, std::env::split_paths(&path).chain(own_bin))
+}
+
+/// The first of `dirs` that holds `program`.
+fn find_program(
+    program: &str,
+    dirs: impl Iterator<Item = PathBuf>,
+) -> Result<PathBuf, String> {
+    for dir in dirs {
+        for candidate in candidates(&dir, program) {
+            if is_executable(&candidate) {
+                return Ok(candidate);
             }
         }
     }
     Err(format!("`{program}` was not found on PATH"))
+}
+
+/// The files `program` can be in `dir`.
+#[cfg(not(windows))]
+fn candidates(dir: &std::path::Path, program: &str) -> Vec<PathBuf> {
+    vec![dir.join(program)]
+}
+
+/// On Windows, with each `PATHEXT` extension too: npm installs a CLI as a
+/// `.cmd` shim, which a bare name never matches.
+#[cfg(windows)]
+fn candidates(dir: &std::path::Path, program: &str) -> Vec<PathBuf> {
+    let exts = std::env::var("PATHEXT").unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".to_owned());
+    std::iter::once(dir.join(program))
+        .chain(
+            exts.split(';')
+                .filter(|e| !e.is_empty())
+                .map(|e| dir.join(format!("{program}{}", e.to_ascii_lowercase()))),
+        )
+        .collect()
 }
 
 #[cfg(unix)]
@@ -190,6 +316,7 @@ impl HostState {
         args: &[String],
         cwd: Option<&str>,
         env: &[(String, String)],
+        unset: &[String],
         pty: Option<wit::process::PtySize>,
     ) -> Result<ProcessChild, String> {
         let exe = resolve_program(program, &self.process_allowed)?;
@@ -205,6 +332,7 @@ impl HostState {
         };
         let out = Arc::new(Mutex::new(Vec::new()));
         let err = Arc::new(Mutex::new(Vec::new()));
+        let open = Arc::new(AtomicUsize::new(0));
 
         if let Some(size) = pty {
             let pair = native_pty_system()
@@ -218,6 +346,9 @@ impl HostState {
             let mut cmd = CommandBuilder::new(&exe);
             cmd.args(args);
             cmd.cwd(&dir);
+            for k in unset {
+                cmd.env_remove(k);
+            }
             for (k, v) in env {
                 cmd.env(k, v);
             }
@@ -228,7 +359,7 @@ impl HostState {
             drop(pair.slave);
             let reader = pair.master.try_clone_reader().map_err(|e| e.to_string())?;
             let writer = pair.master.take_writer().map_err(|e| e.to_string())?;
-            pump(reader, out.clone(), "pty");
+            pump(reader, out.clone(), &open, "pty");
             return Ok(ProcessChild {
                 out,
                 err,
@@ -237,10 +368,16 @@ impl HostState {
                     master: pair.master,
                     child,
                 },
+                open,
+                exited: None,
             });
         }
 
-        let mut child = std::process::Command::new(&exe)
+        let mut cmd = std::process::Command::new(&exe);
+        for k in unset {
+            cmd.env_remove(k);
+        }
+        let mut child = cmd
             .args(args)
             .current_dir(&dir)
             .envs(env.iter().map(|(k, v)| (k, v)))
@@ -250,10 +387,10 @@ impl HostState {
             .spawn()
             .map_err(|e| format!("cannot start `{program}`: {e}"))?;
         if let Some(stdout) = child.stdout.take() {
-            pump(stdout, out.clone(), "stdout");
+            pump(stdout, out.clone(), &open, "stdout");
         }
         if let Some(stderr) = child.stderr.take() {
-            pump(stderr, err.clone(), "stderr");
+            pump(stderr, err.clone(), &open, "stderr");
         }
         let writer = child.stdin.take().map(|s| Box::new(s) as Box<dyn Write + Send>);
         Ok(ProcessChild {
@@ -261,6 +398,8 @@ impl HostState {
             err,
             writer,
             kind: Kind::Pipes(child),
+            open,
+            exited: None,
         })
     }
 
@@ -269,7 +408,11 @@ impl HostState {
     }
 }
 
-impl wit::process::Host for HostState {}
+impl wit::process::Host for HostState {
+    fn which(&mut self, program: String) -> Result<String, String> {
+        resolve_program(&program, &self.process_allowed).map(|p| p.to_string_lossy().into_owned())
+    }
+}
 
 impl wit::process::HostChild for HostState {
     fn spawn(
@@ -278,10 +421,16 @@ impl wit::process::HostChild for HostState {
         args: Vec<String>,
         cwd: Option<String>,
         env: Vec<(String, String)>,
+        unset: Vec<String>,
         pty: Option<wit::process::PtySize>,
     ) -> Result<Resource<ProcessChild>, String> {
-        let child = self.start(&program, &args, cwd.as_deref(), &env, pty)?;
-        self.table.push(child).map_err(|e| e.to_string())
+        let child = self.start(&program, &args, cwd.as_deref(), &env, &unset, pty)?;
+        let pid = child.pid();
+        let r = self.table.push(child).map_err(|e| e.to_string())?;
+        if let Some(pid) = pid {
+            self.child_pids.push((r.rep(), pid));
+        }
+        Ok(r)
     }
 
     fn read(&mut self, r: Resource<ProcessChild>, max: u32) -> Vec<u8> {
@@ -317,6 +466,14 @@ impl wit::process::HostChild for HostState {
         self.child(&r).and_then(|c| c.try_wait())
     }
 
+    fn cwd(&mut self, r: Resource<ProcessChild>) -> Option<String> {
+        self.child(&r).and_then(|c| c.cwd())
+    }
+
+    fn foreground_busy(&mut self, r: Resource<ProcessChild>) -> bool {
+        self.child(&r).is_some_and(|c| c.foreground_busy())
+    }
+
     fn kill(&mut self, r: Resource<ProcessChild>) {
         if let Some(c) = self.child(&r) {
             c.kill();
@@ -325,6 +482,7 @@ impl wit::process::HostChild for HostState {
 
     fn drop(&mut self, r: Resource<ProcessChild>) -> wasmtime::Result<()> {
         // Dropping the ProcessChild kills a program that is still running.
+        self.child_pids.retain(|(rep, _)| *rep != r.rep());
         self.table.delete(r)?;
         Ok(())
     }
@@ -365,7 +523,9 @@ mod tests {
     fn dropping_a_child_kills_the_program() {
         let mut s = HostState::new("demo", "demo", "/tmp/sicompass-test-plugin", Vec::new());
         s.process_allowed = allowed(&["sleep"]);
-        let child = s.start("sleep", &["30".to_owned()], None, &[], None).unwrap();
+        let child = s
+            .start("sleep", &["30".to_owned()], None, &[], &[], None)
+            .unwrap();
         let pid = child.pid().unwrap();
         let alive = |pid: u32| {
             std::fs::read_to_string(format!("/proc/{pid}/stat"))
@@ -378,6 +538,124 @@ mod tests {
             assert!(std::time::Instant::now() < deadline, "the program outlived its resource");
             std::thread::sleep(std::time::Duration::from_millis(20));
         }
+    }
+
+    /// Everything a program wrote is readable once `try_wait` reports its exit:
+    /// a plugin that stops reading there has it all. The output is larger than
+    /// the host buffer and read in small bites, so the reader thread is still
+    /// throttled with the tail in the pipe when the program exits.
+    #[cfg(unix)]
+    #[test]
+    fn the_exit_is_reported_after_the_last_of_the_output() {
+        let mut s = HostState::new("demo", "demo", "/tmp/sicompass-test-plugin", Vec::new());
+        s.process_allowed = allowed(&["sh"]);
+        let lines = 2_000_000;
+        let script = format!("seq 1 {lines}; echo stderr-end >&2");
+        for _ in 0..3 {
+            let mut child = s
+                .start("sh", &["-c".to_owned(), script.clone()], None, &[], &[], None)
+                .unwrap();
+            let deadline = Instant::now() + Duration::from_secs(30);
+            let (mut out, mut err) = (Vec::new(), Vec::new());
+            loop {
+                let exited = child.try_wait().is_some();
+                if exited {
+                    out.extend(take(&child.out, u32::MAX));
+                    err.extend(take(&child.err, u32::MAX));
+                    break;
+                }
+                out.extend(take(&child.out, 4096));
+                err.extend(take(&child.err, 64 * 1024));
+                assert!(Instant::now() < deadline, "the program never finished");
+            }
+            let out = String::from_utf8(out).unwrap();
+            assert_eq!(out.lines().count(), lines);
+            assert!(out.ends_with(&format!("{lines}\n")));
+            assert_eq!(String::from_utf8(err).unwrap(), "stderr-end\n");
+        }
+    }
+
+    /// Read `child` until `done` says so, or 10 s pass.
+    #[cfg(target_os = "linux")]
+    fn until(child: &mut ProcessChild, what: &str, done: impl Fn(&mut ProcessChild) -> bool) {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !done(child) {
+            take(&child.out, u32::MAX);
+            assert!(Instant::now() < deadline, "never: {what}");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    /// A shell's `cd` moves what `cwd` answers, and a running command holds
+    /// the foreground until it ends: what a terminal's prompt and its "a
+    /// command is running" confirmation read.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_pty_shell_reports_its_directory_and_a_running_command() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let there = tmp.path().canonicalize().unwrap();
+        let mut s = HostState::new("demo", "demo", "/tmp/sicompass-test-plugin", Vec::new());
+        s.process_allowed = allowed(&["sh"]);
+        let size = wit::process::PtySize { rows: 24, cols: 80 };
+        let mut child = s
+            .start("sh", &["-i".to_owned()], None, &[], &[], Some(size))
+            .unwrap();
+        assert!(child.cwd().is_some(), "a live program has a directory");
+        assert!(!child.foreground_busy(), "at the prompt");
+
+        let w = child.writer.as_mut().unwrap();
+        writeln!(w, "cd '{}'", there.display()).unwrap();
+        w.flush().unwrap();
+        let want = there.to_string_lossy().into_owned();
+        until(&mut child, "the cd", |c| c.cwd().as_deref() == Some(want.as_str()));
+
+        let w = child.writer.as_mut().unwrap();
+        writeln!(w, "sleep 30").unwrap();
+        w.flush().unwrap();
+        until(&mut child, "sleep holding the terminal", |c| c.foreground_busy());
+
+        child.kill();
+        until(&mut child, "the exit", |c| c.try_wait().is_some());
+        assert_eq!(child.cwd(), None, "an exited program has none");
+    }
+
+    #[test]
+    fn a_program_on_pipes_is_never_foreground_busy() {
+        let mut s = HostState::new("demo", "demo", "/tmp/sicompass-test-plugin", Vec::new());
+        s.process_allowed = allowed(&["sleep"]);
+        let child = s
+            .start("sleep", &["30".to_owned()], None, &[], &[], None)
+            .unwrap();
+        assert!(!child.foreground_busy());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_program_is_found_in_the_folders_after_path_in_order() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::TempDir::new().unwrap();
+        let (first, second) = (tmp.path().join("a"), tmp.path().join("b"));
+        for d in [&first, &second] {
+            std::fs::create_dir(d).unwrap();
+        }
+        let prog = second.join("sicompass-test-prog");
+        std::fs::write(&prog, "#!/bin/sh\n").unwrap();
+        std::fs::set_permissions(&prog, std::fs::Permissions::from_mode(0o755)).unwrap();
+        // Not executable: skipped, as a shell would.
+        std::fs::write(first.join("sicompass-test-prog"), "").unwrap();
+        let dirs = || [first.clone(), second.clone()].into_iter();
+        assert_eq!(find_program("sicompass-test-prog", dirs()).unwrap(), prog);
+        assert!(find_program("sicompass-missing", dirs()).is_err());
+    }
+
+    #[test]
+    fn which_answers_only_for_a_listed_program() {
+        use wit::process::Host;
+        let mut s = HostState::new("demo", "demo", "/tmp/sicompass-test-plugin", Vec::new());
+        s.process_allowed = allowed(&["sh"]);
+        let sh = s.which("sh".to_owned()).unwrap();
+        assert!(std::path::Path::new(&sh).is_absolute(), "{sh}");
+        assert!(s.which("rm".to_owned()).unwrap_err().contains("not among"));
     }
 
     #[test]

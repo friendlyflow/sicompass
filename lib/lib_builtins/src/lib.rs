@@ -29,9 +29,6 @@ pub fn register_all() {
         sicompass_emailclient::register();
         sicompass_settings::register();
         sicompass_store::register();
-        sicompass_terminal::register();
-        sicompass_claude::register();
-        sicompass_gitclient::register();
     });
 }
 
@@ -44,7 +41,6 @@ mod tests {
         register_all();
         register_all(); // second call must not panic
     }
-
 
     #[test]
     fn tutorial_factory_is_registered() {
@@ -67,7 +63,6 @@ mod tests {
         assert!(p.is_some(), "emailclient factory should be registered");
     }
 
-
     #[test]
     fn store_is_registered_and_always_present() {
         register_all();
@@ -89,110 +84,6 @@ mod tests {
         let p = sicompass_sdk::create_provider_by_name("settings");
         assert!(p.is_some(), "settings factory should be registered");
     }
-
-    #[test]
-    fn terminal_factory_is_registered() {
-        register_all();
-        let p = sicompass_sdk::create_provider_by_name("terminal");
-        assert!(p.is_some(), "terminal factory should be registered");
-        assert_eq!(p.unwrap().name(), "terminal");
-    }
-
-    #[test]
-    fn gitclient_factory_is_registered() {
-        register_all();
-        let p = sicompass_sdk::create_provider_by_name("gitclient");
-        assert!(p.is_some(), "gitclient factory should be registered");
-        let p = p.unwrap();
-        assert_eq!(p.name(), "gitclient");
-        // The app matches a settings section to its provider by stripping the
-        // spaces out of the display name, so these two have to agree or the
-        // section is silently dropped.
-        assert_eq!(p.display_name().replace(' ', ""), p.name());
-    }
-
-    #[test]
-    fn builtin_manifests_include_gitclient_opt_in_with_its_settings() {
-        register_all();
-        let manifests = sicompass_sdk::builtin_manifests();
-        let git = manifests
-            .iter()
-            .find(|m| m.name == "gitclient")
-            .expect("gitclient manifest should be registered");
-        assert!(
-            !git.enable_default && !git.always_enabled,
-            "not everyone works with git, and the provider needs the binary"
-        );
-        let keys: Vec<&str> = git.settings.iter().map(|s| s.key.as_str()).collect();
-        assert!(keys.contains(&"gitBinary"), "{keys:?}");
-        assert!(keys.contains(&"gitAutofetchMinutes"), "{keys:?}");
-    }
-
-    #[test]
-    fn builtin_manifests_include_terminal_opt_in_with_shell_setting() {
-        register_all();
-        let manifests = sicompass_sdk::builtin_manifests();
-        let term = manifests.iter().find(|m| m.name == "terminal");
-        assert!(term.is_some(), "terminal manifest should be registered");
-        let term = term.unwrap();
-        assert!(
-            !term.always_enabled,
-            "terminal should not be always_enabled"
-        );
-        assert!(
-            !term.enable_default,
-            "terminal should be opt-in (default off)"
-        );
-        assert!(
-            !term.settings.is_empty(),
-            "terminal should declare at least one setting"
-        );
-        let keys: Vec<&str> = term.settings.iter().map(|s| s.key.as_str()).collect();
-        assert!(
-            keys.contains(&"shellProgram"),
-            "terminal manifest must include shellProgram setting; got {keys:?}"
-        );
-        assert!(
-            keys.contains(&"autoEnterDashboard"),
-            "terminal manifest must include autoEnterDashboard setting; got {keys:?}"
-        );
-    }
-
-    #[test]
-    fn claude_factory_is_registered() {
-        register_all();
-        let p = sicompass_sdk::create_provider_by_name("claude");
-        assert!(p.is_some(), "claude factory should be registered");
-        assert_eq!(p.unwrap().name(), "claude");
-    }
-
-    #[test]
-    fn builtin_manifests_include_claude_opt_in_with_settings() {
-        register_all();
-        let manifests = sicompass_sdk::builtin_manifests();
-        let claude = manifests
-            .iter()
-            .find(|m| m.name == "claude")
-            .expect("claude manifest should be registered");
-        assert!(
-            !claude.always_enabled,
-            "claude should not be always_enabled"
-        );
-        assert!(
-            !claude.enable_default,
-            "claude should be opt-in (default off)"
-        );
-        let keys: Vec<&str> = claude.settings.iter().map(|s| s.key.as_str()).collect();
-        assert!(
-            keys.contains(&"claudeBinary"),
-            "claude manifest must include claudeBinary; got {keys:?}"
-        );
-        assert!(
-            keys.contains(&"claudePermissionMode"),
-            "claude manifest must include claudePermissionMode; got {keys:?}"
-        );
-    }
-
 
     #[test]
     fn builtin_manifests_include_email_settings() {

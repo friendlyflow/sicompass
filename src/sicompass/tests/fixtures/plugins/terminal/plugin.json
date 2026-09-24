@@ -1,0 +1,40 @@
+{
+  "name": "terminal",
+  "displayName": "terminal",
+  "type": "wasm",
+  "entry": "plugin.wasm",
+  "version": "0.2.0",
+  "minAppVersion": "0.1.21",
+  "description": "terminal-description",
+  "settings": [
+    {
+      "type": "text",
+      "label": "terminal-setting-shell",
+      "key": "shellProgram",
+      "default": "$SHELL"
+    },
+    {
+      "type": "text",
+      "label": "terminal-setting-history",
+      "key": "commandHistorySize",
+      "default": "50000"
+    },
+    {
+      "type": "text",
+      "label": "terminal-setting-scrollback",
+      "key": "scrollbackSize",
+      "default": "50000"
+    },
+    {
+      "type": "checkbox",
+      "label": "terminal-setting-auto-dashboard",
+      "key": "autoEnterDashboard",
+      "defaultChecked": true
+    }
+  ],
+  "permissions": {
+    "storage": true,
+    "filesystem": ["/"],
+    "process": ["$SHELL", "sh", "bash", "zsh", "fish", "dash", "ksh"]
+  }
+}

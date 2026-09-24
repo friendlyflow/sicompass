@@ -57,11 +57,17 @@ impl sicompass::registry::HostHooks for TestHooks {
         let mut providers = Vec::with_capacity(names.len());
         let mut roots = Vec::with_capacity(names.len());
         for name in names {
-            let (mut p, mut f) = if matches!(name.as_str(), "filebrowser" | "texteditor") {
-                let (p, root) = sicompass::registry::init_provider_root(
-                    fs_plugin(name),
-                    &mut renderer.error_message,
-                );
+            let (mut p, mut f) = if matches!(
+                name.as_str(),
+                "filebrowser" | "texteditor" | "gitclient" | "terminal" | "claude"
+            ) {
+                let plugin = if name == "claude" {
+                    claude_plugin()
+                } else {
+                    fs_plugin(name)
+                };
+                let (p, root) =
+                    sicompass::registry::init_provider_root(plugin, &mut renderer.error_message);
                 (vec![p], vec![root])
             } else {
                 self.0.build_content_set(renderer, std::slice::from_ref(name))
@@ -91,28 +97,13 @@ fn ensure_builtins() {
     // whichever test runs first must not leave the developer's real history
     // file rewritten.
     sicompass_webbrowser::_set_test_no_history(true);
-    // Same for the terminal, and for a stronger reason: it *appends* every
-    // submitted line, so the residue of these tests (`printf '\033[?1049h'…`,
-    // bare `true`, `cd /tmp/…/elsewhere`) accumulated in the developer's own
-    // recall history, one run at a time, interleaved with real commands.
-    sicompass_terminal::_set_test_no_history(true);
-    // And for claude: skill discovery reads `~/.claude/skills`, so without this
-    // the palette tests would see whatever skills the developer's machine holds
-    // and their counts would differ per machine. Project skills, written into a
-    // tempdir by each test, are unaffected.
-    sicompass_claude::_set_test_no_ambient_skills(true);
-    // And, for a much stronger reason, for claude's session list: it reads
-    // `~/.claude/projects`, and Ctrl+D there *deletes* a transcript. Without
-    // this the tests would list the developer's own sessions and could remove
-    // one. Tests that need sessions inject a fake root of their own with
-    // `_set_test_projects_root`, which is thread-local.
-    sicompass_claude::_set_test_no_ambient_projects(true);
-    // And for the git client: `push`, `pull` and `fetch` contact a real
-    // remote, so without this a fixture repository that happens to have one
-    // configured would have the tests talking to it, hanging on a credential
-    // prompt, or failing differently depending on whether the machine is
-    // online.
-    sicompass_gitclient::_set_test_no_network(true);
+    // (The terminal, which *appends* every submitted line to its recall
+    // history, is a plugin now: it keeps that history in its storage folder,
+    // which `fs_plugin` does not grant, so these tests never reach one.)
+    // (Claude, whose session list reads `~/.claude/projects` and whose Ctrl+D
+    // there *deletes* a transcript, is a plugin now. It reads Claude Code's
+    // folder only once its `claudeFolder` setting names one, which the harness
+    // never does with the developer's own: see `claude_plugin`.)
     // And for plugins' `desktop.trash` / `open-url` / `open-path`
     // (wasm_host/desktop.rs): the file browser's and the text editor's deletes
     // go to the *OS* trash, which sicompass does not own, so no amount of
@@ -321,7 +312,7 @@ fn press_up(r: &mut AppRenderer) {
 fn register_terminal_in_shell(renderer: &mut AppRenderer) -> sicompass_sdk::ffon::IdArray {
     register(
         renderer,
-        sicompass_sdk::create_provider_by_name("terminal").unwrap(),
+        fs_plugin("terminal"),
     );
     sicompass::list::create_list_current_layer(renderer);
     press_right(renderer);
@@ -11423,7 +11414,7 @@ fn ctrl_c_in_interactive_dashboard_does_not_exit() {
 fn register_terminal_rooted_at(renderer: &mut AppRenderer, path: &std::path::Path) {
     register(
         renderer,
-        sicompass_sdk::create_provider_by_name("terminal").unwrap(),
+        fs_plugin("terminal"),
     );
     renderer.providers[0].set_current_path(path.to_str().unwrap());
     let children = renderer.providers[0].fetch();
@@ -11554,7 +11545,7 @@ fn restart_terminal(renderer: &AppRenderer) -> AppRenderer {
     let mut restarted = app_renderer();
     register(
         &mut restarted,
-        sicompass_sdk::create_provider_by_name("terminal").unwrap(),
+        fs_plugin("terminal"),
     );
     if nav.on_path {
         restarted.rebuild_on_path(&nav.path, nav.current_id);
@@ -11967,19 +11958,10 @@ fn terminal_input_slot_renders_as_plus_i() {
 // Claude: browse folders, then `:` for a session in the folder you picked
 // ---------------------------------------------------------------------------
 
-/// Register a claude provider whose browse view is re-rooted at `path`, with its
-/// binary pointed at a name that cannot exist.
-///
-/// The bogus binary is the safety rail: these tests drive `:`, and a machine
-/// with a real `claude` on PATH would otherwise start an actual API session per
-/// test. Spawning still *fails* usefully — the view swap, the working directory
-/// and the placeholder behaviour under test all happen either way.
+/// Register a claude provider whose browse view is re-rooted at `path`, allowed
+/// to start only a program that cannot exist (see [`claude_plugin`]).
 fn register_claude_rooted_at(renderer: &mut AppRenderer, path: &std::path::Path) {
-    register(
-        renderer,
-        sicompass_sdk::create_provider_by_name("claude").unwrap(),
-    );
-    renderer.providers[0].on_setting_change("claudeBinary", "definitely-not-claude-xyz-9000");
+    register(renderer, claude_plugin());
     renderer.providers[0].set_current_path(path.to_str().unwrap());
     let children = renderer.providers[0].fetch();
     renderer.ffon[0].as_obj_mut().unwrap().children = children;
@@ -12207,14 +12189,15 @@ fn project_skill(root: &std::path::Path, name: &str, frontmatter: &str) {
 
 /// A claude session rooted at `path`, cursor left on the live prompt.
 ///
-/// The bogus `claudeBinary` means the spawn fails, but the session folder is
+/// The refused program means the spawn fails, but the session folder is
 /// recorded before the spawn is attempted — and skill discovery only reads the
 /// filesystem, so the palette works regardless of whether a child is running.
 /// Point claude's session scanning at a fake `~/.claude/projects` and write one
 /// transcript per entry, each recorded as having run in `cwd`.
 ///
 /// The returned `TempDir` owns the root, so it has to outlive the renderer.
-/// `_set_test_projects_root` is thread-local, so this affects no other test.
+/// The claude plugins made on this thread afterwards read it as their
+/// `claudeFolder`, which affects no other test.
 fn fake_claude_sessions(cwd: &std::path::Path, entries: &[(&str, &str)]) -> TempDir {
     let tmp = TempDir::new().unwrap();
     let root = tmp.path().join("projects");
@@ -12237,7 +12220,7 @@ fn fake_claude_sessions(cwd: &std::path::Path, entries: &[(&str, &str)]) -> Temp
         );
         std::fs::write(dir.join(format!("{id}.jsonl")), body).unwrap();
     }
-    sicompass_claude::_set_test_projects_root(Some(root));
+    CLAUDE_FOLDER.with(|f| *f.borrow_mut() = Some(tmp.path().to_path_buf()));
     tmp
 }
 
@@ -17813,11 +17796,10 @@ fn git_fixture(root: &Path) {
     run(&["commit", "-q", "-m", "first"]);
 }
 
+/// The git client, from the Store: the plugin as released, with the grants
+/// its `plugin.json` asks for (the whole disk, and the `git` program).
 fn register_gitclient_rooted_at(renderer: &mut AppRenderer, path: &Path) {
-    register(
-        renderer,
-        sicompass_sdk::create_provider_by_name("gitclient").unwrap(),
-    );
+    register(renderer, fs_plugin("gitclient"));
     renderer.providers[0].set_current_path(path.to_str().unwrap());
     let children = renderer.providers[0].fetch();
     renderer.ffon[0].as_obj_mut().unwrap().children = children;
@@ -18053,6 +18035,47 @@ fn gitclient_a_diff_line_that_looks_like_markup_stays_a_plain_row() {
     );
 }
 
+fn staged_files(root: &Path) -> String {
+    let out = std::process::Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(["diff", "--cached", "--name-only"])
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_INDEX_FILE")
+        .output()
+        .unwrap();
+    String::from_utf8_lossy(&out.stdout).trim().to_owned()
+}
+
+#[test]
+fn gitclient_staging_goes_through_git_and_ctrl_z_takes_it_back() {
+    // The plugin runs the real `git` through the host's `process` grant, and
+    // its undo is a provider op the host hands back to it.
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    git_fixture(&root);
+    std::fs::write(root.join("tracked.txt"), "two\n").unwrap();
+
+    ensure_builtins();
+    let mut renderer = app_renderer();
+    register_gitclient_rooted_at(&mut renderer, &root);
+    press_right(&mut renderer);
+    press_colon(&mut renderer);
+    move_to_row(&mut renderer, "changes");
+    press_right(&mut renderer);
+    move_to_row(&mut renderer, "tracked.txt");
+
+    press_colon(&mut renderer);
+    focus_command(&mut renderer, "stage");
+    press_enter(&mut renderer);
+    assert_eq!(staged_files(&root), "tracked.txt", "{}", renderer.error_message);
+
+    press_ctrl(&mut renderer, Keycode::Z);
+    assert_eq!(staged_files(&root), "", "ctrl+z unstaged it");
+    press_ctrl_shift(&mut renderer, Keycode::Z);
+    assert_eq!(staged_files(&root), "tracked.txt", "and redo staged it again");
+}
+
 #[test]
 fn terminal_still_swaps_views_on_colon_from_a_deep_folder() {
     // Guards the `apply_view_command` change: entering a shell from several
@@ -18122,10 +18145,7 @@ fn restart_gitclient(renderer: &AppRenderer) -> AppRenderer {
         renderer.providers[0].current_path(),
     );
     let mut restarted = app_renderer();
-    register(
-        &mut restarted,
-        sicompass_sdk::create_provider_by_name("gitclient").unwrap(),
-    );
+    register(&mut restarted, fs_plugin("gitclient"));
     if nav.on_path {
         restarted.rebuild_on_path(&nav.path, nav.current_id);
     } else {
@@ -18464,7 +18484,7 @@ fn harness_with_notes() -> (AppRenderer, TempDir) {
 /// `target/wasm32-wasip2/release/<name>_plugin.wasm` as `plugin.wasm`),
 /// committed like the `hello.wasm` fixture and for the same reason.
 fn plugin_provider(name: &str, storage: &Path) -> Box<dyn Provider> {
-    plugin_provider_with(name, Some(storage))
+    plugin_provider_with(name, Some(storage), None)
 }
 
 /// A program that is a plugin now and keeps no storage of its own: the file
@@ -18473,10 +18493,37 @@ fn plugin_provider(name: &str, storage: &Path) -> Box<dyn Provider> {
 /// Their deletes go to the host's trash, which the harness keeps in a private
 /// temp folder (`desktop::_set_test_no_trash`).
 fn fs_plugin(name: &str) -> Box<dyn Provider> {
-    plugin_provider_with(name, None)
+    plugin_provider_with(name, None, None)
 }
 
-fn plugin_provider_with(name: &str, storage: Option<&Path>) -> Box<dyn Provider> {
+/// The Claude plugin, allowed to start only a program that cannot exist.
+///
+/// That is the safety rail: these tests drive `:`, and a machine with a real
+/// `claude` would otherwise start an actual API session per test. The host
+/// refuses `claude`, so the spawn still *fails* usefully, and the view swap,
+/// the working directory and the placeholder behaviour under test all happen
+/// either way. Its folder (`~/.claude`) is whatever [`fake_claude_sessions`]
+/// last made on this thread, and otherwise none, so the developer's own
+/// transcripts and skills are never read (and never deleted).
+fn claude_plugin() -> Box<dyn Provider> {
+    let mut p = plugin_provider_with("claude", None, Some(&["definitely-not-claude-xyz-9000"]));
+    if let Some(folder) = CLAUDE_FOLDER.with(|f| f.borrow().clone()) {
+        p.on_setting_change("claudeFolder", folder.to_str().unwrap());
+    }
+    p
+}
+
+thread_local! {
+    /// The fake `~/.claude` [`fake_claude_sessions`] made on this thread.
+    static CLAUDE_FOLDER: std::cell::RefCell<Option<std::path::PathBuf>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+fn plugin_provider_with(
+    name: &str,
+    storage: Option<&Path>,
+    process: Option<&[&str]>,
+) -> Box<dyn Provider> {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures/plugins")
         .join(name);
@@ -18498,6 +18545,10 @@ fn plugin_provider_with(name: &str, storage: Option<&Path>) -> Box<dyn Provider>
             .iter()
             .map(|p| std::path::PathBuf::from(sicompass::plugin_manifest::expand_home(p)))
             .collect(),
+        process: match process {
+            Some(only) => only.iter().map(|p| p.to_string()).collect(),
+            None => strings("process"),
+        },
         settings: manifest["settings"]
             .as_array()
             .map(|a| a.iter().filter_map(|s| s["key"].as_str().map(str::to_owned)).collect())
@@ -19306,7 +19357,7 @@ fn ctrl_z_is_still_forwarded_to_a_provider_that_does_not_ask_for_the_apps_undo()
     // why the routing is opt-in rather than unconditional.
     ensure_builtins();
     let mut r = app_renderer();
-    let term = sicompass_sdk::create_provider_by_name("terminal").expect("terminal provider");
+    let term = fs_plugin("terminal");
     assert!(
         !term.dashboard_uses_app_undo(),
         "the terminal must not claim the app's undo"

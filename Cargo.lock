@@ -2841,12 +2841,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "natord"
-version = "1.0.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "308d96db8debc727c3fd9744aac51751243420e46edf401010908da7f8d5e57c"
-
-[[package]]
 name = "new_debug_unreachable"
 version = "1.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4502,13 +4496,10 @@ dependencies = [
  "serde_json",
  "sicompass-builtins",
  "sicompass-chatclient",
- "sicompass-claude",
  "sicompass-emailclient",
- "sicompass-gitclient",
  "sicompass-sdk",
  "sicompass-settings",
  "sicompass-store",
- "sicompass-terminal",
  "sicompass-tutorial",
  "sicompass-ui",
  "sicompass-updater",
@@ -4535,13 +4526,10 @@ name = "sicompass-builtins"
 version = "0.1.21"
 dependencies = [
  "sicompass-chatclient",
- "sicompass-claude",
  "sicompass-emailclient",
- "sicompass-gitclient",
  "sicompass-sdk",
  "sicompass-settings",
  "sicompass-store",
- "sicompass-terminal",
  "sicompass-tutorial",
  "sicompass-webbrowser",
 ]
@@ -4558,18 +4546,6 @@ dependencies = [
  "tempfile",
  "tokio",
  "wiremock",
-]
-
-[[package]]
-name = "sicompass-claude"
-version = "0.1.21"
-dependencies = [
- "natord",
- "serde",
- "serde_json",
- "sicompass-sdk",
- "tempfile",
- "tracing",
 ]
 
 [[package]]
@@ -4594,19 +4570,9 @@ dependencies = [
 ]
 
 [[package]]
-name = "sicompass-gitclient"
-version = "0.1.21"
-dependencies = [
- "async-trait",
- "natord",
- "sicompass-sdk",
- "tempfile",
-]
-
-[[package]]
 name = "sicompass-sdk"
 version = "0.8.0"
-source = "git+https://github.com/friendlyflow/sicompass-plugin-sdk?rev=942ac5fb925cd0ab301e41df60acfd7f84c2d54e#942ac5fb925cd0ab301e41df60acfd7f84c2d54e"
+source = "git+https://github.com/friendlyflow/sicompass-plugin-sdk?rev=ee8da2906073c5f29e9f7004c9ba13c6645e0d15#ee8da2906073c5f29e9f7004c9ba13c6645e0d15"
 dependencies = [
  "async-trait",
  "base64 0.23.1",
@@ -4642,13 +4608,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "sicompass-shell"
-version = "0.1.21"
-dependencies = [
- "portable-pty",
-]
-
-[[package]]
 name = "sicompass-store"
 version = "0.1.21"
 dependencies = [
@@ -4662,17 +4621,6 @@ dependencies = [
  "tempfile",
  "tokio",
  "wiremock",
-]
-
-[[package]]
-name = "sicompass-terminal"
-version = "0.1.21"
-dependencies = [
- "natord",
- "sicompass-sdk",
- "sicompass-shell",
- "tempfile",
- "vte",
 ]
 
 [[package]]
@@ -5572,16 +5520,6 @@ name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
-
-[[package]]
-name = "vte"
-version = "0.15.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a5924018406ce0063cd67f8e008104968b74b563ee1b85dde3ed1f7cb87d3dbd"
-dependencies = [
- "arrayvec",
- "memchr",
-]
 
 [[package]]
 name = "walkdir"

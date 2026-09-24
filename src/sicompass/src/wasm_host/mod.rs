@@ -136,6 +136,15 @@ pub struct HostState {
     pub tasks: tasks::TaskRole,
     /// Programs this instance may start. Empty: `process` is not linked.
     pub process_allowed: Vec<String>,
+    /// The programs it started and has not dropped, as `(resource rep, pid)`,
+    /// oldest first: the terminal's shell, Claude's CLI. The tab switcher
+    /// names a tab by the first one's pid. (A program a plugin runs to
+    /// completion inside one call, a git command, is gone before anything
+    /// could ask.)
+    pub child_pids: Vec<(u32, u32)>,
+    /// Where the plugin said it moved to (`host.moved-to`), until the
+    /// provider takes it.
+    pub moved_to: Option<String>,
     /// `host:port` pairs this instance may connect to. Empty: no TCP.
     pub sockets_allowed: Vec<String>,
     /// The tier of this plugin's own service (see [`Grants::service_tier`]).
@@ -193,6 +202,8 @@ impl HostState {
             granted_roots,
             tasks: tasks::TaskRole::Unmanaged,
             process_allowed: grants.process,
+            child_pids: Vec::new(),
+            moved_to: None,
             sockets_allowed: grants.sockets,
             service_tier: grants.service_tier,
             setting_defaults: grants.setting_defaults,
@@ -354,13 +365,17 @@ impl wit::host::Host for HostState {
     }
 
     /// The saved value, or the manifest's default until there is one.
+    /// A value starting with `~` names the home folder, saved or default
+    /// alike: a plugin has no way to find the home folder itself.
     fn get_setting(&mut self, key: String) -> Option<String> {
-        read_plugin_setting(&self.settings_section, &key).or_else(|| {
-            self.setting_defaults
-                .iter()
-                .find(|(k, _)| *k == key)
-                .map(|(_, v)| v.clone())
-        })
+        read_plugin_setting(&self.settings_section, &key)
+            .map(|v| crate::plugin_manifest::expand_home(&v))
+            .or_else(|| {
+                self.setting_defaults
+                    .iter()
+                    .find(|(k, _)| *k == key)
+                    .map(|(_, v)| v.clone())
+            })
     }
 
     fn now_millis(&mut self) -> u64 {
@@ -377,6 +392,11 @@ impl wit::host::Host for HostState {
     /// as `None`, so a guest cannot use this to learn what exists on the host.
     fn read_asset(&mut self, rel: String) -> Option<Vec<u8>> {
         read_confined_asset(&self.asset_root(), &rel)
+    }
+
+    /// Kept until the provider next polls, which is where its path cache is.
+    fn moved_to(&mut self, path: String) {
+        self.moved_to = Some(path);
     }
 
     fn translate(&mut self, key: String) -> String {
@@ -1278,8 +1298,9 @@ mod tests {
                 .iter()
                 .all(|(i, _)| *i == "sicompass:plugin/net")
         );
-        // 6 since ABI 0.2: `translate-args` joined `translate`.
-        assert_eq!(HOST_IMPORTS.len(), 6);
+        // 6 since ABI 0.2: `translate-args` joined `translate`. 7 since
+        // `moved-to`, which a plugin calls to say where it is.
+        assert_eq!(HOST_IMPORTS.len(), 7);
         assert_eq!(NET_IMPORTS.len(), 2);
     }
 }

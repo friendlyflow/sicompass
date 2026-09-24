@@ -278,23 +278,25 @@ request, a sleep) stops when that call returns. Worker threads are named
 
 ```wit
 interface process {
+  which: func(program: string) -> result<string, string>;
   resource child {
     spawn: static func(program: string, args: list<string>, cwd: option<string>,
-                       env: list<tuple<string, string>>, pty: option<pty-size>)
-           -> result<child, string>;
+                       env: list<tuple<string, string>>, unset: list<string>,
+                       pty: option<pty-size>) -> result<child, string>;
     read: func(max: u32) -> list<u8>;       // non-blocking, stdout (and the pty)
     read-stderr: func(max: u32) -> list<u8>;
     write: func(bytes: list<u8>) -> result<_, string>;
     resize: func(size: pty-size);
-    try-wait: func() -> option<s32>;
+    try-wait: func() -> option<s32>;        // once the output has all arrived
+    cwd: func() -> option<string>;          // where a shell's `cd` took it
+    foreground-busy: func() -> bool;        // a command holds its PTY
     kill: func();
   }
 }
 ```
 
-Reads never block, so a terminal reads its PTY from `poll`, which it already does
-through `tick` today. The host implements it with `portable-pty`, which the
-workspace already uses in `lib_shell`. `cwd` must be inside a preopen.
+Reads never block, so a terminal reads its PTY from `poll`. The host implements
+it with `portable-pty`. `cwd` must be inside a preopen.
 
 Built in 4.6 (`src/wasm_host/process.rs`). As built: `cwd` defaults to the
 user's home; a program is a bare name from the approved list, resolved on
@@ -302,6 +304,11 @@ user's home; a program is a bare name from the approved list, resolved on
 the host's environment plus the plugin's `env` (the guest's own stays empty);
 unread output is capped at 8 MiB per stream (the program is slowed, not the
 host's memory grown); dropping the resource or the instance kills the program.
+Step 9 added `unset` (the git client removes `GIT_DIR` and its kind), `which`,
+`cwd` and `foreground-busy` (Linux, from `/proc`), made `try-wait` wait for the
+output (half a second at most after the exit, for a program left running in
+the background), and looks in `~/.local/bin` after `PATH` (and tries `PATHEXT`
+on Windows). The tab switcher's PID for a plugin is its oldest running child.
 The audit and the linker work from the approved grants, so an unapproved
 `process` import is refused before instantiation. The `process-plugin` example
 is the fixture.
@@ -692,6 +699,39 @@ their settings section is still there). "Open file with" and the full properties
 `desktop` functions: `applications` and `open-with` (only an id the host
 listed, for a file inside the grants), and `stat` (permission bits, owner,
 group and the local UTC offset, which WASI's metadata lacks).
+
+**Step 9 (2026-09-24):** the terminal (with `lib_shell`), the git client and
+Claude are Store plugins (`terminal_plugin_sicompass`,
+`gitclient_plugin_sicompass`, `claude_plugin_sicompass`). Each asks for the
+whole disk (their folder listings pick where to work) and for its programs:
+`git`; `$SHELL` and the common shells, by name; `claude`. What changed on the
+way:
+
+- **A plugin that moves without a navigation call** (a command opening a
+  repository, a `cd` typed into the shell) now tells the host, through the
+  additive `host.moved-to` import that `export_plugin!` calls itself whenever
+  `current_path` changed. Plugins built before it do not import it and still
+  load. The host also polls again after a command, so `at_root` answers for
+  the level the command left the plugin on.
+- **Background network jobs** (fetch, pull, push) are a host task; the watcher
+  that noticed commits made elsewhere polls `.git` lazily from `poll` instead
+  of from a thread.
+- **The terminal's prompt** needs the user's name, host and home, which a
+  plugin's empty environment lacks, so it asks `sh` once. Its recall history is
+  in its storage folder now. The interactive dashboard crosses as an SDK
+  `DashboardFrame`, which the pdk converts (and keys the other way).
+- **Claude's folder** (`~/.claude`) is the `claudeFolder` setting, whose `~`
+  the host expands (in saved values too now). The built-in skills and the slash
+  commands are listed only when `claude` can be found (`process.which`).
+- Settings that named a program path (`gitBinary`, `claudeBinary`) are gone,
+  since the host starts only the names `plugin.json` lists. The terminal's
+  `shellProgram` takes a name, and a path saved before is taken by its file
+  name. A process can no longer be renamed for process monitors
+  (`sicompass-shell`).
+
+The integration tests load the three from `tests/fixtures/plugins`. The harness
+lets Claude start only a program that cannot exist and names no Claude folder,
+which replaces the crate's thread-local test seams.
 
 ## 14. Decisions on the former open questions (2026-09-24)
 
