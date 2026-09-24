@@ -26,8 +26,6 @@ pub struct ProgramsHooks {
     /// Latest snapshot from the background `sicompass-updater` thread. `None`
     /// when the check is disabled or has not run yet.
     pub update_state: Option<Arc<Mutex<sicompass_updater::UpdateStatus>>>,
-    /// Receives `HotReload` events from the updater thread.
-    pub update_event_rx: Option<std::sync::mpsc::Receiver<sicompass_updater::UpdateEvent>>,
 }
 
 impl HostHooks for ProgramsHooks {
@@ -41,11 +39,7 @@ impl HostHooks for ProgramsHooks {
     }
 
     fn process_update_events(&self, renderer: &mut AppRenderer) {
-        crate::programs::process_update_events(
-            renderer,
-            self.update_state.as_ref(),
-            self.update_event_rx.as_ref(),
-        );
+        crate::programs::process_update_events(renderer, self.update_state.as_ref());
     }
 
     fn handle_apply_app_update(&self, renderer: &mut AppRenderer) {

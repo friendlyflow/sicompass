@@ -469,6 +469,40 @@ Store
 - First-run: the tutorial points at the Store for the programs it describes, per
   [tutorial-guidelines.md](tutorial-guidelines.md), in all four languages.
 
+**Built in 4.8** (`lib/lib_store`, package `sicompass-store`):
+
+- Store > programs lists the signed store list. Each entry's title says its
+  state (`notes, installed, version 0.2.0`), and inside are the latest
+  version, the access in plain words, a paid service, and the buttons.
+  Nothing touches the network until programs is opened.
+- Install and Update run on a worker thread. They install only the exact
+  release that was shown (a release published in between must be looked at
+  again), refuse a revoked or older one and one that needs a newer sicompass,
+  and swap `plugins/<name>/` in with a rename from `plugins/.store/`.
+- The app receives `pluginInstalled`, `pluginUpdated` or `pluginRemoved`
+  through the settings queue (`programs::wire_store`). It records the approval
+  and the enable switch in `settings.json`, adds the program's line and its
+  settings section, and loads or unloads it in every tab.
+- `/store` edits and re-signs the list with `~/.config/sicompass/store.key`.
+- Tests: `lib/lib_store/src/tests.rs` (wiremock, every refusal) and
+  `src/sicompass/tests/store.rs` (a real component, install to uninstall).
+
+- Before the swap, the component is audited against the permissions the user
+  is approving, with the same wasmtime check a load runs
+  (`wasm_host::audit_plugin_bytes`, registered through
+  `sicompass_sdk::package::register_component_auditor`). With no auditor
+  registered, nothing installs.
+- After an uninstall the entry offers, as a separate button, to move the data
+  folder to the trash. The app does it (`pluginDataTrash`) with its guarded
+  trash, and refuses while the plugin is installed or when a built-in program
+  shares the folder.
+- Plugins installed by hand are listed too. With an `updateUrl` (the folder
+  holding the three release files) and a `pubkey` in `plugin.json`, they
+  update here, and an update naming another key is refused. `lib_updater`
+  now updates only the app.
+
+Tiers and licences come in 4.9.
+
 ## 10. Tiers and certificates
 
 The certificate payload gets a `tiers` list. `scope` stays for old certificates:

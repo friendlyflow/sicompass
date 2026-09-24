@@ -2,6 +2,7 @@
 members = [
     "lib/lib_tutorial",
     "lib/lib_settings",
+    "lib/lib_store",
     "lib/lib_payments",
     "lib/lib_filebrowser",
     "lib/lib_webbrowser",
@@ -54,6 +55,7 @@ license = "GPL-3.0-only"
 sicompass-sdk = "0.8.0"
 sicompass-tutorial = { path = "lib/lib_tutorial" }
 sicompass-settings = { path = "lib/lib_settings" }
+sicompass-store = { path = "lib/lib_store" }
 sicompass-payments = { path = "lib/lib_payments" }
 sicompass-filebrowser = { path = "lib/lib_filebrowser" }
 sicompass-webbrowser = { path = "lib/lib_webbrowser" }
@@ -80,13 +82,12 @@ sicompass-ui = { git = "https://github.com/friendlyflow/sicompass-ui", rev = "8d
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
-# Cryptography (offline license-certificate verification in lib_settings;
-# also used by sicompass-updater for plugin signature verification)
+# Cryptography (offline license-certificate verification in lib_payments)
 ed25519-dalek = "3"
 base64 = "0.23"
 sha2 = "0.11"
 
-# Versioning (used by sicompass-updater for app + plugin version comparison)
+# Versioning (app and plugin version comparison: sicompass-updater, the Store)
 semver = "1"
 
 # Graphics
@@ -163,10 +164,6 @@ futures = "0.3"
 tokio-util = "0.7"
 rusqlite = { version = "0.40", features = ["bundled"] }
 
-# Plugin validation. `wasmparser` checks a staged plugin is a well-formed
-# component without compiling it, which is all the updater needs to know.
-wasmparser = "0.258"
-
 # WASM plugin host. No compiler backend is selected here: the `sicompass` crate's
 # `jit-wasm` (default) and `no-jit-wasm` features pick `cranelift` or `pulley`, so
 # an App Store / iOS build can be built with no runtime code generation at all.
@@ -235,7 +232,7 @@ wiremock = "0.6"
 # unreleased, so it still satisfies the `0.8.0` requirements. Remove this block
 # when the pins move to the published 0.9.0.
 [patch.crates-io]
-sicompass-sdk = { git = "https://github.com/friendlyflow/sicompass-plugin-sdk", rev = "90e4c051333d64a7db28ed03d9d1d5c25e69a14d" }
+sicompass-sdk = { git = "https://github.com/friendlyflow/sicompass-plugin-sdk", rev = "e89640b0424776931b6ddee79bfb0dc6abfdae54" }
 #
 # The same rule, for working on the renderer and the app together:
 #

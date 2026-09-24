@@ -1,22 +1,18 @@
 [package]
 publish = false  # internal crate, never published to crates.io
-name = "sicompass-updater"
+name = "sicompass-store"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Startup self-update for the sicompass app"
+description = "The Store: installs, updates and removes sicompass plugins from the signed store list"
 
 [dependencies]
-serde = { workspace = true }
+sicompass-sdk = { workspace = true, features = ["package"] }
 serde_json = { workspace = true }
-reqwest = { workspace = true }
+reqwest = { workspace = true, features = ["blocking"] }
 semver = { workspace = true }
-sha2 = { workspace = true }
-tracing = { workspace = true }
-
-[target.'cfg(target_os = "windows")'.dependencies]
-windows = { workspace = true }
 
 [dev-dependencies]
+tempfile = { workspace = true }
 wiremock = { workspace = true }
 tokio = { workspace = true }

@@ -67,6 +67,11 @@ them. So far:
   and the embedded fonts. A git dependency, see "the sicompass-ui split" below.
 - `../sicompass-plugin-sdk`, the SDK and the WASM plugin kit (on crates.io).
 
+The Store (`lib/lib_store`, package `sicompass-store`) installs plugins from
+the signed store list `lib/lib_store/store.json`. Edit it only through
+`/store`, which re-signs it with `~/.config/sicompass/store.key`. Never read or
+print that key. See [docs/plugin-platform.md](docs/plugin-platform.md) §8-9.
+
 `/commit-and-push`, `/release`, `/sync` and `/update-cargo` take a repo name as
 their first argument and then follow that repo's own copy of the skill (see
 [.claude/repo-selection.md](.claude/repo-selection.md)). `/split-repo` moves a

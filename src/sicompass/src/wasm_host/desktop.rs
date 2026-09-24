@@ -52,7 +52,10 @@ pub fn _set_test_mode(on: bool) {
 /// Test hook: what was "opened" since the last call, as `open-url:<url>` or
 /// `open-path:<host path>`.
 pub fn _take_recorded() -> Vec<String> {
-    RECORDED.lock().map(|mut r| std::mem::take(&mut *r)).unwrap_or_default()
+    RECORDED
+        .lock()
+        .map(|mut r| std::mem::take(&mut *r))
+        .unwrap_or_default()
 }
 
 fn no_open() -> bool {
@@ -64,8 +67,9 @@ fn no_trash() -> bool {
 }
 
 /// Move `path` to the trash: the OS trash, or under `TEST_NO_TRASH` a private
-/// temp directory that [`trash_restore`] can undo.
-fn trash_delete(path: &Path) -> Result<(), String> {
+/// temp directory that [`trash_restore`] can undo. Also what the Store's
+/// "move its data folder to the trash" goes through (`programs.rs`).
+pub(crate) fn trash_delete(path: &Path) -> Result<(), String> {
     if !no_trash() {
         return os_trash_delete(path);
     }
@@ -122,7 +126,9 @@ impl HostState {
         let lexical = self.guest_to_host(guest).ok_or_else(refuse)?;
 
         let resolved = if must_exist {
-            lexical.canonicalize().map_err(|e| format!("{guest}: {e}"))?
+            lexical
+                .canonicalize()
+                .map_err(|e| format!("{guest}: {e}"))?
         } else {
             let parent = lexical.parent().ok_or_else(refuse)?;
             let name = lexical.file_name().ok_or_else(refuse)?;
@@ -146,9 +152,13 @@ impl HostState {
         if !p.is_absolute() || p.components().any(|c| c == std::path::Component::ParentDir) {
             return None;
         }
-        self.granted_roots.iter().find_map(|(guest_root, host_root)| {
-            p.strip_prefix(guest_root).ok().map(|rest| host_root.join(rest))
-        })
+        self.granted_roots
+            .iter()
+            .find_map(|(guest_root, host_root)| {
+                p.strip_prefix(guest_root)
+                    .ok()
+                    .map(|rest| host_root.join(rest))
+            })
     }
 }
 

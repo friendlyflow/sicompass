@@ -615,19 +615,21 @@ pub fn audit_component_imports(component: &Component, grants: &Grants) -> Result
     // the SDK's audit, the same one the release tool and the Store run.
     let imports: Vec<sicompass_sdk::plugin_abi::ImportedInterface> = ty
         .imports(engine)
-        .map(|(name, item)| sicompass_sdk::plugin_abi::ImportedInterface {
-            name: name.to_owned(),
-            functions: match item.ty {
-                ComponentItem::ComponentInstance(instance) => instance
-                    .exports(engine)
-                    // An interface also exports its type declarations; only
-                    // functions are capabilities.
-                    .filter(|(_, kind)| matches!(kind.ty, ComponentItem::ComponentFunc(_)))
-                    .map(|(f, _)| f.to_owned())
-                    .collect(),
-                _ => Vec::new(),
+        .map(
+            |(name, item)| sicompass_sdk::plugin_abi::ImportedInterface {
+                name: name.to_owned(),
+                functions: match item.ty {
+                    ComponentItem::ComponentInstance(instance) => instance
+                        .exports(engine)
+                        // An interface also exports its type declarations; only
+                        // functions are capabilities.
+                        .filter(|(_, kind)| matches!(kind.ty, ComponentItem::ComponentFunc(_)))
+                        .map(|(f, _)| f.to_owned())
+                        .collect(),
+                    _ => Vec::new(),
+                },
             },
-        })
+        )
         .collect();
     let exports: Vec<String> = ty.exports(engine).map(|(n, _)| n.to_owned()).collect();
 
@@ -644,7 +646,33 @@ pub fn audit_component_imports(component: &Component, grants: &Grants) -> Result
         process: grants.process.clone(),
         sockets: grants.sockets.clone(),
     };
-    sicompass_sdk::plugin_abi::audit_imports(&imports, &exports, &permissions, &grants.allowed_hosts)
+    sicompass_sdk::plugin_abi::audit_imports(
+        &imports,
+        &exports,
+        &permissions,
+        &grants.allowed_hosts,
+    )
+}
+
+/// The Store's pre-install check (registered with
+/// `sicompass_sdk::package::register_component_auditor` by
+/// `programs::load_programs`): `wasm` must be a component of this ABI whose
+/// imports stay within what `manifest` asks for. The user is approving exactly
+/// that access by pressing Install, so it is audited as if approved; this is
+/// the same audit a load runs, done before the new files replace the old ones.
+pub fn audit_plugin_bytes(
+    wasm: &[u8],
+    manifest: &sicompass_sdk::plugin_manifest::PluginManifest,
+) -> Result<(), String> {
+    let approved: HashMap<String, String> = [(
+        manifest.name.clone(),
+        sicompass_sdk::plugin_abi::approval_fingerprint(manifest),
+    )]
+    .into();
+    let grants = crate::plugin_manifest::grants_for(manifest, &approved)?;
+    let component =
+        Component::new(engine(), wasm).map_err(|e| format!("not a plugin component: {e}"))?;
+    audit_component_imports(&component, &grants)
 }
 
 // ---------------------------------------------------------------------------
@@ -801,9 +829,15 @@ mod tests {
     #[test]
     fn locale_ids_must_carry_the_plugin_prefix() {
         let good = "# comment\nhello-name = hi\n    .title = attr = still fine\nhello-x =\n    multi = line\n-hello-brand = B\n";
-        assert_eq!(sicompass_sdk::plugin_abi::check_locale_prefix("hello", good), Ok(()));
         assert_eq!(
-            sicompass_sdk::plugin_abi::check_locale_prefix("hello", "hello-a = 1\nsettings-title = stolen\n"),
+            sicompass_sdk::plugin_abi::check_locale_prefix("hello", good),
+            Ok(())
+        );
+        assert_eq!(
+            sicompass_sdk::plugin_abi::check_locale_prefix(
+                "hello",
+                "hello-a = 1\nsettings-title = stolen\n"
+            ),
             Err("settings-title".to_owned())
         );
         assert_eq!(
@@ -819,10 +853,16 @@ mod tests {
 
     #[test]
     fn another_abi_version_is_refused_with_a_readable_reason() {
-        assert!(sicompass_sdk::plugin_abi::check_abi_version("sicompass:plugin/host@0.2.0").is_ok());
+        assert!(
+            sicompass_sdk::plugin_abi::check_abi_version("sicompass:plugin/host@0.2.0").is_ok()
+        );
         assert!(sicompass_sdk::plugin_abi::check_abi_version("wasi:cli/stdout@0.2.9").is_ok());
-        let err = sicompass_sdk::plugin_abi::check_abi_version("sicompass:plugin/host@0.1.0").unwrap_err();
-        assert!(err.contains("ABI 0.1.0") && err.contains("rebuilt"), "{err}");
+        let err = sicompass_sdk::plugin_abi::check_abi_version("sicompass:plugin/host@0.1.0")
+            .unwrap_err();
+        assert!(
+            err.contains("ABI 0.1.0") && err.contains("rebuilt"),
+            "{err}"
+        );
     }
 
     fn state() -> HostState {

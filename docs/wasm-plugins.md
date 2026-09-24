@@ -193,7 +193,7 @@ against 0.4ms to instantiate one. Two caches handle it.
 `load_component` keeps compiled components in-process, keyed on path, modification
 time and length. The app builds a fresh provider set per tab, so without this the
 same bytes are compiled once per tab. Mtime and length are in the key because the
-updater swaps a plugin's `.wasm` in place, and a path-only key would keep running
+Store swaps a plugin's `.wasm` in place, and a path-only key would keep running
 the old code.
 
 Wasmtime's on-disk cache carries the compile across runs, so only the first launch
@@ -212,10 +212,17 @@ and configuration, so an upgrade or a backend change invalidates it.
   "entry": "plugin.wasm",
   "version": "1.0.0",
   "allowedHosts": ["api.weather.example"],
-  "updateUrl": "https://example.com/weather/manifest.json",
+  "updateUrl": "https://example.com/weather/releases/",
   "pubkey": "<base64 ed25519>"
 }
 ```
+
+`updateUrl` and `pubkey` are for a plugin installed by hand rather than from the
+Store. `updateUrl` is the folder holding the three files `sicompass-plugin pack`
+and `sign` produce (`release.json`, `release.json.sig`, `plugin.tar.gz`), and
+`pubkey` the key they are signed with. The Store offers the update, and refuses
+one that names another key, so a new key means installing by hand again. See
+[plugin-platform.md](plugin-platform.md) §7-9.
 
 `type` defaults to `wasm`, so omitting it gets the sandbox rather than having to ask
 for it. `native` and `script` are refused with an explanatory message rather than
@@ -226,14 +233,15 @@ capability declaration has to live *outside* the thing it constrains. A componen
 declaring its own `allowedHosts` would be self-attestation — worthless as a control,
 and it could only be read after instantiating the very code it is meant to
 constrain. The manifest is also what the user reads *before* enabling a plugin, what
-the settings tree is built from while the plugin has never run, and what the updater
-reads on a background thread without standing up a wasmtime instance. The audit
+the settings tree is built from while the plugin has never run, and what the Store
+compares a release against before installing it. The audit
 above only works because manifest and component are independent sources.
 
 `describe()` does overlap it for `name`, `displayName` and `version`. The host
 prefers `plugin.json` for the version and the component for the rest.
 
-Plugins are discovered **at startup**, so a newly installed one needs a restart.
+Plugins are discovered at startup. One the Store installs, updates or removes is
+loaded or unloaded right away, and one copied in by hand needs a restart.
 
 ## Runtime assets
 

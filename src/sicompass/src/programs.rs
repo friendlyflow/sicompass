@@ -13,12 +13,11 @@
 //! `Arc<Mutex<Vec<...>>>` queue that the main loop drains each frame via
 //! [`apply_pending_settings`].
 
-use sicompass_ui::app_state::AppRenderer;
 use crate::plugin_manifest::{DiscoveredPlugin, PluginManifest, PluginType, discover_user_plugins};
 use sicompass_sdk::ffon::{FfonElement, IdArray};
-pub use sicompass_ui::registry::{SettingsQueue, init_provider_root, register_provider};
 use sicompass_sdk::provider::Provider;
-use sicompass_updater::UpdateEvent;
+use sicompass_ui::app_state::AppRenderer;
+pub use sicompass_ui::registry::{SettingsQueue, init_provider_root, register_provider};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 
@@ -54,7 +53,6 @@ pub(crate) fn _reset_user_plugin_cache(plugins: Vec<DiscoveredPlugin>) {
     let cache = user_plugin_cache();
     *cache.lock().unwrap() = plugins;
 }
-
 
 /// Re-instantiate a fresh provider instance by name, mirroring `enable_provider`'s
 /// resolution order: built-ins first, then the user-plugin cache, then a remote
@@ -134,6 +132,10 @@ pub fn load_programs(renderer: &mut AppRenderer) -> SettingsQueue {
             sicompass_sdk::localize::set_locale(&lang);
         }
     }
+
+    // The Store audits a plugin's component with the same check a load runs,
+    // before it replaces anything on disk.
+    sicompass_sdk::package::register_component_auditor(crate::wasm_host::audit_plugin_bytes);
 
     let queue: SettingsQueue = Arc::new(Mutex::new(Vec::new()));
     let queue_clone = Arc::clone(&queue);
@@ -230,6 +232,7 @@ pub fn load_programs(renderer: &mut AppRenderer) -> SettingsQueue {
 
     // ---- Build the content providers + configure their settings sections ----
     load_content_providers(renderer, Some(settings.as_mut()));
+    wire_store(&mut renderer.providers, &queue);
 
     // ---- Register settings as the last provider ----------------------------
     register_provider(renderer, settings);
@@ -379,7 +382,162 @@ pub fn build_content_set_from_names(
         fresh_p.push(provider);
         fresh_f.push(root);
     }
+    if let Some(queue) = renderer.settings_queue.clone() {
+        wire_store(&mut fresh_p, &queue);
+    }
     (fresh_p, fresh_f)
+}
+
+// ---------------------------------------------------------------------------
+// The Store
+// ---------------------------------------------------------------------------
+
+/// The Store's provider name, and the keys it sends through the settings queue
+/// with a plugin name as the value. Spelled out here because the app may not
+/// import lib_store (the SDK boundary); `tests/store.rs` checks they match.
+pub const STORE: &str = "store";
+pub const PLUGIN_INSTALLED: &str = "pluginInstalled";
+pub const PLUGIN_UPDATED: &str = "pluginUpdated";
+pub const PLUGIN_REMOVED: &str = "pluginRemoved";
+pub const PLUGIN_DATA_TRASH: &str = "pluginDataTrash";
+
+/// Give every Store instance the settings queue as its apply callback, so an
+/// install is applied on the main thread like a settings change.
+pub fn wire_store(providers: &mut [Box<dyn Provider>], queue: &SettingsQueue) {
+    for p in providers.iter_mut().filter(|p| p.name() == STORE) {
+        let queue = Arc::clone(queue);
+        p.set_apply_callback(Box::new(move |k, v| {
+            queue.lock().unwrap().push((k.to_owned(), v.to_owned()));
+        }));
+    }
+}
+
+/// The Store changed what is in `plugins/`: load, reload or unload `name` in
+/// every tab, and keep settings.json and the settings panel in step.
+fn apply_store_change(renderer: &mut AppRenderer, key: &str, name: &str) {
+    let loaded = |r: &AppRenderer| {
+        r.providers
+            .iter()
+            .any(|p| name_matches_provider(name, p.name()))
+    };
+    let rescan = |name: &str| -> Option<PluginManifest> {
+        let discovered = discover_user_plugins();
+        let found = discovered
+            .iter()
+            .find(|p| p.manifest.name == name)
+            .map(|p| p.manifest.clone());
+        *user_plugin_cache().lock().unwrap() = discovered;
+        found
+    };
+    let complain = |r: &mut AppRenderer, e: String| {
+        eprintln!("sicompass: store: {name}: {e}");
+        r.error_message = format!("{name}: {e}");
+    };
+
+    match key {
+        PLUGIN_INSTALLED => {
+            let Some(m) = rescan(name) else {
+                return complain(
+                    renderer,
+                    "installed, but not found in the plugins folder".into(),
+                );
+            };
+            if let Err(e) = crate::plugin_manifest::record_store_install(&m, true) {
+                complain(renderer, e);
+            }
+            if let Some(settings) = renderer.providers.last_mut() {
+                settings.add_checkbox_setting(
+                    "Available programs:",
+                    &m.display_name,
+                    &format!("enable_{}", m.name),
+                    true,
+                );
+            }
+            enable_provider(renderer, name);
+            propagate_enable_to_parked_tabs(renderer, name);
+        }
+        PLUGIN_UPDATED => {
+            // Unload first, under the old manifest, so its settings section goes.
+            let was_loaded = loaded(renderer);
+            if was_loaded {
+                disable_provider(renderer, name);
+                propagate_disable_to_parked_tabs(renderer, name);
+            }
+            let Some(m) = rescan(name) else {
+                return complain(
+                    renderer,
+                    "updated, but not found in the plugins folder".into(),
+                );
+            };
+            if let Err(e) = crate::plugin_manifest::record_store_install(&m, false) {
+                complain(renderer, e);
+            }
+            if was_loaded {
+                enable_provider(renderer, name);
+                propagate_enable_to_parked_tabs(renderer, name);
+            }
+        }
+        PLUGIN_REMOVED => {
+            let display_name = user_plugin_cache()
+                .lock()
+                .unwrap()
+                .iter()
+                .find(|p| p.manifest.name == name)
+                .map(|p| p.manifest.display_name.clone());
+            disable_provider(renderer, name);
+            propagate_disable_to_parked_tabs(renderer, name);
+            rescan(name);
+            if let Err(e) = crate::plugin_manifest::forget_store_install(name) {
+                complain(renderer, e);
+            }
+            if let Some(settings) = renderer.providers.last_mut() {
+                settings.remove_checkbox_setting("Available programs:", &format!("enable_{name}"));
+                if let Some(section) = display_name {
+                    settings.remove_settings_section(&section);
+                }
+            }
+        }
+        PLUGIN_DATA_TRASH => {
+            if let Err(e) = trash_plugin_data(name) {
+                complain(renderer, e);
+            }
+            return;
+        }
+        _ => return,
+    }
+    rebuild_settings_ffon(renderer);
+}
+
+/// Move an uninstalled plugin's data folder (`app_data_dir()/<name>`) to the
+/// trash, which the user can empty or restore from. Refused for a plugin that
+/// is still installed, and for a name a built-in program also keeps its data
+/// under (the notes and board plugins share the built-ins' folders).
+fn trash_plugin_data(name: &str) -> Result<(), String> {
+    let plain = !name.is_empty()
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+    if !plain {
+        return Err("not a plugin name".to_owned());
+    }
+    let installed = sicompass_sdk::platform::plugins_dir()
+        .is_some_and(|d| d.join(name).join("plugin.json").exists());
+    if installed {
+        return Err("it is installed again, so its data folder stays".to_owned());
+    }
+    if sicompass_sdk::builtin_manifests()
+        .iter()
+        .any(|m| name_matches_provider(&m.display_name, name) || m.name == name)
+    {
+        return Err("a built-in program uses the same data folder, so it stays".to_owned());
+    }
+    let dir = sicompass_sdk::platform::app_data_dir()
+        .ok_or("no data folder on this system")?
+        .join(name);
+    if !dir.is_dir() {
+        return Ok(());
+    }
+    crate::wasm_host::desktop::trash_delete(&dir)
 }
 
 /// Inject setting entries from a `BuiltinManifest` into the settings provider.
@@ -866,8 +1024,8 @@ pub fn apply_tabs_section(
     r: &mut sicompass_ui::app_state::AppRenderer,
     sec: &serde_json::Map<String, serde_json::Value>,
 ) {
-    use sicompass_ui::app_state::TabSnapshot;
     use sicompass_sdk::ffon::IdArray;
+    use sicompass_ui::app_state::TabSnapshot;
 
     // The bootstrap live set is `[content…, settings]`; every tab shares the
     // same provider ordering, so this count gates persisted `current_id[0]`
@@ -1156,11 +1314,18 @@ pub fn enable_provider(renderer: &mut AppRenderer, name: &str) {
     };
     if let Some(plugin) = cached {
         if let Some(provider) = instantiate_user_plugin(&plugin) {
-            insert_provider_alphabetically(
+            // The same settings entries a startup load injects
+            // (`load_user_plugins`); without them a plugin enabled at runtime
+            // had an empty settings section until the next restart.
+            let manifest = plugin.manifest.clone();
+            insert_provider_in_section(
                 renderer,
                 provider,
-                None,
+                Some(Box::new(move |settings: &mut dyn Provider| {
+                    inject_plugin_settings(settings, &manifest);
+                })),
                 plugin.manifest.version.clone(),
+                Some(plugin.manifest.display_name.clone()),
             );
             return;
         }
@@ -1213,6 +1378,10 @@ fn sort_providers_alphabetically(renderer: &mut AppRenderer) {
     renderer.ffon = ffon;
 }
 
+/// Settings entries to inject for a provider being inserted (see
+/// [`insert_provider_alphabetically`]).
+type ExtraSettings = Option<Box<dyn FnOnce(&mut dyn Provider)>>;
+
 /// Insert a provider at the alphabetically correct position.
 ///
 /// Settings (last index) is never displaced. All other providers (including
@@ -1226,9 +1395,23 @@ fn sort_providers_alphabetically(renderer: &mut AppRenderer) {
 /// fallback to inject `remoteUrl` / `apiKey` text entries.
 fn insert_provider_alphabetically(
     renderer: &mut AppRenderer,
-    mut provider: Box<dyn Provider>,
-    extra_settings: Option<Box<dyn FnOnce(&mut dyn Provider)>>,
+    provider: Box<dyn Provider>,
+    extra_settings: ExtraSettings,
     manifest_version: Option<String>,
+) {
+    insert_provider_in_section(renderer, provider, extra_settings, manifest_version, None);
+}
+
+/// [`insert_provider_alphabetically`], with the settings section named by the
+/// caller. A user plugin's section is its manifest's `displayName`, as at
+/// startup (`load_user_plugins`), where its settings are injected; the name the
+/// guest reports for itself may differ.
+fn insert_provider_in_section(
+    renderer: &mut AppRenderer,
+    mut provider: Box<dyn Provider>,
+    extra_settings: ExtraSettings,
+    manifest_version: Option<String>,
+    section: Option<String>,
 ) {
     provider.init();
     let children = provider.fetch();
@@ -1243,11 +1426,13 @@ fn insert_provider_alphabetically(
     let settings_idx = renderer.providers.len().saturating_sub(1);
     let new_name_lower = provider.name().to_ascii_lowercase();
     // Determine the canonical settings section name before consuming `provider`.
-    let section_name = sicompass_sdk::builtin_manifests()
-        .into_iter()
-        .find(|m| name_matches_provider(&m.display_name, provider.name()))
-        .map(|m| m.display_name)
-        .unwrap_or_else(|| display_name.clone());
+    let section_name = section.unwrap_or_else(|| {
+        sicompass_sdk::builtin_manifests()
+            .into_iter()
+            .find(|m| name_matches_provider(&m.display_name, provider.name()))
+            .map(|m| m.display_name)
+            .unwrap_or_else(|| display_name.clone())
+    });
     let mut insert_idx = settings_idx; // default: just before settings
     for i in 0..settings_idx {
         if renderer.providers[i].name().to_ascii_lowercase() > new_name_lower {
@@ -1280,9 +1465,8 @@ fn insert_provider_alphabetically(
     }
 }
 
-/// Drain any pending `UpdateEvent`s from the updater thread and refresh
-/// the "update available" banner. Called once per frame from the main
-/// loop. Never panics.
+/// Refresh the "update available" banner from the updater thread's status.
+/// Called once per frame from the main loop. Never panics.
 ///
 /// FUTURE NOTIFICATION SYSTEM: when sicompass grows a real in-app
 /// notification surface, replace the `error_message` writes below with
@@ -1291,41 +1475,14 @@ fn insert_provider_alphabetically(
 /// rendering site moves. Grep for "FUTURE NOTIFICATION SYSTEM" to find
 /// all interim shims.
 ///
-/// The updater's channel and status snapshot are passed in rather than read
-/// off the renderer: they are `sicompass-updater` types, and the renderer is
-/// shared with a greeter that must not link an updater at all.
+/// The updater's status snapshot is passed in rather than read off the
+/// renderer: it is a `sicompass-updater` type, and the renderer is shared with
+/// a greeter that must not link an updater at all. Plugin updates are not
+/// here: the Store shows them, and applies them when the user asks.
 pub fn process_update_events(
     renderer: &mut AppRenderer,
     update_state: Option<&Arc<Mutex<sicompass_updater::UpdateStatus>>>,
-    update_event_rx: Option<&std::sync::mpsc::Receiver<UpdateEvent>>,
 ) {
-    // ---- Drain HotReload events ----
-    let events: Vec<UpdateEvent> = match update_event_rx {
-        Some(rx) => rx.try_iter().collect(),
-        None => Vec::new(),
-    };
-
-    for evt in events {
-        match evt {
-            UpdateEvent::HotReload {
-                plugin_name,
-                new_entry_path,
-            } => {
-                match hot_reload_plugin(renderer, &plugin_name, &new_entry_path) {
-                    Ok(()) => {
-                        tracing::info!("hot-reloaded plugin '{plugin_name}'");
-                        // Force banner refresh so user sees the result.
-                        renderer.update_message_active = false;
-                    }
-                    Err(e) => {
-                        tracing::warn!("hot reload '{plugin_name}': {e}");
-                        renderer.error_message = format!("plugin '{plugin_name}': {e}");
-                    }
-                }
-            }
-        }
-    }
-
     // ---- Refresh banner ----
     let state = match update_state {
         Some(s) => Arc::clone(s),
@@ -1336,11 +1493,10 @@ pub fn process_update_events(
     };
     let snap = state.lock().unwrap().clone();
 
-    let plugin_applied: Vec<_> = snap.plugin_updates.iter().filter(|p| p.applied).collect();
     let app_pending = snap.app_update.is_some();
     // What `shortcuts` reads to decide whether to advertise Ctrl+U.
     renderer.app_update_pending = app_pending;
-    let has_news = app_pending || !plugin_applied.is_empty();
+    let has_news = app_pending;
 
     // FUTURE NOTIFICATION SYSTEM: this is the interim surface for update
     // notifications. The error-slot is borrowed only when it is empty or
@@ -1366,20 +1522,6 @@ pub fn process_update_events(
             au.new_version
         );
     }
-    if !plugin_applied.is_empty() {
-        if !msg.is_empty() {
-            msg.push_str(" — ");
-        }
-        if plugin_applied.len() == 1 {
-            let p = plugin_applied[0];
-            msg.push_str(&format!(
-                "Plugin updated: {} v{}",
-                p.plugin_name, p.new_version
-            ));
-        } else {
-            msg.push_str(&format!("{} plugin updates applied", plugin_applied.len()));
-        }
-    }
 
     renderer.error_message = msg;
     renderer.update_message_active = true;
@@ -1404,7 +1546,6 @@ pub fn handle_apply_app_update(
     let checker = sicompass_updater::UpdateChecker::new(
         sicompass_updater::parse_version(env!("CARGO_PKG_VERSION"))
             .unwrap_or_else(|_| semver::Version::new(0, 0, 0)),
-        std::path::PathBuf::new(),
         "",
         "",
     );
@@ -1422,100 +1563,6 @@ pub fn handle_apply_app_update(
             renderer.error_message = format!("apply update failed: {e}");
         }
     }
-}
-
-/// No-op provider used as a placeholder in the registry slot while a
-/// native plugin is being hot-reloaded. Must exist for one instant
-/// (between `drop(old)` and `place(new)`) so that the OS dynamic linker
-/// can free the old `.so`/`.dll`/`.dylib` before we `dlopen` the new
-/// file at the same path. Without this drop-first dance, dlopen returns
-/// the cached old library and the update has no effect.
-struct HotReloadPlaceholder;
-impl Provider for HotReloadPlaceholder {
-    fn name(&self) -> &str {
-        ""
-    }
-    fn fetch(&mut self) -> Vec<FfonElement> {
-        Vec::new()
-    }
-}
-
-/// Tear down a running user plugin and re-instantiate it from the
-/// already-swapped-in entry file. Called from the main loop when an
-/// `UpdateEvent::HotReload` event arrives from the updater thread.
-///
-/// The plugin's directory on disk has already been atomically replaced
-/// by `sicompass-updater`; this function only handles the in-memory
-/// provider swap. Returns an error string suitable for `error_message`
-/// surfacing on failure.
-///
-/// Order matters for native plugins (see `HotReloadPlaceholder`): the
-/// old `Box<dyn Provider>` must be dropped before the new library is
-/// loaded, otherwise the dynamic linker reuses the cached handle and
-/// the update is invisible. Script plugins are immune (they spawn a
-/// subprocess), but we keep the same order for both for simplicity.
-pub fn hot_reload_plugin(
-    renderer: &mut AppRenderer,
-    plugin_name: &str,
-    new_entry: &Path,
-) -> Result<(), String> {
-    let idx = renderer
-        .providers
-        .iter()
-        .position(|p| name_matches_provider(plugin_name, p.name()))
-        .ok_or_else(|| format!("plugin '{plugin_name}' not currently loaded"))?;
-
-    let plugins_root = sicompass_sdk::platform::plugins_dir()
-        .ok_or_else(|| "no plugins dir on this platform".to_string())?;
-    let manifest_path = plugins_root.join(plugin_name).join("plugin.json");
-    let manifest = crate::plugin_manifest::load_manifest(&manifest_path)
-        .ok_or_else(|| format!("read updated manifest {}", manifest_path.display()))?;
-
-    if !manifest.hot_reload {
-        return Err(format!(
-            "plugin '{plugin_name}' opted out of hot reload — restart to activate update"
-        ));
-    }
-
-    let plugin = DiscoveredPlugin {
-        manifest,
-        entry_path: new_entry.to_path_buf(),
-    };
-
-    // Drop-first dance — see HotReloadPlaceholder doc.
-    let placeholder: Box<dyn Provider> = Box::new(HotReloadPlaceholder);
-    let old = std::mem::replace(&mut renderer.providers[idx], placeholder);
-    drop(old);
-
-    let mut new_provider = match instantiate_user_plugin(&plugin) {
-        Some(p) => p,
-        None => {
-            return Err(format!(
-                "failed to instantiate updated plugin '{plugin_name}' \
-                 — provider disabled until restart"
-            ));
-        }
-    };
-
-    new_provider.init();
-    let children = new_provider.fetch();
-    let display_name = new_provider.display_name().to_owned();
-    let mut root = FfonElement::new_obj(&display_name);
-    for child in children {
-        root.as_obj_mut().unwrap().push(child);
-    }
-    renderer.ffon[idx] = root;
-    renderer.providers[idx] = new_provider;
-
-    // Refresh the version shown in the settings tree for this plugin.
-    if let Some(v) = plugin.manifest.version.as_deref() {
-        if let Some(settings) = renderer.providers.last_mut() {
-            settings.set_section_version(&plugin.manifest.display_name, v);
-        }
-        rebuild_settings_ffon(renderer);
-    }
-
-    Ok(())
 }
 
 /// Disable and remove a provider by name.
@@ -1669,6 +1716,15 @@ pub fn apply_pending_settings(
 }
 
 fn apply_setting(renderer: &mut AppRenderer, key: &str, value: &str, skip_enable: bool) {
+    if matches!(
+        key,
+        PLUGIN_INSTALLED | PLUGIN_UPDATED | PLUGIN_REMOVED | PLUGIN_DATA_TRASH
+    ) {
+        if !skip_enable {
+            apply_store_change(renderer, key, value);
+        }
+        return;
+    }
     if let Some(name) = key.strip_prefix("enable_") {
         if skip_enable {
             return;
@@ -1811,10 +1867,10 @@ fn enabled_programs() -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sicompass_ui::app_state::AppRenderer;
     use crate::plugin_manifest::{PluginManifest, PluginType};
     use sicompass_sdk::ffon::FfonElement;
     use sicompass_sdk::provider::Provider;
+    use sicompass_ui::app_state::AppRenderer;
     use std::io::Write;
 
     fn write_config(json: &str) -> tempfile::NamedTempFile {
@@ -2130,7 +2186,10 @@ mod tests {
     fn apply_setting_color_scheme_light() {
         let mut r = AppRenderer::new();
         apply_setting(&mut r, "colorScheme", "light", false);
-        assert_eq!(r.palette_theme, sicompass_ui::app_state::PaletteTheme::Light);
+        assert_eq!(
+            r.palette_theme,
+            sicompass_ui::app_state::PaletteTheme::Light
+        );
     }
 
     #[test]

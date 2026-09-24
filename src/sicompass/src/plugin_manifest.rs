@@ -43,6 +43,75 @@ pub fn read_approvals() -> std::collections::HashMap<String, String> {
         .unwrap_or_default()
 }
 
+/// Record what the Store just installed or updated: the access the user
+/// approved by pressing Install or Update (whatever the manifest asks, so a
+/// later update asking for more is noticed), and, for an install, the program
+/// enabled in "Available programs:".
+pub fn record_store_install(m: &PluginManifest, enable: bool) -> Result<(), String> {
+    edit_config(|root| {
+        let approvals = object_at(root, APPROVALS_KEY);
+        approvals.insert(
+            m.name.clone(),
+            serde_json::Value::String(sicompass_sdk::plugin_abi::approval_fingerprint(m)),
+        );
+        if enable {
+            object_at(root, "Available programs:")
+                .insert(format!("enable_{}", m.name), serde_json::Value::Bool(true));
+        }
+    })
+}
+
+/// Forget an uninstalled plugin's approval and enable switch. Its own settings
+/// section is kept, like its data folder: reinstalling finds them again.
+pub fn forget_store_install(name: &str) -> Result<(), String> {
+    edit_config(|root| {
+        object_at(root, APPROVALS_KEY).remove(name);
+        object_at(root, "Available programs:").remove(&format!("enable_{name}"));
+    })
+}
+
+fn object_at<'a>(
+    root: &'a mut serde_json::Map<String, serde_json::Value>,
+    key: &str,
+) -> &'a mut serde_json::Map<String, serde_json::Value> {
+    let slot = root
+        .entry(key.to_owned())
+        .or_insert_with(|| serde_json::Value::Object(Default::default()));
+    if !slot.is_object() {
+        *slot = serde_json::Value::Object(Default::default());
+    }
+    slot.as_object_mut().expect("just made an object")
+}
+
+/// Read-modify-write `settings.json`, the way the settings provider does: a
+/// file that exists but does not parse is left alone (another process may be
+/// half-way through writing it), never rebuilt from nothing.
+fn edit_config(
+    f: impl FnOnce(&mut serde_json::Map<String, serde_json::Value>),
+) -> Result<(), String> {
+    let path =
+        sicompass_sdk::platform::main_config_path().ok_or("no settings folder on this platform")?;
+    let mut root = match std::fs::read_to_string(&path) {
+        Ok(text) => match serde_json::from_str::<serde_json::Value>(&text) {
+            Ok(serde_json::Value::Object(m)) => m,
+            _ => return Err(format!("{} does not parse, left as it is", path.display())),
+        },
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Default::default(),
+        Err(e) => return Err(format!("{}: {e}", path.display())),
+    };
+    f(&mut root);
+    if let Some(parent) = path.parent() {
+        sicompass_sdk::platform::make_dirs(parent);
+    }
+    let json = serde_json::to_string_pretty(&serde_json::Value::Object(root))
+        .map_err(|e| e.to_string())?;
+    if sicompass_sdk::platform::atomic_write(&path, &json) {
+        Ok(())
+    } else {
+        Err(format!("{} could not be written", path.display()))
+    }
+}
+
 /// What a plugin gets, from its manifest and the user's approvals.
 ///
 /// - `allowedHosts`: as declared (shown when the plugin is enabled).
@@ -69,7 +138,12 @@ pub fn grants_for(
             .iter()
             .map(|f| format!("folder {f}"))
             .chain(m.permissions.process.iter().map(|p| format!("program {p}")))
-            .chain(m.permissions.sockets.iter().map(|s| format!("connection to {s}")))
+            .chain(
+                m.permissions
+                    .sockets
+                    .iter()
+                    .map(|s| format!("connection to {s}")),
+            )
             .collect();
         return Err(format!(
             "it asks for access you have not approved ({}); approve it in the Store",
@@ -194,15 +268,17 @@ mod tests {
         );
         assert!(m.permissions.storage);
         assert_eq!(m.description.as_deref(), Some("notes-description"));
-        assert_eq!(m.service.as_ref().map(|s| s.tier.as_str()), Some("friendlyflow/cloud"));
+        assert_eq!(
+            m.service.as_ref().map(|s| s.tier.as_str()),
+            Some("friendlyflow/cloud")
+        );
     }
 
     #[test]
     fn nothing_is_granted_by_default() {
-        let m: PluginManifest = serde_json::from_str(
-            r#"{ "name": "x", "displayName": "x", "entry": "plugin.wasm" }"#,
-        )
-        .unwrap();
+        let m: PluginManifest =
+            serde_json::from_str(r#"{ "name": "x", "displayName": "x", "entry": "plugin.wasm" }"#)
+                .unwrap();
         assert_eq!(m.permissions, Permissions::default());
         assert!(m.allowed_hosts().is_empty());
         // And the host grants it nothing: no hosts, folders, programs, sockets.

@@ -323,7 +323,8 @@ no-jit-wasm = ["wasmtime/cranelift", "wasmtime/pulley"]
 bundled-sdl3 = ["sdl3/build-from-source-static"]
 
 [dependencies]
-sicompass-sdk = { workspace = true }
+# `package`: the Store's pre-install audit hook (register_component_auditor).
+sicompass-sdk = { workspace = true, features = ["package"] }
 async-trait = { workspace = true }
 sicompass-builtins = { workspace = true }
 sicompass-updater = { workspace = true }
@@ -439,3 +440,5 @@ async-trait = { workspace = true }
 wit-parser = "0.258.0"
 wit-component = "0.258.0"
 wiremock.workspace = true
+# tests/store.rs drives a Store pointed at a local server into the app's queue.
+sicompass-store = { workspace = true }

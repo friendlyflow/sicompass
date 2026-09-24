@@ -32,6 +32,7 @@ pub fn register_all() {
         sicompass_sales_demo::register();
         sicompass_remote::register();
         sicompass_settings::register();
+        sicompass_store::register();
         sicompass_terminal::register();
         sicompass_claude::register();
         sicompass_gitclient::register();
@@ -98,6 +99,21 @@ mod tests {
         let p = sicompass_sdk::create_provider_by_name("texteditor");
         assert!(p.is_some(), "texteditor factory should be registered");
         assert_eq!(p.unwrap().name(), "texteditor");
+    }
+
+    #[test]
+    fn store_is_registered_and_always_present() {
+        register_all();
+        let p = sicompass_sdk::create_provider_by_name("store");
+        assert_eq!(p.map(|p| p.name().to_owned()).as_deref(), Some("store"));
+        let m = sicompass_sdk::builtin_manifests()
+            .into_iter()
+            .find(|m| m.name == "store")
+            .expect("store manifest");
+        assert!(
+            m.always_enabled,
+            "the Store is not optional: it installs the others"
+        );
     }
 
     #[test]

@@ -1359,6 +1359,11 @@ impl Provider for SettingsProvider {
         self.remove_section(name);
     }
 
+    fn remove_checkbox_setting(&mut self, section: &str, config_key: &str) {
+        self.checkbox_entries
+            .retain(|e| !(e.section == section && e.config_key == config_key));
+    }
+
     fn set_section_version(&mut self, section: &str, version: &str) {
         self.section_versions
             .insert(section.to_owned(), version.to_owned());
@@ -2812,6 +2817,28 @@ mod tests {
         p.add_checkbox("s", "my flag", "myFlag", false);
         p.on_checkbox_change("my flag", true);
         assert!(fired.lock().unwrap().contains(&"myFlag".to_owned()));
+    }
+
+    #[test]
+    fn remove_checkbox_setting_drops_only_that_line() {
+        use sicompass_sdk::provider::Provider;
+        let mut p = SettingsProvider::new_headless().with_config_path(test_config_path());
+        p.add_checkbox("Available programs:", "notes", "enable_notes", true);
+        p.add_checkbox("Available programs:", "demo", "enable_demo", true);
+        p.add_checkbox("other", "demo", "enable_demo", true);
+        p.remove_checkbox_setting("Available programs:", "enable_demo");
+        let left: Vec<(&str, &str)> = p
+            .checkbox_entries
+            .iter()
+            .map(|e| (e.section.as_str(), e.config_key.as_str()))
+            .collect();
+        assert_eq!(
+            left,
+            vec![
+                ("Available programs:", "enable_notes"),
+                ("other", "enable_demo")
+            ]
+        );
     }
 
     #[test]

@@ -1575,6 +1575,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "filetime"
+version = "0.2.29"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5c287a33c7f0a620c38e641e7f60827713987b3c0f26e8ddc9462cc69cf75759"
+dependencies = [
+ "cfg-if",
+ "libc",
+]
+
+[[package]]
 name = "find-msvc-tools"
 version = "0.1.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4500,6 +4510,7 @@ dependencies = [
  "sicompass-remote",
  "sicompass-sdk",
  "sicompass-settings",
+ "sicompass-store",
  "sicompass-terminal",
  "sicompass-text-editor",
  "sicompass-tutorial",
@@ -4538,6 +4549,7 @@ dependencies = [
  "sicompass-sales-demo",
  "sicompass-sdk",
  "sicompass-settings",
+ "sicompass-store",
  "sicompass-terminal",
  "sicompass-text-editor",
  "sicompass-tutorial",
@@ -4678,15 +4690,21 @@ dependencies = [
 [[package]]
 name = "sicompass-sdk"
 version = "0.8.0"
-source = "git+https://github.com/friendlyflow/sicompass-plugin-sdk?rev=90e4c051333d64a7db28ed03d9d1d5c25e69a14d#90e4c051333d64a7db28ed03d9d1d5c25e69a14d"
+source = "git+https://github.com/friendlyflow/sicompass-plugin-sdk?rev=e89640b0424776931b6ddee79bfb0dc6abfdae54#e89640b0424776931b6ddee79bfb0dc6abfdae54"
 dependencies = [
  "async-trait",
+ "base64 0.23.1",
+ "ed25519-dalek",
+ "flate2",
  "fluent",
  "fluent-langneg 0.14.2",
+ "getrandom 0.3.4",
  "intl-memoizer",
  "scraper",
  "serde",
  "serde_json",
+ "sha2 0.11.0",
+ "tar",
  "tokio",
  "trash",
  "unic-langid",
@@ -4716,6 +4734,19 @@ name = "sicompass-shell"
 version = "0.1.21"
 dependencies = [
  "portable-pty",
+]
+
+[[package]]
+name = "sicompass-store"
+version = "0.1.21"
+dependencies = [
+ "reqwest",
+ "semver",
+ "serde_json",
+ "sicompass-sdk",
+ "tempfile",
+ "tokio",
+ "wiremock",
 ]
 
 [[package]]
@@ -4782,18 +4813,13 @@ dependencies = [
 name = "sicompass-updater"
 version = "0.1.21"
 dependencies = [
- "base64 0.23.1",
- "ed25519-dalek",
  "reqwest",
  "semver",
  "serde",
  "serde_json",
  "sha2 0.11.0",
- "sicompass-sdk",
- "tempfile",
  "tokio",
  "tracing",
- "wasmparser 0.258.0",
  "windows",
  "wiremock",
 ]
@@ -5024,6 +5050,17 @@ checksum = "8e1d1b10ced5ca923a1fcb8d03e96b8d3268065d724548c0211415ff6ac6bac4"
 dependencies = [
  "core-foundation-sys",
  "libc",
+]
+
+[[package]]
+name = "tar"
+version = "0.4.46"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3f6221d9a6003c78398e3b239969f352578258df48c8eb051caadae0015bc840"
+dependencies = [
+ "filetime",
+ "libc",
+ "xattr",
 ]
 
 [[package]]
@@ -5798,7 +5835,6 @@ dependencies = [
  "hashbrown 0.17.1",
  "indexmap",
  "semver",
- "serde",
 ]
 
 [[package]]
@@ -6541,6 +6577,16 @@ name = "writeable"
 version = "0.6.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3ad82d2a33cdc9674dc7465672f271e096168fcdbe0f799d9e6db8c5892679dc"
+
+[[package]]
+name = "xattr"
+version = "1.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "32e45ad4206f6d2479085147f02bc2ef834ac85886624a23575ae137c8aa8156"
+dependencies = [
+ "libc",
+ "rustix",
+]
 
 [[package]]
 name = "xdg"
