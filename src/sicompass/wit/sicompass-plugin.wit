@@ -379,6 +379,27 @@ interface net {
   fetch-url-ffon: func(url: string) -> result<ffon, string>;
 }
 
+/// The user's desktop, reached through the host. Always linked: every path it
+/// takes must lie inside a directory this plugin was granted (its `storage`
+/// folder, or a `filesystem` folder the user approved), re-checked by the host
+/// after resolving symlinks, so it reaches nothing the plugin could not already
+/// read and write. A plugin with no granted folder can only open URLs.
+interface desktop {
+  /// Open a URL in the user's browser or mail client. `http`, `https` and
+  /// `mailto` only.
+  open-url: func(url: string) -> result<_, string>;
+
+  /// Open a file with the application the user's desktop associates with it.
+  open-path: func(path: string) -> result<_, string>;
+
+  /// Move a file or directory to the OS trash, so the user can get it back.
+  trash: func(path: string) -> result<_, string>;
+
+  /// Restore the most recently trashed item whose original location was
+  /// `path`, for an undo. Fails where the OS offers no programmatic restore.
+  restore: func(path: string) -> result<_, string>;
+}
+
 // ---------------------------------------------------------------------------
 // Guest exports — what a provider implements
 // ---------------------------------------------------------------------------
@@ -565,5 +586,6 @@ interface provider {
 world plugin {
   import host;
   import net;
+  import desktop;
   export provider;
 }

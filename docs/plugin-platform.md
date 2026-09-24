@@ -190,7 +190,7 @@ it, so the 13 ports in Steps 5-10 do not each discover a missing method.
 | Permission | Grants | Shown to the user as |
 |---|---|---|
 | `allowedHosts` | `net` linked, requests to these hosts only (as today) | "connects to cloud.sicompass.org" |
-| `storage` | a preopen of `app_data_dir()/<name>`, the plugin's own folder | nothing (see below) |
+| `storage` | a preopen of `app_data_dir()/<name>`, the plugin's own folder, at `/storage` inside the guest | nothing (see below) |
 | `filesystem` | preopens of these paths, at the same path inside the guest | "reads and writes your files in ~/" |
 | `process` | `process` linked, may start only these programs | "runs git" |
 | `sockets` | `wasi:sockets` linked, connections to these `host:port` pairs only | "connects to imap.gmail.com:993" |
@@ -210,7 +210,11 @@ it, so the 13 ports in Steps 5-10 do not each discover a missing method.
 
 **Approval.** The Store shows the requested permissions before installing, in
 plain words, spoken as one list. The user's grant is recorded in `settings.json`
-as a fingerprint of the permission set. **If an update asks for more, the plugin
+under `pluginApprovals` as `{ "<name>": "<fingerprint>" }`, where the fingerprint
+is `sicompass_sdk::plugin_abi::approval_fingerprint`: one canonical line of
+hosts, folders, programs and sockets (storage is left out, it needs no approval).
+Implemented in 4.4: a plugin whose `filesystem` access is not approved with the
+current fingerprint does not load, and says so. **If an update asks for more, the plugin
 stays on the old version, and the Store shows "this update asks for more
 access" until the user approves.** A plugin copied into `plugins/` by hand asks
 on first enable instead.
@@ -224,8 +228,12 @@ interface desktop {
   open-url: func(url: string) -> result<_, string>;   // http(s) and mailto only
   open-path: func(path: string) -> result<_, string>; // inside a preopen only
   trash: func(path: string) -> result<_, string>;     // inside a preopen only
+  restore: func(path: string) -> result<_, string>;   // undo of a trash, by original path
 }
 ```
+
+Paths arrive as the guest sees them: `/storage/...` maps back to the plugin's
+host folder, and a user-granted folder has the same path on both sides.
 
 The host re-checks every path against the plugin's preopens after resolving
 symlinks, the same way `read-asset` is confined today.

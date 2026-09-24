@@ -867,6 +867,8 @@ fn wit_vendor_matches_host_tables() {
     let mut expected: Vec<(String, String)> = wasm_host::HOST_IMPORTS
         .iter()
         .chain(wasm_host::NET_IMPORTS.iter())
+        // ABI 0.2 (4.4): the desktop interface.
+        .chain(wasm_host::DESKTOP_IMPORTS.iter())
         .map(|(i, f)| (i.to_string(), f.to_string()))
         .collect();
     expected.sort();
@@ -1140,4 +1142,122 @@ fn a_plugin_built_for_the_previous_abi_is_refused_readably() {
         Err(e) => e,
     };
     assert!(err.contains("ABI 0.1.0") && err.contains("rebuilt"), "{err}");
+}
+
+// ---------------------------------------------------------------------------
+// 4.4: storage, granted folders, the desktop interface
+// ---------------------------------------------------------------------------
+
+fn fs_wasm() -> PathBuf {
+    fixture_dir().join("fs.wasm")
+}
+
+fn open_fs(grants: wasm_host::Grants) -> WasmProvider {
+    wasm_host::desktop::_set_test_mode(true);
+    WasmProvider::open_with_grants(&fs_wasm(), "fs", "fs", &fixture_dir(), grants)
+        .expect("the fs fixture loads")
+}
+
+/// Run one of the fs fixture's commands and return its one-line answer.
+fn fs_cmd(p: &mut WasmProvider, cmd: &str, arg: &str) -> String {
+    let mut error = String::new();
+    match p.handle_command(cmd, arg, 0, &mut error) {
+        Some(FfonElement::Str(s)) => s,
+        other => panic!("{cmd} {arg}: unexpected answer {other:?} (error: {error})"),
+    }
+}
+
+#[test]
+fn storage_is_the_plugins_own_folder_and_only_when_granted() {
+    let none = all_text(&open_fs(wasm_host::Grants::default()).fetch());
+    assert!(none.contains(&"storage: absent".to_owned()), "{none:?}");
+
+    let dir = tempfile::tempdir().unwrap();
+    let storage = dir.path().join("fs-storage");
+    let mut p = open_fs(wasm_host::Grants {
+        storage_dir: Some(storage.clone()),
+        ..Default::default()
+    });
+    assert!(all_text(&p.fetch()).contains(&"storage: present".to_owned()));
+    assert_eq!(fs_cmd(&mut p, "write", "/storage/note.txt"), "ok");
+    assert_eq!(
+        std::fs::read_to_string(storage.join("note.txt")).unwrap(),
+        "hello from fs-plugin"
+    );
+    assert_eq!(fs_cmd(&mut p, "read", "/storage/note.txt"), "hello from fs-plugin");
+    assert_eq!(fs_cmd(&mut p, "list", "/storage"), "note.txt");
+    // Nothing outside it.
+    assert!(fs_cmd(&mut p, "read", "/etc/passwd").starts_with("err"));
+    assert!(fs_cmd(&mut p, "read", "/storage/../../etc/passwd").starts_with("err"));
+}
+
+#[test]
+fn an_approved_folder_is_reachable_at_its_own_path_and_nothing_beside_it() {
+    let granted = tempfile::tempdir().unwrap();
+    let other = tempfile::tempdir().unwrap();
+    let granted_path = granted.path().canonicalize().unwrap();
+    let mut p = open_fs(wasm_host::Grants {
+        filesystem: vec![granted_path.clone()],
+        ..Default::default()
+    });
+    let inside = granted_path.join("x.txt");
+    assert_eq!(fs_cmd(&mut p, "write", inside.to_str().unwrap()), "ok");
+    assert!(inside.is_file());
+    let outside = other.path().join("y.txt");
+    assert!(fs_cmd(&mut p, "write", outside.to_str().unwrap()).starts_with("err"));
+    assert!(!outside.exists());
+}
+
+#[test]
+fn desktop_trash_and_restore_stay_inside_the_grant() {
+    let dir = tempfile::tempdir().unwrap();
+    let storage = dir.path().join("s");
+    let mut p = open_fs(wasm_host::Grants {
+        storage_dir: Some(storage.clone()),
+        ..Default::default()
+    });
+    assert_eq!(fs_cmd(&mut p, "write", "/storage/t.txt"), "ok");
+    assert_eq!(fs_cmd(&mut p, "trash", "/storage/t.txt"), "ok");
+    assert!(!storage.join("t.txt").exists());
+    assert_eq!(fs_cmd(&mut p, "restore", "/storage/t.txt"), "ok");
+    assert!(storage.join("t.txt").is_file());
+
+    assert!(fs_cmd(&mut p, "trash", "/etc/hostname").starts_with("err"));
+    assert!(fs_cmd(&mut p, "open-path", "/etc/passwd").starts_with("err"));
+    wasm_host::desktop::_take_recorded();
+    assert_eq!(fs_cmd(&mut p, "open-path", "/storage/t.txt"), "ok");
+    assert_eq!(fs_cmd(&mut p, "open-url", "https://example.com/x"), "ok");
+    assert!(fs_cmd(&mut p, "open-url", "file:///etc/passwd").starts_with("err"));
+    let recorded = wasm_host::desktop::_take_recorded();
+    assert!(recorded.iter().any(|r| r.starts_with("open-path:") && r.ends_with("t.txt")), "{recorded:?}");
+    assert!(recorded.contains(&"open-url:https://example.com/x".to_owned()), "{recorded:?}");
+}
+
+#[test]
+fn a_filesystem_grant_needs_the_users_approval_of_exactly_this_manifest() {
+    use sicompass::plugin_manifest::{grants_for, parse_manifest};
+    let m = parse_manifest(
+        r#"{ "name": "fb", "displayName": "fb", "entry": "plugin.wasm",
+             "permissions": { "filesystem": ["~/Documents"], "storage": true } }"#,
+    )
+    .unwrap();
+    let mut approvals = std::collections::HashMap::new();
+    let e = grants_for(&m, &approvals).unwrap_err();
+    assert!(e.contains("approve"), "{e}");
+
+    approvals.insert(
+        "fb".to_owned(),
+        sicompass_sdk::plugin_abi::approval_fingerprint(&m),
+    );
+    let g = grants_for(&m, &approvals).unwrap();
+    assert!(g.filesystem[0].ends_with("Documents") && !g.filesystem[0].starts_with("~"));
+    assert!(g.storage_dir.unwrap().ends_with("fb"));
+
+    // An update asking for more is held back until approved again.
+    let more = parse_manifest(
+        r#"{ "name": "fb", "displayName": "fb", "entry": "plugin.wasm",
+             "permissions": { "filesystem": ["~/Documents", "~/Pictures"] } }"#,
+    )
+    .unwrap();
+    assert!(grants_for(&more, &approvals).is_err());
 }

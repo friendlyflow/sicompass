@@ -22,18 +22,12 @@ pub use sicompass_sdk::plugin_manifest::{
     parse_manifest,
 };
 
-/// Permissions this sicompass cannot grant yet (parts 4.4-4.7 of
+/// Permissions this sicompass cannot grant yet (parts 4.6-4.7 of
 /// docs/plugin-platform.md). A plugin asking for one is not loaded at all,
 /// rather than loaded without what it asked for.
 pub fn unsupported_permissions(m: &PluginManifest) -> Vec<&'static str> {
     let p = &m.permissions;
     let mut out = Vec::new();
-    if p.storage {
-        out.push("storage");
-    }
-    if !p.filesystem.is_empty() {
-        out.push("filesystem");
-    }
     if !p.process.is_empty() {
         out.push("process");
     }
@@ -41,6 +35,83 @@ pub fn unsupported_permissions(m: &PluginManifest) -> Vec<&'static str> {
         out.push("sockets");
     }
     out
+}
+
+/// The top-level `settings.json` key recording what the user approved, per
+/// plugin: `{ "<name>": "<approval fingerprint>" }`. Written by the Store when the
+/// user grants access; compared on every load, so an update asking for more is
+/// held back until approved again.
+pub const APPROVALS_KEY: &str = "pluginApprovals";
+
+/// The user's approvals from `settings.json`, by plugin name.
+pub fn read_approvals() -> std::collections::HashMap<String, String> {
+    let Some(path) = sicompass_sdk::platform::main_config_path() else {
+        return Default::default();
+    };
+    let Ok(data) = std::fs::read_to_string(path) else {
+        return Default::default();
+    };
+    serde_json::from_str::<serde_json::Value>(&data)
+        .ok()
+        .and_then(|v| v.get(APPROVALS_KEY).cloned())
+        .and_then(|v| serde_json::from_value(v).ok())
+        .unwrap_or_default()
+}
+
+/// What a plugin gets, from its manifest and the user's approvals.
+///
+/// - `allowedHosts`: as declared (shown when the plugin is enabled).
+/// - `storage`: its own folder, `app_data_dir()/<name>`. No approval needed, it
+///   reaches nothing else. The notes and board plugins find their existing data
+///   there, since that is where the built-ins keep it.
+/// - `filesystem`: only if the user approved exactly this manifest's access
+///   ([`sicompass_sdk::plugin_abi::approval_fingerprint`]); `~` means home.
+///
+/// `Err` says why the plugin cannot load: a permission this build cannot grant,
+/// or access the user has not approved.
+pub fn grants_for(
+    m: &PluginManifest,
+    approvals: &std::collections::HashMap<String, String>,
+) -> Result<crate::wasm_host::Grants, String> {
+    let unsupported = unsupported_permissions(m);
+    if !unsupported.is_empty() {
+        return Err(format!(
+            "it asks for {}, which this sicompass cannot grant yet",
+            unsupported.join(", ")
+        ));
+    }
+    if sicompass_sdk::plugin_abi::needs_approval(m)
+        && approvals.get(&m.name) != Some(&sicompass_sdk::plugin_abi::approval_fingerprint(m))
+    {
+        return Err(format!(
+            "it asks for access you have not approved ({}); approve it in the Store",
+            m.permissions.filesystem.join(", ")
+        ));
+    }
+    let storage_dir = if m.permissions.storage {
+        Some(
+            sicompass_sdk::platform::app_data_dir()
+                .ok_or("no data directory on this system")?
+                .join(&m.name),
+        )
+    } else {
+        None
+    };
+    let home = sicompass_sdk::platform::home_dir();
+    let filesystem = m
+        .permissions
+        .filesystem
+        .iter()
+        .map(|p| match (p.strip_prefix('~'), &home) {
+            (Some(rest), Some(h)) => h.join(rest.trim_start_matches('/')),
+            _ => PathBuf::from(p),
+        })
+        .collect();
+    Ok(crate::wasm_host::Grants {
+        allowed_hosts: m.allowed_hosts(),
+        storage_dir,
+        filesystem,
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -155,7 +226,8 @@ mod tests {
                                   "sockets": ["imap.example.org:993"] } }"#,
         )
         .unwrap();
-        assert_eq!(unsupported_permissions(&m), vec!["storage", "process", "sockets"]);
+        // storage and filesystem are grantable since 4.4.
+        assert_eq!(unsupported_permissions(&m), vec!["process", "sockets"]);
     }
 
     use std::io::Write;

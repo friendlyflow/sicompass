@@ -235,7 +235,7 @@ wiremock = "0.6"
 # unreleased, so it still satisfies the `0.8.0` requirements. Remove this block
 # when the pins move to the published 0.9.0.
 [patch.crates-io]
-sicompass-sdk = { git = "https://github.com/friendlyflow/sicompass-plugin-sdk", rev = "2b77bbad353529715eac4d45a8ddc3774ce03b81" }
+sicompass-sdk = { git = "file:///home/nico/Dropbox/Projects/friendlyflow/sicompass-plugin-sdk", rev = "0ee2481ef4ec47533efb5e984feb4d528da453bc" }
 #
 # The same rule, for working on the renderer and the app together:
 #

@@ -98,8 +98,9 @@ fn every_crate_that_can_trash_has_a_test_guard() {
     }
 
     assert_eq!(
-        checked, 2,
-        "expected exactly lib_filebrowser and lib_texteditor to depend on `trash`; \
+        checked, 3,
+        "expected exactly lib_filebrowser, lib_texteditor and the app (for a WASM \
+         plugin's `desktop.trash`, src/wasm_host/desktop.rs) to depend on `trash`; \
          if a crate gained or lost the dependency, update this count deliberately"
     );
 }
@@ -161,10 +162,12 @@ fn no_call_site_bypasses_the_trash_wrapper() {
         }
     }
 
-    // Two crates, each with a macOS and a non-macOS variant behind `#[cfg]`,
-    // both of which this sees because it reads source rather than compiling it.
+    // Three crates (lib_filebrowser, lib_texteditor, and the app for a WASM
+    // plugin's `desktop.trash`), each with a macOS and a non-macOS variant behind
+    // `#[cfg]`, all of which this sees because it reads source rather than
+    // compiling it.
     assert_eq!(
-        wrappers, 4,
-        "expected 4 `os_trash_delete` definitions (2 crates x 2 platform variants)"
+        wrappers, 6,
+        "expected 6 `os_trash_delete` definitions (3 crates x 2 platform variants)"
     );
 }

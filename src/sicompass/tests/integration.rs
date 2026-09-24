@@ -79,6 +79,9 @@ fn ensure_builtins() {
     // which is what the assertions here check anyway.
     sicompass_filebrowser::_set_test_no_trash(true);
     sicompass_text_editor::_set_test_no_trash(true);
+    // A WASM plugin's `desktop.trash` / `open-url` / `open-path` (wasm_host/desktop.rs).
+    sicompass::wasm_host::desktop::_set_test_no_trash(true);
+    sicompass::wasm_host::desktop::_set_test_no_open(true);
 }
 
 // ---------------------------------------------------------------------------

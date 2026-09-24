@@ -107,20 +107,38 @@ impl WasmProvider {
         plugin_dir: &Path,
         allowed_hosts: Vec<String>,
     ) -> Result<Self, String> {
+        Self::open_with_grants(
+            wasm_path,
+            plugin_name,
+            settings_section,
+            plugin_dir,
+            super::Grants::network(allowed_hosts),
+        )
+    }
+
+    /// [`WasmProvider::open`] with everything a plugin can be granted: network,
+    /// its storage folder, approved folders.
+    pub fn open_with_grants(
+        wasm_path: &Path,
+        plugin_name: &str,
+        settings_section: &str,
+        plugin_dir: &Path,
+        grants: super::Grants,
+    ) -> Result<Self, String> {
         let component = super::load_component(wasm_path)?;
 
         // Audit before instantiating. Instantiation would refuse an over-reaching
         // component anyway (the interface simply would not be linked), but the
         // failure would be an opaque link error; this names the mismatch.
-        super::audit_component_imports(&component, &allowed_hosts)
+        super::audit_component_imports(&component, &grants.allowed_hosts)
             .map_err(|e| format!("{}: {e}", wasm_path.display()))?;
 
-        Self::from_component(
+        Self::from_component_with_grants(
             &component,
             plugin_name,
             settings_section,
             plugin_dir,
-            allowed_hosts,
+            grants,
         )
     }
 
@@ -133,13 +151,30 @@ impl WasmProvider {
         plugin_dir: &Path,
         allowed_hosts: Vec<String>,
     ) -> Result<Self, String> {
+        Self::from_component_with_grants(
+            component,
+            plugin_name,
+            settings_section,
+            plugin_dir,
+            super::Grants::network(allowed_hosts),
+        )
+    }
+
+    /// [`WasmProvider::from_component`] with full [`super::Grants`].
+    pub fn from_component_with_grants(
+        component: &Component,
+        plugin_name: &str,
+        settings_section: &str,
+        plugin_dir: &Path,
+        grants: super::Grants,
+    ) -> Result<Self, String> {
         // Before `init`/`describe`, which may already translate the display name.
         for refusal in super::register_plugin_locales(plugin_name, plugin_dir) {
             tracing::warn!(target: "wasm_plugin", plugin = %plugin_name, "{refusal}");
             eprintln!("plugin '{plugin_name}': {refusal}");
         }
 
-        let state = HostState::new(plugin_name, settings_section, plugin_dir, allowed_hosts);
+        let state = HostState::with_grants(plugin_name, settings_section, plugin_dir, grants)?;
         let linker = super::linker_for(&state)?;
 
         let mut store = Store::new(super::engine(), state);

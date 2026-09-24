@@ -461,25 +461,25 @@ fn instantiate_user_plugin(plugin: &DiscoveredPlugin) -> Option<Box<dyn Provider
                 .parent()
                 .unwrap_or_else(|| std::path::Path::new("."));
 
-            let unsupported = crate::plugin_manifest::unsupported_permissions(m);
-            if !unsupported.is_empty() {
-                eprintln!(
-                    "sicompass: plugin '{}' was not loaded: it asks for {}, which this \
-                     sicompass cannot grant yet",
-                    m.name,
-                    unsupported.join(", ")
-                );
-                return None;
-            }
+            let grants = match crate::plugin_manifest::grants_for(
+                m,
+                &crate::plugin_manifest::read_approvals(),
+            ) {
+                Ok(g) => g,
+                Err(e) => {
+                    eprintln!("sicompass: plugin '{}' was not loaded: {e}", m.name);
+                    return None;
+                }
+            };
 
-            match crate::wasm_host::WasmProvider::open(
+            match crate::wasm_host::WasmProvider::open_with_grants(
                 &plugin.entry_path,
                 &m.name,
                 // Settings are injected under the display name, so that is the
                 // section `get_setting` has to read back from.
                 &m.display_name,
                 plugin_dir,
-                m.allowed_hosts(),
+                grants,
             ) {
                 Ok(p) => Some(Box::new(p) as Box<dyn Provider>),
                 // Log here rather than leaving it to the caller's generic "failed to

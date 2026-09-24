@@ -41,9 +41,15 @@ pub fn is_baseline(interface: &str) -> bool {
     sicompass_sdk::plugin_abi::is_wasi_baseline(interface)
 }
 
-/// The per-plugin WASI context: nothing granted.
-pub fn baseline_ctx(plugin_name: &str) -> WasiCtx {
+/// The per-plugin WASI context: the inert baseline, plus a preopen for each
+/// granted `(guest path, host path)`.
+pub fn ctx(plugin_name: &str, preopens: &[(std::path::PathBuf, std::path::PathBuf)]) -> Result<WasiCtx, String> {
     let mut b = WasiCtxBuilder::new();
+    for (guest, host) in preopens {
+        std::fs::create_dir_all(host).map_err(|e| format!("{}: {e}", host.display()))?;
+        b.preopened_dir(host, guest.to_string_lossy(), wasmtime_wasi::FsPerms::ReadWrite)
+            .map_err(|e| format!("cannot open {}: {e}", host.display()))?;
+    }
     b.stdout(LogStream::new(plugin_name, "stdout"))
         .stderr(LogStream::new(plugin_name, "stderr"))
         // Belt and braces: the audit already refuses a component that imports
@@ -51,7 +57,7 @@ pub fn baseline_ctx(plugin_name: &str) -> WasiCtx {
         .allow_tcp(false)
         .allow_udp(false)
         .allow_ip_name_lookup(false);
-    b.build()
+    Ok(b.build())
 }
 
 /// Link every WASI p2 interface wasmtime implements.

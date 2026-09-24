@@ -22,6 +22,7 @@
 //! crates; `wasmtime` is a third-party dependency like `sdl3` or `ash`, and plugin
 //! discovery (`plugin_manifest`) and instantiation (`programs`) already live here.
 
+pub mod desktop;
 pub mod host_fetch;
 pub mod limits;
 pub mod provider;
@@ -55,6 +56,30 @@ use self::sicompass::plugin as wit;
 
 pub use self::sicompass::plugin::types as wit_types;
 
+/// What a plugin instance is granted beyond the inert baseline.
+///
+/// Built by the caller from `plugin.json` and the user's approvals
+/// (`programs::grants_for`); the host only enforces it.
+#[derive(Debug, Clone, Default)]
+pub struct Grants {
+    /// Hosts the `net` interface may reach. Empty: `net` is not linked.
+    pub allowed_hosts: Vec<String>,
+    /// The plugin's own folder on the host, preopened at `/storage`.
+    pub storage_dir: Option<PathBuf>,
+    /// Folders the user approved, preopened at their own paths.
+    pub filesystem: Vec<PathBuf>,
+}
+
+impl Grants {
+    /// Network only: what a plugin got before ABI 0.2.
+    pub fn network(allowed_hosts: Vec<String>) -> Self {
+        Grants {
+            allowed_hosts,
+            ..Default::default()
+        }
+    }
+}
+
 /// Per-instance host state, reachable from every host function the guest calls.
 pub struct HostState {
     /// Manifest `name`. Prefixes log lines so plugin output is attributable.
@@ -79,6 +104,9 @@ pub struct HostState {
     pub wasi: wasmtime_wasi::WasiCtx,
     /// WASI's resources (streams, descriptors) for this instance.
     pub table: ResourceTable,
+    /// Directories this instance may reach, as `(guest path, host path)`: the
+    /// preopens, and the only places `desktop` paths may point into.
+    pub granted_roots: Vec<(PathBuf, PathBuf)>,
 }
 
 impl HostState {
@@ -88,19 +116,47 @@ impl HostState {
         plugin_dir: impl Into<PathBuf>,
         allowed_hosts: Vec<String>,
     ) -> Self {
+        Self::with_grants(
+            plugin_name,
+            settings_section,
+            plugin_dir,
+            Grants::network(allowed_hosts),
+        )
+        .expect("no directories to preopen, so building the context cannot fail")
+    }
+
+    /// State for an instance with `grants`. Fails when a granted directory
+    /// cannot be opened.
+    pub fn with_grants(
+        plugin_name: impl Into<String>,
+        settings_section: impl Into<String>,
+        plugin_dir: impl Into<PathBuf>,
+        grants: Grants,
+    ) -> Result<Self, String> {
         let plugin_name = plugin_name.into();
-        let fetch_policy = host_fetch::FetchPolicy::new(&plugin_name, &allowed_hosts);
-        let wasi = wasi::baseline_ctx(&plugin_name);
-        HostState {
+        let fetch_policy = host_fetch::FetchPolicy::new(&plugin_name, &grants.allowed_hosts);
+        let mut granted_roots = Vec::new();
+        if let Some(dir) = &grants.storage_dir {
+            granted_roots.push((
+                PathBuf::from(sicompass_sdk::plugin_abi::STORAGE_GUEST_DIR),
+                dir.clone(),
+            ));
+        }
+        for dir in &grants.filesystem {
+            granted_roots.push((dir.clone(), dir.clone()));
+        }
+        let wasi = wasi::ctx(&plugin_name, &granted_roots)?;
+        Ok(HostState {
             plugin_name,
             settings_section: settings_section.into(),
             plugin_dir: plugin_dir.into(),
-            allowed_hosts,
+            allowed_hosts: grants.allowed_hosts,
             fetch_policy,
             limits: limits::store_limits(),
             wasi,
             table: wasi::resource_table(),
-        }
+            granted_roots,
+        })
     }
 
     /// Whether this plugin may reach the network at all.
@@ -433,6 +489,13 @@ pub fn linker_for(state: &HostState) -> Result<Linker<HostState>, String> {
     // audit refuses anything else before instantiation. See `wasi`.
     wasi::add_to_linker(&mut linker)?;
 
+    // Always linked: every path it takes is confined to `granted_roots`.
+    wit::desktop::add_to_linker::<_, wasmtime::component::HasSelf<_>>(
+        &mut linker,
+        |s: &mut HostState| s,
+    )
+    .map_err(|e| format!("link sicompass:plugin/desktop: {e}"))?;
+
     if state.may_use_network() {
         // Step 3 fills this in with the mediated fetch (allowlist, robots.txt,
         // crawl-delay, per-domain quotas). Until then, declaring `allowedHosts`
@@ -665,6 +728,9 @@ pub use sicompass_sdk::plugin_abi::HOST_FUNCTIONS as HOST_IMPORTS;
 
 /// Import names that require `allowedHosts` in the manifest.
 pub use sicompass_sdk::plugin_abi::NET_FUNCTIONS as NET_IMPORTS;
+
+/// `sicompass:plugin/desktop`: always linked, paths confined to the grants.
+pub use sicompass_sdk::plugin_abi::DESKTOP_FUNCTIONS as DESKTOP_IMPORTS;
 
 #[cfg(test)]
 mod tests {
