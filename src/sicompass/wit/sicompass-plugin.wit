@@ -24,11 +24,21 @@
 // what it can do, so the host can compare it against the manifest's declaration and
 // reject a mismatch before instantiating anything.
 //
-// Guests target `wasm32-unknown-unknown`, NOT a `wasip2` target. wasip2's std
-// declares `wasi:*` imports (filesystem, sockets, cli, clocks) that the host links
-// none of, and tolerating them would mean `define_unknown_imports_as_traps()`,
-// which would reduce the import section from a capability set to a hint. There is
-// no WASI here at all, by design.
+// Guests target `wasm32-wasip2`, whose `std` imports WASI p2 interfaces of its own
+// (cli stdio, environment and exit, clocks, io, and filesystem when used). This
+// world does not name them: the host links a fixed **baseline** of WASI that
+// grants no authority by itself, and gates the rest by `plugin.json`:
+//
+//   baseline (always, inert): wasi:cli (empty environment and stdin, stdout and
+//     stderr into the host log, never a terminal), wasi:clocks, wasi:random,
+//     wasi:io, and wasi:filesystem with NO preopens, so it reaches nothing.
+//   gated: filesystem preopens (`storage`, `filesystem`), wasi:sockets
+//     (`sockets`), and the sicompass interfaces below that say so.
+//
+// The rule is unchanged from 0.1: every import that grants authority is linked
+// only when the manifest grants it, and the host audits a component's imports
+// against its manifest before instantiating it. Unknown imports are never
+// stubbed as traps. See sicompass's docs/plugin-platform.md.
 //
 // ---------------------------------------------------------------------------
 // Two representation decisions worth knowing before you read on
@@ -56,7 +66,7 @@
 //    The observable behaviour is identical, including the documented two-call
 //    semantics of the `take-*` requests (the host `take()`s its cached option).
 
-package sicompass:plugin@0.1.0;
+package sicompass:plugin@0.2.0;
 
 // ---------------------------------------------------------------------------
 // Shared data types
@@ -118,6 +128,38 @@ interface types {
     rows: u16,
     cells: list<cell>,
     cursor: option<tuple<u16, u16>>,
+    /// The one region the host paints as a selection, if any.
+    selection: option<selection>,
+    /// Rows after which the host leaves half a line height of extra space.
+    half-gap-rows: list<u16>,
+    /// How to draw `cursor`.
+    cursor-style: cursor-style,
+  }
+
+  /// A rectangle of cells, in cells.
+  record selection {
+    col: u16,
+    row: u16,
+    cols: u16,
+    rows: u16,
+  }
+
+  enum cursor-style {
+    block,
+    bar,
+  }
+
+  /// The host's active colours, packed `0xRRGGBBAA`, handed to the provider
+  /// before each `dashboard-render` so a dashboard matches the list around it
+  /// in either theme.
+  record palette {
+    background: u32,
+    text: u32,
+    header-sep: u32,
+    selected: u32,
+    ext-search: u32,
+    scroll-search: u32,
+    error: u32,
   }
 
   /// Keys the host maps SDL keycodes onto. Deliberately small: printable input
@@ -161,9 +203,12 @@ interface types {
 
   /// A cursor move requested outside a keypress, for when background work
   /// finishing would otherwise strand the user on a stale row.
-  enum navigation-request {
+  variant navigation-request {
     /// Descend into the children of the current element, as if Right were pressed.
     enter-children,
+    /// Put the list cursor on this row: indices at each level below the
+    /// provider's own top level.
+    select-path(list<u32>),
   }
 
   /// A reversible action, for the unified undo/redo timeline.
@@ -212,6 +257,11 @@ interface types {
     /// still be entered via a `dashboard-request`.
     manual-dashboard-entry-allowed: bool,
     dashboard-kind: dashboard-kind,
+    /// While the dashboard is open, Ctrl+Z and Ctrl+Y undo and redo through
+    /// the app's timeline (this provider's `undo` / `redo`) instead of being
+    /// forwarded as keys. It can only take keys away from the guest, never
+    /// give it more, which is why a sandboxed provider may set it.
+    dashboard-uses-app-undo: bool,
   }
 
   /// Everything the host needs from a provider once per frame, in one call.
@@ -259,12 +309,17 @@ interface host {
   /// that plugin's own keys — not arbitrary access to the user's config.
   get-setting: func(key: string) -> option<string>;
 
-  /// Milliseconds since the Unix epoch. Guests have no `wasi:clocks`.
+  /// Milliseconds since the Unix epoch. Kept for guests built before `std`'s
+  /// clocks (the baseline `wasi:clocks`) were available; either works.
   now-millis: func() -> u64;
 
   /// Look up a key in the host's Fluent bundles, so a plugin's user-visible text
-  /// localizes through the same path a built-in's does.
+  /// localizes through the same path a built-in's does. A plugin ships its own
+  /// messages in `locales/<lang>.ftl`, every id prefixed with `<name>-`.
   translate: func(key: string) -> string;
+
+  /// `translate` with Fluent arguments, e.g. `("count", "3")`.
+  translate-args: func(key: string, args: list<tuple<string, string>>) -> string;
 
   /// Read one of this plugin's own data files.
   ///
@@ -331,7 +386,7 @@ interface net {
 interface provider {
   use types.{
     ffon, list-item, search-result, frame, key, descriptor, poll-result,
-    provider-op,
+    provider-op, palette,
   };
 
   // ---- Lifecycle ---------------------------------------------------------
@@ -487,8 +542,16 @@ interface provider {
   /// The cell viewport resized. Called once on entry and on every later change.
   dashboard-resize: func(rows: u16, cols: u16);
 
+  /// Where the list cursor was when the dashboard was entered, as indices at
+  /// each level below the provider's own top level. Called immediately before
+  /// `enter-dashboard`.
+  set-dashboard-entry: func(path: list<u32>);
+
   enter-dashboard: func();
   leave-dashboard: func();
+
+  /// The host's active colours. Called before each `dashboard-render`.
+  set-dashboard-palette: func(p: palette);
 }
 
 // ---------------------------------------------------------------------------
@@ -496,8 +559,9 @@ interface provider {
 // ---------------------------------------------------------------------------
 
 /// What a sicompass plugin is: it may call `host` (always) and `net` (only if its
-/// manifest declares `allowedHosts`), and it must provide `provider`. Nothing else
-/// is reachable — there is no `wasi:*` here at all.
+/// manifest declares `allowedHosts`), and it must provide `provider`. The WASI p2
+/// interfaces its `std` needs are linked by the host as described at the top of
+/// this file, not named here.
 world plugin {
   import host;
   import net;

@@ -92,18 +92,25 @@ declare, and gating it would have meant making `host` itself conditional, which 
 exactly what makes `net`'s gate legible. The import still appears in a built
 component's import list, so the audit below still sees that a plugin uses it.
 
-## Guests target `wasm32-unknown-unknown`
+## Guests target `wasm32-wasip2` (ABI 0.2)
 
-Not `wasm32-wasip2`. wasip2's standard library declares `wasi:*` imports that the
-host links none of, so such a guest would only instantiate under
-`define_unknown_imports_as_traps()` — and that would reduce the import section from
-a capability set to a hint.
+Since ABI 0.2 (`sicompass:plugin@0.2.0`) guests are built for `wasm32-wasip2`,
+which emits a component directly. Its `std` imports a few WASI p2 interfaces, and
+the host links exactly those as an **inert baseline**
+(`wasm_host::wasi::BASELINE_INTERFACES`): stdout and stderr go to the host log,
+the environment and stdin are empty, clocks and randomness work, and the
+filesystem has no preopened directory, so `std::fs` finds nothing. Everything
+that grants authority is linked only when `plugin.json`'s `permissions` grant it
+(docs/plugin-platform.md §4), and the audit below refuses any other WASI import
+before instantiation. So it stays true that **a component's import list is what
+it can do**, and `tests/wasm_plugin.rs` asserts it on a real artifact.
 
-Keeping guests WASI-free is what makes this true: **a component's import list is
-what it can do.** `tests/wasm_plugin.rs` asserts it on a real artifact.
+A plugin built for ABI 0.1 (`wasm32-unknown-unknown`) is refused with a message
+saying it needs a rebuild. A plugin ships its own translations in
+`locales/<lang>.ftl`, and every message id must start with `<name>-`.
 
-It also means componentizing needs no adapter, and no extra Rust target: nixpkgs'
-rustc already ships `wasm32-unknown-unknown` std.
+The guest toolchain lives in the SDK repo's dev shell (rust-overlay with the
+`wasm32-wasip2` target): nixpkgs' rustc has no `std` for it.
 
 ## The install-time audit
 

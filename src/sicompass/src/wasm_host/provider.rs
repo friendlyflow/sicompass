@@ -45,9 +45,9 @@ use std::cell::RefCell;
 use std::path::Path;
 
 use sicompass_sdk::{
-    CellAttrs, DashboardCell, DashboardFrame, DashboardKey, DashboardKeysym, DashboardKind,
-    DashboardRequest, FfonElement, ListItem, NavigationRequest, Provider, SearchResultItem,
-    TimelineEntry, ffon,
+    CellAttrs, DashboardCell, DashboardCursor, DashboardFrame, DashboardKey, DashboardKeysym,
+    DashboardKind, DashboardPalette, DashboardRequest, DashboardSelection, FfonElement, ListItem,
+    NavigationRequest, Provider, SearchResultItem, TimelineEntry, ffon,
 };
 use wasmtime::Store;
 use wasmtime::component::Component;
@@ -133,6 +133,12 @@ impl WasmProvider {
         plugin_dir: &Path,
         allowed_hosts: Vec<String>,
     ) -> Result<Self, String> {
+        // Before `init`/`describe`, which may already translate the display name.
+        for refusal in super::register_plugin_locales(plugin_name, plugin_dir) {
+            tracing::warn!(target: "wasm_plugin", plugin = %plugin_name, "{refusal}");
+            eprintln!("plugin '{plugin_name}': {refusal}");
+        }
+
         let state = HostState::new(plugin_name, settings_section, plugin_dir, allowed_hosts);
         let linker = super::linker_for(&state)?;
 
@@ -339,6 +345,7 @@ fn default_descriptor(name: &str) -> wit_types::Descriptor {
         supports_structural_edit: false,
         manual_dashboard_entry_allowed: true,
         dashboard_kind: wit_types::DashboardKind::None,
+        dashboard_uses_app_undo: false,
     }
 }
 
@@ -462,19 +469,33 @@ fn to_sdk_frame(f: wit_types::Frame) -> Option<DashboardFrame> {
     // guest meant would put the screen reader's focus somewhere it never asked for.
     let cursor = f.cursor.filter(|(col, row)| *col < f.cols && *row < f.rows);
 
+    // A selection is drawn as the host's own rounded, inset highlight. Until ABI
+    // 0.2 a guest could not name one, so it could not borrow that furniture. Now
+    // every program is a guest, and the project board's dashboard needs it. The
+    // dashboard is the plugin's own full-screen surface, so a highlight inside it
+    // cannot pass for anything outside it. It is clamped to the grid, and one that
+    // starts outside it is dropped, like the cursor.
+    let selection = f.selection.and_then(|s| {
+        (s.col < f.cols && s.row < f.rows).then(|| DashboardSelection {
+            col: s.col,
+            row: s.row,
+            cols: s.cols.min(f.cols - s.col),
+            rows: s.rows.min(f.rows - s.row),
+        })
+    });
+    let half_gap_rows = f.half_gap_rows.into_iter().filter(|r| *r < f.rows).collect();
+
     Some(DashboardFrame {
         cols: f.cols,
         rows: f.rows,
         cells,
         cursor,
-        // Not carried across the WIT. A selection is drawn as the host's own
-        // rounded, inset highlight, so letting a guest name one would let it
-        // borrow the app's selection furniture for an arbitrary span. The plain
-        // per-cell fills a guest returns are what its colours should look like.
-        selection: None,
-        half_gap_rows: Vec::new(),
-        // Guests draw grids, and a grid's cursor is a cell.
-        cursor_style: sicompass_sdk::DashboardCursor::Block,
+        selection,
+        half_gap_rows,
+        cursor_style: match f.cursor_style {
+            wit_types::CursorStyle::Block => DashboardCursor::Block,
+            wit_types::CursorStyle::Bar => DashboardCursor::Bar,
+        },
     })
 }
 
@@ -584,16 +605,21 @@ impl Provider for WasmProvider {
         self.polled.announcement.take()
     }
 
-    // `dashboard_uses_app_undo` is deliberately not forwarded to the guest. It
-    // decides whether Ctrl+Z reaches the app instead of the provider, and a
-    // sandboxed plugin does not get to choose which keys it intercepts — the
-    // same reasoning that keeps a dashboard exit key out of a guest's reach.
-    // The trait's `false` default stands.
+    // Forwarded since ABI 0.2. It decides whether Ctrl+Z / Ctrl+Y reach the app
+    // (which then calls this provider's own `undo` / `redo`) instead of the guest
+    // as keys. It can only take keys away from a guest, never give it more, so a
+    // sandboxed plugin may choose it. A dashboard exit key stays out of reach.
+    fn dashboard_uses_app_undo(&self) -> bool {
+        self.descriptor.dashboard_uses_app_undo
+    }
 
     fn take_navigation_request(&mut self) -> Option<NavigationRequest> {
         // `take`, not read: the trait requires a second call to return None.
         self.polled.navigation_request.take().map(|r| match r {
             wit_types::NavigationRequest::EnterChildren => NavigationRequest::EnterChildren,
+            wit_types::NavigationRequest::SelectPath(path) => {
+                NavigationRequest::SelectPath(path.into_iter().map(|i| i as usize).collect())
+            }
         })
     }
 
@@ -955,6 +981,32 @@ impl Provider for WasmProvider {
         });
     }
 
+    fn set_dashboard_entry(&mut self, path: &[usize]) {
+        // Indices beyond u32 cannot name a real row; saturate rather than wrap.
+        let path: Vec<u32> = path
+            .iter()
+            .map(|&i| u32::try_from(i).unwrap_or(u32::MAX))
+            .collect();
+        let _ = self.call("set-dashboard-entry", |g, s| {
+            g.call_set_dashboard_entry(s, &path)
+        });
+    }
+
+    fn set_dashboard_palette(&mut self, palette: DashboardPalette) {
+        let p = wit_types::Palette {
+            background: palette.background,
+            text: palette.text,
+            header_sep: palette.header_sep,
+            selected: palette.selected,
+            ext_search: palette.ext_search,
+            scroll_search: palette.scroll_search,
+            error: palette.error,
+        };
+        let _ = self.call("set-dashboard-palette", |g, s| {
+            g.call_set_dashboard_palette(s, p)
+        });
+    }
+
     fn enter_dashboard(&mut self) {
         let _ = self.call("enter-dashboard", |g, s| g.call_enter_dashboard(s));
     }
@@ -1095,6 +1147,9 @@ mod tests {
             rows,
             cells: (0..cell_count).map(|_| wit_cell('x')).collect(),
             cursor: None,
+            selection: None,
+            half_gap_rows: Vec::new(),
+            cursor_style: wit_types::CursorStyle::Block,
         }
     }
 

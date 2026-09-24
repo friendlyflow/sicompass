@@ -115,8 +115,88 @@ pub struct PluginManifest {
     /// individually, because `evil.example.com` is not `example.com`. Listing them
     /// here is also what shows the user, before they enable the plugin, where it
     /// intends to connect.
+    ///
+    /// Also accepted as `permissions.allowedHosts`, where the other permissions
+    /// live. The two lists are merged; see [`PluginManifest::allowed_hosts`].
+    #[serde(default, rename = "allowedHosts")]
+    pub top_level_allowed_hosts: Vec<String>,
+    /// What the plugin may touch beyond the inert baseline every plugin gets.
+    /// See docs/plugin-platform.md §4.
     #[serde(default)]
+    pub permissions: Permissions,
+    /// A Fluent id in the plugin's own `locales/`, describing it in one line for
+    /// the Store.
+    #[serde(default)]
+    pub description: Option<String>,
+    /// A paid service the plugin uses, shown before it is installed.
+    #[serde(default)]
+    pub service: Option<Service>,
+}
+
+/// `permissions` in `plugin.json`. Everything defaults to "not granted".
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Permissions {
+    /// Hosts the `net` interface may reach (same as the top-level key).
     pub allowed_hosts: Vec<String>,
+    /// A folder of its own: `app_data_dir()/<name>`, preopened.
+    pub storage: bool,
+    /// Folders the user grants, preopened at the same path.
+    pub filesystem: Vec<String>,
+    /// Programs it may start.
+    pub process: Vec<String>,
+    /// `host:port` pairs it may open sockets to.
+    pub sockets: Vec<String>,
+}
+
+/// `service` in `plugin.json`: a paid service on a server, which the Store shows
+/// before install. The plugin itself stays free (docs/plugin-platform.md §1).
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct Service {
+    /// Catalog tier id, for example `friendlyflow/cloud`.
+    pub tier: String,
+    /// A Fluent id in the plugin's `locales/`: what the service does.
+    #[serde(default)]
+    pub what: Option<String>,
+}
+
+impl PluginManifest {
+    /// Hosts the plugin may reach: the top-level `allowedHosts` and
+    /// `permissions.allowedHosts`, merged, in declaration order, without duplicates.
+    pub fn allowed_hosts(&self) -> Vec<String> {
+        let mut hosts: Vec<String> = Vec::new();
+        for h in self
+            .top_level_allowed_hosts
+            .iter()
+            .chain(&self.permissions.allowed_hosts)
+        {
+            if !hosts.iter().any(|x| x.eq_ignore_ascii_case(h)) {
+                hosts.push(h.clone());
+            }
+        }
+        hosts
+    }
+
+    /// Permissions this sicompass cannot grant yet (parts 4.4-4.7 of
+    /// docs/plugin-platform.md). A plugin asking for one is not loaded at all,
+    /// rather than loaded without what it asked for.
+    pub fn unsupported_permissions(&self) -> Vec<&'static str> {
+        let p = &self.permissions;
+        let mut out = Vec::new();
+        if p.storage {
+            out.push("storage");
+        }
+        if !p.filesystem.is_empty() {
+            out.push("filesystem");
+        }
+        if !p.process.is_empty() {
+            out.push("process");
+        }
+        if !p.sockets.is_empty() {
+            out.push("sockets");
+        }
+        out
+    }
 }
 
 fn default_hot_reload() -> bool {
@@ -208,6 +288,53 @@ pub fn discover_user_plugins() -> Vec<DiscoveredPlugin> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn permissions_parse_and_both_allowed_hosts_lists_merge() {
+        let m: PluginManifest = serde_json::from_str(
+            r#"{
+                "name": "notes", "displayName": "notes", "entry": "plugin.wasm",
+                "allowedHosts": ["cloud.example.org"],
+                "permissions": {
+                    "allowedHosts": ["Cloud.example.org", "api.example.org"],
+                    "storage": true
+                },
+                "description": "notes-description",
+                "service": { "tier": "friendlyflow/cloud", "what": "notes-service" }
+            }"#,
+        )
+        .unwrap();
+        assert_eq!(
+            m.allowed_hosts(),
+            vec!["cloud.example.org".to_owned(), "api.example.org".to_owned()]
+        );
+        assert!(m.permissions.storage);
+        assert_eq!(m.description.as_deref(), Some("notes-description"));
+        assert_eq!(m.service.as_ref().map(|s| s.tier.as_str()), Some("friendlyflow/cloud"));
+    }
+
+    #[test]
+    fn nothing_is_granted_by_default() {
+        let m: PluginManifest = serde_json::from_str(
+            r#"{ "name": "x", "displayName": "x", "entry": "plugin.wasm" }"#,
+        )
+        .unwrap();
+        assert_eq!(m.permissions, Permissions::default());
+        assert!(m.allowed_hosts().is_empty());
+        assert!(m.unsupported_permissions().is_empty());
+    }
+
+    #[test]
+    fn permissions_this_host_cannot_grant_yet_are_named() {
+        let m: PluginManifest = serde_json::from_str(
+            r#"{ "name": "x", "displayName": "x", "entry": "plugin.wasm",
+                 "permissions": { "storage": true, "process": ["git"],
+                                  "sockets": ["imap.example.org:993"] } }"#,
+        )
+        .unwrap();
+        assert_eq!(m.unsupported_permissions(), vec!["storage", "process", "sockets"]);
+    }
+
     use std::io::Write;
 
     fn write_manifest(dir: &tempfile::TempDir, json: &str) -> PathBuf {
@@ -367,7 +494,7 @@ mod tests {
             r#"{"name":"w","displayName":"W","type":"wasm","entry":"p.wasm"}"#,
         );
         let m = load_manifest(&path).unwrap();
-        assert!(m.allowed_hosts.is_empty());
+        assert!(m.allowed_hosts().is_empty());
     }
 
     #[test]
@@ -385,7 +512,7 @@ mod tests {
         );
         let m = load_manifest(&path).unwrap();
         assert_eq!(
-            m.allowed_hosts,
+            m.allowed_hosts(),
             vec![
                 "api.weather.example".to_owned(),
                 "tiles.weather.example".to_owned()
@@ -406,7 +533,7 @@ mod tests {
         );
         let m = load_manifest(&path).unwrap();
         assert_eq!(m.plugin_type, PluginType::Factory);
-        assert_eq!(m.allowed_hosts, vec!["example.com".to_owned()]);
+        assert_eq!(m.allowed_hosts(), vec!["example.com".to_owned()]);
     }
 
     #[test]
@@ -498,7 +625,7 @@ mod tests {
         assert_eq!(found[0].entry_path, dir.join("plugin.wasm"));
         assert_eq!(found[0].entry_path.parent().unwrap(), dir);
         assert_eq!(
-            found[0].manifest.allowed_hosts,
+            found[0].manifest.allowed_hosts(),
             vec!["api.weather.example".to_owned()]
         );
     }

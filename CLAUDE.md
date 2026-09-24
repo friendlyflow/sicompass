@@ -3,7 +3,8 @@
 ## Environment (Nix: NixOS, other Linux, and macOS)
 
 The whole toolchain (`cargo`, `rustc`, `clippy`, `rustfmt`, `graphify`,
-`lld` + `wasm-tools` (for WASM plugin guests),
+`lld` + `wasm-tools` (to inspect WASM plugin guests; they are built in the
+SDK repo's shell, which has the `wasm32-wasip2` target),
 `cmake` (SDL3 is compiled from source by the `bundled-sdl3` feature),
 `librsvg`/`imagemagick`/`icoutils`/`libicns` (icons),
 `xvfb-run`, SDL3/Vulkan link paths) comes from the flake dev shell in

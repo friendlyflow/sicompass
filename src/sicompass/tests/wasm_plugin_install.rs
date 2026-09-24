@@ -93,7 +93,7 @@ fn a_plugin_installed_on_disk_is_discovered_and_loads() {
     assert_eq!(hello.manifest.display_name, "hello demo");
     assert_eq!(hello.entry_path, plugin_dir.join("plugin.wasm"));
     // Absent `allowedHosts` must mean no network, not unrestricted network.
-    assert!(hello.manifest.allowed_hosts.is_empty());
+    assert!(hello.manifest.allowed_hosts().is_empty());
     assert!(
         !discovered.iter().any(|p| p.manifest.name == "not-a-plugin"),
         "a directory without a manifest should be skipped"
@@ -106,7 +106,7 @@ fn a_plugin_installed_on_disk_is_discovered_and_loads() {
         &hello.manifest.name,
         &hello.manifest.display_name,
         hello.entry_path.parent().unwrap(),
-        hello.manifest.allowed_hosts.clone(),
+        hello.manifest.allowed_hosts(),
     )
     .expect("the discovered plugin should instantiate");
 

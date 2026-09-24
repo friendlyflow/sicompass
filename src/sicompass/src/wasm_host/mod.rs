@@ -25,12 +25,13 @@
 pub mod host_fetch;
 pub mod limits;
 pub mod provider;
+pub mod wasi;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
-use wasmtime::component::{Component, Linker};
+use wasmtime::component::{Component, Linker, ResourceTable};
 use wasmtime::{Config, Engine, StoreLimits};
 
 pub use provider::WasmProvider;
@@ -74,6 +75,10 @@ pub struct HostState {
     pub fetch_policy: host_fetch::FetchPolicy,
     /// Memory/table/instance caps. Wasmtime reaches this through `limiter()`.
     pub limits: StoreLimits,
+    /// The WASI p2 context: the inert baseline (see [`wasi`]).
+    pub wasi: wasmtime_wasi::WasiCtx,
+    /// WASI's resources (streams, descriptors) for this instance.
+    pub table: ResourceTable,
 }
 
 impl HostState {
@@ -85,6 +90,7 @@ impl HostState {
     ) -> Self {
         let plugin_name = plugin_name.into();
         let fetch_policy = host_fetch::FetchPolicy::new(&plugin_name, &allowed_hosts);
+        let wasi = wasi::baseline_ctx(&plugin_name);
         HostState {
             plugin_name,
             settings_section: settings_section.into(),
@@ -92,6 +98,8 @@ impl HostState {
             allowed_hosts,
             fetch_policy,
             limits: limits::store_limits(),
+            wasi,
+            table: wasi::resource_table(),
         }
     }
 
@@ -272,6 +280,14 @@ impl wit::host::Host for HostState {
     fn translate(&mut self, key: String) -> String {
         sicompass_sdk::localize::t(&key)
     }
+
+    fn translate_args(&mut self, key: String, args: Vec<(String, String)>) -> String {
+        let mut fluent = sicompass_sdk::localize::Args::new();
+        for (name, value) in args {
+            fluent.set(name, value);
+        }
+        sicompass_sdk::localize::t_args(&key, &fluent)
+    }
 }
 
 /// Read one setting from the plugin's own section of the user's `settings.json`.
@@ -412,6 +428,11 @@ pub fn linker_for(state: &HostState) -> Result<Linker<HostState>, String> {
     )
     .map_err(|e| format!("link sicompass:plugin/host: {e}"))?;
 
+    // The WASI p2 baseline `std` needs. Linked in full, made inert by the
+    // context, and only the baseline ever reaches an instance, because the
+    // audit refuses anything else before instantiation. See `wasi`.
+    wasi::add_to_linker(&mut linker)?;
+
     if state.may_use_network() {
         // Step 3 fills this in with the mediated fetch (allowlist, robots.txt,
         // crawl-delay, per-domain quotas). Until then, declaring `allowedHosts`
@@ -479,6 +500,12 @@ pub fn audit_component_imports(
     let engine = engine();
     let ty = component.component_type();
 
+    // The ABI version first: a guest built for another one would otherwise fail
+    // with an opaque type mismatch somewhere deep in instantiation.
+    for (name, _) in ty.imports(engine).chain(ty.exports(engine)) {
+        check_abi_version(name)?;
+    }
+
     for (name, item) in ty.imports(engine) {
         // Strip the `@x.y.z` version suffix; the tables are version-agnostic.
         let interface = name.split('@').next().unwrap_or(name);
@@ -486,6 +513,19 @@ pub fn audit_component_imports(
         // A types-only interface carries no functions and grants nothing.
         if interface == "sicompass:plugin/types" {
             continue;
+        }
+
+        // WASI: the inert baseline is accepted as a whole interface (it grants
+        // nothing, see `wasi`). Anything else from WASI needs a permission this
+        // plugin was not given.
+        if interface.starts_with("wasi:") {
+            if wasi::is_baseline(interface) {
+                continue;
+            }
+            return Err(format!(
+                "plugin imports `{interface}`, which needs a permission its plugin.json \
+                 does not grant (or this sicompass does not support yet)"
+            ));
         }
 
         let known = HOST_IMPORTS
@@ -534,6 +574,133 @@ pub fn audit_component_imports(
     }
 
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Translations a plugin ships
+// ---------------------------------------------------------------------------
+
+/// Where a plugin's Fluent files live, relative to its install directory:
+/// `locales/<lang>.ftl`, for example `locales/nl-BE.ftl`.
+pub const LOCALE_SUBDIR: &str = "locales";
+
+/// Register a plugin's `locales/*.ftl` into the app's Fluent bundles, so its
+/// `translate` / `translate-args` calls resolve like a built-in's.
+///
+/// **Every message id must start with `<name>-`** (and every term with
+/// `-<name>-`), or the whole file is refused. The bundles are shared by every
+/// provider and the first definition of an id wins, so without the prefix a
+/// plugin could lose its strings to a built-in, or take over another plugin's.
+///
+/// Each (plugin, locale) is registered once per process. Fluent cannot replace a
+/// message, so a plugin updated in place keeps its old strings until restart.
+///
+/// Returns the refusals, one line each, for the caller to log.
+pub fn register_plugin_locales(plugin_name: &str, plugin_dir: &Path) -> Vec<String> {
+    static DONE: OnceLock<std::sync::Mutex<std::collections::HashSet<(String, String)>>> =
+        OnceLock::new();
+    let done = DONE.get_or_init(Default::default);
+
+    let mut refusals = Vec::new();
+    let Ok(entries) = std::fs::read_dir(plugin_dir.join(LOCALE_SUBDIR)) else {
+        return refusals;
+    };
+    let mut files: Vec<PathBuf> = entries
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|x| x == "ftl"))
+        .collect();
+    files.sort();
+
+    for path in files {
+        let Some(locale) = path.file_stem().and_then(|s| s.to_str()).map(str::to_owned) else {
+            continue;
+        };
+        let key = (plugin_name.to_owned(), locale.clone());
+        if done.lock().map(|d| d.contains(&key)).unwrap_or(true) {
+            continue;
+        }
+        let source = match std::fs::read_to_string(&path) {
+            Ok(s) => s,
+            Err(e) => {
+                refusals.push(format!("{}: {e}", path.display()));
+                continue;
+            }
+        };
+        if let Err(id) = check_locale_prefix(plugin_name, &source) {
+            refusals.push(format!(
+                "{}: message `{id}` does not start with `{plugin_name}-`, so the file \
+                 was not loaded",
+                path.display()
+            ));
+            continue;
+        }
+        match sicompass_sdk::localize::register_bundle(&locale, &source) {
+            Ok(()) => {
+                if let Ok(mut d) = done.lock() {
+                    d.insert(key);
+                }
+            }
+            Err(e) => refusals.push(format!("{}: {e}", path.display())),
+        }
+    }
+    refusals
+}
+
+/// The first message or term id in `source` that lacks the plugin's prefix.
+///
+/// Fluent ids start at column 0 (`id = ...`, `-term = ...`). Continuation lines,
+/// attributes (`.attr = ...`), comments and blank lines all start otherwise.
+fn check_locale_prefix(plugin_name: &str, source: &str) -> Result<(), String> {
+    let message_prefix = format!("{plugin_name}-");
+    let term_prefix = format!("-{plugin_name}-");
+    for line in source.lines() {
+        let Some((head, _)) = line.split_once('=') else {
+            continue;
+        };
+        let id = head.trim_end();
+        let is_id = !id.is_empty()
+            && !line.starts_with(char::is_whitespace)
+            && !id.starts_with('#')
+            && !id.starts_with('.')
+            && id
+                .trim_start_matches('-')
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+        if !is_id {
+            continue;
+        }
+        let ok = if id.starts_with('-') {
+            id.starts_with(&term_prefix)
+        } else {
+            id.starts_with(&message_prefix)
+        };
+        if !ok {
+            return Err(id.to_owned());
+        }
+    }
+    Ok(())
+}
+
+/// The plugin ABI this host implements: the `sicompass:plugin` package version.
+pub const ABI_VERSION: &str = "0.2.0";
+
+/// Refuse a `sicompass:plugin/...@x.y.z` import or export of another ABI version,
+/// with a message a user or plugin author can act on.
+fn check_abi_version(name: &str) -> Result<(), String> {
+    let Some(rest) = name.strip_prefix("sicompass:plugin/") else {
+        return Ok(());
+    };
+    let version = rest.split_once('@').map(|(_, v)| v).unwrap_or("");
+    if version == ABI_VERSION {
+        return Ok(());
+    }
+    Err(format!(
+        "this plugin was built for sicompass plugin ABI {}, and this sicompass runs \
+         ABI {ABI_VERSION}. It has to be rebuilt against the current sicompass-pdk \
+         (for wasm32-wasip2); an update of the plugin usually does that.",
+        if version.is_empty() { "(unversioned)" } else { version }
+    ))
 }
 
 // ---------------------------------------------------------------------------
@@ -602,6 +769,7 @@ pub const HOST_IMPORTS: &[(&str, &str)] = &[
     ("sicompass:plugin/host", "get-setting"),
     ("sicompass:plugin/host", "now-millis"),
     ("sicompass:plugin/host", "translate"),
+    ("sicompass:plugin/host", "translate-args"),
     ("sicompass:plugin/host", "read-asset"),
 ];
 
@@ -614,6 +782,33 @@ pub const NET_IMPORTS: &[(&str, &str)] = &[
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn locale_ids_must_carry_the_plugin_prefix() {
+        let good = "# comment\nhello-name = hi\n    .title = attr = still fine\nhello-x =\n    multi = line\n-hello-brand = B\n";
+        assert_eq!(check_locale_prefix("hello", good), Ok(()));
+        assert_eq!(
+            check_locale_prefix("hello", "hello-a = 1\nsettings-title = stolen\n"),
+            Err("settings-title".to_owned())
+        );
+        assert_eq!(
+            check_locale_prefix("hello", "-brand = B\n"),
+            Err("-brand".to_owned())
+        );
+        // A plugin called `hello` may not claim `helloworld-…` either.
+        assert_eq!(
+            check_locale_prefix("hello", "helloworld-x = 1\n"),
+            Err("helloworld-x".to_owned())
+        );
+    }
+
+    #[test]
+    fn another_abi_version_is_refused_with_a_readable_reason() {
+        assert!(check_abi_version("sicompass:plugin/host@0.2.0").is_ok());
+        assert!(check_abi_version("wasi:cli/stdout@0.2.9").is_ok());
+        let err = check_abi_version("sicompass:plugin/host@0.1.0").unwrap_err();
+        assert!(err.contains("ABI 0.1.0") && err.contains("rebuilt"), "{err}");
+    }
 
     fn state() -> HostState {
         HostState::new("demo", "demo", "/tmp/sicompass-test-plugin", Vec::new())
@@ -974,7 +1169,8 @@ mod tests {
                 .iter()
                 .all(|(i, _)| *i == "sicompass:plugin/net")
         );
-        assert_eq!(HOST_IMPORTS.len(), 5);
+        // 6 since ABI 0.2: `translate-args` joined `translate`.
+        assert_eq!(HOST_IMPORTS.len(), 6);
         assert_eq!(NET_IMPORTS.len(), 2);
     }
 }

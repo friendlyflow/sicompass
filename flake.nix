@@ -56,21 +56,17 @@
               clippy
               rustfmt
 
-              # WASM plugin guests. No extra Rust target is needed: nixpkgs'
-              # rustc already ships std for wasm32-unknown-unknown, which is the
-              # target guests use. (Deliberately not a wasip2 target — wasip2's
-              # std declares wasi:* imports that the sicompass host links none
-              # of, and a guest free of WASI is what makes its import section a
-              # true capability set.)
+              # WASM plugin guests are built in the sicompass-plugin-sdk repo's
+              # own dev shell, not here: they target wasm32-wasip2 (ABI 0.2), and
+              # nixpkgs' rustc has no std for it, so that shell takes Rust from
+              # rust-overlay. This shell keeps two tools for inspecting guests:
               #
-              # lld: nixpkgs strips rustc's bundled rust-lld, so the wasm link
-              # step needs wasm-ld from here. Without it, `cargo build --target
-              # wasm32-unknown-unknown` fails with "linker `lld` not found"
-              # (`cargo check` is unaffected, which is easy to be fooled by).
+              # lld: nixpkgs strips rustc's bundled rust-lld, so a
+              # `wasm32-unknown-unknown` link needs wasm-ld from here (only for
+              # rebuilding an ABI 0.1 guest, which nothing should need).
               lld
-              # wasm-tools: `wasm-tools component new` wraps a core module as a
-              # component. No WASI adapter is involved, precisely because there
-              # are no WASI imports to adapt.
+              # wasm-tools: `wasm-tools component wit plugin.wasm` prints what a
+              # guest imports, which is its capability set.
               wasm-tools
 
               # git: the sicompass-gitclient provider shells out to it rather

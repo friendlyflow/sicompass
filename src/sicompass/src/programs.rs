@@ -461,6 +461,17 @@ fn instantiate_user_plugin(plugin: &DiscoveredPlugin) -> Option<Box<dyn Provider
                 .parent()
                 .unwrap_or_else(|| std::path::Path::new("."));
 
+            let unsupported = m.unsupported_permissions();
+            if !unsupported.is_empty() {
+                eprintln!(
+                    "sicompass: plugin '{}' was not loaded: it asks for {}, which this \
+                     sicompass cannot grant yet",
+                    m.name,
+                    unsupported.join(", ")
+                );
+                return None;
+            }
+
             match crate::wasm_host::WasmProvider::open(
                 &plugin.entry_path,
                 &m.name,
@@ -468,7 +479,7 @@ fn instantiate_user_plugin(plugin: &DiscoveredPlugin) -> Option<Box<dyn Provider
                 // section `get_setting` has to read back from.
                 &m.display_name,
                 plugin_dir,
-                m.allowed_hosts.clone(),
+                m.allowed_hosts(),
             ) {
                 Ok(p) => Some(Box::new(p) as Box<dyn Provider>),
                 // Log here rather than leaving it to the caller's generic "failed to
@@ -569,10 +580,11 @@ fn load_user_plugins(renderer: &mut AppRenderer, mut settings: Option<&mut dyn P
                     // is noise. Naming the capabilities makes it obvious at a glance
                     // when a manifest grants more than its author meant to.
                     if m.plugin_type == PluginType::Wasm {
-                        let caps = if m.allowed_hosts.is_empty() {
+                        let hosts = m.allowed_hosts();
+                        let caps = if hosts.is_empty() {
                             "no network".to_owned()
                         } else {
-                            format!("network: {}", m.allowed_hosts.join(", "))
+                            format!("network: {}", hosts.join(", "))
                         };
                         eprintln!("sicompass: loaded wasm plugin '{}' ({caps})", m.name);
                     }
@@ -2307,7 +2319,10 @@ mod tests {
             min_app_version: None,
             pubkey: None,
             hot_reload: true,
-            allowed_hosts: vec![],
+            top_level_allowed_hosts: vec![],
+            permissions: Default::default(),
+            description: None,
+            service: None,
         }
     }
 
@@ -2332,7 +2347,7 @@ mod tests {
         let mut manifest = make_test_manifest(name);
         manifest.plugin_type = PluginType::Wasm;
         manifest.entry = fixture.to_owned();
-        manifest.allowed_hosts = allowed_hosts;
+        manifest.top_level_allowed_hosts = allowed_hosts;
         DiscoveredPlugin {
             manifest,
             entry_path: wasm_fixture(fixture),

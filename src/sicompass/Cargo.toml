@@ -363,6 +363,9 @@ tracing-subscriber = { workspace = true }
 tracing-appender = { workspace = true }
 
 wasmtime = { workspace = true }
+wasmtime-wasi = { workspace = true }
+# `Bytes`, the buffer type wasmtime-wasi's stream traits take (wasm_host/wasi.rs).
+bytes = "1"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 accesskit_unix = { workspace = true }

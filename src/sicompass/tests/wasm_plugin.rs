@@ -7,20 +7,24 @@
 //!
 //! # The fixture
 //!
-//! `tests/fixtures/wasm/hello.wasm` is `examples/hello-plugin` from the
-//! sicompass-plugin-sdk repo, built for `wasm32-unknown-unknown` and componentized:
+//! `tests/fixtures/wasm/hello.wasm` and `net.wasm` are `examples/hello-plugin` and
+//! `examples/net-plugin` from the sicompass-plugin-sdk repo, built for
+//! `wasm32-wasip2` (ABI 0.2), which emits a component directly. Inside *that* repo's dev shell (this one's rustc has no
+//! wasip2 `std`):
 //!
 //! ```text
-//! cd ../sicompass-plugin-sdk/examples/hello-plugin
-//! cargo build --release --target wasm32-unknown-unknown
-//! wasm-tools component new target/wasm32-unknown-unknown/release/hello_plugin.wasm \
-//!     -o plugin.wasm
-//! cp plugin.wasm <this repo>/src/sicompass/tests/fixtures/wasm/hello.wasm
+//! cd ../sicompass-plugin-sdk
+//! nix develop -c ./scripts/verify-guest.sh   # builds and audits both
+//! cp examples/hello-plugin/plugin.wasm <this repo>/src/sicompass/tests/fixtures/wasm/hello.wasm
+//! cp examples/net-plugin/plugin.wasm   <this repo>/src/sicompass/tests/fixtures/wasm/net.wasm
 //! ```
 //!
-//! It is committed rather than built here on purpose: building it would need the
-//! wasm target and `wasm-tools` present for every `cargo test` run, including CI
-//! jobs that have no business compiling guests. `wit_vendor_matches_host_tables`
+//! `hello-abi-0.1.wasm` is the last ABI 0.1 build of hello, kept only to prove an
+//! old plugin is refused with a readable reason. Never rebuild it.
+//!
+//! They are committed rather than built here on purpose: building them would need a
+//! guest toolchain for every `cargo test` run, including CI jobs that have no
+//! business compiling guests. `wit_vendor_matches_host_tables`
 //! below catches the drift that committing a binary would otherwise risk.
 
 use std::path::{Path, PathBuf};
@@ -168,12 +172,18 @@ fn the_component_imports_nothing_outside_the_host_capability_set() {
         };
         let iface = resolve.id_of(id).unwrap_or_default();
 
-        // The guest must never import WASI. Targeting wasm32-unknown-unknown rather
-        // than wasip2 is what keeps this true.
-        assert!(
-            !iface.contains("wasi:"),
-            "component imports {iface}: WASI would void the capability model"
-        );
+        // Since ABI 0.2 guests are wasm32-wasip2 and their `std` imports WASI. The
+        // capability model holds as long as every WASI import is in the inert
+        // baseline (no preopens, empty environment, stdio to the log): sockets,
+        // http or anything else from WASI must fail here.
+        if iface.starts_with("wasi:") {
+            let bare = iface.split('@').next().unwrap_or_default();
+            assert!(
+                wasm_host::wasi::is_baseline(bare),
+                "component imports {iface}, which is not in the inert WASI baseline"
+            );
+            continue;
+        }
         assert!(
             iface.starts_with("sicompass:plugin/"),
             "component imports an unexpected interface: {iface}"
@@ -913,6 +923,8 @@ fn wit_vendor_descriptor_fields_match_the_host() {
             "supports-structural-edit",
             "manual-dashboard-entry-allowed",
             "dashboard-kind",
+            // ABI 0.2.
+            "dashboard-uses-app-undo",
         ],
         "the vendored WIT's `descriptor` drifted from the host. Re-copy \
          sicompass-plugin.wit from the SDK repo, update `default_descriptor` and \
@@ -1027,4 +1039,105 @@ fn network_functions_live_in_their_own_interface() {
         "`fetch` must not be in the always-linked interface"
     );
     assert!(wasm_host::NET_IMPORTS.iter().any(|(_, f)| *f == "fetch"));
+}
+
+// ---------------------------------------------------------------------------
+// ABI 0.2: the WASI baseline, plugin translations, the version gate
+// ---------------------------------------------------------------------------
+
+/// Every string in a fetched tree, depth first.
+fn all_text(elements: &[FfonElement]) -> Vec<String> {
+    let mut out = Vec::new();
+    for e in elements {
+        match e {
+            FfonElement::Str(s) => out.push(s.clone()),
+            FfonElement::Obj(o) => {
+                out.push(o.key.clone());
+                out.extend(all_text(&o.children));
+            }
+        }
+    }
+    out
+}
+
+/// The guest's `std::fs` compiles and links (baseline `wasi:filesystem`), but with
+/// no `storage`/`filesystem` grant there is no preopened directory, so nothing on
+/// the host is reachable. The fixture tries `/` and `/etc/passwd` and reports.
+#[test]
+fn std_fs_reaches_nothing_without_a_grant() {
+    let mut p = open_hello();
+    let text = all_text(&p.fetch());
+    assert!(
+        text.iter().any(|t| t == "fs: refused"),
+        "the guest's std::fs reached the host filesystem: {text:?}"
+    );
+    assert!(!text.iter().any(|t| t.contains("LEAKED")), "{text:?}");
+}
+
+/// The baseline `wasi:clocks` makes `SystemTime::now()` work inside a guest.
+#[test]
+fn std_clock_works_in_a_guest() {
+    let mut p = open_hello();
+    let text = all_text(&p.fetch());
+    assert!(text.iter().any(|t| t == "std clock: ok"), "{text:?}");
+}
+
+/// A plugin ships `locales/<lang>.ftl`, the host registers it, and the guest's
+/// `translate-args` resolves against it with its arguments.
+#[test]
+fn a_plugin_translates_with_its_own_locale_file_and_arguments() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::copy(hello_wasm(), dir.path().join("plugin.wasm")).unwrap();
+    std::fs::create_dir(dir.path().join("locales")).unwrap();
+    std::fs::write(
+        dir.path().join("locales/en-US.ftl"),
+        "hello-plugin-name = hello\nhello-plugin-greetings = greeted { $count } times\n",
+    )
+    .unwrap();
+    sicompass_sdk::localize::set_locale("en-US");
+
+    let mut p = WasmProvider::open(
+        &dir.path().join("plugin.wasm"),
+        "hello",
+        "hello",
+        dir.path(),
+        Vec::new(),
+    )
+    .expect("hello loads from a temp plugin directory");
+    let text = all_text(&p.fetch());
+    assert!(
+        text.iter().any(|t| t == "greeted 0 times"),
+        "translate-args did not resolve the plugin's own message: {text:?}"
+    );
+}
+
+/// A locale file with a message id outside the plugin's own prefix is refused
+/// whole: the bundles are shared, and the first definition of an id wins.
+#[test]
+fn a_locale_file_with_a_foreign_message_id_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir(dir.path().join("locales")).unwrap();
+    std::fs::write(
+        dir.path().join("locales/nl-BE.ftl"),
+        "spoof-ok = fine\nsettings-section-available-programs = Gestolen\n",
+    )
+    .unwrap();
+    let refusals = wasm_host::register_plugin_locales("spoof", dir.path());
+    assert_eq!(refusals.len(), 1, "{refusals:?}");
+    assert!(
+        refusals[0].contains("settings-section-available-programs"),
+        "{refusals:?}"
+    );
+}
+
+/// A plugin built for ABI 0.1 (wasm32-unknown-unknown, no WASI) is refused before
+/// instantiation, with a reason that says what to do.
+#[test]
+fn a_plugin_built_for_the_previous_abi_is_refused_readably() {
+    let old = fixture_dir().join("hello-abi-0.1.wasm");
+    let err = match WasmProvider::open(&old, "hello", "hello", &fixture_dir(), Vec::new()) {
+        Ok(_) => panic!("an ABI 0.1 plugin must not load on an ABI 0.2 host"),
+        Err(e) => e,
+    };
+    assert!(err.contains("ABI 0.1.0") && err.contains("rebuilt"), "{err}");
 }
