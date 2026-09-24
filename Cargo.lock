@@ -4503,13 +4503,11 @@ dependencies = [
  "sicompass-chatclient",
  "sicompass-claude",
  "sicompass-emailclient",
- "sicompass-filebrowser",
  "sicompass-gitclient",
  "sicompass-sdk",
  "sicompass-settings",
  "sicompass-store",
  "sicompass-terminal",
- "sicompass-text-editor",
  "sicompass-tutorial",
  "sicompass-ui",
  "sicompass-updater",
@@ -4538,13 +4536,11 @@ dependencies = [
  "sicompass-chatclient",
  "sicompass-claude",
  "sicompass-emailclient",
- "sicompass-filebrowser",
  "sicompass-gitclient",
  "sicompass-sdk",
  "sicompass-settings",
  "sicompass-store",
  "sicompass-terminal",
- "sicompass-text-editor",
  "sicompass-tutorial",
  "sicompass-webbrowser",
 ]
@@ -4597,18 +4593,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "sicompass-filebrowser"
-version = "0.1.21"
-dependencies = [
- "async-trait",
- "libc",
- "natord",
- "sicompass-sdk",
- "tempfile",
- "trash",
-]
-
-[[package]]
 name = "sicompass-gitclient"
 version = "0.1.21"
 dependencies = [
@@ -4621,7 +4605,7 @@ dependencies = [
 [[package]]
 name = "sicompass-sdk"
 version = "0.8.0"
-source = "git+https://github.com/friendlyflow/sicompass-plugin-sdk?rev=22929730d8933a3ef1695d85086ae15dd246ff4f#22929730d8933a3ef1695d85086ae15dd246ff4f"
+source = "git+https://github.com/friendlyflow/sicompass-plugin-sdk?rev=f32563c609508b033b71f06d17feaf43e6c6e67b#f32563c609508b033b71f06d17feaf43e6c6e67b"
 dependencies = [
  "async-trait",
  "base64 0.23.1",
@@ -4691,17 +4675,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "sicompass-text-editor"
-version = "0.1.21"
-dependencies = [
- "async-trait",
- "serde_json",
- "sicompass-sdk",
- "tempfile",
- "trash",
-]
-
-[[package]]
 name = "sicompass-tutorial"
 version = "0.1.21"
 dependencies = [
@@ -4713,7 +4686,7 @@ dependencies = [
 [[package]]
 name = "sicompass-ui"
 version = "0.2.0"
-source = "git+https://github.com/friendlyflow/sicompass-ui?rev=8d58f6b27335472fa1eab65066a5a8c1002cacac#8d58f6b27335472fa1eab65066a5a8c1002cacac"
+source = "git+https://github.com/friendlyflow/sicompass-ui?rev=735e72840ce6aca1b51a3ddeec8b7c71c5f72f96#735e72840ce6aca1b51a3ddeec8b7c71c5f72f96"
 dependencies = [
  "accesskit",
  "accesskit_macos",

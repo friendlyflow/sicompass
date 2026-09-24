@@ -8,3 +8,6 @@ texteditor-error-undo-insert-line-write-failed = Zeile einfügen rückgängig: D
 texteditor-error-redo-delete-line-write-failed = Zeile löschen wiederholen: Datei schreiben fehlgeschlagen
 texteditor-error-redo-insert-line-write-failed = Zeile einfügen wiederholen: Datei schreiben fehlgeschlagen
 texteditor-error-redo-delete-trash-failed = Löschen wiederholen: Papierkorb fehlgeschlagen: { $err }
+
+texteditor-description = Bearbeiten Sie jede Textdatei als Liste ihrer Zeilen, mit Einrückung und Abschnitten als Ebenen, und jede Änderung rückgängig zu machen.
+texteditor-setting-path = Pfad des Texteditors

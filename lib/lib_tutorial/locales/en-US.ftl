@@ -62,7 +62,7 @@ tutorial-sc-tab-controls = c: open the window controls palette, minimize, maximi
 tutorial-sc-files = Files, undo, and save
 tutorial-sc-file-undo = Ctrl+Z: undo. Ctrl+Shift+Z: redo. Each tab keeps its own timeline.
 tutorial-sc-file-clipboard = Ctrl+C: copy. Ctrl+X: cut. Ctrl+V: paste. Ctrl+Shift+C: copy the value behind the item, such as a link's address, instead of its label. Delete or Ctrl+D: delete the selected item.
-tutorial-sc-file-save = Ctrl+S: save. Ctrl+Shift+S: save as. Ctrl+O: open a saved configuration file.
+tutorial-sc-file-save = Ctrl+S: save. Ctrl+Shift+S: save as. Ctrl+O: open a saved configuration file. Saving and opening a file need the file browser, from the Store.
 tutorial-sc-file-update = Ctrl+U: apply a staged app update.
 
 # ---------------------------------------------------------------------------
@@ -70,9 +70,9 @@ tutorial-sc-file-update = Ctrl+U: apply a staged app update.
 # ---------------------------------------------------------------------------
 tutorial-sec-how-it-works = How it works
 tutorial-hiw-tree = Every graphical interface is really a tree of lists. Sicompass makes that structure explicit and navigable entirely from the keyboard, so one set of keys drives everything.
-tutorial-hiw-programs = Each item at the root is a program, also called a provider: the file browser, web browser, email, this tutorial. They all plug into the same tree, so once you can navigate one you can navigate them all.
+tutorial-hiw-programs = Each item at the root is a program, also called a provider: the web browser, email, this tutorial. They all plug into the same tree, so once you can navigate one you can navigate them all.
 tutorial-hiw-modes = Keys mean different things in different modes. You start in general mode and drop into insert, command, or search mode as needed. The Terminal and Claude views name themselves command mode and first command mode, because : is what opens them. The Shortcuts at a glance section lists them all.
-tutorial-hiw-editing = Any item that contains an input box is editable. Press i or a to edit it, Enter to save, Escape to cancel. The file browser makes names editable, the settings program makes values editable.
+tutorial-hiw-editing = Any item that contains an input box is editable. Press i or a to edit it, Enter to save, Escape to cancel. The settings program makes values editable, and the file browser, from the Store, makes file names editable.
 tutorial-hiw-undo = Each tab keeps its own undo timeline. Ctrl+Z walks back through your actions, including the route you navigated, and Ctrl+Shift+Z walks forward. Press z to see the history.
 tutorial-hiw-undo-caveats = A few things cannot be undone: a terminal command that already ran, a directory delete larger than 4 MiB once the trash is emptied, and a posted chat message (undo redacts it, so recipients see that it was deleted).
 tutorial-hiw-accessibility = Screen reader support is built in through AccessKit on Linux, macOS, and Windows, with nothing to configure. Each item is spoken in its own detected language, so a French line inside an English interface is read with French pronunciation.
@@ -82,8 +82,8 @@ tutorial-hiw-accessibility = Screen reader support is built in through AccessKit
 # ---------------------------------------------------------------------------
 tutorial-sec-programs = The programs
 tutorial-prog-intro = Sicompass turns each data source into the same navigable tree. Enable or disable programs in Settings under 'Available programs'. Programs that do not ship with the app are installed from the Store. Here is what ships with the app.
-tutorial-prog-filebrowser = File browser: your filesystem as a tree. Enter directories with Right, rename with i, and create, copy, paste, or delete items inline. Dot-prefixed files are hidden, run the colon command show/hide hidden files to see them.
-tutorial-prog-texteditor = Text editor: press Right on a file to open its contents as a tree and edit the lines inline. Every change is on the undo timeline.
+tutorial-prog-filebrowser = File browser, from the Store: your filesystem as a tree. Enter directories with Right, rename with i, and create, copy, paste, or delete items inline. Dot-prefixed files are hidden, run the colon command show/hide hidden files to see them.
+tutorial-prog-texteditor = Text editor, from the Store: press Right on a file to open its contents as a tree and edit the lines inline. Every change is on the undo timeline.
 tutorial-prog-notes = Notes, from the Store: press ctrl+a to write a note, Right to open it, and ctrl+a again inside it to add a line. Notes nest as deep as you like, and every change is on the undo timeline. The first row of a note is its list meta, where you set whether the note is private or public.
 tutorial-prog-kanban = Project management, from the Store: a kanban board. Press ctrl+a to add a column, Right to open it, and ctrl+a inside to add a card. A column holds cards and nothing deeper, so a card is the last level.
 tutorial-prog-kanban-board = d: open the board itself, with the columns side by side. The cursor sits on a card, and the one card it is on is the only thing highlighted. Left and Right move between columns, Up and Down through the cards in one. i and a edit the card, o and shift+o open a new one below or above, ctrl+d deletes, and ctrl+x, ctrl+c and ctrl+v cut, copy and paste. An empty column shows one slot you can stand on to add its first card. Columns themselves are managed in the list. Escape goes back.

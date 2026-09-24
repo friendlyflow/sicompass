@@ -668,6 +668,29 @@ drove the built-in notes and board now load the released plugins from
 during undo panicked (a nested tokio runtime), and a navigation request made in
 `leave-dashboard` was only seen a frame later.
 
+**Step 8 (2026-09-24):** the file browser and the text editor are Store
+plugins (`filebrowser_plugin_sicompass`, `texteditor_plugin_sicompass`), by the
+user's choice, with the whole disk (`"filesystem": ["/"]`, approved at
+install). The save-as and open dialogs look the file browser up by name and say
+to install it from the store when it is missing. Porting them found three
+things the sandbox does differently, each fixed where others can use it:
+
+- WASI never follows, or even reads, a symlink with an absolute target. The
+  host gained `desktop.read-link` (confined to the granted folders), and
+  `sicompass_sdk::fs_links::resolve_with` walks a path through links with it.
+- The host reads a folder up front, and an entry removed meanwhile is an error
+  in the listing, where `std` stops and loses every later entry.
+  `sicompass_pdk::fs::list_dir` reads the stream and skips just that entry.
+- A delete's undo snapshot is `sicompass_sdk::fs_snapshot` now (portable), and
+  travels in the plugin's `ProviderOp` payload.
+
+A plugin setting's default may be `~`, which the host expands to the home
+folder (the text editor's `textEditorPath`), and `get-setting` answers with the
+default until the user saves a value. The Store points out the programs that
+came with the app until 0.2.0 when the user had them (their data folder or
+their settings section is still there). "Open file with" is gone: a sandboxed
+plugin cannot list the system's applications.
+
 ## 14. Decisions on the former open questions (2026-09-24)
 
 1. **Store key custody:** a key file on the maintainer's machine, outside

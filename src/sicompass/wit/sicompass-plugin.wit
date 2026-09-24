@@ -452,6 +452,13 @@ interface desktop {
   /// Restore the most recently trashed item whose original location was
   /// `path`, for an undo. Fails where the OS offers no programmatic restore.
   restore: func(path: string) -> result<_, string>;
+
+  /// The target of the symlink at `path`, as written in the link. WASI never
+  /// follows (or even reads) a link with an absolute target, so a plugin with
+  /// a folder grant asks here to follow one itself. `path` must lie inside a
+  /// granted folder; the target may point anywhere, and reaching it is still
+  /// subject to the grants. Fails when `path` is not a symlink.
+  read-link: func(path: string) -> result<string, string>;
 }
 
 /// Background work. Every call into a provider runs on the UI thread under a

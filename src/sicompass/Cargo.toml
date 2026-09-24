@@ -368,8 +368,7 @@ wasmtime = { workspace = true }
 wasmtime-wasi = { workspace = true }
 # `Bytes`, the buffer type wasmtime-wasi's stream traits take (wasm_host/wasi.rs).
 bytes = "1"
-# The OS trash, for a plugin's `desktop.trash` (wasm_host/desktop.rs). Same crate
-# and version lib_filebrowser uses.
+# The OS trash, for a plugin's `desktop.trash` (wasm_host/desktop.rs).
 trash = "5"
 # A plugin's `process` children on a pseudo-terminal (wasm_host/process.rs). The
 # workspace version lib_shell uses.
@@ -406,7 +405,6 @@ winresource = { workspace = true }
 [dev-dependencies]
 sicompass-builtins = { workspace = true }
 sicompass-settings = { workspace = true }
-sicompass-filebrowser = { workspace = true }
 sicompass-tutorial = { workspace = true }
 sicompass-webbrowser = { workspace = true }
 # Only to switch its recall history off for the test binary — see
@@ -423,10 +421,6 @@ sicompass-claude = { workspace = true }
 sicompass-gitclient = { workspace = true }
 sicompass-chatclient = { workspace = true }
 sicompass-emailclient = { workspace = true }
-# Only to switch OS-trash deletes off for the test binary — see
-# `ensure_builtins`. Without it every delete a test drives leaves its fixture in
-# the developer's real trash, permanently.
-sicompass-text-editor = { workspace = true }
 mockall = { workspace = true }
 tempfile = { workspace = true }
 # The integration test injects its own `ImapBackend` stubs, which the trait

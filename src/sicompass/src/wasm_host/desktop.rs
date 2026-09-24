@@ -84,8 +84,8 @@ pub(crate) fn trash_delete(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// The one place this crate reaches the `trash` crate (tests/hygiene.rs), the
-/// same two variants as lib_filebrowser's: on macOS the crate's default goes
+/// The one place this crate reaches the `trash` crate (tests/hygiene.rs), in
+/// two variants: on macOS the crate's default goes
 /// through Finder over AppleScript (slow, needs Automation permission and a
 /// running Finder), so `NsFileManager` is used instead.
 #[cfg(target_os = "macos")]
@@ -205,6 +205,15 @@ impl wit::desktop::Host for HostState {
         let host = self.confine_granted(&path, false)?;
         trash_restore(&host)
     }
+
+    /// The link's own folder is confined (resolved), the link itself is not:
+    /// resolving it would answer with its target's target.
+    fn read_link(&mut self, path: String) -> Result<String, String> {
+        let host = self.confine_granted(&path, false)?;
+        std::fs::read_link(&host)
+            .map(|t| t.to_string_lossy().into_owned())
+            .map_err(|e| format!("{path}: {e}"))
+    }
 }
 
 #[cfg(test)]
@@ -241,6 +250,29 @@ mod tests {
         std::os::unix::fs::symlink("/etc", host.path().join("escape")).unwrap();
         let s = state(vec![(PathBuf::from("/storage"), host.path().to_path_buf())]);
         assert!(s.confine_granted("/storage/escape/passwd", true).is_err());
+    }
+
+    /// A link inside a granted folder reads back as written, an absolute
+    /// target included (which WASI itself refuses to read); a link outside,
+    /// and a path that is no link, are refused.
+    #[cfg(unix)]
+    #[test]
+    fn read_link_answers_only_inside_a_granted_folder() {
+        use wit::desktop::Host;
+        let granted = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let root = granted.path().canonicalize().unwrap();
+        std::fs::create_dir(root.join("actual")).unwrap();
+        std::os::unix::fs::symlink(root.join("actual"), root.join("via")).unwrap();
+        std::os::unix::fs::symlink("/etc", outside.path().join("elsewhere")).unwrap();
+        let mut s = state(vec![(root.clone(), root.clone())]);
+
+        let via = root.join("via").to_string_lossy().into_owned();
+        assert_eq!(s.read_link(via).unwrap(), root.join("actual").to_string_lossy());
+        let plain = root.join("actual").to_string_lossy().into_owned();
+        assert!(s.read_link(plain).is_err(), "not a link");
+        let far = outside.path().join("elsewhere").to_string_lossy().into_owned();
+        assert!(s.read_link(far).is_err(), "outside the grants");
     }
 
     #[test]

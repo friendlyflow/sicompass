@@ -219,8 +219,6 @@ static SECTIONS: &[Node] = &[
         key: "tutorial-sec-programs",
         children: &[
             Leaf("tutorial-prog-intro"),
-            Leaf("tutorial-prog-filebrowser"),
-            Leaf("tutorial-prog-texteditor"),
             Leaf("tutorial-prog-web"),
             Leaf("tutorial-prog-web-history"),
             Leaf("tutorial-prog-web-bookmark"),
@@ -232,6 +230,8 @@ static SECTIONS: &[Node] = &[
             Leaf("tutorial-prog-chat"),
             Leaf("tutorial-prog-email"),
             Leaf("tutorial-prog-email-gmail"),
+            Leaf("tutorial-prog-filebrowser"),
+            Leaf("tutorial-prog-texteditor"),
             Leaf("tutorial-prog-notes"),
             Leaf("tutorial-prog-kanban"),
             Leaf("tutorial-prog-kanban-board"),

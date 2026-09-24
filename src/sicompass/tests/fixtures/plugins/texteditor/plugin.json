@@ -1,0 +1,20 @@
+{
+  "name": "texteditor",
+  "displayName": "text editor",
+  "type": "wasm",
+  "entry": "plugin.wasm",
+  "version": "0.2.0",
+  "minAppVersion": "0.1.21",
+  "description": "texteditor-description",
+  "settings": [
+    {
+      "type": "text",
+      "label": "texteditor-setting-path",
+      "key": "textEditorPath",
+      "default": "~"
+    }
+  ],
+  "permissions": {
+    "filesystem": ["/"]
+  }
+}

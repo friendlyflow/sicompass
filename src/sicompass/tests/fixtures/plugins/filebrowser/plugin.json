@@ -1,0 +1,21 @@
+{
+  "name": "filebrowser",
+  "displayName": "file browser",
+  "type": "wasm",
+  "entry": "plugin.wasm",
+  "version": "0.2.0",
+  "minAppVersion": "0.1.21",
+  "description": "filebrowser-description",
+  "settings": [
+    {
+      "type": "radio",
+      "label": "filebrowser-radio-sort-order",
+      "key": "sortOrder",
+      "options": ["alphanumerically", "chronologically"],
+      "default": "alphanumerically"
+    }
+  ],
+  "permissions": {
+    "filesystem": ["/"]
+  }
+}

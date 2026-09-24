@@ -121,6 +121,15 @@ enum Job {
     Installing(String),
 }
 
+/// The programs that came with sicompass until 0.2.0 and are plugins in the
+/// store now, with the settings section each one had (its `displayName`).
+const CAME_WITH_THE_APP: [(&str, &str); 4] = [
+    ("filebrowser", "file browser"),
+    ("texteditor", "text editor"),
+    ("notes", "notes"),
+    ("projectmanagement", "project management"),
+];
+
 pub struct StoreProvider {
     current_path: String,
     fetch: Fetch,
@@ -444,17 +453,37 @@ impl StoreProvider {
                 .is_some_and(|mut entries| entries.next().is_some())
     }
 
-    /// Listed programs that are not installed but have data on this computer.
+    /// Whether the user had `name` when it came with the app: its settings
+    /// section is still in `settings.json`. The file browser and the text
+    /// editor keep no data folder, so this is how an upgrade finds them.
+    fn used_before(&self, name: &str) -> bool {
+        let Some((_, section)) = CAME_WITH_THE_APP.iter().find(|(n, _)| *n == name) else {
+            return false;
+        };
+        self.tiers
+            .settings_path()
+            .and_then(|p| std::fs::read_to_string(p).ok())
+            .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+            .is_some_and(|v| v.get(*section).is_some())
+    }
+
+    /// Worth pointing out: listed, not installed, and the user's data or old
+    /// settings for it are here.
+    fn waiting(&self, name: &str) -> bool {
+        self.has_data(name) || self.used_before(name)
+    }
+
+    /// Listed programs that are not installed but that the user evidently had.
     ///
-    /// Mostly the programs that used to ship with the app (notes, project
-    /// management) on a machine that used them: their plugin keeps its data in
-    /// the same folder, so installing it opens that data again. This is how the
-    /// user learns where they went.
+    /// Mostly the programs that came with the app until 0.2.0, on a machine
+    /// that used them: their plugin keeps its data in the same folder and its
+    /// settings in the same section, so installing it picks up where the user
+    /// left off. This is how the user learns where they went.
     fn waiting_data(&self, installed: &BTreeMap<String, Installed>) -> Vec<String> {
         self.offers
             .iter()
             .filter(|o| o.entry.is_some() && !installed.contains_key(&o.name))
-            .filter(|o| self.has_data(&o.name))
+            .filter(|o| self.waiting(&o.name))
             .map(|o| o.name.clone())
             .collect()
     }
@@ -481,7 +510,7 @@ impl StoreProvider {
         let waiting: Vec<String> = self
             .listed_names()
             .into_iter()
-            .filter(|n| !installed.contains_key(n) && self.has_data(n))
+            .filter(|n| !installed.contains_key(n) && self.waiting(n))
             .collect();
         if !waiting.is_empty() {
             let mut args = localize::Args::new();
@@ -569,6 +598,9 @@ impl StoreProvider {
             }
             None if offer.entry.is_some() && self.has_data(&offer.name) => {
                 localize::t("store-state-data-waiting")
+            }
+            None if offer.entry.is_some() && self.used_before(&offer.name) => {
+                localize::t("store-state-used-before")
             }
             None => localize::t("store-state-not-installed"),
         };

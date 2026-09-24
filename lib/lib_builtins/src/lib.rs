@@ -23,8 +23,6 @@ static REGISTERED: OnceLock<()> = OnceLock::new();
 /// Idempotent — safe to call multiple times (only the first call has effect).
 pub fn register_all() {
     REGISTERED.get_or_init(|| {
-        sicompass_filebrowser::register();
-        sicompass_text_editor::register();
         sicompass_tutorial::register();
         sicompass_webbrowser::register();
         sicompass_chatclient::register();
@@ -47,13 +45,6 @@ mod tests {
         register_all(); // second call must not panic
     }
 
-    #[test]
-    fn filebrowser_factory_is_registered() {
-        register_all();
-        let p = sicompass_sdk::create_provider_by_name("filebrowser");
-        assert!(p.is_some(), "filebrowser factory should be registered");
-        assert_eq!(p.unwrap().name(), "filebrowser");
-    }
 
     #[test]
     fn tutorial_factory_is_registered() {
@@ -76,13 +67,6 @@ mod tests {
         assert!(p.is_some(), "emailclient factory should be registered");
     }
 
-    #[test]
-    fn text_editor_factory_is_registered() {
-        register_all();
-        let p = sicompass_sdk::create_provider_by_name("texteditor");
-        assert!(p.is_some(), "texteditor factory should be registered");
-        assert_eq!(p.unwrap().name(), "texteditor");
-    }
 
     #[test]
     fn store_is_registered_and_always_present() {
@@ -209,17 +193,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn builtin_manifests_include_filebrowser_always_enabled() {
-        register_all();
-        let manifests = sicompass_sdk::builtin_manifests();
-        let fb = manifests.iter().find(|m| m.name == "filebrowser");
-        assert!(fb.is_some(), "filebrowser manifest should be registered");
-        assert!(
-            fb.unwrap().always_enabled,
-            "filebrowser should be always_enabled"
-        );
-    }
 
     #[test]
     fn builtin_manifests_include_email_settings() {

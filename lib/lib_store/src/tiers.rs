@@ -80,6 +80,12 @@ impl Tiers {
         }
     }
 
+    /// `settings.json`, which the Store also reads to see which programs the
+    /// user had before they moved to the store.
+    pub fn settings_path(&self) -> Option<&std::path::Path> {
+        self.settings_path.as_deref()
+    }
+
     pub fn set_settings_path(&mut self, path: PathBuf) {
         self.settings_path = Some(path);
     }

@@ -163,15 +163,11 @@ pub fn grants_for(
     } else {
         None
     };
-    let home = sicompass_sdk::platform::home_dir();
     let filesystem = m
         .permissions
         .filesystem
         .iter()
-        .map(|p| match (p.strip_prefix('~'), &home) {
-            (Some(rest), Some(h)) => h.join(rest.trim_start_matches('/')),
-            _ => PathBuf::from(p),
-        })
+        .map(|p| PathBuf::from(expand_home(p)))
         .collect();
     Ok(crate::wasm_host::Grants {
         allowed_hosts: m.allowed_hosts(),
@@ -181,7 +177,28 @@ pub fn grants_for(
         sockets: m.permissions.sockets.clone(),
         settings: m.settings.iter().map(|s| s.key.clone()).collect(),
         service_tier: m.service.as_ref().map(|s| s.tier.clone()),
+        setting_defaults: m
+            .settings
+            .iter()
+            .filter(|s| !s.default.is_empty())
+            .map(|s| (s.key.clone(), expand_home(&s.default)))
+            .collect(),
     })
+}
+
+/// `~` or `~/…` as the user's home folder: in a filesystem grant, and in a
+/// setting's default (a plugin has no environment to find the home in).
+/// Anything else, and `~` on a system without a home, is left as it is.
+pub fn expand_home(value: &str) -> String {
+    let rest = match value.strip_prefix('~') {
+        Some(rest) if rest.is_empty() || rest.starts_with('/') => rest,
+        _ => return value.to_owned(),
+    };
+    match sicompass_sdk::platform::home_dir() {
+        Some(h) if rest.is_empty() => h.to_string_lossy().into_owned(),
+        Some(h) => h.join(rest.trim_start_matches('/')).to_string_lossy().into_owned(),
+        None => value.to_owned(),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -252,6 +269,33 @@ pub fn discover_user_plugins() -> Vec<DiscoveredPlugin> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn home_is_expanded_in_grants_and_setting_defaults() {
+        let home = sicompass_sdk::platform::home_dir().expect("a home in the test sandbox");
+        let m = parse_manifest(
+            r#"{ "name": "texteditor", "displayName": "text editor", "entry": "plugin.wasm",
+                 "settings": [ { "type": "text", "label": "l", "key": "textEditorPath", "default": "~" },
+                               { "type": "text", "label": "m", "key": "other", "default": "~user" },
+                               { "type": "text", "label": "n", "key": "none" } ],
+                 "permissions": { "filesystem": ["~/Documents", "/"] } }"#,
+        )
+        .unwrap();
+        let approved = std::collections::HashMap::from([(
+            m.name.clone(),
+            sicompass_sdk::plugin_abi::approval_fingerprint(&m),
+        )]);
+        let g = grants_for(&m, &approved).unwrap();
+        assert_eq!(g.filesystem, vec![home.join("Documents"), PathBuf::from("/")]);
+        assert_eq!(
+            g.setting_defaults,
+            vec![
+                ("textEditorPath".to_owned(), home.to_string_lossy().into_owned()),
+                // Only `~` and `~/…` mean the home: `~user` is left alone.
+                ("other".to_owned(), "~user".to_owned()),
+            ]
+        );
+    }
 
     #[test]
     fn grants_carry_the_declared_setting_keys_and_nothing_else() {

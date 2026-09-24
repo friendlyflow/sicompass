@@ -162,9 +162,10 @@ the icon.
 ## Built-in providers
 
 Each provider turns a different data source into the same keyboard-navigable
-tree: File Browser, Text Editor, Email, Chat, Web Browser, Terminal, Git Client,
-Claude, Store, and Settings. Notes, Project Management, Remote and the Sales
-demo are installed from the Store.
+tree: Email, Chat, Web Browser, Terminal, Git Client, Claude, Store, and
+Settings. The File Browser, the Text Editor, Notes, Project Management, Remote
+and the Sales demo are installed from the Store. Saving and opening a file
+(ctrl+s, ctrl+o) go through the File Browser, so install it first.
 
 The Store lists the programs you can add. Each one says what it may reach
 before you install it (a server, your files, another program) and whether it

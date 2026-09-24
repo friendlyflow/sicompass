@@ -91,24 +91,26 @@ fn every_crate_that_can_trash_has_a_test_guard() {
             src.contains("TEST_NO_TRASH") && src.contains("_set_test_no_trash"),
             "{} depends on the `trash` crate but has no TEST_NO_TRASH stub, so its \
              tests delete into the developer's real OS trash. Copy the block from \
-             lib/lib_filebrowser/src/lib.rs, and call the setter from \
+             src/sicompass/src/wasm_host/desktop.rs, and call the setter from \
              `ensure_builtins()` in src/sicompass/tests/integration.rs.",
             manifest.display()
         );
     }
 
+    // The file browser and the text editor used to be the other two. They are
+    // plugins now, and trash through the app's `desktop.trash`.
     assert_eq!(
-        checked, 3,
-        "expected exactly lib_filebrowser, lib_texteditor and the app (for a WASM \
-         plugin's `desktop.trash`, src/wasm_host/desktop.rs) to depend on `trash`; \
-         if a crate gained or lost the dependency, update this count deliberately"
+        checked, 1,
+        "expected exactly the app (for a WASM plugin's `desktop.trash`, \
+         src/wasm_host/desktop.rs) to depend on `trash`; if a crate gained or lost \
+         the dependency, update this count deliberately"
     );
 }
 
 /// Every trash action goes through `os_trash_delete`, the one function the
 /// `TEST_NO_TRASH` stub sits in front of.
 ///
-/// `lib_texteditor`'s `redo` called `trash::delete` directly for a long time.
+/// The old built-in text editor's `redo` called `trash::delete` directly for a long time.
 /// On macOS that silently took the slow Finder/osascript path the wrapper exists
 /// to avoid, and once the stub landed it would have walked straight past it.
 ///
@@ -162,12 +164,11 @@ fn no_call_site_bypasses_the_trash_wrapper() {
         }
     }
 
-    // Three crates (lib_filebrowser, lib_texteditor, and the app for a WASM
-    // plugin's `desktop.trash`), each with a macOS and a non-macOS variant behind
-    // `#[cfg]`, all of which this sees because it reads source rather than
-    // compiling it.
+    // One crate (the app, for a WASM plugin's `desktop.trash`), with a macOS
+    // and a non-macOS variant behind `#[cfg]`, both of which this sees because
+    // it reads source rather than compiling it.
     assert_eq!(
-        wrappers, 6,
-        "expected 6 `os_trash_delete` definitions (3 crates x 2 platform variants)"
+        wrappers, 2,
+        "expected 2 `os_trash_delete` definitions (1 crate x 2 platform variants)"
     );
 }

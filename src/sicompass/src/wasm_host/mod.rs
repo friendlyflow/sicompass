@@ -90,6 +90,9 @@ pub struct Grants {
     /// The tier the plugin's manifest names as its `service`: the only tier
     /// `license.token` hands it a token for.
     pub service_tier: Option<String>,
+    /// Each declared setting's default, `~` already expanded: what
+    /// `get-setting` answers until the user has saved a value.
+    pub setting_defaults: Vec<(String, String)>,
 }
 
 impl Grants {
@@ -137,6 +140,8 @@ pub struct HostState {
     pub sockets_allowed: Vec<String>,
     /// The tier of this plugin's own service (see [`Grants::service_tier`]).
     pub service_tier: Option<String>,
+    /// See [`Grants::setting_defaults`].
+    pub setting_defaults: Vec<(String, String)>,
 }
 
 impl HostState {
@@ -190,6 +195,7 @@ impl HostState {
             process_allowed: grants.process,
             sockets_allowed: grants.sockets,
             service_tier: grants.service_tier,
+            setting_defaults: grants.setting_defaults,
         })
     }
 
@@ -347,8 +353,14 @@ impl wit::host::Host for HostState {
         tracing::info!(target: "wasm_plugin", plugin = %self.plugin_name, "{msg}");
     }
 
+    /// The saved value, or the manifest's default until there is one.
     fn get_setting(&mut self, key: String) -> Option<String> {
-        read_plugin_setting(&self.settings_section, &key)
+        read_plugin_setting(&self.settings_section, &key).or_else(|| {
+            self.setting_defaults
+                .iter()
+                .find(|(k, _)| *k == key)
+                .map(|(_, v)| v.clone())
+        })
     }
 
     fn now_millis(&mut self) -> u64 {
@@ -1182,7 +1194,24 @@ mod tests {
 
     // --- settings scoping ---
 
-    // --- settings scoping ---
+    /// Until the user saves a value, a plugin reads its manifest's default,
+    /// which is how the text editor finds the home folder it starts in.
+    #[test]
+    fn an_unsaved_setting_reads_as_its_default() {
+        use wit::host::Host;
+        let mut s = HostState::with_grants(
+            "texteditor",
+            "a section no settings file has",
+            "/tmp/x",
+            Grants {
+                setting_defaults: vec![("textEditorPath".to_owned(), "/home/u".to_owned())],
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(s.get_setting("textEditorPath".to_owned()).as_deref(), Some("/home/u"));
+        assert_eq!(s.get_setting("somethingElse".to_owned()), None);
+    }
 
     #[test]
     fn settings_are_read_from_the_display_name_section() {

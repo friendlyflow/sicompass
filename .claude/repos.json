@@ -45,6 +45,16 @@
       "name": "projectmanagement_plugin_sicompass",
       "path": "../projectmanagement_plugin_sicompass",
       "kind": "plugin"
+    },
+    {
+      "name": "filebrowser_plugin_sicompass",
+      "path": "../filebrowser_plugin_sicompass",
+      "kind": "plugin"
+    },
+    {
+      "name": "texteditor_plugin_sicompass",
+      "path": "../texteditor_plugin_sicompass",
+      "kind": "plugin"
     }
   ]
 }

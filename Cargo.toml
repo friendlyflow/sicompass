@@ -3,11 +3,9 @@ members = [
     "lib/lib_tutorial",
     "lib/lib_settings",
     "lib/lib_store",
-    "lib/lib_filebrowser",
     "lib/lib_webbrowser",
     "lib/lib_chatclient",
     "lib/lib_emailclient",
-    "lib/lib_texteditor",
     "lib/lib_shell",
     "lib/lib_terminal",
     "lib/lib_claude",
@@ -51,11 +49,9 @@ sicompass-sdk = "0.8.0"
 sicompass-tutorial = { path = "lib/lib_tutorial" }
 sicompass-settings = { path = "lib/lib_settings" }
 sicompass-store = { path = "lib/lib_store" }
-sicompass-filebrowser = { path = "lib/lib_filebrowser" }
 sicompass-webbrowser = { path = "lib/lib_webbrowser" }
 sicompass-chatclient = { path = "lib/lib_chatclient" }
 sicompass-emailclient = { path = "lib/lib_emailclient" }
-sicompass-text-editor = { path = "lib/lib_texteditor" }
 sicompass-shell = { path = "lib/lib_shell" }
 sicompass-terminal = { path = "lib/lib_terminal" }
 sicompass-claude = { path = "lib/lib_claude" }
@@ -66,7 +62,7 @@ sicompass-updater = { path = "lib/lib_updater" }
 # (github:friendlyflow/sicompass-ui). Not on crates.io: pinned by git, to a `rev`
 # between releases and to `tag = "vX.Y.Z"` at a release. crane vendors it from
 # Cargo.lock like any git dependency, so there is no hash to maintain.
-sicompass-ui = { git = "https://github.com/friendlyflow/sicompass-ui", rev = "8d58f6b27335472fa1eab65066a5a8c1002cacac" }
+sicompass-ui = { git = "https://github.com/friendlyflow/sicompass-ui", rev = "735e72840ce6aca1b51a3ddeec8b7c71c5f72f96" }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
@@ -222,7 +218,7 @@ wiremock = "0.6"
 # unreleased, so it still satisfies the `0.8.0` requirements. Remove this block
 # when the pins move to the published 0.9.0.
 [patch.crates-io]
-sicompass-sdk = { git = "https://github.com/friendlyflow/sicompass-plugin-sdk", rev = "22929730d8933a3ef1695d85086ae15dd246ff4f" }
+sicompass-sdk = { git = "https://github.com/friendlyflow/sicompass-plugin-sdk", rev = "f32563c609508b033b71f06d17feaf43e6c6e67b" }
 #
 # The same rule, for working on the renderer and the app together:
 #

@@ -24,8 +24,61 @@ use tempfile::TempDir;
 /// tab silently builds an empty provider set.
 fn app_renderer() -> AppRenderer {
     let mut r = AppRenderer::new();
-    r.hooks = Box::new(sicompass::boot::ProgramsHooks::default());
+    r.hooks = Box::new(TestHooks(sicompass::boot::ProgramsHooks::default()));
     r
+}
+
+/// The app's hooks, plus the file browser and text editor fixtures.
+///
+/// A new tab rebuilds its programs by name, and the app finds an installed
+/// plugin in its plugins folder, which the harness does not use: it registers
+/// the fixtures by hand. So a new tab gets them from here, built the same way
+/// (see [`fs_plugin`]); everything else is the app's own.
+struct TestHooks(sicompass::boot::ProgramsHooks);
+
+impl sicompass::registry::HostHooks for TestHooks {
+    fn apply_pending_settings(&self, renderer: &mut AppRenderer, initial: bool) {
+        self.0.apply_pending_settings(renderer, initial);
+    }
+
+    fn process_update_events(&self, renderer: &mut AppRenderer) {
+        self.0.process_update_events(renderer);
+    }
+
+    fn handle_apply_app_update(&self, renderer: &mut AppRenderer) {
+        self.0.handle_apply_app_update(renderer);
+    }
+
+    fn build_content_set(
+        &self,
+        renderer: &mut AppRenderer,
+        names: &[String],
+    ) -> (Vec<Box<dyn Provider>>, Vec<FfonElement>) {
+        let mut providers = Vec::with_capacity(names.len());
+        let mut roots = Vec::with_capacity(names.len());
+        for name in names {
+            let (mut p, mut f) = if matches!(name.as_str(), "filebrowser" | "texteditor") {
+                let (p, root) = sicompass::registry::init_provider_root(
+                    fs_plugin(name),
+                    &mut renderer.error_message,
+                );
+                (vec![p], vec![root])
+            } else {
+                self.0.build_content_set(renderer, std::slice::from_ref(name))
+            };
+            providers.append(&mut p);
+            roots.append(&mut f);
+        }
+        (providers, roots)
+    }
+
+    fn write_maximized(&self, maximized: bool) {
+        self.0.write_maximized(maximized);
+    }
+
+    fn read_font_scale(&self) -> f32 {
+        self.0.read_font_scale()
+    }
 }
 
 /// Call once per test binary to populate the SDK factory registry.
@@ -60,16 +113,13 @@ fn ensure_builtins() {
     // prompt, or failing differently depending on whether the machine is
     // online.
     sicompass_gitclient::_set_test_no_network(true);
-    // And for the two filesystem providers, whose deletes go to the *OS* trash
-    // rather than anywhere sicompass owns — which is why no amount of guarding
-    // sicompass's own directories ever caught it. Every harness delete left its
-    // fixture in the developer's real trash permanently; that is where 37 850
+    // And for plugins' `desktop.trash` / `open-url` / `open-path`
+    // (wasm_host/desktop.rs): the file browser's and the text editor's deletes
+    // go to the *OS* trash, which sicompass does not own, so no amount of
+    // guarding its own directories ever caught it. Every harness delete once
+    // left its fixture in the developer's real trash; that is where 37 850
     // `aaa` / `doomed.txt` / `undotest.txt` entries in a 45 479-entry trash came
-    // from. Under the flag the provider removes the item outright instead,
-    // which is what the assertions here check anyway.
-    sicompass_filebrowser::_set_test_no_trash(true);
-    sicompass_text_editor::_set_test_no_trash(true);
-    // A WASM plugin's `desktop.trash` / `open-url` / `open-path` (wasm_host/desktop.rs).
+    // from. Under the flag the host "trashes" into a private temp folder.
     sicompass::wasm_host::desktop::_set_test_no_trash(true);
     sicompass::wasm_host::desktop::_set_test_no_open(true);
 }
@@ -105,7 +155,7 @@ impl Harness {
         // File browser rooted at temp dir (set path AFTER init which resets to "/")
         register(
             &mut renderer,
-            sicompass_sdk::create_provider_by_name("filebrowser").unwrap(),
+            fs_plugin("filebrowser"),
         );
         renderer.providers[0].set_current_path(root.to_str().unwrap());
         // Re-fetch now that the path is correct
@@ -150,7 +200,7 @@ impl Harness {
         // Filebrowser: init resets path to "/", so set path after init
         register(
             &mut renderer,
-            sicompass_sdk::create_provider_by_name("filebrowser").unwrap(),
+            fs_plugin("filebrowser"),
         );
         renderer.providers[0].set_current_path(root.to_str().unwrap());
         {
@@ -2491,7 +2541,7 @@ fn navigate_right_empty_dir_shows_placeholder() {
     let mut renderer = app_renderer();
     register(
         &mut renderer,
-        sicompass_sdk::create_provider_by_name("filebrowser").unwrap(),
+        fs_plugin("filebrowser"),
     );
     renderer.providers[0].set_current_path(root.to_str().unwrap());
     {
@@ -2559,7 +2609,7 @@ fn navigate_right_updates_parent_key() {
     let mut renderer = app_renderer();
     register(
         &mut renderer,
-        sicompass_sdk::create_provider_by_name("filebrowser").unwrap(),
+        fs_plugin("filebrowser"),
     );
     renderer.providers[0].set_current_path(root.to_str().unwrap());
     {
@@ -2640,7 +2690,7 @@ fn delete_last_item_leaves_placeholder() {
     let mut renderer = app_renderer();
     register(
         &mut renderer,
-        sicompass_sdk::create_provider_by_name("filebrowser").unwrap(),
+        fs_plugin("filebrowser"),
     );
     renderer.providers[0].set_current_path(root.to_str().unwrap());
     {
@@ -2707,7 +2757,7 @@ fn create_file_on_placeholder_replaces_in_place() {
     let mut renderer = app_renderer();
     register(
         &mut renderer,
-        sicompass_sdk::create_provider_by_name("filebrowser").unwrap(),
+        fs_plugin("filebrowser"),
     );
     renderer.providers[0].set_current_path(root.to_str().unwrap());
     {
@@ -2785,7 +2835,7 @@ fn filebrowser_i_placeholder_creates_file() {
     let mut renderer = app_renderer();
     register(
         &mut renderer,
-        sicompass_sdk::create_provider_by_name("filebrowser").unwrap(),
+        fs_plugin("filebrowser"),
     );
     renderer.providers[0].set_current_path(root.to_str().unwrap());
     {
@@ -2850,7 +2900,7 @@ fn filebrowser_i_placeholder_creates_subdirectory() {
     let mut renderer = app_renderer();
     register(
         &mut renderer,
-        sicompass_sdk::create_provider_by_name("filebrowser").unwrap(),
+        fs_plugin("filebrowser"),
     );
     renderer.providers[0].set_current_path(root.to_str().unwrap());
     {
@@ -2913,7 +2963,7 @@ fn ctrl_a_after_prefixed_creation_no_panic() {
     };
     register(
         h.r(),
-        sicompass_sdk::create_provider_by_name("filebrowser").unwrap(),
+        fs_plugin("filebrowser"),
     );
     h.renderer.providers[0].set_current_path(root.to_str().unwrap());
     {
@@ -3218,59 +3268,6 @@ fn open_file_with_secondary_list_uses_nav_path_not_data() {
         assert_eq!(
             item.nav_path.as_deref(),
             Some(exec),
-            "item '{}': nav_path should hold the exec command",
-            item.label
-        );
-    }
-}
-
-/// End-to-end variant against the real filebrowser. Only asserts when the host
-/// actually has `.desktop` entries — a bare container or a distribution whose
-/// entries the SDK cannot see would otherwise fail here for reasons unrelated to
-/// the code under test. The invariant itself is covered unconditionally by
-/// `open_file_with_secondary_list_uses_nav_path_not_data`.
-#[test]
-fn filebrowser_open_file_with_lists_installed_applications() {
-    if sicompass_sdk::platform::get_applications().is_empty() {
-        eprintln!("skipping: no .desktop applications visible on this host");
-        return;
-    }
-
-    let mut h = Harness::new();
-    let fb_idx = h
-        .provider_idx("filebrowser")
-        .expect("filebrowser not found");
-    navigate_to_provider(h.r(), fb_idx);
-    press_right(h.r());
-
-    // Navigate to the first file (non-directory) in the listing
-    let file_idx = h.renderer.total_list.iter().position(|item| {
-        // Objects are directories; strings are files
-        !item.label.is_empty() && item.data.is_none()
-    });
-    if let Some(idx) = file_idx {
-        move_to_index(&mut h, idx);
-    }
-
-    select_open_file_with(&mut h);
-
-    assert_eq!(
-        h.renderer.current_command,
-        sicompass::app_state::CommandPhase::Provider,
-        "should be in Provider phase after selecting 'open file with'"
-    );
-    assert!(
-        !h.renderer.total_list.is_empty(),
-        "open file with should show at least one application"
-    );
-    for item in &h.renderer.total_list {
-        assert!(
-            item.data.is_none(),
-            "item '{}': data should be None (exec must be in nav_path to avoid image load)",
-            item.label
-        );
-        assert!(
-            item.nav_path.is_some(),
             "item '{}': nav_path should hold the exec command",
             item.label
         );
@@ -4429,7 +4426,7 @@ fn harness_with_config_provider() -> (AppRenderer, TempDir) {
     let root = tmp.path().to_str().unwrap().to_owned();
     register(
         &mut renderer,
-        sicompass_sdk::create_provider_by_name("filebrowser").unwrap(),
+        fs_plugin("filebrowser"),
     );
     renderer.providers[1].set_current_path(&root);
     {
@@ -8413,8 +8410,7 @@ fn text_editor_provider_lists_directory_and_parses_file() {
     .unwrap();
     std::fs::create_dir(root.join("subdir")).unwrap();
 
-    let mut editor = sicompass_sdk::create_provider_by_name("texteditor")
-        .expect("editor factory must be registered");
+    let mut editor = fs_plugin("texteditor");
     editor.on_setting_change("textEditorPath", root.to_str().unwrap());
 
     // Directory listing contains all three entries.
@@ -8500,7 +8496,7 @@ fn harness_with_text_editor() -> (AppRenderer, TempDir) {
     // Filebrowser at "/" so it doesn't depend on a real directory.
     register(
         &mut renderer,
-        sicompass_sdk::create_provider_by_name("filebrowser").unwrap(),
+        fs_plugin("filebrowser"),
     );
     renderer.providers[0].set_current_path("/");
     {
@@ -8514,7 +8510,7 @@ fn harness_with_text_editor() -> (AppRenderer, TempDir) {
     }
 
     // Editor at tmp — set path before fetching so init doesn't clobber it.
-    let mut editor = sicompass_sdk::create_provider_by_name("texteditor").unwrap();
+    let mut editor = fs_plugin("texteditor");
     editor.on_setting_change("textEditorPath", root.to_str().unwrap());
     let children = editor.fetch();
     let dn = editor.display_name().to_owned();
@@ -8579,7 +8575,7 @@ fn text_editor_directory_entries_are_obj() {
     std::fs::write(tmp.path().join("readme.md"), "hello").unwrap();
     std::fs::create_dir(tmp.path().join("subdir")).unwrap();
 
-    let mut ed = sicompass_sdk::create_provider_by_name("texteditor").unwrap();
+    let mut ed = fs_plugin("texteditor");
     ed.on_setting_change("textEditorPath", tmp.path().to_str().unwrap());
     let items = ed.fetch();
 
@@ -11072,14 +11068,23 @@ fn root_navigation_persists_to_settings() {
 /// runtime, and the frame loop puts it back. The real app keeps rendering, so
 /// it lands within a frame or two. Tests drive input directly, so without this
 /// they would assert against the placeholder that holds the slot meanwhile.
+///
+/// And then does what the frame loop does when the active provider changed:
+/// refresh the level on screen. A plugin's undo lands this way (a built-in's
+/// file delete used to reinsert its row itself, synchronously).
 fn settle_provider_ops(r: &mut AppRenderer) {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    let mut active_changed = false;
     while !r.pending_provider_ops.is_empty() {
-        sicompass::events::run_provider_ticks(r);
+        active_changed |= sicompass::events::run_provider_ticks(r).0;
         if std::time::Instant::now() > deadline {
             panic!("provider undo/redo did not complete within 5s");
         }
         std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    if active_changed {
+        sicompass::provider::refresh_current_directory(r);
+        sicompass::list::create_list_current_layer(r);
     }
 }
 
@@ -11835,7 +11840,7 @@ fn colon_still_opens_the_command_palette_for_other_providers() {
     let mut renderer = app_renderer();
     register(
         &mut renderer,
-        sicompass_sdk::create_provider_by_name("filebrowser").unwrap(),
+        fs_plugin("filebrowser"),
     );
     sicompass::list::create_list_current_layer(&mut renderer);
     press_right(&mut renderer);
@@ -14063,19 +14068,19 @@ fn unified_undo_reverts_file_deletion_with_snapshot() {
     let prior_entries_len = h.renderer.active_timeline().entries.len();
     assert!(sicompass::provider::delete_item_by_name(h.r(), "alpha.txt"));
     let new_entries = &h.renderer.active_timeline().entries[prior_entries_len..];
+    // The file browser is a plugin: its delete is a `ProviderOp` carrying the
+    // snapshot, where the built-in's was an `FsOp::Delete`.
     assert!(
         new_entries.iter().any(|e| matches!(
             e,
-            TimelineEntry::FsOp {
-                op: sicompass_sdk::timeline::FsOpKind::Delete,
-                ..
-            }
+            TimelineEntry::ProviderOp { command, .. } if command == "delete"
         )),
-        "delete_item_by_name emitted FsOp::Delete"
+        "delete_item_by_name recorded the plugin's undoable delete"
     );
     assert!(!target.exists(), "file gone from disk");
 
     press_ctrl(h.r(), Keycode::Z);
+    settle_provider_ops(h.r());
     assert!(target.exists(), "ctrl-Z restored the file");
     assert_eq!(std::fs::read(&target).unwrap(), b"test content");
 }
@@ -16996,8 +17001,7 @@ fn redo_of_filebrowser_delete_removes_disk_and_ffon() {
 fn setup_texteditor(root: &Path) -> AppRenderer {
     ensure_builtins();
     let mut renderer = app_renderer();
-    let mut te = sicompass_sdk::create_provider_by_name("texteditor")
-        .expect("texteditor factory registered");
+    let mut te = fs_plugin("texteditor");
     te.on_setting_change("textEditorPath", root.to_str().unwrap());
     let children = te.fetch();
     let display_name = te.display_name().to_owned();
@@ -17605,7 +17609,7 @@ fn the_file_browser_palette_still_says_command_mode() {
     let mut renderer = app_renderer();
     register(
         &mut renderer,
-        sicompass_sdk::create_provider_by_name("filebrowser").unwrap(),
+        fs_plugin("filebrowser"),
     );
     sicompass::list::create_list_current_layer(&mut renderer);
     press_right(&mut renderer);
@@ -18372,6 +18376,19 @@ fn harness_with_notes() -> (AppRenderer, TempDir) {
 /// `target/wasm32-wasip2/release/<name>_plugin.wasm` as `plugin.wasm`),
 /// committed like the `hello.wasm` fixture and for the same reason.
 fn plugin_provider(name: &str, storage: &Path) -> Box<dyn Provider> {
+    plugin_provider_with(name, Some(storage))
+}
+
+/// A program that is a plugin now and keeps no storage of its own: the file
+/// browser and the text editor, which reach the disk through their
+/// `filesystem` grant (`/`, the whole disk, as the user approves at install).
+/// Their deletes go to the host's trash, which the harness keeps in a private
+/// temp folder (`desktop::_set_test_no_trash`).
+fn fs_plugin(name: &str) -> Box<dyn Provider> {
+    plugin_provider_with(name, None)
+}
+
+fn plugin_provider_with(name: &str, storage: Option<&Path>) -> Box<dyn Provider> {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures/plugins")
         .join(name);
@@ -18383,10 +18400,16 @@ fn plugin_provider(name: &str, storage: &Path) -> Box<dyn Provider> {
             .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_owned)).collect())
             .unwrap_or_default()
     };
-    std::fs::create_dir_all(storage).unwrap();
+    if let Some(storage) = storage {
+        std::fs::create_dir_all(storage).unwrap();
+    }
     let grants = sicompass::wasm_host::Grants {
         allowed_hosts: strings("allowedHosts"),
-        storage_dir: Some(storage.to_path_buf()),
+        storage_dir: storage.map(Path::to_path_buf),
+        filesystem: strings("filesystem")
+            .iter()
+            .map(|p| std::path::PathBuf::from(sicompass::plugin_manifest::expand_home(p)))
+            .collect(),
         settings: manifest["settings"]
             .as_array()
             .map(|a| a.iter().filter_map(|s| s["key"].as_str().map(str::to_owned)).collect())
@@ -18587,7 +18610,7 @@ fn ctrl_d_in_the_file_browser_still_deletes_the_file() {
     std::fs::write(tmp.path().join("doomed.txt"), "x").unwrap();
 
     let mut r = app_renderer();
-    let fb = sicompass_sdk::create_provider_by_name("filebrowser").unwrap();
+    let fb = fs_plugin("filebrowser");
     register(&mut r, fb);
     // After `register`, because it runs `init()`, which resets the path.
     r.providers[0].set_current_path(tmp.path().to_str().unwrap());
@@ -19029,7 +19052,7 @@ fn deleting_a_file_lands_on_the_one_below_it() {
     }
 
     let mut r = app_renderer();
-    let fb = sicompass_sdk::create_provider_by_name("filebrowser").unwrap();
+    let fb = fs_plugin("filebrowser");
     register(&mut r, fb);
     r.providers[0].set_current_path(tmp.path().to_str().unwrap());
     {
@@ -19985,4 +20008,46 @@ fn archiving_from_the_list_keeps_the_user_in_general_mode() {
         "screen: {:?}",
         screen(&r)
     );
+}
+
+
+/// A folder other programs keep changing (a download folder, `/tmp`) still
+/// lists whole in the sandboxed file browser. The host reads a folder up front
+/// and an entry removed meanwhile becomes an error in the listing; `std` inside
+/// the guest stopped at the first one and lost every entry after it, often all
+/// of them. `sicompass_pdk::fs::list_dir` skips just the vanished entry.
+#[test]
+fn a_listing_survives_its_neighbours_vanishing() {
+    let parent = TempDir::new().unwrap();
+    let parent_path = parent.path().canonicalize().unwrap();
+    std::fs::create_dir(parent_path.join("mine")).unwrap();
+    let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let churn = {
+        let stop = stop.clone();
+        let parent_path = parent_path.clone();
+        std::thread::spawn(move || {
+            let mut i = 0u64;
+            while !stop.load(std::sync::atomic::Ordering::Relaxed) {
+                let d = parent_path.join(format!("churn{i}"));
+                let _ = std::fs::create_dir(&d);
+                let _ = std::fs::remove_dir(&d);
+                i += 1;
+            }
+        })
+    };
+    let mut p = fs_plugin("filebrowser");
+    let mut misses = 0;
+    for _ in 0..300 {
+        p.set_current_path(parent_path.to_str().unwrap());
+        let listed = p.fetch().iter().any(|e| match e {
+            FfonElement::Obj(o) => o.key.contains(">mine<"),
+            FfonElement::Str(_) => false,
+        });
+        if !listed {
+            misses += 1;
+        }
+    }
+    stop.store(true, std::sync::atomic::Ordering::Relaxed);
+    churn.join().unwrap();
+    assert_eq!(misses, 0, "`mine` went missing from {misses} of 300 listings");
 }

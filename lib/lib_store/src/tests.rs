@@ -203,7 +203,9 @@ fn harness(server: &Server, keys: &Keys) -> Harness {
             &[keys.store_public.as_str()],
             plugins.path().to_path_buf(),
         )
-        .with_data_dir(data.path().to_path_buf());
+        .with_data_dir(data.path().to_path_buf())
+        // Its own settings file: what the user had before is read from there.
+        .with_settings_path(data.path().join("settings.json"));
     let fired: Fired = Arc::default();
     let sink = fired.clone();
     store.set_apply_callback(Box::new(move |k, v| {
@@ -673,6 +675,25 @@ fn the_root_points_out_programs_whose_data_is_here_without_the_network() {
     );
     // Only the one with data: project management was never used here.
     assert!(!root[0].contains("projectmanagement"), "{root:?}");
+    let received = server.rt.block_on(server.server.received_requests());
+    assert_eq!(received.map(|r| r.len()), Some(0));
+}
+
+/// The file browser and the text editor keep no data folder. A user who had
+/// them has their settings section, and that is pointed out the same way.
+#[test]
+fn the_root_points_out_programs_the_user_had_before() {
+    let (server, keys) = (Server::start(), keys());
+    let mut h = harness(&server, &keys);
+    std::fs::write(
+        h.data.path().join("settings.json"),
+        r#"{ "file browser": { "sortOrder": "alphanumerically" }, "weather": {} }"#,
+    )
+    .unwrap();
+
+    let root = lines(h.store.fetch());
+    assert!(root[0].contains("filebrowser"), "{root:?}");
+    assert!(!root[0].contains("texteditor"), "{root:?}");
     let received = server.rt.block_on(server.server.received_requests());
     assert_eq!(received.map(|r| r.len()), Some(0));
 }

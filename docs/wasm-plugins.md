@@ -60,7 +60,7 @@ outside the sandbox, the user approved it (docs/plugin-platform.md §4 and §5):
 | Interface | Linked | Gives |
 |---|---|---|
 | `host` | always | logging, the plugin's own settings, time, translations, its own assets |
-| `desktop` | always | open a URL or a file, trash and restore, paths confined to granted folders |
+| `desktop` | always | open a URL or a file, trash and restore, read a symlink's target (WASI never follows an absolute one: use `sicompass_sdk::fs_links`), paths confined to granted folders |
 | `tasks` | always | background work in a fresh instance of the same plugin |
 | `license` | always | whether the user holds a paid tier (third parties), never a key |
 | `net` | `allowedHosts` | HTTP to those hosts only |

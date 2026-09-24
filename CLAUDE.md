@@ -25,7 +25,7 @@ produce the installable Linux package. It reads the version from
   by `[ -t 0 ]` on purpose: without the guard it replaces the process for
   `nix develop -c <cmd>`, and the command silently never runs (exit 0, no output).
 - Crate package names differ from directory names: `lib/lib_<x>` is package
-  `sicompass-<x>` (exception: `lib/lib_texteditor` is `sicompass-text-editor`).
+  `sicompass-<x>`.
   Crates under `src/` keep their directory name. `cargo test -p` takes the
   package name.
 - The dev shell is platform-split. `aarch64-darwin` gets MoltenVK,

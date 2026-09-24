@@ -199,15 +199,6 @@ pub fn load_programs(renderer: &mut AppRenderer) -> SettingsQueue {
         "en-US",
     );
 
-    // File-browser settings
-    settings.add_radio_setting(
-        "file browser",
-        "settings-radio-sort-order",
-        "sortOrder",
-        &["alphanumerically", "chronologically"],
-        "alphanumerically",
-    );
-
     // "Available programs:" priority section.
     // Built-in program checkboxes are added first; user-plugin checkboxes are
     // added by load_user_plugins() below (after discovery).
@@ -653,7 +644,8 @@ fn inject_plugin_settings(settings: &mut dyn Provider, manifest: &PluginManifest
     for s in &manifest.settings {
         match s.kind {
             SettingKind::Text => {
-                settings.add_text_setting(&manifest.display_name, &s.label, &s.key, &s.default);
+                let default = crate::plugin_manifest::expand_home(&s.default);
+                settings.add_text_setting(&manifest.display_name, &s.label, &s.key, &default);
             }
             SettingKind::Password => {
                 settings.add_password_setting(&manifest.display_name, &s.label, &s.key, &s.default);
@@ -1689,9 +1681,6 @@ fn apply_setting(renderer: &mut AppRenderer, key: &str, value: &str, skip_enable
         if skip_enable {
             return;
         }
-        if name == "file browser" {
-            return;
-        } // always present
         if value == "true" {
             enable_provider(renderer, name);
             propagate_enable_to_parked_tabs(renderer, name);
@@ -2646,31 +2635,4 @@ mod tests {
         );
     }
 
-    #[test]
-    fn hot_enable_text_editor_registers_settings() {
-        let ffon = settings_ffon_after_enable("text editor");
-        let children = section_children(&ffon, "text editor")
-            .expect("text editor section should be present after hot-enable");
-        assert!(
-            !children.iter().any(|e| e.as_str() == Some("no settings")),
-            "text editor section should not show 'no settings'"
-        );
-        let inputs: Vec<_> = children
-            .iter()
-            .filter_map(|e| e.as_str())
-            .filter(|s| s.contains("<input>"))
-            .collect();
-        assert_eq!(
-            inputs.len(),
-            1,
-            "expected 1 text setting (text editor path), got {}: {:?}",
-            inputs.len(),
-            inputs
-        );
-        assert!(
-            inputs[0].contains("text editor path"),
-            "the single input should be 'text editor path', got: {}",
-            inputs[0]
-        );
-    }
 }

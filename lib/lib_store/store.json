@@ -25,6 +25,18 @@
       "repo": "friendlyflow/projectmanagement_plugin_sicompass",
       "pubkey": "mKWfeJ8vM7+ui0mEtIQkcXTXNQM0ZhwdCOi3h+r3070=",
       "category": "productivity"
+    },
+    {
+      "name": "filebrowser",
+      "repo": "friendlyflow/filebrowser_plugin_sicompass",
+      "pubkey": "U/6QU2rWxL0GFI0WeSCfL+jMya4vpXlYtYT3FtL22Us=",
+      "category": "files"
+    },
+    {
+      "name": "texteditor",
+      "repo": "friendlyflow/texteditor_plugin_sicompass",
+      "pubkey": "3TQyCQUOyT9RuZy3ClqvB/JF3s8CSzPQZNWtlf7CFmA=",
+      "category": "files"
     }
   ]
 }
