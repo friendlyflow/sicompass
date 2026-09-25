@@ -995,3 +995,90 @@ fn any_server_on_a_port_is_said_plainly_and_never_as_a_star() {
     );
     assert!(!entry.iter().any(|l| l.contains('*')), "{entry:?}");
 }
+
+#[test]
+fn the_releases_of_a_long_list_are_fetched_side_by_side_and_listed_in_order() {
+    let (server, keys) = (Server::start(), keys());
+    register_test_auditor();
+    let names: Vec<String> = (0..8).map(|i| format!("p{i}")).collect();
+    let entries: Vec<_> = names
+        .iter()
+        .map(|n| {
+            serde_json::json!({
+                "name": n,
+                "repo": format!("friendlyflow/{n}_plugin_sicompass"),
+                "pubkey": keys.plugin_public,
+            })
+        })
+        .collect();
+    let json =
+        serde_json::to_vec(&serde_json::json!({ "version": 1, "plugins": entries })).unwrap();
+    let sig = package::sign(&json, &keys.store_secret).unwrap();
+    server.serve("/store/store.json", json);
+    server.serve("/store/store.json.sig", sig.into_bytes());
+    for n in &names {
+        let manifest = format!(
+            r#"{{ "name": "{n}", "displayName": "{n}", "entry": "plugin.wasm",
+                 "version": "1.0.0", "minAppVersion": "0.1.0" }}"#
+        );
+        server.serve_release_at(
+            &format!("/friendlyflow/{n}_plugin_sicompass/releases/latest/download/"),
+            &release_with(&keys, &manifest, None),
+        );
+    }
+
+    // Each release.json takes a while to arrive, the way GitHub's redirects
+    // do, and the fetch counts how many are on their way at once.
+    let in_flight = Arc::new(Mutex::new((0usize, 0usize)));
+    let counter = in_flight.clone();
+    let real = http::http_fetch();
+    let slow: http::Fetch = Arc::new(move |url: &str| {
+        if !url.ends_with(RELEASE_FILE) {
+            return real(url);
+        }
+        {
+            let mut c = counter.lock().unwrap();
+            c.0 += 1;
+            c.1 = c.1.max(c.0);
+        }
+        std::thread::sleep(Duration::from_millis(300));
+        counter.lock().unwrap().0 -= 1;
+        real(url)
+    });
+    let plugins = tempfile::tempdir().unwrap();
+    let data = tempfile::tempdir().unwrap();
+    let mut store = StoreProvider::new()
+        .with_sources(
+            slow,
+            &format!("{}/store/", server.uri()),
+            &server.uri(),
+            &[keys.store_public.as_str()],
+            plugins.path().to_path_buf(),
+        )
+        .with_data_dir(data.path().to_path_buf())
+        .with_settings_path(data.path().join("settings.json"));
+    store.set_current_path("/");
+    store.push_path("programs");
+    store.fetch();
+    let start = Instant::now();
+    while store.is_working() {
+        store.tick();
+        assert!(start.elapsed() < Duration::from_secs(20), "the Store hung");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+
+    assert_eq!(
+        in_flight.lock().unwrap().1,
+        names.len(),
+        "every release was fetched at the same time"
+    );
+    let listed: Vec<String> = lines(store.fetch())
+        .into_iter()
+        .filter(|l| l.starts_with('p'))
+        .collect();
+    let expected: Vec<String> = names
+        .iter()
+        .map(|n| format!("{n}, {}", localize::t("store-state-not-installed")))
+        .collect();
+    assert_eq!(listed, expected, "in the order the store list gives");
+}

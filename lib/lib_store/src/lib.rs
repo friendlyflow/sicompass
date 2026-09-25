@@ -6,8 +6,9 @@
 //! that plugin's signed `release.json` ([`install`]). The design is
 //! `docs/plugin-platform.md` §8 and §9.
 //!
-//! Network work runs on one worker thread at a time and is picked up in
-//! [`Provider::tick`]. The app is told about an install, update or removal
+//! Network work runs as one job at a time on a worker thread and is picked up
+//! in [`Provider::tick`]. Loading fetches the offers' releases side by side.
+//! The app is told about an install, update or removal
 //! through the apply callback, the same queue Settings uses (the SDK boundary
 //! forbids a direct call): `pluginInstalled`, `pluginUpdated` or
 //! `pluginRemoved`, with the plugin's name as the value. The app then rescans,
@@ -23,8 +24,8 @@
 //! trash; the app does that (`pluginDataTrash`), with its guarded trash.
 
 pub mod http;
-pub mod payments;
 pub mod install;
+pub mod payments;
 pub mod source;
 pub mod tiers;
 
@@ -102,6 +103,36 @@ impl Offer {
             },
         }
     }
+}
+
+/// Where an offer's release comes from, before it is fetched.
+enum OfferSource {
+    Listed(StoreEntry),
+    ByHand(Box<sicompass_sdk::plugin_manifest::PluginManifest>),
+}
+
+impl OfferSource {
+    fn name(&self) -> &str {
+        match self {
+            OfferSource::Listed(entry) => &entry.name,
+            OfferSource::ByHand(manifest) => &manifest.name,
+        }
+    }
+}
+
+/// `f` over every item at once, a thread each, the results in the items' order.
+fn in_parallel<T: Send, R: Send>(items: Vec<T>, f: impl Fn(T) -> R + Sync) -> Vec<R> {
+    let f = &f;
+    std::thread::scope(|scope| {
+        let handles: Vec<_> = items
+            .into_iter()
+            .map(|item| scope.spawn(move || f(item)))
+            .collect();
+        handles
+            .into_iter()
+            .map(|h| h.join().unwrap_or_else(|e| std::panic::resume_unwind(e)))
+            .collect()
+    })
 }
 
 enum Done {
@@ -276,29 +307,31 @@ impl StoreProvider {
         spawn("store:load", move || {
             let keys: Vec<&str> = trusted.iter().map(String::as_str).collect();
             let store = source::load(&fetch, &store_url, &keys);
-            let mut offers: Vec<Offer> = match &store {
+            let mut sources: Vec<OfferSource> = match &store {
                 Ok(loaded) => loaded
                     .store
                     .plugins
                     .iter()
-                    .map(|entry| {
-                        Offer::from_source(
-                            &fetch,
-                            Source::listed(entry, &releases_url),
-                            Some(entry.clone()),
-                        )
-                    })
+                    .map(|entry| OfferSource::Listed(entry.clone()))
                     .collect(),
                 Err(_) => Vec::new(),
             };
             // Everything else in the plugins folder was installed by hand.
             if let Some(dir) = &plugins_dir {
                 for (name, i) in install::installed(dir) {
-                    if !offers.iter().any(|o| o.name == name) {
-                        offers.push(Offer::by_hand(&fetch, &i.manifest));
+                    if !sources.iter().any(|s| s.name() == name) {
+                        sources.push(OfferSource::ByHand(Box::new(i.manifest)));
                     }
                 }
             }
+            // Every offer is its own release to fetch and verify. One after
+            // another, a dozen of them kept the list waiting for seconds.
+            let offers = in_parallel(sources, |source| match source {
+                OfferSource::Listed(entry) => {
+                    Offer::from_source(&fetch, Source::listed(&entry, &releases_url), Some(entry))
+                }
+                OfferSource::ByHand(manifest) => Offer::by_hand(&fetch, &manifest),
+            });
             let _ = tx.send(Done::Loaded { store, offers });
         });
         self.job = Some((Job::Loading, rx));
@@ -779,8 +812,11 @@ fn access_lines(release: &ReleaseInfo) -> Vec<String> {
     add("store-access-files", &p.filesystem);
     add("store-access-programs", &p.process);
     // `*:<port>` is any public server on that port (a mail client's).
-    let (any_ports, socket_hosts): (Vec<String>, Vec<String>) =
-        p.sockets.iter().cloned().partition(|e| e.trim().starts_with("*:"));
+    let (any_ports, socket_hosts): (Vec<String>, Vec<String>) = p
+        .sockets
+        .iter()
+        .cloned()
+        .partition(|e| e.trim().starts_with("*:"));
     add("store-access-sockets", &socket_hosts);
     let ports: Vec<String> = any_ports
         .iter()
@@ -999,9 +1035,7 @@ pub fn license_status(tier_id: &str) -> sicompass_sdk::license::LicenseStatus {
 pub fn license_token(tier_id: &str) -> Option<String> {
     use crate::payments::cert::tier;
     let token = match tier_id {
-        t if t == tier::CLOUD || t == tier::COMMERCIAL => {
-            crate::payments::config::redeem_token()
-        }
+        t if t == tier::CLOUD || t == tier::COMMERCIAL => crate::payments::config::redeem_token(),
         t if t == tier::SUPPORT => crate::payments::config::support_redeem_token(),
         _ => return None,
     };
