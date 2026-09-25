@@ -204,7 +204,10 @@ it, so the 13 ports in Steps 5-10 do not each discover a missing method.
   inside the guest, so a file browser shows real paths, and `path-is-filesystem`
   keeps its meaning.
 - `process` names programs, not paths. The host resolves them on `PATH` at spawn
-  time. `"$SHELL"` means the user's login shell.
+  time, then in `~/.local/bin`, then on macOS as applications
+  (`/Applications/<name>.app/Contents/MacOS/<name>`, and the same under
+  `~/Applications`), so `"Google Chrome"` is a name like any other.
+  `"$SHELL"` means the user's login shell.
 - `sockets` is enforced by wasmtime-wasi's socket-address check, and
   `ip-name-lookup` resolves only the names listed.
 
@@ -774,6 +777,37 @@ envelope cache moved from SQLite to a JSON file in storage: SQLite needs C
 emulation libraries to build for WASI and has no file locks there. Tests in
 sicompass drive the released plugin against a fake mailbox on loopback
 (`tests/fake_imap`), granted by name.
+
+**Step 10, the web browser:** the browser is a Store plugin
+(`webbrowser_plugin_sicompass`) with its storage folder and, under `process`,
+the names Chrome goes by (Chrome, Chromium, Edge) and `Xvfb`. A small blocking
+DevTools client (`cdp.rs`) drives Chrome over `spawn-with-channel`
+(`--remote-debugging-pipe`), from one long-lived task holding Chrome and the
+reader's tab. On Linux with Xvfb, the plugin starts Xvfb itself
+(`-displayfd`, no wrapper script) and Chrome headed on it, otherwise headless.
+Chrome's profile is `/storage/chrome/profile`: Chrome runs outside the sandbox,
+so it is Chrome's working directory (which the host maps from `/storage`) and a
+relative `--user-data-dir`. Windows is left out for now, since the channel is
+Unix-only.
+
+Following a link to a web page from any program is rendered by the browser
+plugin, as the built-in did. `plugin.json` says `"rendersPages": true`; the
+host asks with `execute-command` and the command id `sicompass:render-url`
+(no new export, so released plugins still load), the plugin renders the page
+in a tab of its own in its task, and answers with the new host import
+`host.rendered`, which takes only URLs it was asked for. The link shows
+"Loading…" until then (`sicompass_sdk::url_fetcher`'s queues, since the
+renderer and the host cannot reach each other). With no browser installed the
+host renders the page's plain HTML. An answer to a render request does not
+count as a change to the plugin's own view, or a link inside a page the
+browser shows would be thrown away by the redraw.
+
+At startup the app moves what the built-ins kept elsewhere into the folder the
+plugin's storage is: the terminal's command history and the browser's URL
+history from the state folder, and the Chrome profile from the config folder
+(only into an empty place). Tests start a fake Chrome
+(`tests/fake_chrome`), through a test-only override of the host's program
+lookup, so no test can start a real one.
 
 ## 14. Decisions on the former open questions (2026-09-24)
 

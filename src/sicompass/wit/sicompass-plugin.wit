@@ -320,6 +320,8 @@ interface types {
 /// *appears* in a built component's import list, so an audit can still see that a
 /// plugin reads its own data.
 interface host {
+  use types.{ffon};
+
   /// Write a diagnostic line to the host log, prefixed with the plugin name.
   log: func(msg: string);
 
@@ -359,8 +361,16 @@ interface host {
   /// Where the plugin is now, after a call that moved it other than through
   /// `push-path`, `pop-path` or `set-current-path` (which return the path): a
   /// command, an edit, background work such as a shell's `cd`. The pdk's
-  /// `export_plugin!` calls it itself whenever `current_path` changed.
+  /// `export_plugin!` calls it itself whenever `current-path` changed.
   moved-to: func(path: string);
+
+  /// A web page this plugin rendered for the host, as FFON: the answer to a
+  /// render request. A plugin whose `plugin.json` says `"rendersPages": true`
+  /// is asked to render the pages other programs link to, with
+  /// `execute-command` and the command id `sicompass:render-url` (the URL is
+  /// the selection), and answers here when the page is ready, from its UI
+  /// instance. The host puts the page under the link that asked for it.
+  rendered: func(url: string, page: ffon);
 }
 
 /// Network egress. **A separate interface from `host` on purpose.**

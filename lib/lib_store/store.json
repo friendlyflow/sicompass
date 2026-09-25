@@ -67,6 +67,12 @@
       "repo": "friendlyflow/emailclient_plugin_sicompass",
       "pubkey": "+tpLk3f9PKBSTG1Ebuf6kZDWyiNhJOcWC1BVgAVt5i8=",
       "category": "communication"
+    },
+    {
+      "name": "webbrowser",
+      "repo": "friendlyflow/webbrowser_plugin_sicompass",
+      "pubkey": "BUWOjQt7xPQo+xwZuhtFNYX18cqpVlYLnAMzRvtrhMU=",
+      "category": "network"
     }
   ]
 }

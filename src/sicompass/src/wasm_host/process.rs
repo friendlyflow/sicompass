@@ -245,6 +245,22 @@ fn login_shell() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("/bin/sh"))
 }
 
+/// Programs a test binary put in place of real ones (see
+/// [`_set_test_program`]).
+static TEST_PROGRAMS: std::sync::Mutex<Vec<(String, PathBuf)>> = std::sync::Mutex::new(Vec::new());
+
+/// Test hook: resolve the program `name` to `path`, for the whole process,
+/// whatever `PATH` holds. The integration tests put a fake Chrome in place of
+/// `google-chrome` with it, so a test can never start a real one (the browser
+/// tests once leaked a Chrome each and took the desktop down). The grant is
+/// still checked: only a program the plugin may start is replaced.
+#[doc(hidden)]
+pub fn _set_test_program(name: &str, path: PathBuf) {
+    let mut programs = TEST_PROGRAMS.lock().unwrap_or_else(|e| e.into_inner());
+    programs.retain(|(n, _)| n != name);
+    programs.push((name.to_owned(), path));
+}
+
 /// Resolve `program` if the plugin may start it: listed, a bare name, on `PATH`.
 pub fn resolve_program(program: &str, allowed: &[String]) -> Result<PathBuf, String> {
     if !allowed.iter().any(|a| a == program) {
@@ -252,6 +268,14 @@ pub fn resolve_program(program: &str, allowed: &[String]) -> Result<PathBuf, Str
             "`{program}` is not among the programs this plugin may start ({})",
             allowed.join(", ")
         ));
+    }
+    if let Some((_, path)) = TEST_PROGRAMS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .iter()
+        .find(|(n, _)| n == program)
+    {
+        return Ok(path.clone());
     }
     if program == "$SHELL" {
         return Ok(login_shell());
@@ -263,8 +287,27 @@ pub fn resolve_program(program: &str, allowed: &[String]) -> Result<PathBuf, Str
     // After PATH, the user's own `~/.local/bin`, where per-user installers
     // (Claude Code's, pip's) put programs. A desktop session's PATH often
     // lacks it, and one started before the installer ran always does.
-    let own_bin = sicompass_sdk::platform::home_dir().map(|h| h.join(".local").join("bin"));
-    find_program(program, std::env::split_paths(&path).chain(own_bin))
+    let home = sicompass_sdk::platform::home_dir();
+    let own_bin = home.as_ref().map(|h| h.join(".local").join("bin"));
+    // Last, on macOS, the application bundles: a GUI program such as a
+    // browser is not on `PATH` there, but `<name>.app` is where it lives.
+    let bundles = if cfg!(target_os = "macos") {
+        let roots = std::iter::once(PathBuf::from("/Applications"))
+            .chain(home.map(|h| h.join("Applications")));
+        app_bundle_dirs(program, roots)
+    } else {
+        Vec::new()
+    };
+    find_program(program, std::env::split_paths(&path).chain(own_bin).chain(bundles))
+}
+
+/// Where a macOS application named `program` keeps its executable, under each
+/// of `roots`: `<root>/<program>.app/Contents/MacOS`. So a listed
+/// `Google Chrome` is found as a name, like any other program.
+fn app_bundle_dirs(program: &str, roots: impl Iterator<Item = PathBuf>) -> Vec<PathBuf> {
+    roots
+        .map(|r| r.join(format!("{program}.app")).join("Contents").join("MacOS"))
+        .collect()
 }
 
 /// The first of `dirs` that holds `program`.
@@ -627,6 +670,41 @@ mod tests {
         let list = allowed(&["/bin/sh", "../sh"]);
         assert!(resolve_program("/bin/sh", &list).unwrap_err().contains("not a path"));
         assert!(resolve_program("../sh", &list).unwrap_err().contains("not a path"));
+    }
+
+    #[test]
+    fn a_mac_application_is_found_by_its_name_inside_its_bundle() {
+        let apps = tempfile::tempdir().unwrap();
+        let exe_dir = apps.path().join("Fake Browser.app/Contents/MacOS");
+        std::fs::create_dir_all(&exe_dir).unwrap();
+        let exe = exe_dir.join("Fake Browser");
+        std::fs::write(&exe, "#!/bin/sh\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let dirs = app_bundle_dirs("Fake Browser", std::iter::once(apps.path().to_path_buf()));
+        assert_eq!(
+            find_program("Fake Browser", dirs.into_iter()).unwrap(),
+            exe
+        );
+    }
+
+    #[test]
+    fn a_test_program_stands_in_only_for_a_listed_name() {
+        _set_test_program("sicompass-test-stand-in", PathBuf::from("/bin/sh"));
+        let listed = allowed(&["sicompass-test-stand-in"]);
+        assert_eq!(
+            resolve_program("sicompass-test-stand-in", &listed).unwrap(),
+            PathBuf::from("/bin/sh")
+        );
+        assert!(
+            resolve_program("sicompass-test-stand-in", &allowed(&["sh"]))
+                .unwrap_err()
+                .contains("not among"),
+            "the grant is checked first"
+        );
     }
 
     #[test]

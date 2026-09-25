@@ -97,8 +97,10 @@ nothing, so with those two you may also need `libpng16`, `zlib`, OpenSSL 3 and
 
 ### The web browser
 
-Pages are read with a real Chrome or Chromium, which is not bundled, so install
-one if you want to use that provider. Chrome never appears on your screen. With
+The web browser, from the Store, reads pages with a real Chrome, Chromium or
+Edge, which is not bundled, so install one if you want to use that program. It
+also renders the web pages other programs link to. Chrome never appears on your
+screen. With
 `xvfb` present it runs as a normal browser on an invisible display, which is
 what a website expects to see. Without it Chrome runs headless instead, which a
 few sites detect and block. If a page refuses to load, install `xvfb` with
@@ -162,9 +164,9 @@ the icon.
 ## Built-in providers
 
 Each provider turns a different data source into the same keyboard-navigable
-tree: Web Browser, Store, and Settings. The File Browser, the Text Editor,
-Notes, Project Management, the Git Client, the Terminal, Claude, Chat, Email,
-Remote and the Sales demo are installed from the Store. Saving and opening a file
+tree: the Store and Settings. The Web Browser, the File Browser, the Text
+Editor, Notes, Project Management, the Git Client, the Terminal, Claude, Chat,
+Email, Remote and the Sales demo are installed from the Store. Saving and opening a file
 (ctrl+s, ctrl+o) go through the File Browser, so install it first.
 
 The Store lists the programs you can add. Each one says what it may reach

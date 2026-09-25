@@ -1,6 +1,8 @@
 # Web-browser provider strings — Belgian Dutch (Flemish).
 
 webbrowser-display-name = webbrowser
+webbrowser-description = Het web als lijst: typ een adres, en de pagina komt terug als koppen, tekst, links en formulieren. Chrome geeft ze weer, buiten je scherm.
+webbrowser-setting-url-history = URL-geschiedenis
 
 # A site can put a cookie choice in front of its content. It is answered on a
 # page of its own; this introduces it.

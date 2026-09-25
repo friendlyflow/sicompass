@@ -116,6 +116,13 @@ pub fn load_programs(renderer: &mut AppRenderer) -> SettingsQueue {
         migrate_programs_to_load(&path);
         migrate_editor_to_text_editor(&path);
     }
+    if let (Some(state), Some(config), Some(data)) = (
+        sicompass_sdk::platform::app_state_dir(),
+        sicompass_sdk::platform::app_config_dir(),
+        sicompass_sdk::platform::app_data_dir(),
+    ) {
+        migrate_builtin_data_to_plugins(&state, &config, &data);
+    }
 
     // Set the active locale BEFORE any provider is constructed, so every
     // first `display_name()` / `fetch()` already resolves in the user's
@@ -775,6 +782,41 @@ fn is_plugin_enabled_in_config(name: &str) -> bool {
         .and_then(|s| s.get(&config_key))
         .and_then(|v| v.as_bool())
         .unwrap_or(false)
+}
+
+/// Move what built-ins kept outside the folder their plugin's storage is
+/// now (`<data>/<plugin name>`, see `plugin_manifest::grants_for`), so it is
+/// there when the plugin is installed: the terminal's command history and
+/// the web browser's URL history (with its bookmarks) from the state folder,
+/// and the browser's Chrome profile (cookies, logins) from the config folder.
+///
+/// Only into an empty place: something there already is newer than what is
+/// left behind. A move that fails (another disk) leaves the old one where it
+/// was, and the plugin starts without it.
+fn migrate_builtin_data_to_plugins(state: &Path, config: &Path, data: &Path) {
+    let moves = [
+        (state.join("terminal").join("history"), data.join("terminal").join("history")),
+        (state.join("webbrowser").join("history"), data.join("webbrowser").join("history")),
+        (
+            config.join("chrome-profile"),
+            data.join("webbrowser").join("chrome").join("profile"),
+        ),
+    ];
+    for (from, to) in moves {
+        if !from.exists() || to.exists() {
+            continue;
+        }
+        if let Some(parent) = to.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        if let Err(e) = std::fs::rename(&from, &to) {
+            eprintln!(
+                "sicompass: could not move {} to {}: {e}",
+                from.display(),
+                to.display()
+            );
+        }
+    }
 }
 
 /// Migrate obsolete `sicompass.programsToLoad` array to individual
@@ -2211,6 +2253,55 @@ mod tests {
         assert_eq!(r.palette_theme, sicompass_ui::app_state::PaletteTheme::Dark);
     }
 
+    // --- migrate_builtin_data_to_plugins ---
+
+    #[test]
+    fn built_in_data_moves_to_where_its_plugin_keeps_it() {
+        let root = tempfile::tempdir().unwrap();
+        let (state, config, data) = (
+            root.path().join("state"),
+            root.path().join("config"),
+            root.path().join("data"),
+        );
+        std::fs::create_dir_all(state.join("terminal")).unwrap();
+        std::fs::write(state.join("terminal/history"), "ls\n").unwrap();
+        std::fs::create_dir_all(state.join("webbrowser")).unwrap();
+        std::fs::write(state.join("webbrowser/history"), "*https://kept.example\n").unwrap();
+        std::fs::create_dir_all(config.join("chrome-profile/Default")).unwrap();
+        std::fs::write(config.join("chrome-profile/Default/Cookies"), "c").unwrap();
+
+        migrate_builtin_data_to_plugins(&state, &config, &data);
+
+        assert_eq!(std::fs::read_to_string(data.join("terminal/history")).unwrap(), "ls\n");
+        assert_eq!(
+            std::fs::read_to_string(data.join("webbrowser/history")).unwrap(),
+            "*https://kept.example\n",
+            "bookmarks come along"
+        );
+        assert!(data.join("webbrowser/chrome/profile/Default/Cookies").exists());
+        assert!(!state.join("webbrowser/history").exists(), "moved, not copied");
+        assert!(!config.join("chrome-profile").exists());
+    }
+
+    #[test]
+    fn built_in_data_never_overwrites_what_a_plugin_has() {
+        let root = tempfile::tempdir().unwrap();
+        let (state, config, data) = (
+            root.path().join("state"),
+            root.path().join("config"),
+            root.path().join("data"),
+        );
+        std::fs::create_dir_all(state.join("webbrowser")).unwrap();
+        std::fs::write(state.join("webbrowser/history"), "old\n").unwrap();
+        std::fs::create_dir_all(data.join("webbrowser")).unwrap();
+        std::fs::write(data.join("webbrowser/history"), "new\n").unwrap();
+
+        migrate_builtin_data_to_plugins(&state, &config, &data);
+
+        assert_eq!(std::fs::read_to_string(data.join("webbrowser/history")).unwrap(), "new\n");
+        assert!(state.join("webbrowser/history").exists(), "left where it was");
+    }
+
     // --- migrate_programs_to_load ---
 
     #[test]
@@ -2394,6 +2485,7 @@ mod tests {
             permissions: Default::default(),
             description: None,
             service: None,
+            renders_pages: false,
         }
     }
 
@@ -2565,29 +2657,37 @@ mod tests {
             .map(|o| &o.children)
     }
 
-    /// The web browser is the last built-in with a setting of its own (the
-    /// email client's twin of this test went with the crate).
+    /// A built-in's own settings appear in its section when it is enabled.
+    /// No built-in left has settings (the email client's and then the web
+    /// browser's twins of this test went with their crates, which are
+    /// plugins now), so a test one is registered here.
     #[test]
-    fn hot_enable_web_browser_registers_settings() {
-        let ffon = settings_ffon_after_enable("web browser");
-        let children = section_children(&ffon, "web browser")
-            .expect("web browser section should be present");
+    fn hot_enable_registers_a_builtins_settings() {
+        sicompass_sdk::register_provider_factory("configurabletest", || {
+            Box::new(MockProv::new("configurabletest"))
+        });
+        sicompass_sdk::register_builtin_manifest(
+            sicompass_sdk::BuiltinManifest::new("configurabletest", "configurable test")
+                .with_settings(vec![
+                    sicompass_sdk::SettingDecl::text("configurable test", "server", "cfgTestServer", "a"),
+                    sicompass_sdk::SettingDecl::password("configurable test", "secret", "cfgTestSecret", ""),
+                ]),
+        );
+        let ffon = settings_ffon_after_enable("configurable test");
+        let children = section_children(&ffon, "configurable test")
+            .expect("configurable test section should be present");
         assert!(
             !children.iter().any(|e| e.as_str() == Some("no settings")),
-            "web browser section should not show 'no settings'"
+            "configurable test section should not show 'no settings'"
         );
         let editable: Vec<_> = children
             .iter()
             .filter_map(|e| e.as_str())
             .filter(|s| s.contains("<input>") || s.contains("<password>"))
             .collect();
-        assert_eq!(
-            editable.len(),
-            1,
-            "expected 1 editable setting, got {}: {:?}",
-            editable.len(),
-            editable
-        );
+        assert_eq!(editable.len(), 2, "expected 2 editable settings: {editable:?}");
+        let masked: Vec<_> = editable.iter().filter(|s| s.contains("<password>")).collect();
+        assert_eq!(masked.len(), 1, "expected 1 masked setting: {masked:?}");
     }
 
 }

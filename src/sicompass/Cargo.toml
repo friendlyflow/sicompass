@@ -113,11 +113,11 @@ target = "licenses/THIRD-PARTY-LICENSES.html"
 # exist on a user's machine), but the libpng and zlib it was built against
 # stay dynamic and are needed for colour emoji to render.
 #
-# xvfb is what lets the web browser provider run Chrome headed on an invisible
+# xvfb is what lets the web browser plugin run Chrome headed on an invisible
 # X11 display, which is the mode that websites see as a normal browser. No
-# desktop distribution installs it by default, and without it the provider
+# desktop distribution installs it by default, and without it the plugin
 # falls back to Chrome's headless mode, which some sites block
-# (`linux_chrome_launch` in lib/lib_webbrowser/src/lib.rs).
+# (`Chrome::launch` in webbrowser_plugin_sicompass's src/cdp.rs).
 depends = ["libvulkan1", "at-spi2-core", "libssl3", "libpng16-16", "zlib1g", "xvfb"]
 
 # Use the real desktop entry instead of cargo-packager's template, which knows
@@ -410,7 +410,6 @@ winresource = { workspace = true }
 sicompass-builtins = { workspace = true }
 sicompass-settings = { workspace = true }
 sicompass-tutorial = { workspace = true }
-sicompass-webbrowser = { workspace = true }
 # Only to switch its recall history off for the test binary — see
 # `ensure_builtins`. Without it, every run appends the commands these tests run
 # to the developer's own shell history.

@@ -1,6 +1,8 @@
 # Web-browser provider strings — English (source/fallback).
 
 webbrowser-display-name = web browser
+webbrowser-description = The web as a list: type an address, and the page comes back as headings, text, links and forms. Chrome renders it, off your screen.
+webbrowser-setting-url-history = URL history
 
 # A site can put a cookie choice in front of its content. It is answered on a
 # page of its own; this introduces it.

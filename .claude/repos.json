@@ -80,6 +80,11 @@
       "name": "emailclient_plugin_sicompass",
       "path": "../emailclient_plugin_sicompass",
       "kind": "plugin"
+    },
+    {
+      "name": "webbrowser_plugin_sicompass",
+      "path": "../webbrowser_plugin_sicompass",
+      "kind": "plugin"
     }
   ]
 }

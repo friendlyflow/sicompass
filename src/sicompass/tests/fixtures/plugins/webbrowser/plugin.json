@@ -1,0 +1,34 @@
+{
+  "name": "webbrowser",
+  "displayName": "web browser",
+  "type": "wasm",
+  "entry": "plugin.wasm",
+  "version": "0.2.0",
+  "minAppVersion": "0.1.21",
+  "description": "webbrowser-description",
+  "rendersPages": true,
+  "settings": [
+    {
+      "type": "text",
+      "label": "webbrowser-setting-url-history",
+      "key": "urlHistorySize",
+      "default": "50000"
+    }
+  ],
+  "permissions": {
+    "storage": true,
+    "process": [
+      "google-chrome",
+      "google-chrome-stable",
+      "google-chrome-beta",
+      "chromium",
+      "chromium-browser",
+      "chrome",
+      "Google Chrome",
+      "Chromium",
+      "Microsoft Edge",
+      "Google Chrome Canary",
+      "Xvfb"
+    ]
+  }
+}

@@ -177,6 +177,7 @@ pub fn grants_for(
         sockets: m.permissions.sockets.clone(),
         settings: m.settings.iter().map(|s| s.key.clone()).collect(),
         service_tier: m.service.as_ref().map(|s| s.tier.clone()),
+        renders_pages: m.renders_pages,
         setting_defaults: m
             .settings
             .iter()

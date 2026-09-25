@@ -3,7 +3,6 @@ members = [
     "lib/lib_tutorial",
     "lib/lib_settings",
     "lib/lib_store",
-    "lib/lib_webbrowser",
     "lib/lib_builtins",
     "lib/lib_updater",
     "src/sicompass",
@@ -43,14 +42,13 @@ sicompass-sdk = "0.8.0"
 sicompass-tutorial = { path = "lib/lib_tutorial" }
 sicompass-settings = { path = "lib/lib_settings" }
 sicompass-store = { path = "lib/lib_store" }
-sicompass-webbrowser = { path = "lib/lib_webbrowser" }
 sicompass-builtins = { path = "lib/lib_builtins" }
 sicompass-updater = { path = "lib/lib_updater" }
 # The renderer shared with the login greeter, in its own repo
 # (github:friendlyflow/sicompass-ui). Not on crates.io: pinned by git, to a `rev`
 # between releases and to `tag = "vX.Y.Z"` at a release. crane vendors it from
 # Cargo.lock like any git dependency, so there is no hash to maintain.
-sicompass-ui = { git = "https://github.com/friendlyflow/sicompass-ui", rev = "735e72840ce6aca1b51a3ddeec8b7c71c5f72f96" }
+sicompass-ui = { git = "https://github.com/friendlyflow/sicompass-ui", rev = "ade41658d93fa23777a3dd3d8ffb72baa9859872" }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
@@ -189,7 +187,7 @@ wiremock = "0.6"
 # unreleased, so it still satisfies the `0.8.0` requirements. Remove this block
 # when the pins move to the published 0.9.0.
 [patch.crates-io]
-sicompass-sdk = { git = "https://github.com/friendlyflow/sicompass-plugin-sdk", rev = "494cff619feb408aff15f541ba530120a65019fa" }
+sicompass-sdk = { git = "https://github.com/friendlyflow/sicompass-plugin-sdk", rev = "faed1702fbc26c4a4c7ae062e567997916d83cef" }
 #
 # The same rule, for working on the renderer and the app together:
 #

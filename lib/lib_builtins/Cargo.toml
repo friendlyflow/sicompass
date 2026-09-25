@@ -9,6 +9,5 @@ description = "Registers all built-in sicompass providers with the SDK factory r
 [dependencies]
 sicompass-sdk = { workspace = true }
 sicompass-tutorial = { workspace = true }
-sicompass-webbrowser = { workspace = true }
 sicompass-settings = { workspace = true }
 sicompass-store = { workspace = true }

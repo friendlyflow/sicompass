@@ -24,7 +24,6 @@ static REGISTERED: OnceLock<()> = OnceLock::new();
 pub fn register_all() {
     REGISTERED.get_or_init(|| {
         sicompass_tutorial::register();
-        sicompass_webbrowser::register();
         sicompass_settings::register();
         sicompass_store::register();
     });
@@ -67,15 +66,5 @@ mod tests {
         register_all();
         let p = sicompass_sdk::create_provider_by_name("settings");
         assert!(p.is_some(), "settings factory should be registered");
-    }
-
-    #[test]
-    fn builtin_manifests_include_web_browser_settings() {
-        register_all();
-        let manifests = sicompass_sdk::builtin_manifests();
-        let browser = manifests.iter().find(|m| m.name == "webbrowser");
-        assert!(browser.is_some());
-        let settings = &browser.unwrap().settings;
-        assert_eq!(settings.len(), 1, "web browser should declare 1 setting");
     }
 }

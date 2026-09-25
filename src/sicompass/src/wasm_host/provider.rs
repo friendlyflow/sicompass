@@ -92,6 +92,9 @@ pub struct WasmProvider {
     dashboard_image: Option<String>,
     /// The settings this plugin declared; see [`hears_setting`].
     setting_keys: Vec<String>,
+    /// It renders pages for links (`"rendersPages"`), and counts in
+    /// [`sicompass_sdk::url_fetcher::renderer_available`] while it lives.
+    renders_pages: bool,
 }
 
 impl WasmProvider {
@@ -227,6 +230,7 @@ impl WasmProvider {
             grants: grants.clone(),
         });
         let setting_keys = grants.settings.clone();
+        let renders_pages = grants.renders_pages;
         let mut state = HostState::with_grants(plugin_name, settings_section, plugin_dir, grants)?;
         state.tasks = super::tasks::TaskRole::Ui(manager);
         let linker = super::linker_for(&state)?;
@@ -255,6 +259,9 @@ impl WasmProvider {
             polled: default_poll(),
             dashboard_image: None,
             setting_keys,
+            // Counted once construction has succeeded (below), so a plugin
+            // that fails to start is never waited on.
+            renders_pages: false,
         };
 
         // `init` before `describe`, so a plugin can compute its display name.
@@ -279,6 +286,10 @@ impl WasmProvider {
         let mut me = me;
         me.descriptor = descriptor;
         me.dashboard_image = dashboard_image;
+        if renders_pages {
+            me.renders_pages = true;
+            sicompass_sdk::url_fetcher::set_renderer_available(true);
+        }
         Ok(me)
     }
 
@@ -327,7 +338,7 @@ impl WasmProvider {
     }
 
     /// Hand the UI instance every task event that arrived, in order. Returns
-    /// whether there were any, which asks for a redraw.
+    /// whether any of them changed the plugin's view, which asks for a redraw.
     fn deliver_task_events(&self) -> bool {
         let events = match self.inner.try_borrow() {
             Ok(inner) => match &inner.store.data().tasks {
@@ -336,11 +347,26 @@ impl WasmProvider {
             },
             Err(_) => return false,
         };
-        let delivered = !events.is_empty();
+        // An event counts as a change to the plugin's own view, unless all it
+        // did was answer a render request (`host.rendered`): that page goes
+        // under a link, and redrawing the plugin's level for it would rebuild
+        // the level from `fetch`, discarding the link it is meant for when the
+        // link is in this plugin's own tree (a browser page's link).
+        let mut changed = false;
         for (id, event) in events {
+            let rendered_before = self.renders_answered();
             let _ = self.call("on-task-event", |g, s| g.call_on_task_event(s, id, &event));
+            changed |= self.renders_answered() == rendered_before;
         }
-        delivered
+        changed
+    }
+
+    /// How many render requests the plugin has answered so far.
+    fn renders_answered(&self) -> u64 {
+        self.inner
+            .try_borrow()
+            .map(|inner| inner.store.data().renders_answered)
+            .unwrap_or(0)
     }
 
     /// Stop this plugin's tasks: running ones at their next epoch tick, queued
@@ -710,6 +736,10 @@ impl Provider for WasmProvider {
     // ---- Per-frame: one crossing, then cached ------------------------------
 
     fn tick(&mut self) -> bool {
+        // Links waiting for a page, when this plugin renders them.
+        if self.renders_pages {
+            self.hand_out_render_requests();
+        }
         // Task events first, so the guest's `poll` already reflects them.
         let delivered = self.deliver_task_events();
         match self.call("poll", |g, s| g.call_poll(s)) {
@@ -1507,8 +1537,44 @@ mod tests {
 
 /// A provider dropped without `cleanup` (a tab closed, a hot reload) must not
 /// leave its tasks running on the worker threads.
+impl WasmProvider {
+    /// Ask the plugin to render each URL a link is waiting on. One it
+    /// declines, or cannot be asked about, is answered at once with a row
+    /// saying so, so the link does not wait forever.
+    fn hand_out_render_requests(&mut self) {
+        for url in sicompass_sdk::url_fetcher::take_render_requests() {
+            self.inner
+                .borrow_mut()
+                .store
+                .data_mut()
+                .render_asked
+                .insert(url.clone());
+            let taken = self
+                .call("execute-command", |g, s| {
+                    g.call_execute_command(s, sicompass_sdk::plugin_abi::RENDER_URL_COMMAND, &url)
+                })
+                .unwrap_or(false);
+            if !taken {
+                self.inner
+                    .borrow_mut()
+                    .store
+                    .data_mut()
+                    .render_asked
+                    .remove(&url);
+                sicompass_sdk::url_fetcher::deliver_render(
+                    &url,
+                    vec![FfonElement::new_str(format!("{url} could not be rendered"))],
+                );
+            }
+        }
+    }
+}
+
 impl Drop for WasmProvider {
     fn drop(&mut self) {
         self.close_tasks();
+        if self.renders_pages {
+            sicompass_sdk::url_fetcher::set_renderer_available(false);
+        }
     }
 }

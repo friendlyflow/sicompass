@@ -15,6 +15,8 @@ use sicompass_sdk::provider::Provider;
 use std::path::Path;
 use tempfile::TempDir;
 
+// A fake Chrome, for the web browser plugin.
+mod fake_chrome;
 // A fake IMAP mailbox, for the email plugin.
 mod fake_imap;
 
@@ -93,13 +95,12 @@ impl sicompass::registry::HostHooks for TestHooks {
 /// Call once per test binary to populate the SDK factory registry.
 fn ensure_builtins() {
     sicompass_builtins::register_all();
-    // Keep the web browser's URL history in memory for the whole binary.
-    // Set here rather than in `new_with_webbrowser` because a webbrowser
-    // provider is also built behind the app's own back — the `enable_webbrowser`
-    // settings tests go through `programs.rs`, not through the harness — and
-    // whichever test runs first must not leave the developer's real history
-    // file rewritten.
-    sicompass_webbrowser::_set_test_no_history(true);
+    // The web browser is a plugin now, keeping its URL history in its storage
+    // folder, which the harness makes a temp folder. The Chrome it starts is
+    // a fake, for every browser plugin in this binary (see `fake_chrome`):
+    // the browser tests once leaked a real Chrome each and took the desktop
+    // down with them.
+    sicompass::wasm_host::process::_set_test_program("google-chrome", fake_chrome::program());
     // (The terminal, which *appends* every submitted line to its recall
     // history, is a plugin now: it keeps that history in its storage folder,
     // which `fs_plugin` does not grant, so these tests never reach one.)
@@ -179,11 +180,10 @@ impl Harness {
     }
 
     fn new_with_webbrowser() -> Self {
+        // The browser starts the fake Chrome `ensure_builtins` puts in place:
+        // every webbrowser test in this binary checks app-side behavior (URL
+        // bar mode, FFON updates, link navigation) against stub pages.
         ensure_builtins();
-        // Stub out real Chrome launches: every webbrowser test in this binary
-        // only checks app-side behavior (URL bar mode, FFON updates, link
-        // navigation) and never wants to spawn a real browser process.
-        sicompass_webbrowser::_set_test_no_launch(true);
         let tmp = TempDir::new().expect("failed to create temp dir");
         let settings_tmp = TempDir::new().expect("failed to create settings temp dir");
         let root = tmp.path();
@@ -209,7 +209,7 @@ impl Harness {
 
         register(
             &mut renderer,
-            sicompass_sdk::create_provider_by_name("webbrowser").unwrap(),
+            webbrowser_plugin(&settings_tmp.path().join("webbrowser")),
         );
 
         // Settings (isolated to a separate temp dir — see Harness::new).
@@ -1078,6 +1078,8 @@ fn webbrowser_url_commit_enters_page_content() {
     press(h.r(), Keycode::I);
     type_text(h.r(), "https://example.invalid");
     press_enter(h.r());
+    // The page loads in the browser's task; landing asks the app to enter it.
+    wait_for_page(h.r(), wb_idx);
 
     assert_eq!(
         h.renderer.current_id.depth(),
@@ -1111,6 +1113,7 @@ fn webbrowser_url_commit_enters_page_content() {
     press(h.r(), Keycode::I);
     type_text(h.r(), "https://second.invalid");
     press_enter(h.r());
+    wait_for_page(h.r(), wb_idx);
     assert_eq!(h.renderer.current_id.depth(), 3);
     let label = h
         .renderer
@@ -1151,6 +1154,9 @@ fn commit_url(h: &mut Harness, url: &str) {
     press_ctrl(h.r(), Keycode::A);
     type_text(h.r(), url);
     press_enter(h.r());
+    // The page loads in the browser's task and lands a few frames later.
+    let wb_idx = h.renderer.current_id.get(0).expect("in a provider");
+    wait_for_page(h.r(), wb_idx);
 }
 
 /// The web browser's root-level rows, as their raw FFON text.
@@ -1237,8 +1243,8 @@ fn webbrowser_history_row_loads_the_site_and_enters_its_content() {
     );
     assert_eq!(h.renderer.list_index, 0);
 
-    sicompass::events::run_provider_ticks(h.r());
-    sicompass::events::apply_navigation_requests(h.r());
+    let wb = h.renderer.current_id.get(0).unwrap();
+    wait_for_page(h.r(), wb);
 
     assert_eq!(
         h.renderer.current_id.depth(),
@@ -1284,6 +1290,8 @@ fn webbrowser_f5_inside_a_page_keeps_history_at_the_provider_top_level() {
     assert_eq!(h.renderer.current_id.depth(), 3);
 
     sicompass::handlers::handle_f5(h.r());
+    // The reload runs in the browser's task.
+    wait_for_page(h.r(), wb_idx);
 
     // The provider root still reads [URL bar, newest, older] — nothing was
     // nested into the page.
@@ -1323,8 +1331,8 @@ fn webbrowser_f5_inside_a_page_keeps_history_at_the_provider_top_level() {
         Some(0),
         "focus should still jump to the URL bar after an F5"
     );
-    sicompass::events::run_provider_ticks(h.r());
-    sicompass::events::apply_navigation_requests(h.r());
+    let wb = h.renderer.current_id.get(0).unwrap();
+    wait_for_page(h.r(), wb);
     assert_eq!(h.renderer.current_id.depth(), 3);
     let label = h
         .renderer
@@ -1353,8 +1361,8 @@ fn webbrowser_f5_inside_a_page_returns_the_cursor_to_the_page() {
     while h.renderer.current_id.depth() > 2 {
         press_left(h.r());
     }
-    sicompass::events::run_provider_ticks(h.r());
-    sicompass::events::apply_navigation_requests(h.r());
+    let wb = h.renderer.current_id.get(0).unwrap();
+    wait_for_page(h.r(), wb);
 
     assert_eq!(
         h.renderer.current_id.depth(),
@@ -1384,6 +1392,7 @@ fn webbrowser_history_row_navigates_rather_than_filling_the_url_bar() {
     press_down(h.r());
     press_down(h.r()); // the "first.invalid" row
     press_enter(h.r());
+    wait_for_page(h.r(), wb_idx);
 
     let rows = webbrowser_root_rows(&h, wb_idx);
     assert!(
@@ -2202,6 +2211,136 @@ fn enter_in_editor_general_appends() {
         before + 1,
         "Enter in an editor provider should append a new sibling element",
     );
+}
+
+/// The sandboxed plugin starting a real Chrome (on Xvfb when there is one)
+/// through the host, with its profile in the plugin's storage, and loading a
+/// page. Needs Chrome as `google-chrome-stable` (the fake Chrome only stands
+/// in for `google-chrome`). Run alone:
+/// `cargo test -p sicompass --test integration -- --ignored --test-threads=1 real_chrome`
+/// and check that no Chrome with `--remote-debugging-pipe` is left.
+#[test]
+#[ignore]
+fn the_browser_plugin_loads_a_page_in_a_real_chrome() {
+    let url = serve_html("<!DOCTYPE html><html><body><h1>Hello from real Chrome</h1></body></html>");
+    let tmp = TempDir::new().unwrap();
+    let mut p = plugin_provider_with(
+        "webbrowser",
+        Some(tmp.path()),
+        Some(&["google-chrome-stable", "Xvfb"]),
+    );
+    p.fetch();
+    assert!(p.commit_edit("", &url));
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    while !p.tick() {
+        assert!(std::time::Instant::now() < deadline, "the page never landed");
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    let rows = format!("{:?}", p.fetch());
+    assert!(rows.contains("Hello from real Chrome"), "{rows} {:?}", p.take_error());
+    assert!(tmp.path().join("chrome/profile").is_dir(), "the profile is in storage");
+    p.cleanup();
+    drop(p);
+}
+
+/// On a machine with no Chrome, a page load says so, as a page and on the
+/// status line, instead of loading forever.
+#[test]
+fn the_browser_plugin_without_chrome_says_it_is_missing() {
+    let tmp = TempDir::new().unwrap();
+    let mut p =
+        plugin_provider_with("webbrowser", Some(tmp.path()), Some(&["definitely-not-chrome-xyz"]));
+    p.fetch();
+    assert!(p.commit_edit("", "https://example.invalid"));
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    while !p.tick() {
+        assert!(std::time::Instant::now() < deadline, "the load never ended");
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    let rows = format!("{:?}", p.fetch());
+    assert!(rows.contains("was not found"), "{rows}");
+    assert!(
+        p.take_error().is_some_and(|e| e.contains("Error launching browser")),
+        "and on the status line"
+    );
+}
+
+/// An HTTP server on loopback answering every request with `html`: what the
+/// host fetches a link's body from before deciding it is a web page.
+fn serve_html(html: &'static str) -> String {
+    use std::io::{Read, Write};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    std::thread::spawn(move || {
+        for mut stream in listener.incoming().flatten() {
+            let mut buf = [0u8; 4096];
+            let _ = stream.read(&mut buf);
+            let _ = write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\n\
+                 Connection: close\r\n\r\n{html}",
+                html.len()
+            );
+        }
+    });
+    format!("http://127.0.0.1:{port}/page")
+}
+
+/// Following a link to a web page from any program has it rendered by the
+/// browser plugin, which the host asks with `sicompass:render-url`: the link
+/// shows "Loading…", the plugin loads the page in its task (in Chrome, here
+/// the fake one), and its answer (`host.rendered`) lands under the link.
+#[test]
+fn a_followed_link_to_a_web_page_is_rendered_by_the_browser_plugin() {
+    let mut h = Harness::new_with_webbrowser();
+    sicompass::boot::register_http_client();
+    let url = serve_html("<!DOCTYPE html><html><body><p>plain html</p></body></html>");
+    // The link is in the browser's own page, the case where a redraw of the
+    // browser's level for the answer would throw the reader out of the link.
+    let wb_idx = h.provider_idx("webbrowser").expect("webbrowser not found");
+    navigate_to_provider(h.r(), wb_idx);
+    press_right(h.r());
+    {
+        let wb_obj = h.renderer.ffon[wb_idx].as_obj_mut().unwrap();
+        let mut url_obj = FfonElement::new_obj("<input>https://example.com</input>");
+        url_obj
+            .as_obj_mut()
+            .unwrap()
+            .push(FfonElement::new_obj(&format!("A page <link>{url}</link>")));
+        wb_obj.children[0] = url_obj;
+    }
+    sicompass::list::create_list_current_layer(h.r());
+    press_right(h.r()); // into the URL Obj, onto the link
+    sicompass::list::create_list_current_layer(h.r());
+    press_right(h.r()); // follow the link
+
+    let link_children = |r: &AppRenderer| -> Vec<String> {
+        r.ffon[wb_idx]
+            .as_obj()
+            .and_then(|o| o.children.first())
+            .and_then(|u| u.as_obj())
+            .and_then(|u| u.children.first())
+            .and_then(|l| l.as_obj())
+            .map(|l| {
+                l.children
+                    .iter()
+                    .map(|c| c.as_str().map(str::to_owned).unwrap_or_default())
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    assert_eq!(link_children(&h.renderer), ["Loading…"], "waiting for the browser");
+    let expected = fake_chrome::page_text(&url);
+    frames_until(h.r(), "the linked page renders", |r| {
+        link_children(r).iter().any(|c| *c == expected)
+    });
+    // The cursor, which stood on "Loading…", is on the page's first row.
+    let label = h
+        .renderer
+        .current_list_item()
+        .map(|it| it.label.clone())
+        .unwrap_or_default();
+    assert!(label.contains("Fake page for"), "{label:?}");
 }
 
 /// A `<link>` Obj injected into the webbrowser FFON (simulating what
@@ -7865,8 +8004,8 @@ fn f5_dispatches_refresh_command_when_provider_exposes_it() {
 
 #[test]
 fn webbrowser_provider_push_pop_path_round_trip() {
-    ensure_builtins();
-    let mut p = sicompass_sdk::create_provider_by_name("webbrowser").unwrap();
+    let tmp = TempDir::new().unwrap();
+    let mut p = webbrowser_plugin(tmp.path());
     assert_eq!(p.current_path(), "/");
     p.push_path("https://example.com");
     p.push_path("form_1");
@@ -7879,8 +8018,8 @@ fn webbrowser_provider_push_pop_path_round_trip() {
 
 #[test]
 fn webbrowser_provider_set_current_path_survives_round_trip() {
-    ensure_builtins();
-    let mut p = sicompass_sdk::create_provider_by_name("webbrowser").unwrap();
+    let tmp = TempDir::new().unwrap();
+    let mut p = webbrowser_plugin(tmp.path());
     p.set_current_path("/https://example.com/form_2/q");
     assert_eq!(p.current_path(), "/https://example.com/form_2/q");
 }
@@ -9796,9 +9935,10 @@ fn enabling_app_in_settings_propagates_to_all_tabs() {
     assert_eq!(h.renderer.tabs.len(), 2);
     let inactive = if h.renderer.active_tab == 0 { 1 } else { 0 };
 
-    // Enable the web browser via the settings-apply path.
+    // Enable the tutorial (the one built-in program that can be switched
+    // off) via the settings-apply path.
     let queue: sicompass::programs::SettingsQueue = std::sync::Arc::new(std::sync::Mutex::new(
-        vec![("enable_webbrowser".to_owned(), "true".to_owned())],
+        vec![("enable_tutorial".to_owned(), "true".to_owned())],
     ));
     sicompass::programs::apply_pending_settings(h.r(), &queue, false);
 
@@ -9807,7 +9947,7 @@ fn enabling_app_in_settings_propagates_to_all_tabs() {
         h.renderer
             .providers
             .iter()
-            .any(|p| p.name() == "webbrowser"),
+            .any(|p| p.name() == "tutorial"),
         "active tab should have the newly enabled provider"
     );
     // Inactive tab's parked set has it too.
@@ -9815,13 +9955,13 @@ fn enabling_app_in_settings_propagates_to_all_tabs() {
         h.renderer.tabs[inactive]
             .providers
             .iter()
-            .any(|p| p.name() == "webbrowser"),
+            .any(|p| p.name() == "tutorial"),
         "inactive tab should ALSO have the newly enabled provider"
     );
 
     // Now disable it again — both tabs lose it.
     let queue: sicompass::programs::SettingsQueue = std::sync::Arc::new(std::sync::Mutex::new(
-        vec![("enable_webbrowser".to_owned(), "false".to_owned())],
+        vec![("enable_tutorial".to_owned(), "false".to_owned())],
     ));
     sicompass::programs::apply_pending_settings(h.r(), &queue, false);
 
@@ -9829,14 +9969,14 @@ fn enabling_app_in_settings_propagates_to_all_tabs() {
         !h.renderer
             .providers
             .iter()
-            .any(|p| p.name() == "webbrowser"),
+            .any(|p| p.name() == "tutorial"),
         "active tab should drop the disabled provider"
     );
     assert!(
         !h.renderer.tabs[inactive]
             .providers
             .iter()
-            .any(|p| p.name() == "webbrowser"),
+            .any(|p| p.name() == "tutorial"),
         "inactive tab should ALSO drop the disabled provider"
     );
 }
@@ -18241,6 +18381,50 @@ fn plugin_provider_with(
     plugin_provider_granted(name, storage, process, &[])
 }
 
+/// The web browser plugin, its storage in `storage`, allowed to start only
+/// `google-chrome`, which in this binary is the fake Chrome (see
+/// `ensure_builtins`). No Xvfb either, so the fake runs "headless".
+fn webbrowser_plugin(storage: &Path) -> Box<dyn Provider> {
+    ensure_builtins();
+    plugin_provider_with("webbrowser", Some(storage), Some(&["google-chrome"]))
+}
+
+/// Run frames the way the app's loop does (ticks, the refresh of the active
+/// level, provider navigation requests) until `done` holds. The browser loads
+/// its pages in a host task, so a page lands a few frames after the commit.
+fn frames_until(r: &mut AppRenderer, what: &str, done: impl Fn(&AppRenderer) -> bool) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    loop {
+        let (active_changed, _) = sicompass::events::run_provider_ticks(r);
+        if active_changed {
+            sicompass::events::drain_provider_errors(r);
+            sicompass::provider::refresh_current_directory(r);
+            sicompass::list::create_list_current_layer(r);
+            r.sync_list_index_from_current_id();
+        }
+        sicompass::events::apply_navigation_requests(r);
+        if done(r) {
+            return;
+        }
+        assert!(std::time::Instant::now() < deadline, "{what}: did not happen in 20 s");
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+}
+
+/// Whether the browser at `wb_idx` is still loading a page.
+fn browser_loading(r: &AppRenderer, wb_idx: usize) -> bool {
+    r.ffon[wb_idx].as_obj().is_some_and(|o| {
+        o.children
+            .iter()
+            .any(|c| c.as_str() == Some("Loading…"))
+    })
+}
+
+/// Let a page the browser at `wb_idx` is loading land, as the app would.
+fn wait_for_page(r: &mut AppRenderer, wb_idx: usize) {
+    frames_until(r, "the page loads", |r| !browser_loading(r, wb_idx));
+}
+
 /// The email plugin with no mail server: enough for everything the compose
 /// form does, which never touches the network. Its sockets are the ones its
 /// manifest asks for, public servers only.
@@ -18290,6 +18474,7 @@ fn plugin_provider_granted(
             .unwrap_or_default(),
         service_tier: manifest["service"]["tier"].as_str().map(str::to_owned),
         sockets: sockets.to_vec(),
+        renders_pages: manifest["rendersPages"].as_bool().unwrap_or(false),
         ..Default::default()
     };
     let component = sicompass::wasm_host::load_component(&dir.join("plugin.wasm")).unwrap();

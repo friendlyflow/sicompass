@@ -93,6 +93,9 @@ pub struct Grants {
     /// Each declared setting's default, `~` already expanded: what
     /// `get-setting` answers until the user has saved a value.
     pub setting_defaults: Vec<(String, String)>,
+    /// It renders the web pages other programs link to (`"rendersPages"`):
+    /// the host hands it render requests and takes its `host.rendered`.
+    pub renders_pages: bool,
 }
 
 impl Grants {
@@ -151,6 +154,12 @@ pub struct HostState {
     pub service_tier: Option<String>,
     /// See [`Grants::setting_defaults`].
     pub setting_defaults: Vec<(String, String)>,
+    /// The URLs this instance was asked to render and has not answered yet.
+    /// `host.rendered` takes only these: a plugin cannot put a page under a
+    /// link nobody followed, or answer for a URL it was never asked about.
+    pub render_asked: std::collections::HashSet<String>,
+    /// How many of them it has answered.
+    pub renders_answered: u64,
 }
 
 impl HostState {
@@ -207,6 +216,8 @@ impl HostState {
             sockets_allowed: grants.sockets,
             service_tier: grants.service_tier,
             setting_defaults: grants.setting_defaults,
+            render_asked: Default::default(),
+            renders_answered: 0,
         })
     }
 
@@ -397,6 +408,17 @@ impl wit::host::Host for HostState {
     /// Kept until the provider next polls, which is where its path cache is.
     fn moved_to(&mut self, path: String) {
         self.moved_to = Some(path);
+    }
+
+    /// A page asked for with `sicompass:render-url`, for the link waiting on
+    /// it. Anything not asked for is dropped.
+    fn rendered(&mut self, url: String, page: Vec<u8>) {
+        if self.render_asked.remove(&url) {
+            self.renders_answered += 1;
+            sicompass_sdk::url_fetcher::deliver_render(&url, sicompass_sdk::ffon::deserialize_binary(&page));
+        } else {
+            tracing::warn!(target: "wasm_plugin", plugin = %self.plugin_name, "rendered {url}, which it was not asked for");
+        }
     }
 
     fn translate(&mut self, key: String) -> String {
@@ -619,9 +641,10 @@ impl wit::net::Host for HostState {
 
     fn fetch_url_ffon(&mut self, url: String) -> Result<Vec<u8>, String> {
         // Deliberately routed through the same policy-checked `perform` rather than
-        // the SDK's global `fetch_url_to_ffon`. That callback is installed by
-        // lib_webbrowser and does its own fetching, so using it here would hand a
-        // plugin an unchecked way out — the one thing this module exists to prevent.
+        // the SDK's global `fetch_url_to_ffon`. That callback is installed by a
+        // renderer compiled into the app and does its own fetching, so using it
+        // here would hand a plugin an unchecked way out — the one thing this
+        // module exists to prevent.
         let resp = host_fetch::perform(
             &mut self.fetch_policy,
             wit::net::HttpRequest {
@@ -1299,8 +1322,9 @@ mod tests {
                 .all(|(i, _)| *i == "sicompass:plugin/net")
         );
         // 6 since ABI 0.2: `translate-args` joined `translate`. 7 since
-        // `moved-to`, which a plugin calls to say where it is.
-        assert_eq!(HOST_IMPORTS.len(), 7);
+        // `moved-to`, which a plugin calls to say where it is. 8 since
+        // `rendered`, a page renderer's answer.
+        assert_eq!(HOST_IMPORTS.len(), 8);
         assert_eq!(NET_IMPORTS.len(), 2);
     }
 }

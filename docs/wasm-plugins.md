@@ -64,7 +64,7 @@ outside the sandbox, the user approved it (docs/plugin-platform.md §4 and §5):
 | `tasks` | always | background work in a fresh instance of the same plugin, and an inbox the UI instance sends a running task messages through (`send`, and `receive` in the task) |
 | `license` | always | whether the user holds a paid tier (third parties), never a key |
 | `net` | `allowedHosts` | HTTP to those hosts only |
-| `process` | `permissions.process`, approved | start the listed programs (on `PATH`, then `~/.local/bin`), optionally on a PTY; `which` one would start; a running one's `cwd` and whether a command holds its PTY (`foreground-busy`); a message channel on fds 3 and 4 (`spawn-with-channel`, Chrome's `--remote-debugging-pipe`) |
+| `process` | `permissions.process`, approved | start the listed programs (on `PATH`, then `~/.local/bin`, then on macOS `<name>.app` in the Applications folders), optionally on a PTY; `which` one would start; a running one's `cwd` and whether a command holds its PTY (`foreground-busy`); a message channel on fds 3 and 4 (`spawn-with-channel`, Chrome's `--remote-debugging-pipe`) |
 | `sockets` + `wasi:sockets` | `permissions.sockets`, approved | TCP to the listed `host:port` pairs, or with `*:<port>` to any public server on that port |
 | `wasi:filesystem` preopens | `storage`, `filesystem` (approved) | the plugin's own folder at `/storage`, granted folders at their own paths |
 
