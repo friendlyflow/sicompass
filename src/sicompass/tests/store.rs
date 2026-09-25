@@ -26,7 +26,7 @@ use sicompass_ui::app_state::AppRenderer;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-const REPO: &str = "friendlyflow/hello_plugin_sicompass";
+const REPO: &str = "friendlyflow/hello-plugin-sicompass";
 
 fn fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))

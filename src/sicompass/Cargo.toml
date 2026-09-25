@@ -117,7 +117,7 @@ target = "licenses/THIRD-PARTY-LICENSES.html"
 # X11 display, which is the mode that websites see as a normal browser. No
 # desktop distribution installs it by default, and without it the plugin
 # falls back to Chrome's headless mode, which some sites block
-# (`Chrome::launch` in webbrowser_plugin_sicompass's src/cdp.rs).
+# (`Chrome::launch` in webbrowser-plugin-sicompass's src/cdp.rs).
 depends = ["libvulkan1", "at-spi2-core", "libssl3", "libpng16-16", "zlib1g", "xvfb"]
 
 # Use the real desktop entry instead of cargo-packager's template, which knows

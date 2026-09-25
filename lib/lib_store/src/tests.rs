@@ -17,7 +17,7 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use super::*;
 
-const REPO: &str = "friendlyflow/demo_plugin_sicompass";
+const REPO: &str = "friendlyflow/demo-plugin-sicompass";
 
 struct Keys {
     store_secret: String,
@@ -1007,7 +1007,7 @@ fn the_releases_of_a_long_list_are_fetched_side_by_side_and_listed_in_order() {
         .map(|n| {
             serde_json::json!({
                 "name": n,
-                "repo": format!("friendlyflow/{n}_plugin_sicompass"),
+                "repo": format!("friendlyflow/{n}-plugin-sicompass"),
                 "pubkey": keys.plugin_public,
             })
         })
@@ -1023,7 +1023,7 @@ fn the_releases_of_a_long_list_are_fetched_side_by_side_and_listed_in_order() {
                  "version": "1.0.0", "minAppVersion": "0.1.0" }}"#
         );
         server.serve_release_at(
-            &format!("/friendlyflow/{n}_plugin_sicompass/releases/latest/download/"),
+            &format!("/friendlyflow/{n}-plugin-sicompass/releases/latest/download/"),
             &release_with(&keys, &manifest, None),
         );
     }

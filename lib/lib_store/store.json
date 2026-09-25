@@ -4,73 +4,73 @@
   "plugins": [
     {
       "name": "salesdemo",
-      "repo": "friendlyflow/salesdemo_plugin_sicompass",
+      "repo": "friendlyflow/salesdemo-plugin-sicompass",
       "pubkey": "iKfXFRrUlgx/hg34tBO53+LGizSCuwzYfwEuTSjr/4Q=",
       "category": "demo"
     },
     {
       "name": "remote",
-      "repo": "friendlyflow/remote_plugin_sicompass",
+      "repo": "friendlyflow/remote-plugin-sicompass",
       "pubkey": "49CDtq4mYpIQ4fNxioeI2BslQfzCX4+4OV6Wffr6aF4=",
       "category": "network"
     },
     {
       "name": "notes",
-      "repo": "friendlyflow/notes_plugin_sicompass",
+      "repo": "friendlyflow/notes-plugin-sicompass",
       "pubkey": "sSg9dF25eDkWhcUMUXYH9XUvt8F3Vb16qyrRDoAYA78=",
       "category": "productivity"
     },
     {
       "name": "projectmanagement",
-      "repo": "friendlyflow/projectmanagement_plugin_sicompass",
+      "repo": "friendlyflow/projectmanagement-plugin-sicompass",
       "pubkey": "mKWfeJ8vM7+ui0mEtIQkcXTXNQM0ZhwdCOi3h+r3070=",
       "category": "productivity"
     },
     {
       "name": "filebrowser",
-      "repo": "friendlyflow/filebrowser_plugin_sicompass",
+      "repo": "friendlyflow/filebrowser-plugin-sicompass",
       "pubkey": "U/6QU2rWxL0GFI0WeSCfL+jMya4vpXlYtYT3FtL22Us=",
       "category": "files"
     },
     {
       "name": "texteditor",
-      "repo": "friendlyflow/texteditor_plugin_sicompass",
+      "repo": "friendlyflow/texteditor-plugin-sicompass",
       "pubkey": "3TQyCQUOyT9RuZy3ClqvB/JF3s8CSzPQZNWtlf7CFmA=",
       "category": "files"
     },
     {
       "name": "gitclient",
-      "repo": "friendlyflow/gitclient_plugin_sicompass",
+      "repo": "friendlyflow/gitclient-plugin-sicompass",
       "pubkey": "LJUlsAbot7VyF35vKQ6azyAWR5GmgjVhmzr6bDPFMOU=",
       "category": "development"
     },
     {
       "name": "terminal",
-      "repo": "friendlyflow/terminal_plugin_sicompass",
+      "repo": "friendlyflow/terminal-plugin-sicompass",
       "pubkey": "a6w+En0gtnrSuaqh371br2ZNN0y73MSU6ir/QSrzF1o=",
       "category": "development"
     },
     {
       "name": "claude",
-      "repo": "friendlyflow/claude_plugin_sicompass",
+      "repo": "friendlyflow/claude-plugin-sicompass",
       "pubkey": "f8vpfY+RSWtOsXz/n9dLf742aymiQHPAfrbPh1r6mhE=",
       "category": "development"
     },
     {
       "name": "chatclient",
-      "repo": "friendlyflow/chatclient_plugin_sicompass",
+      "repo": "friendlyflow/chatclient-plugin-sicompass",
       "pubkey": "cK0H0GI2m7DlGnTzrbUBhywmo6K4yLKTCRwiqWGfzWg=",
       "category": "communication"
     },
     {
       "name": "emailclient",
-      "repo": "friendlyflow/emailclient_plugin_sicompass",
+      "repo": "friendlyflow/emailclient-plugin-sicompass",
       "pubkey": "+tpLk3f9PKBSTG1Ebuf6kZDWyiNhJOcWC1BVgAVt5i8=",
       "category": "communication"
     },
     {
       "name": "webbrowser",
-      "repo": "friendlyflow/webbrowser_plugin_sicompass",
+      "repo": "friendlyflow/webbrowser-plugin-sicompass",
       "pubkey": "BUWOjQt7xPQo+xwZuhtFNYX18cqpVlYLnAMzRvtrhMU=",
       "category": "network"
     }

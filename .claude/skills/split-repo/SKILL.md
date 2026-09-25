@@ -23,8 +23,8 @@ with `command -v git-filter-repo`, and fall back to `nix develop -c`.
 
 - `<path-in-sicompass>`: the directory that becomes the new repo's root.
 - `<new-repo-name>`: the directory name in `../` and the GitHub name under
-  `friendlyflow/`. Plugins are `<name>_plugin_sicompass` (for example
-  `projectmanagement_plugin_sicompass`). The others keep their crate name.
+  `friendlyflow/`. Plugins are `<name>-plugin-sicompass` (for example
+  `projectmanagement-plugin-sicompass`). The others keep their crate name.
 - `--path <extra>`: extra paths whose history comes along (docs, scripts, shared
   assets). Each one also needs a `--path-rename` so it lands where the new
   layout expects it, since everything else is relative to the new root.

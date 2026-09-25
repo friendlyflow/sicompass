@@ -27,63 +27,63 @@
       "kind": "greeter"
     },
     {
-      "name": "salesdemo_plugin_sicompass",
-      "path": "../salesdemo_plugin_sicompass",
+      "name": "salesdemo-plugin-sicompass",
+      "path": "../salesdemo-plugin-sicompass",
       "kind": "plugin"
     },
     {
-      "name": "remote_plugin_sicompass",
-      "path": "../remote_plugin_sicompass",
+      "name": "remote-plugin-sicompass",
+      "path": "../remote-plugin-sicompass",
       "kind": "plugin"
     },
     {
-      "name": "notes_plugin_sicompass",
-      "path": "../notes_plugin_sicompass",
+      "name": "notes-plugin-sicompass",
+      "path": "../notes-plugin-sicompass",
       "kind": "plugin"
     },
     {
-      "name": "projectmanagement_plugin_sicompass",
-      "path": "../projectmanagement_plugin_sicompass",
+      "name": "projectmanagement-plugin-sicompass",
+      "path": "../projectmanagement-plugin-sicompass",
       "kind": "plugin"
     },
     {
-      "name": "filebrowser_plugin_sicompass",
-      "path": "../filebrowser_plugin_sicompass",
+      "name": "filebrowser-plugin-sicompass",
+      "path": "../filebrowser-plugin-sicompass",
       "kind": "plugin"
     },
     {
-      "name": "texteditor_plugin_sicompass",
-      "path": "../texteditor_plugin_sicompass",
+      "name": "texteditor-plugin-sicompass",
+      "path": "../texteditor-plugin-sicompass",
       "kind": "plugin"
     },
     {
-      "name": "gitclient_plugin_sicompass",
-      "path": "../gitclient_plugin_sicompass",
+      "name": "gitclient-plugin-sicompass",
+      "path": "../gitclient-plugin-sicompass",
       "kind": "plugin"
     },
     {
-      "name": "terminal_plugin_sicompass",
-      "path": "../terminal_plugin_sicompass",
+      "name": "terminal-plugin-sicompass",
+      "path": "../terminal-plugin-sicompass",
       "kind": "plugin"
     },
     {
-      "name": "claude_plugin_sicompass",
-      "path": "../claude_plugin_sicompass",
+      "name": "claude-plugin-sicompass",
+      "path": "../claude-plugin-sicompass",
       "kind": "plugin"
     },
     {
-      "name": "chatclient_plugin_sicompass",
-      "path": "../chatclient_plugin_sicompass",
+      "name": "chatclient-plugin-sicompass",
+      "path": "../chatclient-plugin-sicompass",
       "kind": "plugin"
     },
     {
-      "name": "emailclient_plugin_sicompass",
-      "path": "../emailclient_plugin_sicompass",
+      "name": "emailclient-plugin-sicompass",
+      "path": "../emailclient-plugin-sicompass",
       "kind": "plugin"
     },
     {
-      "name": "webbrowser_plugin_sicompass",
-      "path": "../webbrowser_plugin_sicompass",
+      "name": "webbrowser-plugin-sicompass",
+      "path": "../webbrowser-plugin-sicompass",
       "kind": "plugin"
     }
   ]

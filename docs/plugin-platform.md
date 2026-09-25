@@ -427,7 +427,7 @@ mention the Store.
     "friendlyflow/commercial": { "issuer": "<ed25519 pub>", "checkout": "https://…", "title": "store-tier-commercial" }
   },
   "plugins": [
-    { "name": "notes", "repo": "friendlyflow/notes_plugin_sicompass",
+    { "name": "notes", "repo": "friendlyflow/notes-plugin-sicompass",
       "pubkey": "<ed25519 pub>", "category": "productivity",
       "service": "friendlyflow/cloud", "paidFeatures": false }
   ]
@@ -649,7 +649,7 @@ Each part ends in something runnable, like Steps 1-3.
 Step 5 (the salesdemo pilot) then exercises 4.2, 4.3 and 4.8 end to end, and
 Steps 6-10 exercise the rest.
 
-**Step 5 done (2026-09-24):** github.com/friendlyflow/salesdemo_plugin_sicompass
+**Step 5 done (2026-09-24):** github.com/friendlyflow/salesdemo-plugin-sicompass
 (32 commits of history), released as v0.2.0 by its release workflow with its own
 key, listed in the store list, installed from GitHub through the Store into a
 dev build, and `lib/lib_sales_demo` removed. The port needed two per-level
@@ -661,7 +661,7 @@ every navigation.
 **Step 6 done (2026-09-24), after a detour:** remote services were first
 removed, because a plugin could reach only the hosts its `plugin.json` names,
 and a remote server is whatever the user types in. They came back as
-github.com/friendlyflow/remote_plugin_sicompass once plugins could ask for
+github.com/friendlyflow/remote-plugin-sicompass once plugins could ask for
 **any public server**: `"allowedHosts": ["*"]`, which needs the user's approval
 (shown in the Store as "connects to any server on the internet, never to your
 own computer or local network") and is in the approval fingerprint. The host
@@ -679,7 +679,7 @@ over a plugin's `net`, the debounce, and `cloud::Cloud`, the service as a
 plugin runs it (switch, row, uploads and restores as background tasks). The
 host adds `license.standing` and `license.token`, the token only for the tier a
 manifest names as its `service`. Notes and project management became
-`notes_plugin_sicompass` and `projectmanagement_plugin_sicompass`, with
+`notes-plugin-sicompass` and `projectmanagement-plugin-sicompass`, with
 `storage` mapped to the folders the built-ins used, so existing notes and
 boards open unchanged, and settings sections that keep their names. A user
 who had them learns where they went from the Store: a listed program that is
@@ -695,7 +695,7 @@ during undo panicked (a nested tokio runtime), and a navigation request made in
 `leave-dashboard` was only seen a frame later.
 
 **Step 8 (2026-09-24):** the file browser and the text editor are Store
-plugins (`filebrowser_plugin_sicompass`, `texteditor_plugin_sicompass`), by the
+plugins (`filebrowser-plugin-sicompass`, `texteditor-plugin-sicompass`), by the
 user's choice, with the whole disk (`"filesystem": ["/"]`, approved at
 install). The save-as and open dialogs look the file browser up by name and say
 to install it from the store when it is missing. Porting them found three
@@ -720,8 +720,8 @@ listed, for a file inside the grants), and `stat` (permission bits, owner,
 group and the local UTC offset, which WASI's metadata lacks).
 
 **Step 9 (2026-09-24):** the terminal (with `lib_shell`), the git client and
-Claude are Store plugins (`terminal_plugin_sicompass`,
-`gitclient_plugin_sicompass`, `claude_plugin_sicompass`). Each asks for the
+Claude are Store plugins (`terminal-plugin-sicompass`,
+`gitclient-plugin-sicompass`, `claude-plugin-sicompass`). Each asks for the
 whole disk (their folder listings pick where to work) and for its programs:
 `git`; `$SHELL` and the common shells, by name; `claude`. What changed on the
 way:
@@ -753,7 +753,7 @@ lets Claude start only a program that cannot exist and names no Claude folder,
 which replaces the crate's thread-local test seams.
 
 **Step 10, chat (2026-09-24):** the chat client is a Store plugin
-(`chatclient_plugin_sicompass`) with any public server (`"allowedHosts":
+(`chatclient-plugin-sicompass`) with any public server (`"allowedHosts":
 ["*"]`, the user's choice) and its storage folder. Its `/sync` long poll is a
 task, and its sign-in lives in the storage folder because a plugin cannot
 write the app's settings. The user's decisions for the rest of the step:
@@ -774,7 +774,7 @@ write the app's settings. The user's decisions for the rest of the step:
   into the UI instance gets 10 seconds before the plugin is trapped.
 
 **Step 10, email:** the email client is a Store plugin
-(`emailclient_plugin_sicompass`) with sockets `*:993`, `*:465` and `*:587`,
+(`emailclient-plugin-sicompass`) with sockets `*:993`, `*:465` and `*:587`,
 Google's token and userinfo endpoints, and its storage folder. IMAP is the
 blocking `imap` crate over a host socket and rustls (ring, built with clang
 for wasm), SMTP a few commands by hand with STARTTLS for port 587. The
@@ -784,7 +784,7 @@ sicompass drive the released plugin against a fake mailbox on loopback
 (`tests/fake_imap`), granted by name.
 
 **Step 10, the web browser:** the browser is a Store plugin
-(`webbrowser_plugin_sicompass`) with its storage folder and, under `process`,
+(`webbrowser-plugin-sicompass`) with its storage folder and, under `process`,
 the names Chrome goes by (Chrome, Chromium, Edge) and `Xvfb`. A small blocking
 DevTools client (`cdp.rs`) drives Chrome over `spawn-with-channel`
 (`--remote-debugging-pipe`), from one long-lived task holding Chrome and the

@@ -917,7 +917,7 @@ mod tests {
         let text = joined(&p.fetch());
         assert!(
             // The reference program became a plugin in 0.2.0.
-            text.contains("salesdemo_plugin_sicompass"),
+            text.contains("salesdemo-plugin-sicompass"),
             "must point to the reference program"
         );
         // Rust for built-ins, WASM for anything installed. The `native` and

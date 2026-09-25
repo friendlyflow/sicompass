@@ -51,8 +51,8 @@ file does not) and put it back into the tag unchanged on the next `fetch`.
 
 The FFON label is markup, so text that could look like a tag must be escaped.
 The git client, notes and project management plugins
-(`../gitclient_plugin_sicompass`, `../notes_plugin_sicompass`,
-`../projectmanagement_plugin_sicompass`) each carry a small
+(`../gitclient-plugin-sicompass`, `../notes-plugin-sicompass`,
+`../projectmanagement-plugin-sicompass`) each carry a small
 `escape.rs` that escapes `<` and `>` on the way out and undoes it in
 `commit_edit`. Copy that pattern.
 
@@ -72,7 +72,7 @@ Two capability flags change what happens around an edit:
 A dashboard receives raw keys in `dashboard_key` and text in `dashboard_text`, and
 draws its own cell grid. It has no `<input>` to lean on, so it edits text itself.
 Build that on the SDK model, not on a fresh `String` and caret. The project
-management board (`../projectmanagement_plugin_sicompass`) is the worked example. A WASM
+management board (`../projectmanagement-plugin-sicompass`) is the worked example. A WASM
 plugin gets the same module as `sicompass_pdk::input`.
 
 The model has two parts:

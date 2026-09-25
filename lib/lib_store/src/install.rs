@@ -322,7 +322,7 @@ mod tests {
     fn listed_release_urls_are_the_ones_the_sdk_documents() {
         let entry = StoreEntry {
             name: "notes".into(),
-            repo: "friendlyflow/notes_plugin_sicompass".into(),
+            repo: "friendlyflow/notes-plugin-sicompass".into(),
             pubkey: String::new(),
             category: None,
             service: None,

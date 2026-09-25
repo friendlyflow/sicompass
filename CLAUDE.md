@@ -146,7 +146,7 @@ in Store > tiers. The server is the **separate, private** repo `../server` (the
 Ed25519 signing key must never sit in GPL client code).
 
 The backups themselves are the plugins'. Notes and project management are
-plugins now (`../notes_plugin_sicompass`, `../projectmanagement_plugin_sicompass`)
+plugins now (`../notes-plugin-sicompass`, `../projectmanagement-plugin-sicompass`)
 and back up the way a third party's plugin would, with the `sicompass-payments`
 guest library (`sicompass-payments/` in `../sicompass-plugin-sdk`). The host gives a plugin two
 things through the `license` interface: where the user stands with a tier

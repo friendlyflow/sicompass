@@ -5,7 +5,7 @@
 #
 # The suite is the one of the repo that *owns the edited file*, not always this
 # one. Work on the sibling repos (../desicompass, ../sicompass-ui,
-# ../<name>_plugin_sicompass, see .claude/repos.json) is driven from this
+# ../<name>-plugin-sicompass, see .claude/repos.json) is driven from this
 # checkout, so an edit there fires this hook too, and running sicompass's suite
 # for it would test the wrong code and still take minutes.
 

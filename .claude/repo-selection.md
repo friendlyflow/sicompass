@@ -1,7 +1,7 @@
 # Choosing the repo a skill runs in
 
 sicompass is one of several sibling repos under the same parent directory
-(`../desicompass`, `../sicompass-ui`, `../<name>_plugin_sicompass`, ...). Work
+(`../desicompass`, `../sicompass-ui`, `../<name>-plugin-sicompass`, ...). Work
 is driven from this checkout, so `/commit-and-push`, `/release`, `/sync` and
 `/update-cargo` take the target repo as their **first argument**.
 `.claude/repos.json` is the list of names they accept.

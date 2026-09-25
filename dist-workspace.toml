@@ -83,7 +83,7 @@ features = ["bundled-sdl3"]
 # So there is no longer a runtime tree here. `assets/tutorial` and
 # `assets/sales-demo` moved into `lib/lib_tutorial/assets/` and
 # `lib/lib_sales_demo/assets/`, where the owning crate `include_bytes!`s them.
-# (The sales demo has since become a plugin, salesdemo_plugin_sicompass, which
+# (The sales demo has since become a plugin, salesdemo-plugin-sicompass, which
 # the Store installs with its own assets.)
 # What is left in the top-level `assets/` (icons, the .desktop file) is consumed
 # at package-build time from the checkout, never from the archive.

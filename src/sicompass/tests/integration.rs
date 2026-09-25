@@ -18334,7 +18334,7 @@ fn harness_with_notes() -> (AppRenderer, TempDir) {
 /// so these tests also show an existing store opening unchanged.
 ///
 /// `tests/fixtures/plugins/<name>` is the plugin's release contents (built
-/// from `../<name>_plugin_sicompass`: `plugin.json`, `locales/`, and
+/// from `../<name>-plugin-sicompass`: `plugin.json`, `locales/`, and
 /// `target/wasm32-wasip2/release/<name>_plugin.wasm` as `plugin.wasm`),
 /// committed like the `hello.wasm` fixture and for the same reason.
 fn plugin_provider(name: &str, storage: &Path) -> Box<dyn Provider> {
