@@ -8,6 +8,7 @@
 //!
 //! Network work runs as one job at a time on a worker thread and is picked up
 //! in [`Provider::tick`]. Loading fetches the offers' releases side by side.
+//! The list downloaded last time is shown at once meanwhile ([`cache`]).
 //! The app is told about an install, update or removal
 //! through the apply callback, the same queue Settings uses (the SDK boundary
 //! forbids a direct call): `pluginInstalled`, `pluginUpdated` or
@@ -23,6 +24,7 @@
 //! separately and never by default, to move the plugin's data folder to the
 //! trash; the app does that (`pluginDataTrash`), with its guarded trash.
 
+pub mod cache;
 pub mod http;
 pub mod install;
 pub mod payments;
@@ -120,6 +122,44 @@ impl OfferSource {
     }
 }
 
+/// The store list and every offer in it, plus the plugins in `plugins_dir`
+/// that were installed by hand.
+fn load_offers(
+    fetch: &Fetch,
+    store_url: &str,
+    releases_url: &str,
+    keys: &[&str],
+    plugins_dir: Option<&std::path::Path>,
+) -> (Result<Loaded, String>, Vec<Offer>) {
+    let store = source::load(fetch, store_url, keys);
+    let mut sources: Vec<OfferSource> = match &store {
+        Ok(loaded) => loaded
+            .store
+            .plugins
+            .iter()
+            .map(|entry| OfferSource::Listed(entry.clone()))
+            .collect(),
+        Err(_) => Vec::new(),
+    };
+    // Everything else in the plugins folder was installed by hand.
+    if let Some(dir) = plugins_dir {
+        for (name, i) in install::installed(dir) {
+            if !sources.iter().any(|s| s.name() == name) {
+                sources.push(OfferSource::ByHand(Box::new(i.manifest)));
+            }
+        }
+    }
+    // Every offer is its own release to fetch and verify. One after another, a
+    // dozen of them kept the list waiting for seconds.
+    let offers = in_parallel(sources, |source| match source {
+        OfferSource::Listed(entry) => {
+            Offer::from_source(fetch, Source::listed(&entry, releases_url), Some(entry))
+        }
+        OfferSource::ByHand(manifest) => Offer::by_hand(fetch, &manifest),
+    });
+    (store, offers)
+}
+
 /// `f` over every item at once, a thread each, the results in the items' order.
 fn in_parallel<T: Send, R: Send>(items: Vec<T>, f: impl Fn(T) -> R + Sync) -> Vec<R> {
     let f = &f;
@@ -136,6 +176,8 @@ fn in_parallel<T: Send, R: Send>(items: Vec<T>, f: impl Fn(T) -> R + Sync) -> Ve
 }
 
 enum Done {
+    /// The list as it was last downloaded, shown while a fresh one loads.
+    Kept { store: Loaded, offers: Vec<Offer> },
     Loaded {
         store: Result<Loaded, String>,
         offers: Vec<Offer>,
@@ -177,6 +219,8 @@ pub struct StoreProvider {
     /// Where plugins keep their data (`app_data_dir()`), to offer the folder
     /// of an uninstalled one for the trash.
     data_dir: Option<PathBuf>,
+    /// Where the last downloaded list is kept ([`cache`]). `None` keeps nothing.
+    cache_dir: Option<PathBuf>,
 
     loaded: Option<Result<Loaded, String>>,
     offers: Vec<Offer>,
@@ -214,6 +258,12 @@ impl StoreProvider {
                 .collect(),
             plugins_dir: sicompass_sdk::platform::plugins_dir(),
             data_dir: sicompass_sdk::platform::app_data_dir(),
+            // Never the developer's cache from a unit test.
+            cache_dir: if cfg!(test) {
+                None
+            } else {
+                sicompass_sdk::platform::app_cache_dir().map(|d| d.join("store"))
+            },
             loaded: None,
             offers: Vec::new(),
             job: None,
@@ -242,6 +292,7 @@ impl StoreProvider {
         self.releases_url = releases_url.to_owned();
         self.trusted = trusted.iter().map(|k| (*k).to_owned()).collect();
         self.plugins_dir = Some(plugins_dir);
+        self.cache_dir = None;
         self.tiers = tiers::Tiers::new(self.fetch.clone());
         self
     }
@@ -268,6 +319,15 @@ impl StoreProvider {
         for (k, v) in self.tiers.take_changed() {
             self.fire(&k, &v);
         }
+    }
+
+    /// Keep the last downloaded list in `dir` (tests; [`with_sources`] turns
+    /// the cache off).
+    ///
+    /// [`with_sources`]: Self::with_sources
+    pub fn with_cache_dir(mut self, dir: PathBuf) -> Self {
+        self.cache_dir = Some(dir);
+        self
     }
 
     /// Point the data-folder check somewhere else (tests).
@@ -304,37 +364,59 @@ impl StoreProvider {
         let releases_url = self.releases_url.clone();
         let trusted = self.trusted.clone();
         let plugins_dir = self.plugins_dir.clone();
+        let cache_dir = self.cache_dir.clone();
         spawn("store:load", move || {
             let keys: Vec<&str> = trusted.iter().map(String::as_str).collect();
-            let store = source::load(&fetch, &store_url, &keys);
-            let mut sources: Vec<OfferSource> = match &store {
-                Ok(loaded) => loaded
-                    .store
-                    .plugins
-                    .iter()
-                    .map(|entry| OfferSource::Listed(entry.clone()))
-                    .collect(),
-                Err(_) => Vec::new(),
+            let load = |fetch: &Fetch| {
+                load_offers(
+                    fetch,
+                    &store_url,
+                    &releases_url,
+                    &keys,
+                    plugins_dir.as_deref(),
+                )
             };
-            // Everything else in the plugins folder was installed by hand.
-            if let Some(dir) = &plugins_dir {
-                for (name, i) in install::installed(dir) {
-                    if !sources.iter().any(|s| s.name() == name) {
-                        sources.push(OfferSource::ByHand(Box::new(i.manifest)));
-                    }
-                }
+            // What was downloaded last time, at once. Only a list that was
+            // kept: the compiled-in fallback is no reason to show anything
+            // before the network answers.
+            let kept = cache_dir
+                .clone()
+                .and_then(|dir| match load(&cache::kept(dir)) {
+                    (Ok(store), offers) if store.offline.is_none() => Some((store, offers)),
+                    _ => None,
+                });
+            if let Some((store, offers)) = &kept {
+                let _ = tx.send(Done::Kept {
+                    store: store.clone(),
+                    offers: offers.clone(),
+                });
             }
-            // Every offer is its own release to fetch and verify. One after
-            // another, a dozen of them kept the list waiting for seconds.
-            let offers = in_parallel(sources, |source| match source {
-                OfferSource::Listed(entry) => {
-                    Offer::from_source(&fetch, Source::listed(&entry, &releases_url), Some(entry))
-                }
-                OfferSource::ByHand(manifest) => Offer::by_hand(&fetch, &manifest),
-            });
+            let fetch = match cache_dir {
+                Some(dir) => cache::keeping(fetch, dir),
+                None => fetch,
+            };
+            let (mut store, mut offers) = load(&fetch);
+            // Offline, the kept list is still newer than the compiled one.
+            let offline = match &store {
+                Ok(loaded) => loaded.offline.clone(),
+                Err(e) => Some(e.clone()),
+            };
+            if let (Some(why), Some((kept, kept_offers))) = (offline, kept) {
+                store = Ok(Loaded {
+                    store: kept.store,
+                    offline: Some(why),
+                });
+                offers = kept_offers;
+            }
             let _ = tx.send(Done::Loaded { store, offers });
         });
         self.job = Some((Job::Loading, rx));
+    }
+
+    /// Whether the store list is being loaded (or checked, when a kept copy
+    /// is already shown).
+    fn is_loading(&self) -> bool {
+        matches!(self.job, Some((Job::Loading, _)))
     }
 
     fn start_install(&mut self, name: &str, update: bool) {
@@ -423,6 +505,11 @@ impl StoreProvider {
 
     fn finish(&mut self, done: Done) {
         match done {
+            Done::Kept { store, offers } => {
+                remember_issuers(&store.store);
+                self.offers = offers;
+                self.loaded = Some(Ok(store));
+            }
             Done::Loaded { store, offers } => {
                 if let Ok(loaded) = &store {
                     remember_issuers(&loaded.store);
@@ -616,6 +703,9 @@ impl StoreProvider {
         }
         if self.job.is_none() {
             out.push(check_again);
+        } else if self.is_loading() {
+            // The kept list is on screen, the fresh one is on its way.
+            out.push(FfonElement::new_str(localize::t("store-checking")));
         }
         out
     }
@@ -708,7 +798,12 @@ impl StoreProvider {
         let release = match &offer.release {
             Ok(r) => r,
             Err(e) => {
-                out.push(line("store-release-unavailable", &[("err", e.clone())]));
+                if self.is_loading() {
+                    // Not kept last time, the download is still running.
+                    out.push(FfonElement::new_str(localize::t("store-checking")));
+                } else {
+                    out.push(line("store-release-unavailable", &[("err", e.clone())]));
+                }
                 if installed.is_some() {
                     out.push(button("uninstall", name, localize::t("store-uninstall")));
                 }
@@ -923,7 +1018,10 @@ impl Provider for StoreProvider {
         };
         match rx.try_recv() {
             Ok(done) => {
-                self.job = None;
+                // A kept list is shown while the fresh one is still coming.
+                if !matches!(done, Done::Kept { .. }) {
+                    self.job = None;
+                }
                 self.finish(done);
                 true
             }

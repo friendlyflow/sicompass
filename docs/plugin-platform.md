@@ -461,6 +461,11 @@ mention the Store.
   `raw.githubusercontent.com/friendlyflow/sicompass/main/lib/lib_store/` and falls
   back to the copy compiled into the binary when offline or when the signature
   does not verify.
+- **Kept, for an instant list:** the Store keeps the signed store list and
+  release files it last downloaded in `<cache>/store/` and shows them at once,
+  checked against their signatures like any download, while it fetches fresh
+  ones. Offline, the kept list wins over the compiled one. An install always
+  downloads the release again.
 
 ## 9. lib_store
 

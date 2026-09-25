@@ -6,6 +6,7 @@ store-loading = Chargement de la liste du store. Appuyez à nouveau sur Gauche p
 store-load-failed = La liste du store n'a pas pu être chargée : { $err }
 store-offline = Hors ligne, voici donc la liste du store intégrée à cette version de sicompass.
 store-check-again = vérifier à nouveau
+store-checking = Recherche de nouvelles versions dans le store.
 store-no-programs = Le store ne propose encore aucun programme.
 store-state-not-installed = non installé
 store-state-installed = installé, version { $version }

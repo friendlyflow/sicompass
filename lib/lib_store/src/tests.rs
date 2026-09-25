@@ -6,6 +6,7 @@
 //! a runtime used only for the server, and drives the
 //! provider from plain synchronous code.
 
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -1081,4 +1082,169 @@ fn the_releases_of_a_long_list_are_fetched_side_by_side_and_listed_in_order() {
         .map(|n| format!("{n}, {}", localize::t("store-state-not-installed")))
         .collect();
     assert_eq!(listed, expected, "in the order the store list gives");
+}
+
+/// A Store over `fetch` that keeps its downloads in `cache`, as the app's does.
+fn cached_store(server: &Server, keys: &Keys, fetch: http::Fetch, cache: &Path) -> StoreProvider {
+    register_test_auditor();
+    let plugins = cache.join("plugins");
+    let data = cache.join("data");
+    StoreProvider::new()
+        .with_sources(
+            fetch,
+            &format!("{}/store/", server.uri()),
+            &server.uri(),
+            &[keys.store_public.as_str()],
+            plugins,
+        )
+        .with_data_dir(data.clone())
+        .with_settings_path(data.join("settings.json"))
+        .with_cache_dir(cache.join("store"))
+}
+
+/// A network that answers only once `open` is set, the way a slow connection
+/// keeps the Store waiting.
+fn gated(open: Arc<(Mutex<bool>, std::sync::Condvar)>) -> http::Fetch {
+    let real = http::http_fetch();
+    Arc::new(move |url: &str| {
+        let (lock, cvar) = &*open;
+        drop(
+            cvar.wait_while(lock.lock().unwrap(), |open| !*open)
+                .unwrap(),
+        );
+        real(url)
+    })
+}
+
+/// Open `programs` and tick until the list shows `demo`, or `limit` passes.
+fn programs_within(store: &mut StoreProvider, limit: Duration) -> Vec<String> {
+    store.set_current_path("/");
+    store.push_path("programs");
+    let start = Instant::now();
+    loop {
+        store.tick();
+        let list = lines(store.fetch());
+        if has(&list, "demo, ") || start.elapsed() > limit {
+            return list;
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}
+
+fn settle_store(store: &mut StoreProvider) {
+    let start = Instant::now();
+    while store.is_working() {
+        store.tick();
+        assert!(start.elapsed() < Duration::from_secs(20), "the Store hung");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}
+
+#[test]
+fn the_list_downloaded_last_time_shows_at_once_while_the_store_is_checked() {
+    let (server, keys) = (Server::start(), keys());
+    server.serve_store(&keys, &keys.store_secret, &[]);
+    server.serve_release(&release(&keys, "1.0.0", ""));
+    let dir = tempfile::tempdir().unwrap();
+
+    // The first time there is nothing kept: the list waits for the network.
+    let mut first = cached_store(&server, &keys, http::http_fetch(), dir.path());
+    programs_within(&mut first, Duration::from_secs(20));
+    settle_store(&mut first);
+
+    // Next time, with a network that has not answered yet.
+    server.reset();
+    server.serve_store(&keys, &keys.store_secret, &[]);
+    server.serve_release(&release(&keys, "1.1.0", ""));
+    let open = Arc::new((Mutex::new(false), std::sync::Condvar::new()));
+    let mut next = cached_store(&server, &keys, gated(open.clone()), dir.path());
+    let list = programs_within(&mut next, Duration::from_secs(5));
+    let not_installed = localize::t("store-state-not-installed");
+    assert!(has(&list, &format!("demo, {not_installed}")), "{list:?}");
+    assert!(has(&list, &localize::t("store-checking")), "{list:?}");
+    next.set_current_path("/programs/demo");
+    let entry = lines(next.fetch());
+    assert!(
+        has(&entry, &t_with("store-version", &[("version", "1.0.0")])),
+        "the kept release: {entry:?}"
+    );
+
+    // Then the network answers, and the fresh list replaces the kept one.
+    *open.0.lock().unwrap() = true;
+    open.1.notify_all();
+    settle_store(&mut next);
+    let entry = lines(next.fetch());
+    assert!(
+        has(&entry, &t_with("store-version", &[("version", "1.1.0")])),
+        "{entry:?}"
+    );
+    next.set_current_path("/programs");
+    let list = lines(next.fetch());
+    assert!(!has(&list, &localize::t("store-checking")), "{list:?}");
+    assert!(has(&list, "<button>refresh</button>"), "{list:?}");
+}
+
+#[test]
+fn offline_the_list_downloaded_last_time_is_kept() {
+    let (server, keys) = (Server::start(), keys());
+    server.serve_store(&keys, &keys.store_secret, &[]);
+    server.serve_release(&release(&keys, "1.0.0", ""));
+    let dir = tempfile::tempdir().unwrap();
+    let mut first = cached_store(&server, &keys, http::http_fetch(), dir.path());
+    programs_within(&mut first, Duration::from_secs(20));
+    settle_store(&mut first);
+
+    let offline: http::Fetch = Arc::new(|url: &str| Err(format!("{url}: no network")));
+    let mut next = cached_store(&server, &keys, offline, dir.path());
+    programs_within(&mut next, Duration::from_secs(5));
+    settle_store(&mut next);
+    let list = lines(next.fetch());
+    assert!(has(&list, "demo, "), "{list:?}");
+    assert!(has(&list, &localize::t("store-offline")), "{list:?}");
+    next.set_current_path("/programs/demo");
+    let entry = lines(next.fetch());
+    assert!(
+        has(&entry, &t_with("store-version", &[("version", "1.0.0")])),
+        "{entry:?}"
+    );
+}
+
+#[test]
+fn a_kept_file_that_no_longer_matches_its_signature_is_not_shown() {
+    let (server, keys) = (Server::start(), keys());
+    server.serve_store(&keys, &keys.store_secret, &[]);
+    server.serve_release(&release(&keys, "1.0.0", ""));
+    let dir = tempfile::tempdir().unwrap();
+    let mut first = cached_store(&server, &keys, http::http_fetch(), dir.path());
+    programs_within(&mut first, Duration::from_secs(20));
+    settle_store(&mut first);
+
+    // Someone changes the kept release: another version, same signature.
+    let kept = dir.path().join("store");
+    let mut changed = 0;
+    for file in std::fs::read_dir(&kept).unwrap() {
+        let path = file.unwrap().path();
+        let body = std::fs::read_to_string(&path).unwrap_or_default();
+        if body.contains("\"1.0.0\"") {
+            std::fs::write(&path, body.replace("\"1.0.0\"", "\"9.0.0\"")).unwrap();
+            changed += 1;
+        }
+    }
+    assert_eq!(changed, 1, "one kept release.json");
+
+    let open = Arc::new((Mutex::new(false), std::sync::Condvar::new()));
+    let mut next = cached_store(&server, &keys, gated(open.clone()), dir.path());
+    programs_within(&mut next, Duration::from_millis(500));
+    next.set_current_path("/programs/demo");
+    let entry = lines(next.fetch());
+    assert!(!has(&entry, "9.0.0"), "{entry:?}");
+    assert!(has(&entry, &localize::t("store-checking")), "{entry:?}");
+    *open.0.lock().unwrap() = true;
+    open.1.notify_all();
+    settle_store(&mut next);
+    let entry = lines(next.fetch());
+    assert!(
+        has(&entry, &t_with("store-version", &[("version", "1.0.0")])),
+        "{entry:?}"
+    );
 }
