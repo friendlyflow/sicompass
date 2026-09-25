@@ -622,7 +622,12 @@ mod tests {
         assert!(f.modified > 0);
 
         let l = s.stat(root.join("link").to_string_lossy().into_owned()).unwrap();
-        assert_eq!(l.mode.unwrap() & libc::S_IFMT, libc::S_IFLNK, "the link, not its target");
+        // `mode_t` is a u16 on macOS.
+        assert_eq!(
+            l.mode.unwrap() & u32::from(libc::S_IFMT),
+            u32::from(libc::S_IFLNK),
+            "the link, not its target"
+        );
         assert!(s.stat("/etc/passwd".to_owned()).is_err(), "outside the grants");
     }
 

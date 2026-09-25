@@ -306,19 +306,25 @@ jobs:
           fi
           cd ../sicompass-plugin-sdk && ./scripts/verify-guest.sh
 
-      # Independent of the SDK checkout: the committed fixtures must import nothing
-      # the host does not offer.
+      # Independent of the SDK checkout: the committed fixtures (the capability
+      # examples and the released plugins) must import nothing the host does not
+      # offer. Since ABI 0.2 that is the sicompass interfaces and WASI p2's
+      # baseline and TCP (sicompass_sdk::plugin_abi: WASI_BASELINE, WASI_SOCKETS),
+      # each linked only as plugin.json grants, which the host tests exercise.
+      # Never `wasi:sockets/ip-name-lookup`: resolving any name could leak data,
+      # so the host does not link it.
       - name: Audit the committed fixtures
         run: |
-          for f in src/sicompass/tests/fixtures/wasm/*.wasm; do
+          allowed='^import (sicompass:plugin/[a-z-]+|wasi:(cli/(environment|exit|stdin|stdout|stderr|terminal-(input|output|stdin|stdout|stderr))|clocks/(wall-clock|monotonic-clock)|random/(random|insecure|insecure-seed)|io/(error|poll|streams)|filesystem/(types|preopens)|sockets/(network|instance-network|tcp|tcp-create-socket|udp|udp-create-socket)))@'
+          for f in src/sicompass/tests/fixtures/wasm/*.wasm src/sicompass/tests/fixtures/plugins/*/plugin.wasm; do
             echo "== $f"
-            imports=$(wasm-tools component wit "$f" | grep -E '^\s*import' || true)
+            imports=$(wasm-tools component wit "$f" | grep -E '^\s*import' | sed 's/^\s*//' || true)
             echo "$imports"
-            if echo "$imports" | grep -qi 'wasi:'; then
-              echo "::error::$f imports WASI, which voids the capability model"
+            if echo "$imports" | grep -q 'wasi:sockets/ip-name-lookup'; then
+              echo "::error::$f imports ip-name-lookup, which the host never links"
               exit 1
             fi
-            if echo "$imports" | grep -vE 'sicompass:plugin/(types|host|net)@' | grep -q 'import'; then
+            if echo "$imports" | grep -vE "$allowed" | grep -q 'import'; then
               echo "::error::$f imports an interface the host does not provide"
               exit 1
             fi
