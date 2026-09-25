@@ -3,6 +3,36 @@
 cargo-dist parses this file and uses the matching version's section as the
 GitHub Release body, so entries here are what users read on the download page.
 
+## 0.2.0
+
+### Programs come from the Store
+
+Sicompass itself is now small: the Store, Settings and the tutorial. Every other
+program is installed from the Store, when you want it: the file browser, the
+text editor, notes, project management, the git client, the terminal, Claude,
+chat, email, the web browser, remote, and the sales demo.
+
+Each one runs in a sandbox and can reach only what it asks for. The Store says
+what that is before you install, in plain words: which folders, which programs
+it starts, which servers it talks to. Installing is your approval, and a program
+cannot reach anything it did not ask for. Updates come through the Store too,
+checked against the program's signature.
+
+If you used a program before, your data is where it was. The Store lists the
+programs you had first, says when your data for one is on this computer, and
+installing it opens that data again: your notes, your boards, your browser
+history and bookmarks, the browser's logins, and your terminal history.
+
+A few things work differently:
+
+- The web browser also renders the web pages other programs link to, as before,
+  and shows "Loading…" under the link while it does. Without it installed, a
+  linked page is shown as plain text.
+- The web browser does not run on Windows yet.
+- The email client sends through port 587 (STARTTLS) as well as 465, and Ctrl+D
+  on the message list deletes the message under the cursor again.
+- Cloud backup and the other paid services are in the Store, under tiers.
+
 ## 0.1.21
 
 ### Claude keeps your sessions

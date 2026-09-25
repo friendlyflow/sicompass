@@ -809,6 +809,14 @@ history from the state folder, and the Chrome profile from the config folder
 (`tests/fake_chrome`), through a test-only override of the host's program
 lookup, so no test can start a real one.
 
+**Step 11, the 0.2.0 release train (2026-09-25):** `sicompass-sdk` 0.9.0 and
+`sicompass-pdk` 0.6.0 are on crates.io (tag v0.9.0 of the SDK repo, which
+`sicompass-payments` and the release tool are taken from by git).
+`sicompass-ui` and `loginsicompass` are tagged v0.2.0, and sicompass pins the
+renderer by that tag. Every plugin was released again on the published crates,
+with `minAppVersion` 0.2.0, since the 0.1.x app lacks the host functions they
+import (the file browser at 0.2.1, its version since open-with).
+
 ## 14. Decisions on the former open questions (2026-09-24)
 
 1. **Store key custody:** a key file on the maintainer's machine, outside

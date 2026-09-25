@@ -13,7 +13,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.1.21"
+version = "0.2.0"
 edition = "2024"
 license = "GPL-3.0-only"
 
@@ -38,7 +38,7 @@ license = "GPL-3.0-only"
 # used unconditionally by lib_notes, lib_filebrowser and
 # lib_project_management — and the provider-scoped asset registry and
 # `read-asset` host import from 0.4.0, likewise required unconditionally.)
-sicompass-sdk = "0.8.0"
+sicompass-sdk = "0.9.0"
 sicompass-tutorial = { path = "lib/lib_tutorial" }
 sicompass-settings = { path = "lib/lib_settings" }
 sicompass-store = { path = "lib/lib_store" }
@@ -48,7 +48,7 @@ sicompass-updater = { path = "lib/lib_updater" }
 # (github:friendlyflow/sicompass-ui). Not on crates.io: pinned by git, to a `rev`
 # between releases and to `tag = "vX.Y.Z"` at a release. crane vendors it from
 # Cargo.lock like any git dependency, so there is no hash to maintain.
-sicompass-ui = { git = "https://github.com/friendlyflow/sicompass-ui", rev = "ade41658d93fa23777a3dd3d8ffb72baa9859872" }
+sicompass-ui = { git = "https://github.com/friendlyflow/sicompass-ui", tag = "v0.2.0" }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
@@ -179,16 +179,6 @@ wiremock = "0.6"
 # [patch.crates-io]
 # sicompass-sdk = { path = "../sicompass-plugin-sdk" }
 #
-# Until the 0.2.0 release train publishes sicompass-sdk 0.9.0, the SDK is taken
-# from its git repo at a fixed commit. This one is a *git* patch, which builds
-# anywhere (CI, nix, a fresh checkout), unlike the path patch above that must
-# stay commented. It applies to the whole graph, sicompass-ui included, so there
-# is one SDK and one `Provider` trait. The SDK keeps a 0.8.x version while
-# unreleased, so it still satisfies the `0.8.0` requirements. Remove this block
-# when the pins move to the published 0.9.0.
-[patch.crates-io]
-sicompass-sdk = { git = "https://github.com/friendlyflow/sicompass-plugin-sdk", rev = "faed1702fbc26c4a4c7ae062e567997916d83cef" }
-#
 # The same rule, for working on the renderer and the app together:
 #
 # [patch."https://github.com/friendlyflow/sicompass-ui"]
@@ -196,8 +186,6 @@ sicompass-sdk = { git = "https://github.com/friendlyflow/sicompass-plugin-sdk", 
 
 # Optimize heavy third-party deps even in debug builds — html5ever and the
 # TLS/HTTP stack are 10-50x slower without optimizations.
-[profile.dev.package.chromiumoxide]
-opt-level = 2
 [profile.dev.package.reqwest]
 opt-level = 2
 

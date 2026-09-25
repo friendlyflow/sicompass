@@ -124,7 +124,11 @@ impl WasmProvider {
     }
 
     /// A plugin that moved without a navigation call said so
-    /// (`host.moved-to`), during whichever call moved it.
+    /// (`host.moved-to`), during whichever call moved it. Taken right after
+    /// every call that can move one, not only at the next poll: the app reads
+    /// `current_path` in between (recording where a navigation starts), and a
+    /// stale answer there sent the text editor to `/` when that navigation
+    /// was undone (its root is set through `on-setting-change`).
     fn take_moved_to(&mut self) {
         let moved = self.inner.borrow_mut().store.data_mut().moved_to.take();
         if let Some(path) = moved {
@@ -286,6 +290,10 @@ impl WasmProvider {
         let mut me = me;
         me.descriptor = descriptor;
         me.dashboard_image = dashboard_image;
+        // Where `init` put it (a text editor opens on its root folder): the
+        // path the app records before the first poll has to be the real one,
+        // or undoing the first navigation sends the plugin to `/`.
+        me.take_moved_to();
         if renders_pages {
             me.renders_pages = true;
             sicompass_sdk::url_fetcher::set_renderer_available(true);
@@ -694,7 +702,9 @@ impl Provider for WasmProvider {
     // ---- Data source -------------------------------------------------------
 
     fn fetch(&mut self) -> Vec<FfonElement> {
-        self.call_ffon("fetch", |g, s| g.call_fetch(s))
+        let out = self.call_ffon("fetch", |g, s| g.call_fetch(s));
+        self.take_moved_to();
+        out
     }
 
     fn fetch_subtree_children(&mut self) -> Option<Vec<FfonElement>> {
@@ -848,18 +858,24 @@ impl Provider for WasmProvider {
     }
 
     fn create_directory(&mut self, name: &str) -> bool {
-        self.call("create-directory", |g, s| g.call_create_directory(s, name))
-            .unwrap_or(false)
+        let ok = self.call("create-directory", |g, s| g.call_create_directory(s, name))
+            .unwrap_or(false);
+        self.take_moved_to();
+        ok
     }
 
     fn create_file(&mut self, name: &str) -> bool {
-        self.call("create-file", |g, s| g.call_create_file(s, name))
-            .unwrap_or(false)
+        let ok = self.call("create-file", |g, s| g.call_create_file(s, name))
+            .unwrap_or(false);
+        self.take_moved_to();
+        ok
     }
 
     fn delete_item(&mut self, name: &str) -> bool {
-        self.call("delete-item", |g, s| g.call_delete_item(s, name))
-            .unwrap_or(false)
+        let ok = self.call("delete-item", |g, s| g.call_delete_item(s, name))
+            .unwrap_or(false);
+        self.take_moved_to();
+        ok
     }
 
     fn copy_item(
@@ -869,10 +885,13 @@ impl Provider for WasmProvider {
         dest_dir: &str,
         dest_name: &str,
     ) -> bool {
-        self.call("copy-item", |g, s| {
-            g.call_copy_item(s, src_dir, src_name, dest_dir, dest_name)
-        })
-        .unwrap_or(false)
+        let ok = self
+            .call("copy-item", |g, s| {
+                g.call_copy_item(s, src_dir, src_name, dest_dir, dest_name)
+            })
+            .unwrap_or(false);
+        self.take_moved_to();
+        ok
     }
 
     // ---- Commands ----------------------------------------------------------
@@ -956,22 +975,26 @@ impl Provider for WasmProvider {
         let _ = self.call("on-radio-change", |g, s| {
             g.call_on_radio_change(s, group, value)
         });
+        self.take_moved_to();
     }
 
     fn on_button_press(&mut self, function_name: &str) {
         let _ = self.call("on-button-press", |g, s| {
             g.call_on_button_press(s, function_name)
         });
+        self.take_moved_to();
     }
 
     fn on_checkbox_change(&mut self, label: &str, checked: bool) {
         let _ = self.call("on-checkbox-change", |g, s| {
             g.call_on_checkbox_change(s, label, checked)
         });
+        self.take_moved_to();
     }
 
     fn set_input_value(&mut self, value: &str) {
         let _ = self.call("set-input-value", |g, s| g.call_set_input_value(s, value));
+        self.take_moved_to();
     }
 
     fn on_setting_change(&mut self, key: &str, value: &str) {
@@ -986,6 +1009,7 @@ impl Provider for WasmProvider {
         let _ = self.call("on-setting-change", |g, s| {
             g.call_on_setting_change(s, key, &value)
         });
+        self.take_moved_to();
     }
 
     // ---- Timeline undo/redo ------------------------------------------------
@@ -1018,6 +1042,7 @@ impl Provider for WasmProvider {
                 Ok(Err(msg)) | Err(msg) => *error = msg,
                 Ok(Ok(())) => {}
             }
+            self.take_moved_to();
         }
     }
 
@@ -1027,6 +1052,7 @@ impl Provider for WasmProvider {
                 Ok(Err(msg)) | Err(msg) => *error = msg,
                 Ok(Ok(())) => {}
             }
+            self.take_moved_to();
         }
     }
 
@@ -1170,18 +1196,23 @@ impl Provider for WasmProvider {
 
     fn dashboard_key(&mut self, key: DashboardKey) -> bool {
         let k = to_wit_key(key);
-        self.call("dashboard-key", |g, s| g.call_dashboard_key(s, k))
-            .unwrap_or(false)
+        let handled = self
+            .call("dashboard-key", |g, s| g.call_dashboard_key(s, k))
+            .unwrap_or(false);
+        self.take_moved_to();
+        handled
     }
 
     fn dashboard_text(&mut self, text: &str) {
         let _ = self.call("dashboard-text", |g, s| g.call_dashboard_text(s, text));
+        self.take_moved_to();
     }
 
     fn dashboard_paste(&mut self, text: &str) {
         // Distinct from `dashboard_text` at the WIT level too, so a guest can wrap
         // it in bracketed-paste markers if it is emulating a terminal.
         let _ = self.call("dashboard-paste", |g, s| g.call_dashboard_paste(s, text));
+        self.take_moved_to();
     }
 
     fn dashboard_resize(&mut self, rows: u16, cols: u16) {
