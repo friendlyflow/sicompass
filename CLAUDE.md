@@ -2,13 +2,8 @@
 
 ## Environment (Nix: NixOS, other Linux, and macOS)
 
-The whole toolchain (`cargo`, `rustc`, `clippy`, `rustfmt`, `graphify`,
-`lld` + `wasm-tools` (to inspect WASM plugin guests; they are built in the
-SDK repo's shell, which has the `wasm32-wasip2` target),
-`cmake` (SDL3 is compiled from source by the `bundled-sdl3` feature),
-`librsvg`/`imagemagick`/`icoutils`/`libicns` (icons),
-`xvfb-run`, SDL3/Vulkan link paths) comes from the flake dev shell in
-[flake.nix](flake.nix). Nothing is installed system-wide.
+The whole toolchain comes from the flake dev shell in [flake.nix](flake.nix).
+Nothing is installed system-wide.
 
 `flake.nix` also exposes `packages.default`, so `nix build` and `nix run`
 produce the installable Linux package. It reads the version from
@@ -21,30 +16,11 @@ produce the installable Linux package. It reads the version from
     `nix develop -c cargo test -p sicompass-tutorial`.
 - `nix develop -c <cmd>` always prints a `warning: Git tree ... is dirty` line on
   stderr first. That warning is noise, not a failure.
-- Do not reintroduce a bare `exec fish` in the flake's `shellHook`. It is guarded
-  by `[ -t 0 ]` on purpose: without the guard it replaces the process for
-  `nix develop -c <cmd>`, and the command silently never runs (exit 0, no output).
 - Crate package names differ from directory names: `lib/lib_<x>` is package
   `sicompass-<x>`.
   Crates under `src/` keep their directory name. `cargo test -p` takes the
   package name.
-- The dev shell is platform-split. `aarch64-darwin` gets MoltenVK,
-  `DYLD_FALLBACK_LIBRARY_PATH` and a `sysctl` job cap; Linux gets Wayland/X11,
-  Mesa ICD discovery, `LD_LIBRARY_PATH` and xvfb. Anything added to the shared
-  part of the `shellHook` has to hold on both. In particular, never reference a
-  Linux-only package (`wayland`, `mesa`, `at-spi2-core`) outside the
-  `lib.optionalString stdenv.hostPlatform.isLinux` branch: nixpkgs marks `wayland` bad on
-  darwin, so a stray reference breaks `nix develop` at *eval* time on macOS,
-  before anything is fetched.
-- `x86_64-darwin` builds from a **second** nixpkgs input pinned to
-  `nixpkgs-26.05-darwin`, selected by `nixpkgsInputFor`. Unstable (26.11)
-  dropped Intel macOS and now *throws* on `import nixpkgs` for it, which would
-  take down every eval of the flake on every platform, so it cannot simply be
-  listed against the main input. That branch is supported until the end of 2026.
-- `nix develop` overwrites `$SHELL` with its own store bash before the
-  `shellHook` runs, so `$SHELL` is useless for detecting the user's shell there.
-  The hook reads the OS user database instead (`getent`, then `/etc/passwd`,
-  then `dscl` on macOS).
+- Editing `flake.nix` itself: see [.claude/rules/nix-flake.md](.claude/rules/nix-flake.md).
 
 ## Sibling repos
 
@@ -73,23 +49,12 @@ and `run-tests.sh` runs the suite of the repo that owns the edited file.
 
 ## Code Style
 
-### Rust
+### Documentation prose (`README.md`)
 
-Follow standard Rust idioms. Use `#[allow(...)]` sparingly and only when justified.
-
-### Documentation prose (`README.md` and `lib/lib_tutorial`)
-
-In `README.md` and the tutorial content (`lib/lib_tutorial/src/lib.rs`), do not
-use em dashes or semicolons. Use commas instead, or split into separate
-sentences (parentheses are fine for true parentheticals).
-
-### Tutorial authoring
-
-When writing or restructuring the in-app tutorial (`lib/lib_tutorial/`), follow
-the rules in [docs/tutorial-guidelines.md](docs/tutorial-guidelines.md): teach by
-doing, one idea per step, confirm via the screen-reader announcement, keep a short
-guided path separate from the reference manual, make keyboard shortcuts lead each
-line, and add every new string to all four locale bundles.
+In `README.md`, do not use em dashes or semicolons. Use commas instead, or
+split into separate sentences (parentheses are fine for true parentheticals).
+The tutorial has the same rule and more, in
+[lib/lib_tutorial/CLAUDE.md](lib/lib_tutorial/CLAUDE.md).
 
 ## Generated files that are committed
 
@@ -184,10 +149,6 @@ the pre-release checklist, and the post-release smoke test.
 
 ## Testing
 
-- After implementing changes, always run relevant tests before finishing.
-- Rust tests: `cargo test` (workspace-wide), or `cargo test -p <crate>` (specific crate).
-- Integration tests: `src/sicompass/tests/integration.rs`
-- When adding new code, write or update tests.
 - If tests fail, fix the code — never leave a task with failing tests.
 
 ## Test Integrity

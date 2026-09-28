@@ -1,7 +1,6 @@
 {
   "model": "opus[1m]",
   "permissions": {
-    "defaultMode": "plan",
     "allow": [
       "Bash(cd:*)",
       "Bash(cargo build:*)",
