@@ -1,7 +1,7 @@
 ---
 name: commit-and-push
-description: Commit all changes with a message and push to remote main via gh, in sicompass or a sibling repo named by the first argument
-argument-hint: "[repo] [message]"
+description: Commit all changes with a message and push to remote main via gh, in sicompass, a sibling repo named by the first argument, or every repo with `all`
+argument-hint: "[repo|all] [message]"
 model: sonnet
 ---
 
@@ -11,6 +11,24 @@ argument may name a sibling repo from `.claude/repos.json`. If it does, and that
 repo has its own copy of this skill, follow that copy instead of the steps
 below. With no repo argument, the target is sicompass and everything below
 applies unchanged.
+
+**`all`.** Commit and push every repo in `.claude/repos.json` that has
+changes. For each one, resolve `PROJECT_ROOT` as usual and check
+`git -C <PROJECT_ROOT> status --porcelain`. Skip a clean repo. Then follow that
+repo's own copy of this skill (or the steps below, for sicompass), exactly as a
+single-repo run would.
+
+- **Order.** Go in the order listed, but do sicompass **last**. It pins
+  `sicompass-ui` and other siblings by git `rev`, so each rev it names has to be
+  on the remote before its CI fetches it.
+- **Message.** Text after `all` is the commit message for every repo. Without
+  it, draft a separate message for each repo from its own diff. One message
+  rarely describes changes in several repos.
+- **Failures.** A repo that fails to commit or push (diverged, a hook refuses,
+  an inconsistent generated file) is reported and does not stop the others.
+  Never force-push to get past one.
+- **Report.** End with one table: repo, commit (short hash and subject, or
+  `clean`), pushed (yes, or why not).
 
 Commit and push all changes.
 

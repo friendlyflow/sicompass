@@ -13,14 +13,17 @@ Resolve it before doing anything else:
    - **It matches a `name`.** That repo is the target. Remove the word from
      `$ARGUMENTS`, and treat what is left as the arguments for the rest of the
      skill.
-   - **It is `all`** (only `/sync` and `/update-cargo` accept it). Run the skill
-     once per repo, in the order listed, and end with one table covering all of
-     them: repo, what moved, build, tests. A failure in one repo is reported
-     and does not stop the others. For `/update-cargo all`, each repo still gets
-     its own commit.
+   - **It is `all`** (only `/sync`, `/update-cargo` and `/commit-and-push`
+     accept it). Run the skill once per repo, in the order listed, and end with
+     one table covering all of them: repo, what moved, build, tests. A failure
+     in one repo is reported and does not stop the others. For
+     `/update-cargo all`, each repo still gets its own commit.
+     `/commit-and-push all` has its own ordering and table, described in that
+     skill.
    - **Anything else, or nothing.** The target is `sicompass`, and `$ARGUMENTS`
      is left as it is. A commit message that happens to start with a repo name
-     is the one ambiguous case: if a message was clearly meant, ask.
+     or with `all` is the one ambiguous case: if a message was clearly meant,
+     ask.
 3. `PROJECT_ROOT` is the target's `path`, resolved against this repo's root to
    an absolute path. Check that it exists and is a git repository
    (`git -C <path> rev-parse --show-toplevel`). If it is not, stop and say so.
