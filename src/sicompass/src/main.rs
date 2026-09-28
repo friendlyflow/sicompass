@@ -89,7 +89,10 @@ fn main() {
         None
     };
 
-    let hooks = boot::ProgramsHooks { update_state };
+    let hooks = boot::ProgramsHooks {
+        update_state,
+        ..Default::default()
+    };
     match boot::app_state(hooks) {
         Ok(mut app) => app.run(),
         Err(e) => {

@@ -4158,7 +4158,7 @@ dependencies = [
 [[package]]
 name = "sicompass-ui"
 version = "0.2.0"
-source = "git+https://github.com/friendlyflow/sicompass-ui?tag=v0.2.0#fe792b4f8e810926d23a4802311d9dc744ebf97b"
+source = "git+https://github.com/friendlyflow/sicompass-ui?rev=154fb5df642cbb657279c1e7eec1d6dfa6bfbd07#154fb5df642cbb657279c1e7eec1d6dfa6bfbd07"
 dependencies = [
  "accesskit",
  "accesskit_macos",

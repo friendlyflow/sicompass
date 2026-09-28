@@ -12,6 +12,7 @@
 
 use std::sync::{Arc, Mutex};
 
+use sicompass_ui::accessibility::ScreenReader;
 use sicompass_ui::app_state::{AppConfig, AppRenderer, AppState, SiError};
 use sicompass_ui::registry::HostHooks;
 
@@ -26,6 +27,10 @@ pub struct ProgramsHooks {
     /// Latest snapshot from the background `sicompass-updater` thread. `None`
     /// when the check is disabled or has not run yet.
     pub update_state: Option<Arc<Mutex<sicompass_updater::UpdateStatus>>>,
+    /// The session's screen reader, started by the `screenReader` setting.
+    /// Shared with the startup drain in [`app_state`]; the last clone is the
+    /// renderer's, so it is dropped with the window, and dropping it stops Orca.
+    pub screen_reader: Arc<Mutex<ScreenReader>>,
 }
 
 impl HostHooks for ProgramsHooks {
@@ -34,7 +39,12 @@ impl HostHooks for ProgramsHooks {
         // so the caller has already established there is one to drain. The
         // renderer carries a clone for exactly this reason.
         if let Some(queue) = renderer.settings_queue.clone() {
-            crate::programs::apply_pending_settings(renderer, &queue, initial);
+            crate::programs::apply_pending_settings_with(
+                renderer,
+                &queue,
+                initial,
+                Some(&self.screen_reader),
+            );
         }
     }
 
@@ -89,12 +99,18 @@ pub fn app_state(hooks: ProgramsHooks) -> Result<AppState, SiError> {
         .map(|p| !p.exists())
         .unwrap_or(false);
 
+    let screen_reader = Arc::clone(&hooks.screen_reader);
     state.renderer.hooks = Box::new(hooks);
 
     // Load providers (tutorial + settings by default)
     let queue = crate::programs::load_programs(&mut state.renderer);
     // Apply initial settings (skip enable_* — providers already loaded above)
-    crate::programs::apply_pending_settings(&mut state.renderer, &queue, true);
+    crate::programs::apply_pending_settings_with(
+        &mut state.renderer,
+        &queue,
+        true,
+        Some(&screen_reader),
+    );
     state.renderer.settings_queue = Some(queue);
 
     // Restore persisted tab layout (no-op if none stored).

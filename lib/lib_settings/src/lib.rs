@@ -248,6 +248,12 @@ impl SettingsProvider {
         options: &[&str],
         default_value: &str,
     ) {
+        // The colour scheme is shown and fired from its own field, not from
+        // this entry, so a default other than dark (a system default from
+        // /etc/sicompass/accessibility.json) has to reach that field too.
+        if config_key == "colorScheme" && options.contains(&default_value) {
+            self.color_scheme = default_value.to_owned();
+        }
         self.radio_entries.push(RadioEntry {
             section: section.to_owned(),
             radio_key: radio_key.to_owned(),
@@ -1201,6 +1207,32 @@ mod tests {
             .iter()
             .find(|c| c.as_obj().map_or(false, |o| o.key.contains("<radio>")));
         assert!(radio.is_some());
+    }
+
+    /// A colour-scheme default other than dark (a system default from
+    /// /etc/sicompass/accessibility.json) must be what is shown and applied,
+    /// not only what the hidden radio entry holds.
+    #[test]
+    fn a_light_color_scheme_default_is_shown_and_fired() {
+        let (mut p, log) = with_callback();
+        p.add_radio(
+            "sicompass",
+            "color scheme",
+            "colorScheme",
+            &["dark", "light"],
+            "light",
+        );
+        assert_eq!(p.color_scheme, "light");
+        p.fire_all_apply();
+        let fired: Vec<String> = log
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(k, _)| k == "colorScheme")
+            .map(|(_, v)| v.clone())
+            .collect();
+        assert!(!fired.is_empty());
+        assert!(fired.iter().all(|v| v == "light"), "fired {fired:?}");
     }
 
     #[test]

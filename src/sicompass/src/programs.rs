@@ -16,6 +16,7 @@
 use crate::plugin_manifest::{DiscoveredPlugin, PluginManifest, PluginType, discover_user_plugins};
 use sicompass_sdk::ffon::{FfonElement, IdArray};
 use sicompass_sdk::provider::Provider;
+use sicompass_ui::accessibility::{self, AccessibilitySettings, KEY_SCREEN_READER, ScreenReader};
 use sicompass_ui::app_state::AppRenderer;
 pub use sicompass_ui::registry::{SettingsQueue, init_provider_root, register_provider};
 use std::path::{Path, PathBuf};
@@ -128,10 +129,13 @@ pub fn load_programs(renderer: &mut AppRenderer) -> SettingsQueue {
     // first `display_name()` / `fetch()` already resolves in the user's
     // chosen language — no English flash on startup. We bypass the settings
     // provider (not built yet) and read straight from settings.json.
-    if let Some(path) = sicompass_sdk::platform::main_config_path() {
-        if let Some(lang) = read_language_from_config(&path) {
-            sicompass_sdk::localize::set_locale(&lang);
-        }
+    // Unset there, the system default (/etc/sicompass/accessibility.json)
+    // decides, as it does for the language radio below.
+    let lang = sicompass_sdk::platform::main_config_path()
+        .and_then(|path| read_language_from_config(&path))
+        .or_else(|| AccessibilitySettings::system().language);
+    if let Some(lang) = lang {
+        sicompass_sdk::localize::set_locale(&lang);
     }
 
     // The Store audits a plugin's component with the same check a load runs,
@@ -159,51 +163,10 @@ pub fn load_programs(renderer: &mut AppRenderer) -> SettingsQueue {
     // Surface the sicompass app version as a child of the "sicompass" section.
     settings.set_section_version("sicompass", env!("CARGO_PKG_VERSION"));
 
-    // Core sicompass settings. Labels are Fluent message IDs so the settings
-    // panel renders them in the user's chosen language; lib_settings reverses
-    // the translation when the user clicks a toggle so settings.json stays
-    // language-neutral.
-    settings.add_radio_setting(
-        "sicompass",
-        "color scheme",
-        "colorScheme",
-        &["dark", "light"],
-        "dark",
-    );
-    // Window maximize/restore is driven by the custom titlebar controls (the
-    // `c` palette and corner buttons), so there is no settings checkbox for it.
-    // The window still restores its last maximized state via `read_maximized`.
-    settings.add_checkbox_setting(
-        "sicompass",
-        "settings-checkbox-shoulder-surfing-protection",
-        "shoulderSurfingProtection",
-        false,
-    );
-    // Checked at startup by `read_auto_update_check_setting` in main.rs.
-    // Toggling at runtime only affects the next launch — we don't spawn /
-    // cancel the updater thread on the fly.
-    settings.add_checkbox_setting(
-        "sicompass",
-        "settings-checkbox-auto-update-check",
-        "autoUpdateCheck",
-        true,
-    );
-    // Default coupled to read_font_scale's fallback so the radio selection and
-    // the actual on-screen scale always agree — change DEFAULT_FONT_SCALE alone.
-    let default_font_scale = format!("{DEFAULT_FONT_SCALE:.2}");
-    settings.add_radio_setting(
-        "sicompass",
-        "settings-radio-font-scale",
-        "fontScale",
-        &["1.00", "1.25", "1.50", "1.75", "2.00", "2.25", "2.50"],
-        &default_font_scale,
-    );
-    settings.add_radio_setting(
-        "sicompass",
-        "settings-radio-language",
-        "language",
-        &["en-US", "nl-BE", "fr-BE", "de-BE"],
-        "en-US",
+    register_core_settings(
+        settings.as_mut(),
+        &AccessibilitySettings::system(),
+        sicompass_ui::session_mode::is_session_mode(),
     );
 
     // "Available programs:" priority section.
@@ -795,8 +758,14 @@ fn is_plugin_enabled_in_config(name: &str) -> bool {
 /// was, and the plugin starts without it.
 fn migrate_builtin_data_to_plugins(state: &Path, config: &Path, data: &Path) {
     let moves = [
-        (state.join("terminal").join("history"), data.join("terminal").join("history")),
-        (state.join("webbrowser").join("history"), data.join("webbrowser").join("history")),
+        (
+            state.join("terminal").join("history"),
+            data.join("terminal").join("history"),
+        ),
+        (
+            state.join("webbrowser").join("history"),
+            data.join("webbrowser").join("history"),
+        ),
         (
             config.join("chrome-profile"),
             data.join("webbrowser").join("chrome").join("profile"),
@@ -820,6 +789,82 @@ fn migrate_builtin_data_to_plugins(state: &Path, config: &Path, data: &Path) {
 }
 
 /// Migrate obsolete `sicompass.programsToLoad` array to individual
+/// The app's own rows in the Settings page's `sicompass` section.
+///
+/// `system` holds the machine's accessibility defaults, and `session` is true
+/// in a desicompass session. Both are parameters so tests can supply them.
+fn register_core_settings(
+    settings: &mut dyn Provider,
+    system: &AccessibilitySettings,
+    session: bool,
+) {
+    // Core sicompass settings. Labels are Fluent message IDs so the settings
+    // panel renders them in the user's chosen language; lib_settings reverses
+    // the translation when the user clicks a toggle so settings.json stays
+    // language-neutral.
+    //
+    // The accessibility defaults come from /etc/sicompass/accessibility.json
+    // where it sets them (the desicompass NixOS module writes it, and the
+    // login screen reads it too), so a machine set up for a blind user starts
+    // that way for every new account. A value the user saved still wins.
+    settings.add_radio_setting(
+        "sicompass",
+        "color scheme",
+        "colorScheme",
+        &["dark", "light"],
+        system.color_scheme.as_deref().unwrap_or("dark"),
+    );
+    // Window maximize/restore is driven by the custom titlebar controls (the
+    // `c` palette and corner buttons), so there is no settings checkbox for it.
+    // The window still restores its last maximized state via `read_maximized`.
+    settings.add_checkbox_setting(
+        "sicompass",
+        "settings-checkbox-shoulder-surfing-protection",
+        "shoulderSurfingProtection",
+        system.shoulder_surfing_protection.unwrap_or(false),
+    );
+    // Only in a desicompass session, where nothing else starts a screen
+    // reader. On any other desktop that desktop owns the screen reader, and a
+    // second Orca started from here would fight it.
+    if session {
+        settings.add_checkbox_setting(
+            "sicompass",
+            "settings-checkbox-screen-reader",
+            KEY_SCREEN_READER,
+            system.screen_reader.unwrap_or(false),
+        );
+    }
+    // Checked at startup by `read_auto_update_check_setting` in main.rs.
+    // Toggling at runtime only affects the next launch — we don't spawn /
+    // cancel the updater thread on the fly.
+    settings.add_checkbox_setting(
+        "sicompass",
+        "settings-checkbox-auto-update-check",
+        "autoUpdateCheck",
+        true,
+    );
+    // Default coupled to read_font_scale's fallback so the radio selection and
+    // the actual on-screen scale always agree — change DEFAULT_FONT_SCALE alone.
+    let default_font_scale = system
+        .font_scale
+        .clone()
+        .unwrap_or_else(|| format!("{DEFAULT_FONT_SCALE:.2}"));
+    settings.add_radio_setting(
+        "sicompass",
+        "settings-radio-font-scale",
+        "fontScale",
+        &["1.00", "1.25", "1.50", "1.75", "2.00", "2.25", "2.50"],
+        &default_font_scale,
+    );
+    settings.add_radio_setting(
+        "sicompass",
+        "settings-radio-language",
+        "language",
+        &["en-US", "nl-BE", "fr-BE", "de-BE"],
+        system.language.as_deref().unwrap_or("en-US"),
+    );
+}
+
 /// Read `sicompass.language` from settings.json. Returns `Some(lang)` only
 /// when the value is one of the locales the language radio actually offers,
 /// so a typo / stale value can't lock the UI to a missing bundle. Called
@@ -1259,14 +1304,20 @@ pub const DEFAULT_FONT_SCALE: f32 = 1.75;
 /// Read `sicompass.fontScale` from settings.json.
 /// Returns [`DEFAULT_FONT_SCALE`] if absent or unparseable. Clamped to [1.0, 2.5].
 pub fn read_font_scale() -> f32 {
+    let fallback = || {
+        AccessibilitySettings::system()
+            .font_scale
+            .map(|s| accessibility::font_scale_value(Some(&s)))
+            .unwrap_or(DEFAULT_FONT_SCALE)
+    };
     let Some(path) = sicompass_sdk::platform::main_config_path() else {
-        return DEFAULT_FONT_SCALE;
+        return fallback();
     };
     let Ok(data) = std::fs::read_to_string(&path) else {
-        return DEFAULT_FONT_SCALE;
+        return fallback();
     };
     let Ok(root) = serde_json::from_str::<serde_json::Value>(&data) else {
-        return DEFAULT_FONT_SCALE;
+        return fallback();
     };
     let raw = root
         .get("sicompass")
@@ -1279,7 +1330,7 @@ pub fn read_font_scale() -> f32 {
         });
     raw.and_then(|s| s.parse::<f32>().ok())
         .map(|f| f.clamp(1.0, 2.5))
-        .unwrap_or(DEFAULT_FONT_SCALE)
+        .unwrap_or_else(fallback)
 }
 
 /// Enable a provider by name at runtime (hot-load).
@@ -1699,13 +1750,47 @@ pub fn apply_pending_settings(
     queue: &SettingsQueue,
     skip_enable: bool,
 ) {
+    apply_pending_settings_with(renderer, queue, skip_enable, None);
+}
+
+/// [`apply_pending_settings`], also starting or stopping `screen_reader` when
+/// the `screenReader` setting arrives.
+pub fn apply_pending_settings_with(
+    renderer: &mut AppRenderer,
+    queue: &SettingsQueue,
+    skip_enable: bool,
+    screen_reader: Option<&Mutex<ScreenReader>>,
+) {
     let events: Vec<SettingEvent> = {
         let mut q = queue.lock().unwrap();
         q.drain(..).collect()
     };
 
     for (key, value) in events {
+        if key == KEY_SCREEN_READER
+            && let Some(sr) = screen_reader
+        {
+            apply_screen_reader(renderer, sr, &value);
+        }
         apply_setting(renderer, &key, &value, skip_enable);
+    }
+}
+
+/// Start or stop the session's screen reader. The setting only exists in a
+/// desicompass session (see `load_programs`), so this never runs elsewhere.
+fn apply_screen_reader(renderer: &mut AppRenderer, sr: &Mutex<ScreenReader>, value: &str) {
+    let mut sr = sr.lock().unwrap_or_else(|e| e.into_inner());
+    if value != "true" {
+        sr.stop();
+        return;
+    }
+    if let Err(e) = sr.start() {
+        let error = e.to_string();
+        eprintln!("sicompass: could not start the screen reader: {error}");
+        let mut args = sicompass_sdk::localize::Args::new();
+        args.set("error", error);
+        renderer.error_message =
+            sicompass_sdk::localize::t_args("settings-screen-reader-failed", &args);
     }
 }
 
@@ -1734,13 +1819,9 @@ fn apply_setting(renderer: &mut AppRenderer, key: &str, value: &str, skip_enable
     }
 
     match key {
-        "colorScheme" => {
-            renderer.palette_theme = if value == "light" {
-                sicompass_ui::app_state::PaletteTheme::Light
-            } else {
-                sicompass_ui::app_state::PaletteTheme::Dark
-            };
-        }
+        // colorScheme, shoulderSurfingProtection, fontScale: shared with the
+        // login screen, so they are applied by the renderer's own code.
+        k if accessibility::apply_display(renderer, k, value) => {}
         "maximized" => {
             // During the startup settings drain (skip_enable=true) the window
             // builder flag already handles the initial maximize state, so skip
@@ -1750,14 +1831,8 @@ fn apply_setting(renderer: &mut AppRenderer, key: &str, value: &str, skip_enable
                 renderer.pending_maximized = Some(value == "true");
             }
         }
-        "shoulderSurfingProtection" => {
-            renderer.privacy_blank = value == "true";
-        }
         "saveFolder" => {
             renderer.save_folder_path = value.to_owned();
-        }
-        "fontScale" => {
-            renderer.rebuild_font_renderer = true;
         }
         "language" => {
             // Switch the active locale on every t() / t_args() call from now
@@ -2685,9 +2760,128 @@ mod tests {
             .filter_map(|e| e.as_str())
             .filter(|s| s.contains("<input>") || s.contains("<password>"))
             .collect();
-        assert_eq!(editable.len(), 2, "expected 2 editable settings: {editable:?}");
-        let masked: Vec<_> = editable.iter().filter(|s| s.contains("<password>")).collect();
+        assert_eq!(
+            editable.len(),
+            2,
+            "expected 2 editable settings: {editable:?}"
+        );
+        let masked: Vec<_> = editable
+            .iter()
+            .filter(|s| s.contains("<password>"))
+            .collect();
         assert_eq!(masked.len(), 1, "expected 1 masked setting: {masked:?}");
     }
 
+    // --- the shared accessibility defaults ---
+
+    /// Register the core rows on a real settings provider, backed by a file
+    /// that does not exist (a first run), and collect what it fires.
+    fn core_settings_fired(system: &AccessibilitySettings, session: bool) -> Vec<(String, String)> {
+        let dir = tempfile::tempdir().unwrap();
+        let log: Arc<Mutex<Vec<(String, String)>>> = Arc::new(Mutex::new(Vec::new()));
+        let log2 = Arc::clone(&log);
+        let mut p = sicompass_settings::SettingsProvider::new(move |k, v| {
+            log2.lock().unwrap().push((k.to_owned(), v.to_owned()));
+        })
+        .with_config_path(dir.path().join("settings.json"));
+        register_core_settings(&mut p, system, session);
+        p.init();
+        log.lock().unwrap().clone()
+    }
+
+    fn last_fired<'a>(fired: &'a [(String, String)], key: &str) -> Option<&'a str> {
+        fired
+            .iter()
+            .rev()
+            .find(|(k, _)| k == key)
+            .map(|(_, v)| v.as_str())
+    }
+
+    #[test]
+    fn with_no_system_defaults_the_built_in_ones_apply() {
+        let fired = core_settings_fired(&AccessibilitySettings::default(), true);
+        assert_eq!(last_fired(&fired, "colorScheme"), Some("dark"));
+        assert_eq!(last_fired(&fired, "fontScale"), Some("1.75"));
+        assert_eq!(last_fired(&fired, "language"), Some("en-US"));
+        assert_eq!(
+            last_fired(&fired, "shoulderSurfingProtection"),
+            Some("false")
+        );
+        assert_eq!(last_fired(&fired, "screenReader"), Some("false"));
+    }
+
+    /// A first login on a machine set up through
+    /// `services.desicompass.accessibility` starts the way the login screen did.
+    #[test]
+    fn the_system_defaults_are_what_a_first_run_starts_with() {
+        let system = AccessibilitySettings {
+            screen_reader: Some(true),
+            font_scale: Some("2.25".to_owned()),
+            color_scheme: Some("light".to_owned()),
+            language: Some("nl-BE".to_owned()),
+            shoulder_surfing_protection: Some(true),
+        };
+        let fired = core_settings_fired(&system, true);
+        assert_eq!(last_fired(&fired, "colorScheme"), Some("light"));
+        assert_eq!(last_fired(&fired, "fontScale"), Some("2.25"));
+        assert_eq!(last_fired(&fired, "language"), Some("nl-BE"));
+        assert_eq!(
+            last_fired(&fired, "shoulderSurfingProtection"),
+            Some("true")
+        );
+        assert_eq!(last_fired(&fired, "screenReader"), Some("true"));
+    }
+
+    /// On any other desktop, that desktop owns the screen reader.
+    #[test]
+    fn the_screen_reader_row_exists_only_in_a_desicompass_session() {
+        let system = AccessibilitySettings {
+            screen_reader: Some(true),
+            ..Default::default()
+        };
+        let fired = core_settings_fired(&system, false);
+        assert_eq!(last_fired(&fired, "screenReader"), None);
+        assert!(last_fired(&fired, "fontScale").is_some());
+    }
+
+    #[test]
+    fn the_screen_reader_setting_starts_and_stops_it() {
+        let sr = Mutex::new(ScreenReader::with_args("sleep", vec!["30".to_owned()]));
+        let queue: SettingsQueue = Arc::new(Mutex::new(vec![(
+            "screenReader".to_owned(),
+            "true".to_owned(),
+        )]));
+        let mut r = AppRenderer::new();
+        apply_pending_settings_with(&mut r, &queue, false, Some(&sr));
+        assert!(sr.lock().unwrap().is_running());
+
+        queue
+            .lock()
+            .unwrap()
+            .push(("screenReader".to_owned(), "false".to_owned()));
+        apply_pending_settings_with(&mut r, &queue, false, Some(&sr));
+        assert!(!sr.lock().unwrap().is_running());
+    }
+
+    #[test]
+    fn a_missing_screen_reader_is_reported_not_fatal() {
+        let sr = Mutex::new(ScreenReader::new("/nonexistent/orca"));
+        let queue: SettingsQueue = Arc::new(Mutex::new(vec![(
+            "screenReader".to_owned(),
+            "true".to_owned(),
+        )]));
+        let mut r = AppRenderer::new();
+        apply_pending_settings_with(&mut r, &queue, false, Some(&sr));
+        assert!(!r.error_message.is_empty(), "the user must be told");
+    }
+
+    #[test]
+    fn shoulder_surfing_and_font_scale_still_reach_the_renderer() {
+        let mut r = AppRenderer::new();
+        apply_setting(&mut r, "shoulderSurfingProtection", "true", false);
+        assert!(r.privacy_blank);
+        r.rebuild_font_renderer = false;
+        apply_setting(&mut r, "fontScale", "2.00", false);
+        assert!(r.rebuild_font_renderer);
+    }
 }
