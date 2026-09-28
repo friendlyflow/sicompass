@@ -51,7 +51,7 @@ sicompass-updater = { path = "lib/lib_updater" }
 # rev, not a tag: no v0.2.1 has been cut yet for the accessibility.rs /
 # late-registration additions this depends on. Move to a tag at the next
 # sicompass-ui release.
-sicompass-ui = { git = "https://github.com/friendlyflow/sicompass-ui", rev = "154fb5df642cbb657279c1e7eec1d6dfa6bfbd07" }
+sicompass-ui = { git = "https://github.com/friendlyflow/sicompass-ui", rev = "ec7846ad98590afe19378626795d3cf4afc9fcdb" }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }

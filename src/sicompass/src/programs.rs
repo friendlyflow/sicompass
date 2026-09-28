@@ -1784,14 +1784,21 @@ fn apply_screen_reader(renderer: &mut AppRenderer, sr: &Mutex<ScreenReader>, val
         sr.stop();
         return;
     }
-    if let Err(e) = sr.start() {
-        let error = e.to_string();
-        eprintln!("sicompass: could not start the screen reader: {error}");
-        let mut args = sicompass_sdk::localize::Args::new();
-        args.set("error", error);
-        renderer.error_message =
-            sicompass_sdk::localize::t_args("settings-screen-reader-failed", &args);
+    match sr.start() {
+        // Orca attaches before it listens for events; the first cursor move
+        // tells it which row has focus (see `a11y_refocus_on_move`).
+        Ok(()) => renderer.a11y_refocus_on_move = true,
+        Err(e) => report_screen_reader_failure(renderer, e),
     }
+}
+
+fn report_screen_reader_failure(renderer: &mut AppRenderer, e: std::io::Error) {
+    let error = e.to_string();
+    eprintln!("sicompass: could not start the screen reader: {error}");
+    let mut args = sicompass_sdk::localize::Args::new();
+    args.set("error", error);
+    renderer.error_message =
+        sicompass_sdk::localize::t_args("settings-screen-reader-failed", &args);
 }
 
 fn apply_setting(renderer: &mut AppRenderer, key: &str, value: &str, skip_enable: bool) {
@@ -2854,6 +2861,10 @@ mod tests {
         let mut r = AppRenderer::new();
         apply_pending_settings_with(&mut r, &queue, false, Some(&sr));
         assert!(sr.lock().unwrap().is_running());
+        assert!(
+            r.a11y_refocus_on_move,
+            "the first cursor move must tell the new screen reader where focus is"
+        );
 
         queue
             .lock()

@@ -4158,7 +4158,7 @@ dependencies = [
 [[package]]
 name = "sicompass-ui"
 version = "0.2.0"
-source = "git+https://github.com/friendlyflow/sicompass-ui?rev=154fb5df642cbb657279c1e7eec1d6dfa6bfbd07#154fb5df642cbb657279c1e7eec1d6dfa6bfbd07"
+source = "git+https://github.com/friendlyflow/sicompass-ui?rev=ec7846ad98590afe19378626795d3cf4afc9fcdb#ec7846ad98590afe19378626795d3cf4afc9fcdb"
 dependencies = [
  "accesskit",
  "accesskit_macos",
@@ -4170,6 +4170,7 @@ dependencies = [
  "freetype",
  "glam",
  "image",
+ "libc",
  "nucleo-matcher",
  "sdl3",
  "sdl3-sys",
