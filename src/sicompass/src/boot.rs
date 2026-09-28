@@ -46,6 +46,16 @@ impl HostHooks for ProgramsHooks {
                 Some(&self.screen_reader),
             );
         }
+        // Called every frame. The session's Orca, once it listens, is handed
+        // the focused row at once (see `ScreenReader::take_ready`).
+        if self
+            .screen_reader
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take_ready()
+        {
+            renderer.a11y_refocus_now = true;
+        }
     }
 
     fn process_update_events(&self, renderer: &mut AppRenderer) {

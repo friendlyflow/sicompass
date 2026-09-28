@@ -4158,7 +4158,7 @@ dependencies = [
 [[package]]
 name = "sicompass-ui"
 version = "0.2.0"
-source = "git+https://github.com/friendlyflow/sicompass-ui?rev=4e6d412c2f1a74d642e51f1f7a446f40054d00dc#4e6d412c2f1a74d642e51f1f7a446f40054d00dc"
+source = "git+https://github.com/friendlyflow/sicompass-ui?rev=7f3a48ee13ede4af34c05eaf2a9ef56f5a30325a#7f3a48ee13ede4af34c05eaf2a9ef56f5a30325a"
 dependencies = [
  "accesskit",
  "accesskit_macos",
@@ -4182,6 +4182,7 @@ dependencies = [
  "unicode-normalization",
  "whatlang",
  "windows",
+ "zbus",
  "zeroize",
 ]
 
