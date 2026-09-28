@@ -147,8 +147,14 @@ fuller refresh of that repo (its `flake.lock` too), use
 6. **Test.** `cargo test --workspace`. Never weaken an assertion to make a test
    pass; fix the code, and ask the user before changing a test itself.
 
+   **Licenses.** `cargo about generate about.hbs -o THIRD-PARTY-LICENSES.html`
+   (cargo-about 0.9.2). The file names every crate with its exact version, so
+   any crate that moved makes it stale, and `licenses.yml` fails on a stale
+   file.
+
 7. **Review the diff.** `git diff --stat` — expect `Cargo.lock`, `flake.lock`,
-   and (with `major`) `Cargo.toml`. Anything else is a mistake.
+   `THIRD-PARTY-LICENSES.html`, and (with `major`) `Cargo.toml`. Anything else
+   is a mistake.
 
 8. **Commit** on `main`, no co-author trailer. Message style follows the
    existing history:
