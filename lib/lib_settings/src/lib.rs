@@ -4,7 +4,7 @@ use sicompass_sdk::localize;
 use sicompass_sdk::platform;
 use sicompass_sdk::provider::Provider;
 use sicompass_sdk::timeline::TimelineEntry;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
@@ -99,6 +99,11 @@ pub struct SettingsProvider {
     /// the one-time onboarding: the `onboarding` checkbox is force-enabled and
     /// the app focuses the onboarding line.
     first_run: bool,
+    /// Settings someone else owns (`set_external_setting_keys`): no row for
+    /// them on this page, and nothing replayed for them at startup. In a
+    /// desicompass session these are the accessibility settings, which the
+    /// superkey and the login screen change.
+    external_keys: HashSet<String>,
 }
 
 impl SettingsProvider {
@@ -117,6 +122,7 @@ impl SettingsProvider {
             pending_timeline_entries: Vec::new(),
             section_versions: HashMap::new(),
             first_run: false,
+            external_keys: HashSet::new(),
         }
     }
 
@@ -136,6 +142,7 @@ impl SettingsProvider {
             pending_timeline_entries: Vec::new(),
             section_versions: HashMap::new(),
             first_run: false,
+            external_keys: HashSet::new(),
         }
     }
 
@@ -505,14 +512,17 @@ impl SettingsProvider {
     }
 
     fn fire_all_apply(&self) {
-        self.fire_apply("colorScheme", &self.color_scheme.clone());
-        for e in &self.radio_entries {
+        let ours = |key: &str| !self.external_keys.contains(key);
+        if ours("colorScheme") {
+            self.fire_apply("colorScheme", &self.color_scheme.clone());
+        }
+        for e in self.radio_entries.iter().filter(|e| ours(&e.config_key)) {
             self.fire_apply(&e.config_key.clone(), &e.current_value.clone());
         }
-        for e in &self.text_entries {
+        for e in self.text_entries.iter().filter(|e| ours(&e.config_key)) {
             self.fire_apply(&e.config_key.clone(), &e.current_value.clone());
         }
-        for e in &self.checkbox_entries {
+        for e in self.checkbox_entries.iter().filter(|e| ours(&e.config_key)) {
             let val = if e.checked { "true" } else { "false" };
             self.fire_apply(&e.config_key.clone(), val);
         }
@@ -666,7 +676,7 @@ impl Provider for SettingsProvider {
         let onboarding = localize::t("settings-onboarding-body");
         entries.push((onboarding.clone(), FfonElement::Str(onboarding)));
 
-        {
+        if !self.external_keys.contains("colorScheme") {
             let title = localize::t("settings-radio-color-scheme");
             let mut radio = FfonElement::new_obj(format!("<radio>{title}"));
             let ro = radio.as_obj_mut().unwrap();
@@ -685,7 +695,7 @@ impl Provider for SettingsProvider {
             entries.push((title, radio));
         }
         for e in &self.checkbox_entries {
-            if e.section == "sicompass" {
+            if e.section == "sicompass" && !self.external_keys.contains(&e.config_key) {
                 let tag = if e.checked {
                     "<checkbox checked>"
                 } else {
@@ -699,7 +709,10 @@ impl Provider for SettingsProvider {
             }
         }
         for e in &self.radio_entries {
-            if e.section == "sicompass" && e.config_key != "colorScheme" {
+            if e.section == "sicompass"
+                && e.config_key != "colorScheme"
+                && !self.external_keys.contains(&e.config_key)
+            {
                 let title = localize::t(&e.radio_key);
                 let mut radio = FfonElement::new_obj(format!("<radio>{title}"));
                 let ro = radio.as_obj_mut().unwrap();
@@ -716,7 +729,7 @@ impl Provider for SettingsProvider {
             }
         }
         for e in &self.text_entries {
-            if e.section == "sicompass" {
+            if e.section == "sicompass" && !self.external_keys.contains(&e.config_key) {
                 entries.push((
                     localize::t(&e.label),
                     FfonElement::Str(format!(
@@ -1134,6 +1147,10 @@ impl Provider for SettingsProvider {
 
     fn write_text_setting(&mut self, section: &str, key: &str, value: &str) {
         self.write_key_string(section, key, value);
+    }
+
+    fn set_external_setting_keys(&mut self, keys: &[&str]) {
+        self.external_keys = keys.iter().map(|k| (*k).to_owned()).collect();
     }
 
     fn add_priority_section(&mut self, name: &str) {
@@ -2816,6 +2833,42 @@ mod tests {
             has_section,
             "priority section should appear in fetch output"
         );
+    }
+
+    // --- settings someone else owns (a desicompass session) ---
+
+    #[test]
+    fn an_external_setting_has_no_row_and_is_not_replayed() {
+        let (mut p, log) = with_callback();
+        p.add_radio(
+            "sicompass",
+            "font scale",
+            "fontScale",
+            &["1.25", "2.50"],
+            "1.25",
+        );
+        p.add_checkbox("sicompass", "screen reader", "screenReader", false);
+        p.add_checkbox("sicompass", "auto update", "autoUpdateCheck", true);
+        p.set_external_setting_keys(&["colorScheme", "fontScale", "screenReader"]);
+        p.init();
+        let fired: Vec<String> = log.lock().unwrap().iter().map(|(k, _)| k.clone()).collect();
+        assert_eq!(fired, ["autoUpdateCheck"]);
+        let rows = format!("{:?}", p.fetch());
+        assert!(
+            !rows.contains("<radio>"),
+            "no colour scheme or font scale radio: {rows}"
+        );
+        assert!(!rows.contains("screen reader"), "{rows}");
+        assert!(rows.contains("auto update"), "{rows}");
+    }
+
+    #[test]
+    fn without_external_settings_the_colour_scheme_is_still_there() {
+        let (mut p, log) = with_callback();
+        p.set_external_setting_keys(&[]);
+        p.init();
+        assert!(log.lock().unwrap().iter().any(|(k, _)| k == "colorScheme"));
+        assert!(format!("{:?}", p.fetch()).contains("<radio>"));
     }
 }
 

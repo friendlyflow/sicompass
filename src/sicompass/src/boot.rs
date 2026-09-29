@@ -12,7 +12,7 @@
 
 use std::sync::{Arc, Mutex};
 
-use sicompass_ui::accessibility::ScreenReader;
+use sicompass_ui::accessibility::{ScreenReader, SharedAccessibility};
 use sicompass_ui::app_state::{AppConfig, AppRenderer, AppState, SiError};
 use sicompass_ui::registry::HostHooks;
 
@@ -31,6 +31,10 @@ pub struct ProgramsHooks {
     /// Shared with the startup drain in [`app_state`]; the last clone is the
     /// renderer's, so it is dropped with the window, and dropping it stops Orca.
     pub screen_reader: Arc<Mutex<ScreenReader>>,
+    /// In a desicompass session, the accessibility settings shared with the
+    /// superkey (`programs::session_accessibility`). `None` otherwise, and
+    /// then settings.json keeps them.
+    pub shared_accessibility: Option<Arc<Mutex<SharedAccessibility>>>,
 }
 
 impl HostHooks for ProgramsHooks {
@@ -43,6 +47,13 @@ impl HostHooks for ProgramsHooks {
                 renderer,
                 &queue,
                 initial,
+                Some(&self.screen_reader),
+            );
+        }
+        if let Some(shared) = self.shared_accessibility.as_deref() {
+            crate::programs::follow_shared_accessibility(
+                renderer,
+                shared,
                 Some(&self.screen_reader),
             );
         }
@@ -82,26 +93,27 @@ impl HostHooks for ProgramsHooks {
     }
 
     fn read_font_scale(&self) -> f32 {
-        crate::programs::read_font_scale()
+        crate::programs::read_font_scale_with(self.shared_accessibility.as_deref())
     }
 }
 
 /// The application's window: everything [`AppConfig`] defaults to, plus the
 /// two values that come from `settings.json`.
-fn app_config() -> AppConfig {
+fn app_config(shared: Option<&Mutex<SharedAccessibility>>) -> AppConfig {
     AppConfig {
         // In session mode the compositor owns the geometry and configures every
         // window itself, so a remembered "maximized" is a second opinion about
         // size that it would immediately override.
         maximized: crate::programs::read_maximized(),
-        font_scale: crate::programs::read_font_scale(),
+        font_scale: crate::programs::read_font_scale_with(shared),
         ..AppConfig::default()
     }
 }
 
 /// Build the application. The old `AppState::new()`, verbatim in what it does.
 pub fn app_state(hooks: ProgramsHooks) -> Result<AppState, SiError> {
-    let mut state = AppState::init_stack(&app_config())?;
+    let shared = hooks.shared_accessibility.clone();
+    let mut state = AppState::init_stack(&app_config(shared.as_deref()))?;
 
     // First launch = no settings.json yet. Captured before `load_programs`,
     // whose settings-provider `init()` seeds the file (after which it exists).
@@ -113,7 +125,7 @@ pub fn app_state(hooks: ProgramsHooks) -> Result<AppState, SiError> {
     state.renderer.hooks = Box::new(hooks);
 
     // Load providers (tutorial + settings by default)
-    let queue = crate::programs::load_programs(&mut state.renderer);
+    let queue = crate::programs::load_programs_with(&mut state.renderer, shared.as_deref());
     // Apply initial settings (skip enable_* — providers already loaded above)
     crate::programs::apply_pending_settings_with(
         &mut state.renderer,
@@ -122,6 +134,14 @@ pub fn app_state(hooks: ProgramsHooks) -> Result<AppState, SiError> {
         Some(&screen_reader),
     );
     state.renderer.settings_queue = Some(queue);
+    // In a session the accessibility settings have no rows to replay them.
+    if let Some(shared) = shared.as_deref() {
+        crate::programs::apply_shared_accessibility(
+            &mut state.renderer,
+            shared,
+            Some(&screen_reader),
+        );
+    }
 
     // Restore persisted tab layout (no-op if none stored).
     // Must run AFTER providers are loaded so provider-index validation works.

@@ -16,7 +16,9 @@
 use crate::plugin_manifest::{DiscoveredPlugin, PluginManifest, PluginType, discover_user_plugins};
 use sicompass_sdk::ffon::{FfonElement, IdArray};
 use sicompass_sdk::provider::Provider;
-use sicompass_ui::accessibility::{self, AccessibilitySettings, KEY_SCREEN_READER, ScreenReader};
+use sicompass_ui::accessibility::{
+    self, AccessibilitySettings, KEY_SCREEN_READER, ScreenReader, SharedAccessibility,
+};
 use sicompass_ui::app_state::AppRenderer;
 pub use sicompass_ui::registry::{SettingsQueue, init_provider_root, register_provider};
 use std::path::{Path, PathBuf};
@@ -106,12 +108,34 @@ fn rebuild_settings_ffon(renderer: &mut AppRenderer) {
 // Public API
 // ---------------------------------------------------------------------------
 
+/// The accessibility object a desicompass session shares with its superkey
+/// (`sicompass_ui::accessibility::SharedAccessibility`), or `None` outside a
+/// session, where settings.json keeps these settings as it always has.
+pub fn session_accessibility() -> Option<Arc<Mutex<SharedAccessibility>>> {
+    sicompass_ui::session_mode::is_session_mode()
+        .then(|| Arc::new(Mutex::new(SharedAccessibility::open_session())))
+}
+
 /// Load all providers according to the settings config.
 ///
 /// Returns a [`SettingsQueue`] that receives apply-callback events while the
 /// settings provider is live.  Pass it to [`apply_pending_settings`] to
 /// process those events against `AppRenderer`.
 pub fn load_programs(renderer: &mut AppRenderer) -> SettingsQueue {
+    load_programs_with(renderer, None)
+}
+
+/// [`load_programs`], with the session's shared accessibility object when
+/// there is one ([`session_accessibility`]).
+///
+/// With it, the accessibility settings are that object's, not settings.json's:
+/// the rows start from its values, the settings provider neither reads nor
+/// writes those keys, and the language is its language. Everything else is
+/// unchanged.
+pub fn load_programs_with(
+    renderer: &mut AppRenderer,
+    shared: Option<&Mutex<SharedAccessibility>>,
+) -> SettingsQueue {
     // Run one-time migrations of obsolete config keys.
     if let Some(path) = sicompass_sdk::platform::main_config_path() {
         migrate_programs_to_load(&path);
@@ -131,9 +155,17 @@ pub fn load_programs(renderer: &mut AppRenderer) -> SettingsQueue {
     // provider (not built yet) and read straight from settings.json.
     // Unset there, the system default (/etc/sicompass/accessibility.json)
     // decides, as it does for the language radio below.
-    let lang = sicompass_sdk::platform::main_config_path()
-        .and_then(|path| read_language_from_config(&path))
-        .or_else(|| AccessibilitySettings::system().language);
+    let lang = match shared {
+        Some(sh) => {
+            sh.lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .effective()
+                .language
+        }
+        None => sicompass_sdk::platform::main_config_path()
+            .and_then(|path| read_language_from_config(&path))
+            .or_else(|| AccessibilitySettings::system().language),
+    };
     if let Some(lang) = lang {
         sicompass_sdk::localize::set_locale(&lang);
     }
@@ -163,11 +195,7 @@ pub fn load_programs(renderer: &mut AppRenderer) -> SettingsQueue {
     // Surface the sicompass app version as a child of the "sicompass" section.
     settings.set_section_version("sicompass", env!("CARGO_PKG_VERSION"));
 
-    register_core_settings(
-        settings.as_mut(),
-        &AccessibilitySettings::system(),
-        sicompass_ui::session_mode::is_session_mode(),
-    );
+    register_accessibility_settings(settings.as_mut(), shared);
 
     // "Available programs:" priority section.
     // Built-in program checkboxes are added first; user-plugin checkboxes are
@@ -793,6 +821,71 @@ fn migrate_builtin_data_to_plugins(state: &Path, config: &Path, data: &Path) {
 ///
 /// `system` holds the machine's accessibility defaults, and `session` is true
 /// in a desicompass session. Both are parameters so tests can supply them.
+/// The core settings, with the accessibility rows taken from the session's
+/// shared object when there is one, and from settings.json over the system
+/// defaults when there is not.
+fn register_accessibility_settings(
+    settings: &mut dyn Provider,
+    shared: Option<&Mutex<SharedAccessibility>>,
+) {
+    match shared {
+        // In a desicompass session the accessibility settings are the
+        // superkey's and the login screen's to change, so this page has none
+        // of them: only what is sicompass's own. Their values still apply
+        // here (`apply_shared_accessibility`, `follow_shared_accessibility`).
+        Some(_) => {
+            register_auto_update_check(settings);
+            // The colour scheme row is built into the settings provider.
+            settings.set_external_setting_keys(accessibility::ALL_KEYS);
+        }
+        None => register_core_settings(
+            settings,
+            &AccessibilitySettings::system(),
+            sicompass_ui::session_mode::is_session_mode(),
+        ),
+    }
+}
+
+/// Put the shared accessibility values into effect at startup, in a session,
+/// where no settings row exists to replay them. The screen reader starts here
+/// too: in the session, sicompass is the one that owns it.
+pub fn apply_shared_accessibility(
+    renderer: &mut AppRenderer,
+    shared: &Mutex<SharedAccessibility>,
+    screen_reader: Option<&Mutex<ScreenReader>>,
+) {
+    let effective = shared.lock().unwrap_or_else(|e| e.into_inner()).effective();
+    for key in accessibility::ALL_KEYS {
+        let Some(value) = effective.get(key) else {
+            continue;
+        };
+        if *key == KEY_SCREEN_READER {
+            if value == "true"
+                && let Some(sr) = screen_reader
+            {
+                apply_screen_reader(renderer, sr, &value);
+            }
+            continue;
+        }
+        // As the startup drain does: the locale was set before any provider
+        // was built, so nothing needs re-fetching.
+        apply_setting(renderer, key, &value, true);
+    }
+}
+
+/// The update check, the one sicompass setting a session keeps on this page.
+fn register_auto_update_check(settings: &mut dyn Provider) {
+    // Checked at startup by `read_auto_update_check_setting` in main.rs.
+    // Toggling at runtime only affects the next launch — we don't spawn /
+    // cancel the updater thread on the fly.
+    settings.add_checkbox_setting(
+        "sicompass",
+        "settings-checkbox-auto-update-check",
+        "autoUpdateCheck",
+        true,
+    );
+}
+
 fn register_core_settings(
     settings: &mut dyn Provider,
     system: &AccessibilitySettings,
@@ -834,15 +927,7 @@ fn register_core_settings(
             system.screen_reader.unwrap_or(false),
         );
     }
-    // Checked at startup by `read_auto_update_check_setting` in main.rs.
-    // Toggling at runtime only affects the next launch — we don't spawn /
-    // cancel the updater thread on the fly.
-    settings.add_checkbox_setting(
-        "sicompass",
-        "settings-checkbox-auto-update-check",
-        "autoUpdateCheck",
-        true,
-    );
+    register_auto_update_check(settings);
     // Default coupled to read_font_scale's fallback so the radio selection and
     // the actual on-screen scale always agree — change DEFAULT_FONT_SCALE alone.
     let default_font_scale = system
@@ -1300,6 +1385,21 @@ pub fn apply_tabs_section(
 /// Default on-screen font scale when `sicompass.fontScale` is not set (matches
 /// the `fontScale` radio's default in `load_programs`).
 pub const DEFAULT_FONT_SCALE: f32 = 1.75;
+
+/// [`read_font_scale`], from the session's shared accessibility object when
+/// there is one.
+pub fn read_font_scale_with(shared: Option<&Mutex<SharedAccessibility>>) -> f32 {
+    match shared {
+        Some(sh) => accessibility::font_scale_value(
+            sh.lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .effective()
+                .font_scale
+                .as_deref(),
+        ),
+        None => read_font_scale(),
+    }
+}
 
 /// Read `sicompass.fontScale` from settings.json.
 /// Returns [`DEFAULT_FONT_SCALE`] if absent or unparseable. Clamped to [1.0, 2.5].
@@ -1774,6 +1874,36 @@ pub fn apply_pending_settings_with(
         }
         apply_setting(renderer, &key, &value, skip_enable);
     }
+}
+
+/// Follow a change another process (the superkey) made to the session's
+/// shared accessibility object: apply it as if it had been chosen here, and
+/// show it in the settings rows. Called every frame; the object itself
+/// throttles how often it looks at the files.
+///
+/// The screen reader is started and stopped here too. In a session, this
+/// process is the one that owns it, whoever flipped the switch.
+pub fn follow_shared_accessibility(
+    renderer: &mut AppRenderer,
+    shared: &Mutex<SharedAccessibility>,
+    screen_reader: Option<&Mutex<ScreenReader>>,
+) {
+    let changed = shared.lock().unwrap_or_else(|e| e.into_inner()).poll();
+    if changed.is_empty() {
+        return;
+    }
+    for (key, value) in &changed {
+        if *key == KEY_SCREEN_READER
+            && let Some(sr) = screen_reader
+        {
+            apply_screen_reader(renderer, sr, value);
+        }
+        // Also tells the settings provider, whose row updates silently.
+        apply_setting(renderer, key, value, false);
+    }
+    rebuild_settings_ffon(renderer);
+    sicompass_ui::list::create_list_current_layer(renderer);
+    renderer.needs_redraw = true;
 }
 
 /// Start or stop the session's screen reader. The setting only exists in a
@@ -2894,5 +3024,106 @@ mod tests {
         r.rebuild_font_renderer = false;
         apply_setting(&mut r, "fontScale", "2.00", false);
         assert!(r.rebuild_font_renderer);
+    }
+
+    // --- a desicompass session: the accessibility object shared with the superkey ---
+
+    fn shared_in(dir: &Path) -> Mutex<SharedAccessibility> {
+        Mutex::new(SharedAccessibility::new(
+            Some(dir.join("shared.json")),
+            vec![dir.join("system.json")],
+            AccessibilitySettings::builtin(),
+        ))
+    }
+
+    #[test]
+    fn in_a_session_the_settings_page_has_no_accessibility_rows() {
+        let dir = tempfile::tempdir().unwrap();
+        let shared = shared_in(dir.path());
+        let log: Arc<Mutex<Vec<(String, String)>>> = Arc::new(Mutex::new(Vec::new()));
+        let log2 = Arc::clone(&log);
+        let mut p = sicompass_settings::SettingsProvider::new(move |k, v| {
+            log2.lock().unwrap().push((k.to_owned(), v.to_owned()));
+        })
+        .with_config_path(dir.path().join("settings.json"));
+        register_accessibility_settings(&mut p, Some(&shared));
+        p.init();
+        let fired: Vec<String> = log.lock().unwrap().iter().map(|(k, _)| k.clone()).collect();
+        for key in accessibility::ALL_KEYS {
+            assert!(
+                !fired.iter().any(|k| k == key),
+                "{key} has a row: {fired:?}"
+            );
+        }
+        assert!(fired.iter().any(|k| k == "autoUpdateCheck"), "{fired:?}");
+    }
+
+    #[test]
+    fn in_a_session_the_shared_values_apply_at_startup() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("shared.json"),
+            r#"{"colorScheme":"light","shoulderSurfingProtection":true,"screenReader":true}"#,
+        )
+        .unwrap();
+        let shared = shared_in(dir.path());
+        let sr = Mutex::new(ScreenReader::with_args("sleep", vec!["30".to_owned()]));
+        let mut r = AppRenderer::new();
+        apply_shared_accessibility(&mut r, &shared, Some(&sr));
+        assert_eq!(
+            r.palette_theme,
+            sicompass_ui::app_state::PaletteTheme::Light
+        );
+        assert!(r.privacy_blank);
+        assert!(
+            sr.lock().unwrap().is_running(),
+            "sicompass owns Orca in the session"
+        );
+        sr.lock().unwrap().stop_now();
+    }
+
+    #[test]
+    fn a_screen_reader_that_is_off_is_not_started_at_startup() {
+        let dir = tempfile::tempdir().unwrap();
+        let shared = shared_in(dir.path());
+        let sr = Mutex::new(ScreenReader::with_args("sleep", vec!["30".to_owned()]));
+        let mut r = AppRenderer::new();
+        apply_shared_accessibility(&mut r, &shared, Some(&sr));
+        assert!(!sr.lock().unwrap().is_running());
+    }
+
+    #[test]
+    fn a_change_the_superkey_makes_is_followed_here() {
+        let dir = tempfile::tempdir().unwrap();
+        let ours = shared_in(dir.path());
+        let sr = Mutex::new(ScreenReader::with_args("sleep", vec!["30".to_owned()]));
+        let mut r = AppRenderer::new();
+        follow_shared_accessibility(&mut r, &ours, Some(&sr));
+        assert_eq!(r.palette_theme, sicompass_ui::app_state::PaletteTheme::Dark);
+
+        // The superkey, another process with its own view of the same files.
+        let superkey = shared_in(dir.path());
+        superkey
+            .lock()
+            .unwrap()
+            .set("colorScheme", "light")
+            .unwrap();
+        superkey
+            .lock()
+            .unwrap()
+            .set("screenReader", "true")
+            .unwrap();
+
+        std::thread::sleep(accessibility::POLL_INTERVAL + std::time::Duration::from_millis(20));
+        follow_shared_accessibility(&mut r, &ours, Some(&sr));
+        assert_eq!(
+            r.palette_theme,
+            sicompass_ui::app_state::PaletteTheme::Light
+        );
+        assert!(
+            sr.lock().unwrap().is_running(),
+            "this process owns the screen reader, whoever flipped the switch"
+        );
+        sr.lock().unwrap().stop_now();
     }
 }

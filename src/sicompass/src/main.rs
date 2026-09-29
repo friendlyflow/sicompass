@@ -91,6 +91,7 @@ fn main() {
 
     let hooks = boot::ProgramsHooks {
         update_state,
+        shared_accessibility: sicompass::programs::session_accessibility(),
         ..Default::default()
     };
     match boot::app_state(hooks) {

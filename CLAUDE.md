@@ -180,6 +180,31 @@ lib crates for mock injection — these deps live in `[dev-dependencies]`.
 A Stop hook (`.claude/hooks/check-sdk-boundary.sh`) enforces this automatically
 at the end of each Claude turn.
 
+## Architecture: accessibility settings in a desicompass session
+
+Standalone, sicompass keeps the accessibility settings (screen reader, font
+scale, colour scheme, language, shoulder-surfing protection) in its own
+`settings.json`, over `/etc/sicompass/accessibility.json`. In a desicompass
+session (`session_mode::is_session_mode()`) they are one machine-wide object
+shared with the superkey and the login screen instead, both ways:
+`/var/lib/sicompass/accessibility.json`, read and written through
+`sicompass_ui::accessibility::SharedAccessibility`
+(`programs::session_accessibility`, carried by `boot::ProgramsHooks`). The
+desicompass NixOS module makes that directory writable by a `sicompass-a11y`
+group holding the greeter and the users.
+
+- In a session these are not sicompass's to change: its settings page has no
+  rows for them (`Provider::set_external_setting_keys`, which hides even the
+  built-in colour scheme radio). The superkey and the login screen change them.
+  sicompass applies the shared values at startup
+  (`programs::apply_shared_accessibility`) and follows every change made
+  elsewhere, every frame (`programs::follow_shared_accessibility`).
+- Below the shared file sits `/etc/sicompass/accessibility.json`. Every save
+  and every change followed from elsewhere is logged (`accessibility:` in the
+  journal).
+- sicompass is the session's only owner of Orca. The superkey writes the
+  `screenReader` switch; sicompass starts and stops the screen reader.
+
 ## Architecture: the greeter
 
 The greetd login screen is its own repo, `../loginsicompass`
@@ -212,7 +237,7 @@ login screen ever calls. The sicompass-ui repo's Stop hook checks this.
 
 Where the renderer needs something only the embedder can answer, it asks:
 
-- `registry::HostHooks` — six methods, every one defaulting to a no-op, stored
+- `registry::HostHooks` — eight methods, every one defaulting to a no-op, stored
   on `AppRenderer`. The app installs `boot::ProgramsHooks`; the greeter takes
   the defaults, which are all correct for something with no settings file, no
   updater and no tabs. Integration tests must install the app's hooks too (see
