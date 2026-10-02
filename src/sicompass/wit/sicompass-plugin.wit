@@ -546,7 +546,7 @@ interface desktop {
 /// `run-task` gets only its `input`. It reports through `emit` and its result,
 /// which the host delivers to the UI instance through `on-task-event`, just
 /// before the next `poll`. It has no deadline, but stops at its next epoch tick
-/// once cancelled, and `cancelled` lets a loop exit cleanly. At most 4 tasks run
+/// once cancelled, and `cancelled` lets a loop exit cleanly. At most 16 tasks run
 /// per plugin; further ones wait. Always linked: a task can do nothing the
 /// plugin could not already do, only for longer.
 interface tasks {

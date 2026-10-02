@@ -27,13 +27,20 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, mpsc};
 use std::time::{Duration, Instant};
 
-use sicompass_sdk::plugin_abi::MAX_CONCURRENT_TASKS;
 use wasmtime::component::Component;
 use wasmtime::{Store, UpdateDeadline};
 
 use super::sicompass::plugin as wit;
 use super::wit_types::TaskEvent;
 use super::{Grants, HostState, Plugin};
+
+/// Most tasks one plugin runs at once. Further `spawn`s wait for a slot.
+///
+/// A backstop against a plugin starting instances without end, not a budget:
+/// most tasks spend their life waiting (a socket read, `receive`), which costs a
+/// thread and nothing else, and a task blocked in a read holds its slot until
+/// the read returns. The host's figure, so raising it needs no SDK release.
+pub const MAX_CONCURRENT_TASKS: usize = 16;
 
 /// Epoch ticks (100 ms each) a cancelled task gets to stop by itself.
 pub const CANCEL_GRACE_TICKS: u32 = 5;

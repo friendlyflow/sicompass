@@ -266,7 +266,7 @@ on-task-event: func(id: u64, event: task-event);      // progress / done, UI ins
   just before the next `poll`. That is the price of a sandbox with no shared
   memory, and it is the shape every existing worker thread in the libs already has
   (a channel into the provider).
-- At most 4 tasks per plugin run at once. Further `spawn`s queue.
+- At most 16 tasks per plugin run at once. Further `spawn`s queue.
 - Closing the provider cancels its tasks, including dropping it without
   `cleanup` (a tab closed, a hot reload).
 

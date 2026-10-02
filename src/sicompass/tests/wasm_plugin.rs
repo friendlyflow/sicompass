@@ -1422,24 +1422,25 @@ fn a_task_that_ignores_cancel_is_stopped_by_the_host() {
 }
 
 #[test]
-fn at_most_four_tasks_run_at_once_and_the_next_starts_when_one_ends() {
+fn at_most_max_concurrent_tasks_run_at_once_and_the_next_starts_when_one_ends() {
+    let cap = wasm_host::tasks::MAX_CONCURRENT_TASKS;
     let mut p = open_task();
-    let ids: Vec<u64> = (0..5).map(|_| start(&mut p, "spin", "")).collect();
+    let ids: Vec<u64> = (0..=cap).map(|_| start(&mut p, "spin", "")).collect();
     let running = |l: &[String]| l.iter().filter(|x| x.ends_with("progress running")).count();
-    wait_for(&mut p, 10, |l| running(l) == 4);
-    // Give a fifth a moment it must not use.
+    wait_for(&mut p, 10, |l| running(l) == cap);
+    // Give the one past the cap a moment it must not use.
     std::thread::sleep(std::time::Duration::from_millis(400));
     p.tick();
-    assert_eq!(running(&all_text(&p.fetch())), 4);
+    assert_eq!(running(&all_text(&p.fetch())), cap);
 
     let mut error = String::new();
     p.handle_command("cancel", &ids[0].to_string(), 0, &mut error);
-    wait_for(&mut p, 10, |l| running(l) == 5);
+    wait_for(&mut p, 10, |l| running(l) == cap + 1);
     for id in &ids[1..] {
         p.handle_command("cancel", &id.to_string(), 0, &mut error);
     }
     wait_for(&mut p, 10, |l| {
-        l.iter().filter(|x| x.contains("done")).count() == 5
+        l.iter().filter(|x| x.contains("done")).count() == cap + 1
     });
 }
 
