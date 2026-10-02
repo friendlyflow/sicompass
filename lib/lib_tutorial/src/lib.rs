@@ -3,6 +3,7 @@ use sicompass_sdk::localize;
 use sicompass_sdk::provider::Provider;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
+use std::time::{Duration, Instant, SystemTime};
 
 // ---------------------------------------------------------------------------
 // Assets
@@ -424,6 +425,35 @@ fn installed_program_leaves(plugins_dir: Option<&Path>) -> Vec<String> {
     programs.into_iter().flat_map(|(_, leaves)| leaves).collect()
 }
 
+/// What the programs section was built from: each entry of the plugins folder,
+/// with when its `plugin.json` and its `locales/` last changed. Cheap enough to
+/// read every second, and an install or an uninstall changes it.
+type PluginsFingerprint = Vec<(std::ffi::OsString, Option<SystemTime>, Option<SystemTime>)>;
+
+fn plugins_fingerprint(plugins_dir: Option<&Path>) -> PluginsFingerprint {
+    let Some(entries) = plugins_dir.and_then(|d| std::fs::read_dir(d).ok()) else {
+        return Vec::new();
+    };
+    let modified = |p: PathBuf| std::fs::metadata(p).and_then(|m| m.modified()).ok();
+    let mut fingerprint: PluginsFingerprint = entries
+        .flatten()
+        .map(|e| {
+            let dir = e.path();
+            (
+                e.file_name(),
+                modified(dir.join("plugin.json")),
+                modified(dir.join(sicompass_sdk::installed_plugins::LOCALE_SUBDIR)),
+            )
+        })
+        .collect();
+    fingerprint.sort();
+    fingerprint
+}
+
+/// How often [`TutorialProvider::tick`] looks at the plugins folder while the
+/// programs section is on screen.
+const PROGRAMS_CHECK_INTERVAL: Duration = Duration::from_secs(1);
+
 fn capitalized(s: &str) -> String {
     let mut chars = s.chars();
     match chars.next() {
@@ -446,6 +476,10 @@ pub struct TutorialProvider {
     /// Where the installed plugins are, whose own text fills the programs
     /// section. `None` lists none.
     plugins_dir: Option<PathBuf>,
+    /// The plugins folder as it was when the programs section was last built,
+    /// and when `tick` last compared it with the folder now.
+    programs_built_from: Option<PluginsFingerprint>,
+    programs_checked: Option<Instant>,
     /// A one-shot screen-reader announcement, drained by `take_error`. The demo
     /// button in the playground sets this so activating it confirms with a short
     /// spoken line instead of silently re-fetching the list.
@@ -470,8 +504,19 @@ impl TutorialProvider {
         TutorialProvider {
             current_path: "/".to_owned(),
             plugins_dir,
+            programs_built_from: None,
+            programs_checked: None,
             pending_announce: None,
         }
+    }
+
+    /// Whether the list on screen is the programs section itself. An embedder
+    /// that keeps its own copy of the tutorial's rows (the desicompass superkey)
+    /// asks this tutorial for that section instead, since its rows follow the
+    /// plugins folder rather than anything the user edits.
+    pub fn in_programs_section(&self) -> bool {
+        let programs = translate_node_string("tutorial-sec-programs");
+        self.path_parts() == [sicompass_sdk::tags::strip_display(&programs)]
     }
 
     fn path_parts(&self) -> Vec<&str> {
@@ -497,11 +542,37 @@ impl Provider for TutorialProvider {
     }
 
     fn fetch(&mut self) -> Vec<FfonElement> {
+        // The root's rows carry every section's, the programs section's included.
+        if self.current_path == "/" || self.in_programs_section() {
+            self.programs_built_from = Some(plugins_fingerprint(self.plugins_dir.as_deref()));
+        }
         let parts = self.path_parts();
         match get_children_at_path(SECTIONS, &parts) {
             Some(nodes) => nodes_to_ffon(nodes, self.plugins_dir.as_deref()),
             None => vec![],
         }
+    }
+
+    /// While the programs section is on screen, notice a plugin being installed
+    /// or removed, and have the section read again.
+    ///
+    /// The section's rows arrive with the rest of the tree when the tutorial is
+    /// first fetched, and the renderer walks into rows it already has without
+    /// asking again, so without this a plugin installed from the Store would
+    /// only appear after a restart. Only the programs section is refreshed: a
+    /// refresh replaces the level on screen, and every other level holds what
+    /// the user ticked and typed.
+    fn tick(&mut self) -> bool {
+        if !self.in_programs_section()
+            || self
+                .programs_checked
+                .is_some_and(|t| t.elapsed() < PROGRAMS_CHECK_INTERVAL)
+        {
+            return false;
+        }
+        self.programs_checked = Some(Instant::now());
+        self.programs_built_from.as_ref()
+            != Some(&plugins_fingerprint(self.plugins_dir.as_deref()))
     }
 
     fn push_path(&mut self, segment: &str) {
@@ -953,6 +1024,46 @@ mod tests {
         assert!(at("Aardvark leaf") < at("Zebra leaf"));
         assert!(at("Zebra leaf") < at("Store:"));
         assert!(at("Store:") < at("Settings:"));
+    }
+
+    #[test]
+    fn test_programs_section_asks_to_be_read_again_after_an_install() {
+        let root = tempfile::tempdir().unwrap();
+        let mut p = TutorialProvider::with_plugins_dir(Some(root.path().to_owned()));
+        // Built with the root's rows, then walked into without a fetch, the
+        // way the renderer does it.
+        p.fetch();
+        p.push_path("The programs");
+        assert!(!p.tick(), "nothing has changed yet");
+
+        install(
+            root.path(),
+            "tutfake-late",
+            "fake late",
+            "tutfake-late-tutorial = Installed while the tutorial was open\n",
+        );
+        p.programs_checked = None; // past the once-a-second throttle
+        assert!(p.tick(), "an install must have the section read again");
+        assert!(
+            joined(&p.fetch()).contains("Installed while the tutorial was open"),
+            "the section read again must show the new plugin"
+        );
+        p.programs_checked = None;
+        assert!(!p.tick(), "and once read, it is up to date");
+    }
+
+    #[test]
+    fn test_only_the_programs_section_is_read_again() {
+        let root = tempfile::tempdir().unwrap();
+        let mut p = TutorialProvider::with_plugins_dir(Some(root.path().to_owned()));
+        p.fetch();
+        install(root.path(), "tutfake-elsewhere", "fake", "tutfake-elsewhere-tutorial = x\n");
+        // The root and the playground hold what the user ticked and typed.
+        for path in ["/", "/Interactive playground"] {
+            p.set_current_path(path);
+            p.programs_checked = None;
+            assert!(!p.tick(), "{path} must not be refreshed");
+        }
     }
 
     #[test]
