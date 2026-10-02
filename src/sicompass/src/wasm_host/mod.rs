@@ -753,75 +753,12 @@ pub fn audit_plugin_bytes(
 // Translations a plugin ships
 // ---------------------------------------------------------------------------
 
-/// Where a plugin's Fluent files live, relative to its install directory:
-/// `locales/<lang>.ftl`, for example `locales/nl-BE.ftl`.
-pub const LOCALE_SUBDIR: &str = "locales";
-
-/// Register a plugin's `locales/*.ftl` into the app's Fluent bundles, so its
-/// `translate` / `translate-args` calls resolve like a built-in's.
-///
-/// **Every message id must start with `<name>-`** (and every term with
-/// `-<name>-`), or the whole file is refused. The bundles are shared by every
-/// provider and the first definition of an id wins, so without the prefix a
-/// plugin could lose its strings to a built-in, or take over another plugin's.
-///
-/// Each (plugin, locale) is registered once per process, under one lock, so two
-/// instances starting at once (two tabs, parallel tests) cannot both load a
-/// file and have the second refused for redefining every message. Fluent
-/// cannot replace a message, so a plugin updated in place keeps its old strings
-/// until restart.
-///
-/// Returns the refusals, one line each, for the caller to log.
-pub fn register_plugin_locales(plugin_name: &str, plugin_dir: &Path) -> Vec<String> {
-    static DONE: OnceLock<std::sync::Mutex<std::collections::HashSet<(String, String)>>> =
-        OnceLock::new();
-    let Ok(mut done) = DONE.get_or_init(Default::default).lock() else {
-        return vec!["the plugin locale registry is poisoned".to_owned()];
-    };
-
-    let mut refusals = Vec::new();
-    let Ok(entries) = std::fs::read_dir(plugin_dir.join(LOCALE_SUBDIR)) else {
-        return refusals;
-    };
-    let mut files: Vec<PathBuf> = entries
-        .flatten()
-        .map(|e| e.path())
-        .filter(|p| p.extension().is_some_and(|x| x == "ftl"))
-        .collect();
-    files.sort();
-
-    for path in files {
-        let Some(locale) = path.file_stem().and_then(|s| s.to_str()).map(str::to_owned) else {
-            continue;
-        };
-        let key = (plugin_name.to_owned(), locale.clone());
-        if done.contains(&key) {
-            continue;
-        }
-        let source = match std::fs::read_to_string(&path) {
-            Ok(s) => s,
-            Err(e) => {
-                refusals.push(format!("{}: {e}", path.display()));
-                continue;
-            }
-        };
-        if let Err(id) = sicompass_sdk::plugin_abi::check_locale_prefix(plugin_name, &source) {
-            refusals.push(format!(
-                "{}: message `{id}` does not start with `{plugin_name}-`, so the file \
-                 was not loaded",
-                path.display()
-            ));
-            continue;
-        }
-        match sicompass_sdk::localize::register_bundle(&locale, &source) {
-            Ok(()) => {
-                done.insert(key);
-            }
-            Err(e) => refusals.push(format!("{}: {e}", path.display())),
-        }
-    }
-    refusals
-}
+// A plugin's `locales/*.ftl` are registered by the SDK, which the tutorial also
+// calls to describe the installed plugins, so one once-per-process registry
+// covers both.
+pub use sicompass_sdk::installed_plugins::{
+    LOCALE_SUBDIR, register_locales as register_plugin_locales,
+};
 
 /// The plugin ABI this host implements (the SDK's single definition).
 pub use sicompass_sdk::plugin_abi::ABI_VERSION;

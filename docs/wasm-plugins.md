@@ -124,6 +124,15 @@ A plugin built for ABI 0.1 (`wasm32-unknown-unknown`) is refused with a message
 saying it needs a rebuild. A plugin ships its own translations in
 `locales/<lang>.ftl`, and every message id must start with `<name>-`.
 
+The same files carry what the tutorial says about the plugin, under its
+programs section: `<name>-tutorial`, then optionally `<name>-tutorial-2`,
+`-3` and so on, read until one is missing, in all four languages. Follow the
+tutorial's prose rules (docs/tutorial-guidelines.md). The tutorial reads these
+from the installed plugin's directory with
+`sicompass_sdk::installed_plugins`, without starting the plugin, so it works in
+the desicompass superkey too, which has no WASM host. A plugin without them is
+described by its display name and `<name>-description`.
+
 The guest toolchain lives in the SDK repo's dev shell (rust-overlay with the
 `wasm32-wasip2` target): nixpkgs' rustc has no `std` for it.
 

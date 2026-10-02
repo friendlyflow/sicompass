@@ -237,30 +237,31 @@ pub struct DiscoveredPlugin {
 
 /// Scan `~/.config/sicompass/plugins/` for subdirectories containing a
 /// `plugin.json`.  Returns all successfully parsed manifests.
-///
-/// Mirrors `discoverUserPlugins()` in `src/sicompass/programs.c`.
 pub fn discover_user_plugins() -> Vec<DiscoveredPlugin> {
-    let Some(dir) = sicompass_sdk::platform::plugins_dir() else {
-        return Vec::new();
-    };
-
-    let Ok(entries) = std::fs::read_dir(&dir) else {
-        return Vec::new();
-    };
-
-    let mut found = Vec::new();
-    for entry in entries.flatten() {
-        let manifest_path = entry.path().join("plugin.json");
-        if let Some(manifest) = load_manifest(&manifest_path) {
-            // Resolve entry relative to the manifest's directory.
-            let entry_path = entry.path().join(&manifest.entry);
-            found.push(DiscoveredPlugin {
-                manifest,
-                entry_path,
-            });
-        }
+    match sicompass_sdk::platform::plugins_dir() {
+        Some(dir) => discover_plugins_in(&dir),
+        None => Vec::new(),
     }
-    found
+}
+
+/// [`discover_user_plugins`] for an explicit plugins directory. The scan is the
+/// SDK's, shared with the tutorial, which lists the same plugins.
+pub fn discover_plugins_in(plugins_dir: &Path) -> Vec<DiscoveredPlugin> {
+    sicompass_sdk::installed_plugins::discover_in(plugins_dir)
+        .into_iter()
+        .filter_map(|(dir, manifest)| match manifest {
+            Ok(manifest) => Some(DiscoveredPlugin {
+                // Resolve entry relative to the manifest's directory.
+                entry_path: dir.join(&manifest.entry),
+                manifest,
+            }),
+            Err(e) => {
+                // `parse_manifest` names a retired plugin type itself.
+                eprintln!("sicompass: ignoring {}: {e}", dir.join("plugin.json").display());
+                None
+            }
+        })
+        .collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -655,24 +656,4 @@ mod tests {
     fn discover_nonexistent_dir_returns_empty() {
         assert!(discover_plugins_in(Path::new("/no/such/dir")).is_empty());
     }
-}
-
-// Testable variant that accepts an explicit plugins directory.
-#[cfg(test)]
-pub fn discover_plugins_in(plugins_dir: &Path) -> Vec<DiscoveredPlugin> {
-    let Ok(entries) = std::fs::read_dir(plugins_dir) else {
-        return Vec::new();
-    };
-    let mut found = Vec::new();
-    for entry in entries.flatten() {
-        let manifest_path = entry.path().join("plugin.json");
-        if let Some(manifest) = load_manifest(&manifest_path) {
-            let entry_path = entry.path().join(&manifest.entry);
-            found.push(DiscoveredPlugin {
-                manifest,
-                entry_path,
-            });
-        }
-    }
-    found
 }

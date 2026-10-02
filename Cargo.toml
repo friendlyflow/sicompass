@@ -188,10 +188,11 @@ wiremock = "0.6"
 # sicompass-ui = { path = "../sicompass-ui" }
 
 # TEMPORARY, until sicompass-sdk 0.9.1 is on crates.io: the SDK commit that
-# adds `Provider::set_external_setting_keys`, by git rev so `nix build` can
-# fetch it. Replace with `sicompass-sdk = "0.9.1"` above at the release.
+# adds `Provider::set_external_setting_keys` and `installed_plugins`, by git rev
+# so `nix build` can fetch it. Replace with `sicompass-sdk = "0.9.1"` above at
+# the release.
 [patch.crates-io]
-sicompass-sdk = { git = "https://github.com/friendlyflow/sicompass-plugin-sdk", rev = "ffe91c151ada7d544a0bf67ba507ef475b6fc6ff" }
+sicompass-sdk = { git = "https://github.com/friendlyflow/sicompass-plugin-sdk", rev = "f3c1c4fef3d4633b7e0f2ac1b59636d2edd947bb" }
 
 # Optimize heavy third-party deps even in debug builds — html5ever and the
 # TLS/HTTP stack are 10-50x slower without optimizations.

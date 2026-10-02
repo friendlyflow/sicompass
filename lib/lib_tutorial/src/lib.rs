@@ -1,6 +1,7 @@
 use sicompass_sdk::ffon::FfonElement;
 use sicompass_sdk::localize;
 use sicompass_sdk::provider::Provider;
+use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 // ---------------------------------------------------------------------------
@@ -46,9 +47,12 @@ enum Node {
         key: &'static str,
         children: &'static [Node],
     },
+    /// One leaf per installed plugin, in the plugin's own words (see
+    /// [`installed_program_leaves`]).
+    InstalledPrograms,
 }
 
-use Node::{Branch, Leaf};
+use Node::{Branch, InstalledPrograms, Leaf};
 
 fn lorem_ipsum() -> &'static str {
     "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut \
@@ -214,29 +218,13 @@ static SECTIONS: &[Node] = &[
             Leaf("tutorial-hiw-accessibility"),
         ],
     },
-    // 4. The programs: one short leaf each.
+    // 4. The programs: the installed plugins describe themselves, then the two
+    //    that ship with the app.
     Branch {
         key: "tutorial-sec-programs",
         children: &[
             Leaf("tutorial-prog-intro"),
-            Leaf("tutorial-prog-web"),
-            Leaf("tutorial-prog-web-history"),
-            Leaf("tutorial-prog-web-bookmark"),
-            Leaf("tutorial-prog-web-commands"),
-            Leaf("tutorial-prog-terminal"),
-            Leaf("tutorial-prog-claude"),
-            Leaf("tutorial-prog-git"),
-            Leaf("tutorial-prog-git-commit"),
-            Leaf("tutorial-prog-chat"),
-            Leaf("tutorial-prog-email"),
-            Leaf("tutorial-prog-email-gmail"),
-            Leaf("tutorial-prog-filebrowser"),
-            Leaf("tutorial-prog-texteditor"),
-            Leaf("tutorial-prog-notes"),
-            Leaf("tutorial-prog-kanban"),
-            Leaf("tutorial-prog-kanban-board"),
-            Leaf("tutorial-prog-salesdemo"),
-            Leaf("tutorial-prog-remote"),
+            InstalledPrograms,
             Leaf("tutorial-prog-store"),
             Leaf("tutorial-prog-settings"),
         ],
@@ -320,24 +308,32 @@ fn get_children_at_path<'a>(nodes: &'a [Node], path_parts: &[&str]) -> Option<&'
 // Convert static tree to FfonElement vec, substituting asset URIs
 // ---------------------------------------------------------------------------
 
-fn node_to_ffon(node: &Node) -> FfonElement {
+/// Append what `node` renders as to `out`: one element, or for
+/// [`Node::InstalledPrograms`] one per leaf.
+fn push_ffon(node: &Node, plugins_dir: Option<&Path>, out: &mut Vec<FfonElement>) {
     match node {
         Node::Leaf(s) => {
             // Resolve the translation key first, then run asset-placeholder
             // substitution on the resolved value (sentinels like __TEXTURE_JPG__
             // live in the FTL value).
             let translated = translate_node_string(s);
-            FfonElement::Str(apply_asset_placeholders(&translated))
+            out.push(FfonElement::Str(apply_asset_placeholders(&translated)));
         }
         Node::Branch { key, children } => {
             let translated = translate_node_string(key);
             let resolved_key = apply_asset_placeholders(&translated);
             let mut obj = FfonElement::new_obj(resolved_key);
-            for child in *children {
-                obj.as_obj_mut().unwrap().push(node_to_ffon(child));
-            }
-            obj
+            obj.as_obj_mut()
+                .unwrap()
+                .children
+                .extend(nodes_to_ffon(children, plugins_dir));
+            out.push(obj);
         }
+        Node::InstalledPrograms => out.extend(
+            installed_program_leaves(plugins_dir)
+                .into_iter()
+                .map(FfonElement::Str),
+        ),
     }
 }
 
@@ -372,8 +368,68 @@ fn apply_asset_placeholders(s: &str) -> String {
         .replace("__LOREM_IPSUM__", lorem_ipsum())
 }
 
-fn nodes_to_ffon(nodes: &[Node]) -> Vec<FfonElement> {
-    nodes.iter().map(node_to_ffon).collect()
+fn nodes_to_ffon(nodes: &[Node], plugins_dir: Option<&Path>) -> Vec<FfonElement> {
+    let mut out = Vec::new();
+    for node in nodes {
+        push_ffon(node, plugins_dir, &mut out);
+    }
+    out
+}
+
+// ---------------------------------------------------------------------------
+// The installed plugins, in their own words
+// ---------------------------------------------------------------------------
+
+/// The programs section's leaves for the plugins installed under `plugins_dir`,
+/// sorted by display name.
+///
+/// Each plugin writes its own tutorial text, in its own `locales/<lang>.ftl`:
+/// `<name>-tutorial`, then optionally `<name>-tutorial-2`, `-3` and so on, read
+/// until one is missing. A plugin without them gets one leaf made of its display
+/// name and its `<name>-description`, and a plugin with neither is left out.
+///
+/// The files are read from disk, not through the plugin, so this works where no
+/// plugin can run (the desicompass superkey) and for plugins that are installed
+/// but switched off. With nothing installed, one leaf points to the Store.
+fn installed_program_leaves(plugins_dir: Option<&Path>) -> Vec<String> {
+    let mut programs: Vec<(String, Vec<String>)> = plugins_dir
+        .map(sicompass_sdk::installed_plugins::discover_in)
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|(dir, manifest)| {
+            let manifest = manifest.ok()?;
+            let name = manifest.name;
+            // A refused locale file just leaves its ids unresolved, so the
+            // plugin falls through to being left out.
+            sicompass_sdk::installed_plugins::register_locales(&name, &dir);
+            let display_name = localize::try_t(&format!("{name}-display-name"))
+                .unwrap_or(manifest.display_name);
+            let mut leaves: Vec<String> = localize::try_t(&format!("{name}-tutorial"))
+                .into_iter()
+                .chain(
+                    (2..).map_while(|n| localize::try_t(&format!("{name}-tutorial-{n}"))),
+                )
+                .collect();
+            if leaves.is_empty() {
+                let description = localize::try_t(&format!("{name}-description"))?;
+                leaves.push(format!("{}: {description}", capitalized(&display_name)));
+            }
+            Some((display_name.to_lowercase(), leaves))
+        })
+        .collect();
+    if programs.is_empty() {
+        return vec![translate_node_string("tutorial-prog-none")];
+    }
+    programs.sort();
+    programs.into_iter().flat_map(|(_, leaves)| leaves).collect()
+}
+
+fn capitalized(s: &str) -> String {
+    let mut chars = s.chars();
+    match chars.next() {
+        Some(first) => first.to_uppercase().chain(chars).collect(),
+        None => String::new(),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -383,10 +439,13 @@ fn nodes_to_ffon(nodes: &[Node]) -> Vec<FfonElement> {
 /// The tutorial provider: a short, guided, read-only introduction to Sicompass.
 ///
 /// Carries no asset paths: the two files it shows are compiled in and named by the
-/// constant `asset:` URIs above, so there is nothing per-instance to configure and
-/// no headless variant to need.
+/// constant `asset:` URIs above. The one thing it reads from outside is the
+/// plugins folder, for the programs section.
 pub struct TutorialProvider {
     current_path: String,
+    /// Where the installed plugins are, whose own text fills the programs
+    /// section. `None` lists none.
+    plugins_dir: Option<PathBuf>,
     /// A one-shot screen-reader announcement, drained by `take_error`. The demo
     /// button in the playground sets this so activating it confirms with a short
     /// spoken line instead of silently re-fetching the list.
@@ -400,9 +459,17 @@ impl Default for TutorialProvider {
 }
 
 impl TutorialProvider {
+    /// The tutorial for this machine's installed plugins
+    /// ([`sicompass_sdk::platform::plugins_dir`]).
     pub fn new() -> Self {
+        Self::with_plugins_dir(sicompass_sdk::platform::plugins_dir())
+    }
+
+    /// The tutorial for the plugins installed under `plugins_dir`.
+    pub fn with_plugins_dir(plugins_dir: Option<PathBuf>) -> Self {
         TutorialProvider {
             current_path: "/".to_owned(),
+            plugins_dir,
             pending_announce: None,
         }
     }
@@ -432,7 +499,7 @@ impl Provider for TutorialProvider {
     fn fetch(&mut self) -> Vec<FfonElement> {
         let parts = self.path_parts();
         match get_children_at_path(SECTIONS, &parts) {
-            Some(nodes) => nodes_to_ffon(nodes),
+            Some(nodes) => nodes_to_ffon(nodes, self.plugins_dir.as_deref()),
             None => vec![],
         }
     }
@@ -486,8 +553,10 @@ impl Provider for TutorialProvider {
 mod tests {
     use super::*;
 
+    /// The tutorial with no plugins installed, so no test reads the real
+    /// plugins folder. The programs tests below install their own.
     fn provider() -> TutorialProvider {
-        TutorialProvider::new()
+        TutorialProvider::with_plugins_dir(None)
     }
 
     #[test]
@@ -549,7 +618,7 @@ mod tests {
         }
 
         let mut found = Vec::new();
-        walk(&nodes_to_ffon(SECTIONS), &mut found);
+        walk(&nodes_to_ffon(SECTIONS, None), &mut found);
 
         let assets: Vec<&String> = found
             .iter()
@@ -729,31 +798,6 @@ mod tests {
         }
     }
 
-    /// The web browser's own keys and commands must be discoverable from the
-    /// programs section. `b` and the recall history shipped without any tutorial
-    /// text at all, which is what this test exists to stop happening again.
-    #[test]
-    fn test_programs_documents_the_browser_history_and_bookmarks() {
-        let mut p = provider();
-        p.push_path("The programs");
-        let text = joined(&p.fetch());
-        assert!(
-            text.contains("[bookmark]"),
-            "must give the marker a bookmarked row is announced with, got:\n{text}"
-        );
-        assert!(
-            text.contains("address bar"),
-            "must say where the recall history sits, got:\n{text}"
-        );
-        // The colon commands a reader cannot otherwise guess at.
-        for cmd in ["clear cookies", "show hidden content"] {
-            assert!(
-                text.contains(cmd),
-                "must document the {cmd} command, got:\n{text}"
-            );
-        }
-    }
-
     #[test]
     fn test_tabs_group_lists_t_and_c_palettes_separately() {
         let mut p = provider();
@@ -791,47 +835,139 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_programs_lists_each_program_once() {
-        let mut p = provider();
+    /// Installs a fake plugin under `root`: its `plugin.json` and its
+    /// `locales/en-US.ftl`. Each test uses its own plugin names, because the
+    /// localizer the plugins' strings go into is one per process.
+    fn install(root: &Path, name: &str, display_name: &str, en_us: &str) {
+        let dir = root.join(name);
+        std::fs::create_dir_all(dir.join("locales")).unwrap();
+        std::fs::write(
+            dir.join("plugin.json"),
+            format!(
+                r#"{{"name":"{name}","displayName":"{display_name}","entry":"plugin.wasm"}}"#
+            ),
+        )
+        .unwrap();
+        std::fs::write(dir.join("locales").join("en-US.ftl"), en_us).unwrap();
+    }
+
+    fn programs(root: &Path) -> Vec<String> {
+        let mut p = TutorialProvider::with_plugins_dir(Some(root.to_owned()));
         p.push_path("The programs");
-        let text = joined(&p.fetch());
-        for token in [
-            "File browser",
-            "Text editor",
-            "Web browser",
-            "Terminal",
-            "Claude",
-            "Chat",
-            "Email",
-            "Settings",
-        ] {
-            assert!(
-                text.contains(token),
-                "programs section must mention {token}, got:\n{text}"
-            );
-        }
+        p.fetch()
+            .iter()
+            .filter_map(|e| e.as_str().map(str::to_owned))
+            .collect()
     }
 
     #[test]
-    fn test_programs_documents_gmail_setup() {
-        let mut p = provider();
-        p.push_path("The programs");
-        let text = joined(&p.fetch());
-        // The Gmail setup leaf must call out the mail scope (the actual fix) and
-        // the recovery colon commands.
+    fn test_programs_shows_each_plugins_own_tutorial_leaves_in_order() {
+        let root = tempfile::tempdir().unwrap();
+        install(
+            root.path(),
+            "tutfake-web",
+            "fake web",
+            "tutfake-web-description = Not shown, it has tutorial text\n\
+             tutfake-web-tutorial = Fake web, from the Store: the first leaf\n\
+             tutfake-web-tutorial-2 = b: the second leaf\n\
+             tutfake-web-tutorial-3 = the third leaf\n",
+        );
+        let leaves = programs(root.path());
+        let first = leaves
+            .iter()
+            .position(|l| l == "Fake web, from the Store: the first leaf")
+            .unwrap_or_else(|| panic!("no first leaf in {leaves:?}"));
+        assert_eq!(leaves[first + 1], "b: the second leaf");
+        assert_eq!(leaves[first + 2], "the third leaf");
+        assert!(!leaves.iter().any(|l| l.contains("Not shown")), "{leaves:?}");
+    }
+
+    #[test]
+    fn test_programs_falls_back_to_a_plugins_description() {
+        let root = tempfile::tempdir().unwrap();
+        install(
+            root.path(),
+            "tutfake-desc",
+            "fake desc",
+            "tutfake-desc-display-name = fake description\n\
+             tutfake-desc-description = A list of things, from somewhere.\n",
+        );
+        let leaves = programs(root.path());
         assert!(
-            text.contains("https://mail.google.com/"),
-            "must name the mail scope, got:\n{text}"
+            leaves.contains(&"Fake description: A list of things, from somewhere.".to_owned()),
+            "{leaves:?}"
+        );
+    }
+
+    #[test]
+    fn test_programs_leaves_out_a_plugin_with_no_text_or_unprefixed_ids() {
+        let root = tempfile::tempdir().unwrap();
+        install(
+            root.path(),
+            "tutfake-mute",
+            "fake mute",
+            "tutfake-mute-display-name = fake mute\n",
+        );
+        // The host refuses the whole file, so not even its own leaf resolves.
+        install(
+            root.path(),
+            "tutfake-spoof",
+            "fake spoof",
+            "tutfake-spoof-tutorial = Spoofed leaf\ntutorial-prog-settings = Taken over\n",
+        );
+        let leaves = programs(root.path());
+        assert!(
+            !leaves.iter().any(|l| l.contains("mute") || l.contains("Spoof")),
+            "{leaves:?}"
         );
         assert!(
-            text.contains(":refresh"),
-            "must mention the :refresh colon command"
+            !leaves.iter().any(|l| l == "Taken over"),
+            "a plugin must not replace the tutorial's own text: {leaves:?}"
         );
-        assert!(
-            text.contains(":logout"),
-            "must mention re-authorizing via :logout"
+    }
+
+    #[test]
+    fn test_programs_are_sorted_by_display_name_then_store_and_settings() {
+        let root = tempfile::tempdir().unwrap();
+        // Directory order is the opposite of display-name order.
+        install(
+            root.path(),
+            "tutfake-a",
+            "zebra",
+            "tutfake-a-tutorial = Zebra leaf\n",
         );
+        install(
+            root.path(),
+            "tutfake-b",
+            "aardvark",
+            "tutfake-b-tutorial = Aardvark leaf\n",
+        );
+        let leaves = programs(root.path());
+        let at = |text: &str| {
+            leaves
+                .iter()
+                .position(|l| l.starts_with(text))
+                .unwrap_or_else(|| panic!("no {text} in {leaves:?}"))
+        };
+        assert!(at("Sicompass turns") < at("Aardvark leaf"));
+        assert!(at("Aardvark leaf") < at("Zebra leaf"));
+        assert!(at("Zebra leaf") < at("Store:"));
+        assert!(at("Store:") < at("Settings:"));
+    }
+
+    #[test]
+    fn test_programs_with_nothing_installed_points_to_the_store() {
+        let root = tempfile::tempdir().unwrap();
+        for dir in [Some(root.path().to_owned()), None] {
+            let mut p = TutorialProvider::with_plugins_dir(dir);
+            p.push_path("The programs");
+            let text = joined(&p.fetch());
+            assert!(
+                text.contains("No programs installed yet"),
+                "got:\n{text}"
+            );
+            assert!(text.contains("Store:") && text.contains("Settings:"), "got:\n{text}");
+        }
     }
 
     #[test]

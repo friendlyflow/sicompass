@@ -4094,7 +4094,7 @@ dependencies = [
 [[package]]
 name = "sicompass-sdk"
 version = "0.9.0"
-source = "git+https://github.com/friendlyflow/sicompass-plugin-sdk?rev=ffe91c151ada7d544a0bf67ba507ef475b6fc6ff#ffe91c151ada7d544a0bf67ba507ef475b6fc6ff"
+source = "git+https://github.com/friendlyflow/sicompass-plugin-sdk?rev=f3c1c4fef3d4633b7e0f2ac1b59636d2edd947bb#f3c1c4fef3d4633b7e0f2ac1b59636d2edd947bb"
 dependencies = [
  "async-trait",
  "base64 0.23.1",

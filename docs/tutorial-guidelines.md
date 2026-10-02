@@ -81,6 +81,16 @@ sections, and finally a pointer to the repo/SDK docs for plugin development. Kee
 that way. When you add a topic, give it one short leaf in the relevant section, do not
 inline a manual, and do not re-list keys that already live in Shortcuts at a glance.
 
+### Plugins describe themselves
+
+The programs section only writes the intro and the two programs that ship with the
+app (Store and Settings). Every other program is a Store plugin, and its paragraphs
+are its own: `<name>-tutorial`, `<name>-tutorial-2` and so on, in the plugin's
+`locales/<lang>.ftl` (docs/wasm-plugins.md). The tutorial lists the plugins
+installed on the machine, sorted by display name. So a change to what a plugin's
+paragraph says is made in that plugin's repo, and the rules in this document apply
+there too.
+
 ### Make keyboard shortcuts stand out
 
 Shortcuts are the core vocabulary of the app, and screen-reader users navigate by the
@@ -108,4 +118,4 @@ file.
 3. Follow the prose style (no em dashes, no semicolons).
 4. Add or update the structural tests in `src/lib.rs` (the `tests` module asserts
    section placement and content).
-5. Run `cargo test -p lib_tutorial`.
+5. Run `cargo test -p sicompass-tutorial`.
