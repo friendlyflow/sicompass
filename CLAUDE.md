@@ -204,6 +204,9 @@ group holding the greeter and the users.
   journal).
 - sicompass is the session's only owner of Orca. The superkey writes the
   `screenReader` switch; sicompass starts and stops the screen reader.
+- The tutorial is the superkey's in a session too: it is a section of the
+  superkey's list (Super+T), and sicompass neither loads it nor offers its
+  checkbox (`programs::SESSION_OWNED_PROGRAMS`).
 
 ## Architecture: the greeter
 

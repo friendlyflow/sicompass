@@ -197,21 +197,7 @@ pub fn load_programs_with(
 
     register_accessibility_settings(settings.as_mut(), shared);
 
-    // "Available programs:" priority section.
-    // Built-in program checkboxes are added first; user-plugin checkboxes are
-    // added by load_user_plugins() below (after discovery).
-    settings.add_priority_section("Available programs:");
-    for m in sicompass_sdk::builtin_manifests() {
-        if !m.always_enabled {
-            let config_key = format!("enable_{}", m.display_name);
-            settings.add_checkbox_setting(
-                "Available programs:",
-                &m.display_name,
-                &config_key,
-                m.enable_default,
-            );
-        }
-    }
+    register_available_programs(settings.as_mut(), shared.is_some());
 
     // ---- Build the content providers + configure their settings sections ----
     load_content_providers(renderer, Some(settings.as_mut()));
@@ -221,6 +207,41 @@ pub fn load_programs_with(
     register_provider(renderer, settings);
 
     queue
+}
+
+/// Built-in programs that a desicompass session shows in the superkey instead,
+/// the way it owns the accessibility settings: in a session sicompass neither
+/// loads them nor offers a checkbox for them.
+const SESSION_OWNED_PROGRAMS: &[&str] = &["tutorial"];
+
+/// `names` without the programs the superkey shows when `session` is true.
+fn session_filtered(mut names: Vec<String>, session: bool) -> Vec<String> {
+    if session {
+        names.retain(|n| !SESSION_OWNED_PROGRAMS.contains(&n.as_str()));
+    }
+    names
+}
+
+/// The "Available programs:" section: one checkbox per opt-in built-in, except
+/// in a session the ones the superkey owns ([`SESSION_OWNED_PROGRAMS`]).
+/// User-plugin checkboxes are added by `load_user_plugins()` later, after
+/// discovery.
+fn register_available_programs(settings: &mut dyn Provider, session: bool) {
+    settings.add_priority_section("Available programs:");
+    for m in sicompass_sdk::builtin_manifests() {
+        if m.always_enabled
+            || (session && SESSION_OWNED_PROGRAMS.contains(&m.display_name.as_str()))
+        {
+            continue;
+        }
+        let config_key = format!("enable_{}", m.display_name);
+        settings.add_checkbox_setting(
+            "Available programs:",
+            &m.display_name,
+            &config_key,
+            m.enable_default,
+        );
+    }
 }
 
 /// Move `current_id` onto the onboarding line in the settings provider's
@@ -293,8 +314,12 @@ pub fn load_content_providers(renderer: &mut AppRenderer, mut settings: Option<&
         }
     }
 
-    // Enabled opt-in content providers.
-    let enabled = enabled_programs();
+    // Enabled opt-in content providers. Filtered after `enabled_programs`, whose
+    // "nothing enabled" fallback would otherwise bring a session's tutorial back.
+    let enabled = session_filtered(
+        enabled_programs(),
+        sicompass_ui::session_mode::is_session_mode(),
+    );
     for name in &enabled {
         if let Some(p) = instantiate_builtin(name.as_str()) {
             if let Some(s) = settings.as_deref_mut() {
@@ -3056,6 +3081,48 @@ mod tests {
             );
         }
         assert!(fired.iter().any(|k| k == "autoUpdateCheck"), "{fired:?}");
+    }
+
+    /// The `Available programs:` keys a settings provider fires on `init`,
+    /// with the built-ins registered and `session` as given.
+    fn available_program_keys(session: bool) -> Vec<String> {
+        sicompass_builtins::register_all();
+        let dir = tempfile::tempdir().unwrap();
+        let log: Arc<Mutex<Vec<(String, String)>>> = Arc::new(Mutex::new(Vec::new()));
+        let log2 = Arc::clone(&log);
+        let mut p = sicompass_settings::SettingsProvider::new(move |k, v| {
+            log2.lock().unwrap().push((k.to_owned(), v.to_owned()));
+        })
+        .with_config_path(dir.path().join("settings.json"));
+        register_available_programs(&mut p, session);
+        p.init();
+        let keys = log.lock().unwrap().iter().map(|(k, _)| k.clone()).collect();
+        keys
+    }
+
+    #[test]
+    fn in_a_session_the_tutorial_has_no_checkbox() {
+        let keys = available_program_keys(true);
+        assert!(!keys.iter().any(|k| k == "enable_tutorial"), "{keys:?}");
+        assert!(keys.iter().any(|k| k.starts_with("enable_")), "{keys:?}");
+    }
+
+    #[test]
+    fn standalone_the_tutorial_keeps_its_checkbox() {
+        let keys = available_program_keys(false);
+        assert!(keys.iter().any(|k| k == "enable_tutorial"), "{keys:?}");
+    }
+
+    /// Also after `enabled_programs`' fallback, which hands back the manifest
+    /// defaults (the tutorial among them) when nothing is enabled.
+    #[test]
+    fn in_a_session_the_tutorial_is_not_loaded() {
+        let defaults = vec!["tutorial".to_owned(), "web browser".to_owned()];
+        assert_eq!(
+            session_filtered(defaults.clone(), true),
+            vec!["web browser".to_owned()]
+        );
+        assert_eq!(session_filtered(defaults.clone(), false), defaults);
     }
 
     #[test]
