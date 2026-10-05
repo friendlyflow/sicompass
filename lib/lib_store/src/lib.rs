@@ -43,7 +43,7 @@ use sicompass_sdk::provider::Provider;
 use sicompass_sdk::store::StoreEntry;
 
 use crate::http::Fetch;
-use crate::install::{Installed, Source};
+use crate::install::{Installed, PluginOrigin, Source};
 use crate::source::Loaded;
 
 /// Register this crate's translation bundles with the SDK localizer.
@@ -128,12 +128,13 @@ impl OfferSource {
 }
 
 /// The store list and every offer in it, plus the plugins in `plugins_dir`
-/// that were installed by hand.
+/// that were installed by hand and the ones in `system_plugin_dirs`.
 fn load_offers(
     fetch: &Fetch,
     store_url: &str,
     releases_url: &str,
     keys: &[&str],
+    system_plugin_dirs: &[PathBuf],
     plugins_dir: Option<&std::path::Path>,
 ) -> (Result<Loaded, String>, Vec<Offer>) {
     let store = source::load(fetch, store_url, keys);
@@ -146,12 +147,11 @@ fn load_offers(
             .collect(),
         Err(_) => Vec::new(),
     };
-    // Everything else in the plugins folder was installed by hand.
-    if let Some(dir) = plugins_dir {
-        for (name, i) in install::installed(dir) {
-            if !sources.iter().any(|s| s.name() == name) {
-                sources.push(OfferSource::ByHand(Box::new(i.manifest)));
-            }
+    // Everything else on this computer was installed by hand, or is provided
+    // by its configuration.
+    for (name, i) in install::installed_everywhere(system_plugin_dirs, plugins_dir) {
+        if !sources.iter().any(|s| s.name() == name) {
+            sources.push(OfferSource::ByHand(Box::new(i.manifest)));
         }
     }
     // Every offer is its own release to fetch and verify. One after another, a
@@ -221,6 +221,9 @@ pub struct StoreProvider {
     releases_url: String,
     trusted: Vec<String>,
     plugins_dir: Option<PathBuf>,
+    /// The plugin folders this computer's configuration provides
+    /// (`SICOMPASS_PLUGIN_PATH`). Their plugins are shown, never changed.
+    system_plugin_dirs: Vec<PathBuf>,
     /// Where plugins keep their data (`app_data_dir()`), to offer the folder
     /// of an uninstalled one for the trash.
     data_dir: Option<PathBuf>,
@@ -262,6 +265,7 @@ impl StoreProvider {
                 .map(|k| (*k).to_owned())
                 .collect(),
             plugins_dir: sicompass_sdk::platform::plugins_dir(),
+            system_plugin_dirs: sicompass_sdk::platform::system_plugin_dirs(),
             data_dir: sicompass_sdk::platform::app_data_dir(),
             // Never the developer's cache from a unit test.
             cache_dir: if cfg!(test) {
@@ -283,7 +287,7 @@ impl StoreProvider {
     }
 
     /// Point the Store somewhere else: a test server, other keys, another
-    /// plugins folder.
+    /// plugins folder, and none provided by the configuration.
     pub fn with_sources(
         mut self,
         fetch: Fetch,
@@ -297,6 +301,7 @@ impl StoreProvider {
         self.releases_url = releases_url.to_owned();
         self.trusted = trusted.iter().map(|k| (*k).to_owned()).collect();
         self.plugins_dir = Some(plugins_dir);
+        self.system_plugin_dirs = Vec::new();
         self.cache_dir = None;
         self.tiers = tiers::Tiers::new(self.fetch.clone());
         self
@@ -335,6 +340,12 @@ impl StoreProvider {
         self
     }
 
+    /// The plugin folders this computer's configuration provides (tests).
+    pub fn with_system_plugin_dirs(mut self, dirs: Vec<PathBuf>) -> Self {
+        self.system_plugin_dirs = dirs;
+        self
+    }
+
     /// Point the data-folder check somewhere else (tests).
     pub fn with_data_dir(mut self, data_dir: PathBuf) -> Self {
         self.data_dir = Some(data_dir);
@@ -347,10 +358,28 @@ impl StoreProvider {
     }
 
     fn installed(&self) -> BTreeMap<String, Installed> {
-        self.plugins_dir
-            .as_deref()
-            .map(install::installed)
-            .unwrap_or_default()
+        install::installed_everywhere(&self.system_plugin_dirs, self.plugins_dir.as_deref())
+    }
+
+    /// Whether this computer's configuration provides `name`, which the Store
+    /// then leaves alone: the app runs that copy whatever the Store installs.
+    fn provided_by_system(&self, name: &str) -> bool {
+        self.installed()
+            .get(name)
+            .is_some_and(|i| i.origin == PluginOrigin::System)
+    }
+
+    /// Refuse to change a plugin the configuration provides, saying so.
+    fn refuse_system(&mut self, name: &str) -> bool {
+        if !self.provided_by_system(name) {
+            return false;
+        }
+        let mut args = localize::Args::new();
+        args.set("name", name.to_owned());
+        let line = localize::t_args("store-system-refused", &args);
+        self.notes.insert(name.to_owned(), line.clone());
+        self.announcement = Some(line);
+        true
     }
 
     /// Whether the user approved this version of an installed plugin: the
@@ -385,6 +414,7 @@ impl StoreProvider {
         let releases_url = self.releases_url.clone();
         let trusted = self.trusted.clone();
         let plugins_dir = self.plugins_dir.clone();
+        let system_plugin_dirs = self.system_plugin_dirs.clone();
         let cache_dir = self.cache_dir.clone();
         spawn("store:load", move || {
             let keys: Vec<&str> = trusted.iter().map(String::as_str).collect();
@@ -394,6 +424,7 @@ impl StoreProvider {
                     &store_url,
                     &releases_url,
                     &keys,
+                    &system_plugin_dirs,
                     plugins_dir.as_deref(),
                 )
             };
@@ -441,6 +472,9 @@ impl StoreProvider {
     }
 
     fn start_install(&mut self, name: &str, update: bool) {
+        if self.refuse_system(name) {
+            return;
+        }
         if self.job.is_some() {
             self.notes
                 .insert(name.to_owned(), localize::t("store-busy"));
@@ -474,6 +508,9 @@ impl StoreProvider {
     }
 
     fn uninstall(&mut self, name: &str) {
+        if self.refuse_system(name) {
+            return;
+        }
         let Some(plugins_dir) = self.plugins_dir.clone() else {
             return;
         };
@@ -736,6 +773,10 @@ impl StoreProvider {
     fn offer_key(&self, offer: &Offer, installed: &BTreeMap<String, Installed>) -> String {
         let mut args = localize::Args::new();
         let state = match installed.get(&offer.name) {
+            Some(i) if i.origin == PluginOrigin::System => {
+                args.set("version", i.manifest.version.clone().unwrap_or_default());
+                localize::t_args("store-state-system", &args)
+            }
             Some(i) => {
                 args.set("version", i.manifest.version.clone().unwrap_or_default());
                 match &offer.release {
@@ -773,6 +814,17 @@ impl StoreProvider {
         let mut out = Vec::new();
         if let Some(note) = self.notes.get(name) {
             out.push(FfonElement::new_str(note.clone()));
+        }
+        // Provided by this computer's configuration: runs without approval and
+        // is changed by changing that configuration, never from here.
+        if let Some(current) = installed
+            && current.origin == PluginOrigin::System
+        {
+            out.push(line(
+                "store-system",
+                &[("path", current.dir.display().to_string())],
+            ));
+            return out;
         }
         // On disk but not approved, as a plugin copied in by hand is: it does
         // not run until the user has seen what it is and said yes.

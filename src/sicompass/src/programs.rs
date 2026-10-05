@@ -13,7 +13,9 @@
 //! `Arc<Mutex<Vec<...>>>` queue that the main loop drains each frame via
 //! [`apply_pending_settings`].
 
-use crate::plugin_manifest::{DiscoveredPlugin, PluginManifest, PluginType, discover_user_plugins};
+use crate::plugin_manifest::{
+    DiscoveredPlugin, PluginManifest, PluginOrigin, PluginType, discover_user_plugins,
+};
 use sicompass_sdk::ffon::{FfonElement, IdArray};
 use sicompass_sdk::provider::Provider;
 use sicompass_ui::accessibility::{
@@ -523,8 +525,9 @@ fn trash_plugin_data(name: &str) -> Result<(), String> {
     if !plain {
         return Err("not a plugin name".to_owned());
     }
-    let installed = sicompass_sdk::platform::plugins_dir()
-        .is_some_and(|d| d.join(name).join("plugin.json").exists());
+    let installed = sicompass_sdk::installed_plugins::discover_all()
+        .iter()
+        .any(|(_, _, m)| m.as_ref().is_ok_and(|m| m.name == name));
     if installed {
         return Err("it is installed again, so its data folder stays".to_owned());
     }
@@ -623,13 +626,15 @@ fn instantiate_user_plugin_approved(
 
     match m.plugin_type {
         PluginType::Process => {
-            let plugin_dir = plugin
-                .entry_path
-                .parent()
-                .unwrap_or_else(|| std::path::Path::new("."));
+            let plugin_dir = plugin.dir.as_path();
             // A plugin runs with the user's rights, so it loads only once they
-            // approved it, which the Store records when they install it.
-            let grants = match crate::plugin_manifest::grants_for(m, approvals) {
+            // approved it, which the Store records when they install it. One
+            // this computer's configuration provides is not asked about.
+            let grants = match plugin.origin {
+                PluginOrigin::System => crate::plugin_manifest::approved_grants(m),
+                PluginOrigin::User => crate::plugin_manifest::grants_for(m, approvals),
+            };
+            let grants = match grants {
                 Ok(g) => g,
                 Err(e) => {
                     eprintln!("sicompass: plugin '{}' was not loaded: {e}", m.name);
@@ -716,7 +721,9 @@ fn load_user_plugins(renderer: &mut AppRenderer, mut settings: Option<&mut dyn P
 
         // Add the enable checkbox to "Available programs:" (same as C's registerProgramsSection).
         let config_key = format!("enable_{}", m.name);
-        let currently_enabled = is_plugin_enabled_in_config(&m.name);
+        // One this computer's configuration provides was put there to run.
+        let currently_enabled =
+            is_plugin_enabled_in_config(&m.name, plugin.origin == PluginOrigin::System);
         if let Some(s) = settings.as_deref_mut() {
             s.add_checkbox_setting(
                 "Available programs:",
@@ -776,23 +783,24 @@ fn load_user_plugins(renderer: &mut AppRenderer, mut settings: Option<&mut dyn P
 }
 
 /// Check whether a user plugin (by manifest `name`) is enabled in `settings.json`.
-/// Returns `false` if the file doesn't exist, the section is absent, or the key
-/// is missing (user plugins are opt-in, default disabled — matches C behavior).
-fn is_plugin_enabled_in_config(name: &str) -> bool {
+/// Returns `default` if the file doesn't exist, the section is absent, or the
+/// key is missing: `false` for the user's plugins (opt-in, matches C behavior),
+/// `true` for one this computer's configuration provides.
+fn is_plugin_enabled_in_config(name: &str, default: bool) -> bool {
     let Some(path) = sicompass_sdk::platform::main_config_path() else {
-        return false;
+        return default;
     };
     let Ok(data) = std::fs::read_to_string(&path) else {
-        return false;
+        return default;
     };
     let Ok(root) = serde_json::from_str::<serde_json::Value>(&data) else {
-        return false;
+        return default;
     };
     let config_key = format!("enable_{}", name);
     root.get("Available programs:")
         .and_then(|s| s.get(&config_key))
         .and_then(|v| v.as_bool())
-        .unwrap_or(false)
+        .unwrap_or(default)
 }
 
 /// Move what built-ins kept outside the folder their plugin's storage is
@@ -2725,6 +2733,8 @@ mod tests {
         DiscoveredPlugin {
             manifest: make_test_manifest(name),
             entry_path: PathBuf::from("/nonexistent/plugin"),
+            dir: PathBuf::from("/nonexistent"),
+            origin: PluginOrigin::User,
         }
     }
 
@@ -2754,9 +2764,12 @@ mod tests {
     }
 
     fn make_process_plugin(name: &str) -> DiscoveredPlugin {
+        let entry_path = fixture_entry();
         DiscoveredPlugin {
             manifest: make_test_manifest(name),
-            entry_path: fixture_entry(),
+            dir: entry_path.parent().unwrap().to_owned(),
+            entry_path,
+            origin: PluginOrigin::User,
         }
     }
 
@@ -2789,6 +2802,17 @@ mod tests {
             instantiate_user_plugin_approved(&plugin, &other).is_none(),
             "an approval of other access is not this one"
         );
+    }
+
+    #[test]
+    fn a_plugin_this_computers_configuration_provides_starts_unasked() {
+        // Whoever sets the session's environment can already replace sicompass
+        // itself, so asking the user would protect nothing.
+        let mut plugin = make_process_plugin("fixture");
+        plugin.origin = PluginOrigin::System;
+        let provider = instantiate_user_plugin_approved(&plugin, &Default::default())
+            .expect("a system plugin needs no approval");
+        assert_eq!(provider.name(), "fixture");
     }
 
     #[test]

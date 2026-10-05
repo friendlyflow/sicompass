@@ -156,6 +156,11 @@ is `src/sicompass/src/plugin_host/`. Follow
   `plugin.json` and `locales/` from that same rev. Move the rev and refresh the
   folder together. Claude and the web browser get an environment with no real
   `claude` or Chrome to find (`no_programs_env`, `fake_chrome::dir`).
+- **`SICOMPASS_PLUGIN_PATH`** names plugin folders the computer's configuration
+  provides (the desicompass dev session's plugins, built from local checkouts).
+  They win over the user's copy, run without approval and the Store leaves them
+  alone. Discovery goes through the SDK's `installed_plugins::discover_all`
+  everywhere, never `plugins_dir()` alone.
 - WASM components (0.2) are gone: `"type": "wasm"`, or no `type`, is refused
   with "update it from the Store".
 

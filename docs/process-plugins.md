@@ -170,6 +170,28 @@ offers its program as an install. The Store's page leads with "runs as a program
 on this computer, with your rights", then lists what the plugin declares, and an
 update that declares more asks again.
 
+## Plugins the computer's configuration provides
+
+`SICOMPASS_PLUGIN_PATH` lists more plugin folders, separated like `PATH`, each
+laid out like `~/.config/sicompass/plugins/` (one subfolder per plugin, as the
+Store unpacks it). The desicompass NixOS module sets it for its dev session,
+pointing at plugins built from local checkouts (`services.desicompass.dev.plugins`),
+so `nixos-rebuild switch` puts a plugin edit into that session the way it does an
+app edit.
+
+- **Precedence.** These folders are read first and one plugin is kept per name
+  (`installed_plugins::discover_all` in the SDK), so a plugin here replaces the
+  user's copy of the same name. The app, the Store and the tutorial all read
+  through that one function.
+- **No approval.** It starts without asking (`plugin_manifest::approved_grants`)
+  and is on unless the user switched it off. Whoever sets the session's
+  environment can already replace sicompass itself, so asking would protect
+  nothing. It is not a sandbox and not a boundary: such a plugin runs with the
+  user's rights like every other.
+- **The Store leaves it alone.** Its entry says the configuration provides it and
+  offers no install, update, approve or uninstall. Pressing one anyway is
+  refused, so a hidden second copy is never written under it.
+
 ## Testing
 
 ```sh

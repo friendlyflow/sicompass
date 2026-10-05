@@ -597,6 +597,9 @@ Store
   holding the release files) and a `pubkey` in `plugin.json`, they
   update here, and an update naming another key is refused. `lib_updater`
   now updates only the app.
+- Plugins in a folder `SICOMPASS_PLUGIN_PATH` names are listed as provided by
+  this computer's configuration, with no controls. See "Plugins the computer's
+  configuration provides" in [process-plugins.md](process-plugins.md).
 
 Tiers and licences come in 4.9.
 

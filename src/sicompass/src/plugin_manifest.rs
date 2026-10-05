@@ -1,6 +1,9 @@
 //! Plugin manifest — parses `plugin.json` and discovers user plugins.
 //!
 //! User plugins live under `<config>/sicompass/plugins/<name>/plugin.json`.
+//! A computer's configuration can provide more, in the folders
+//! `SICOMPASS_PLUGIN_PATH` lists ([`sicompass_sdk::platform::system_plugin_dirs`]),
+//! which win over the user's copy of the same name and need no approval.
 //! Each manifest names the plugin's program (`entry`), what it declares it
 //! does (`permissions`), and the settings to inject into the settings
 //! provider.
@@ -132,6 +135,13 @@ pub fn grants_for(
                 .to_owned(),
         );
     }
+    approved_grants(m)
+}
+
+/// What a plugin gets once it may run: [`grants_for`] without the approval
+/// check, for a plugin this computer's configuration provides
+/// ([`PluginOrigin::System`]), which nobody is asked about.
+pub fn approved_grants(m: &PluginManifest) -> Result<crate::plugin_host::Grants, String> {
     let storage_dir = if m.permissions.storage {
         Some(
             sicompass_sdk::platform::app_data_dir()
@@ -194,33 +204,51 @@ pub fn load_manifest(path: &Path) -> Option<PluginManifest> {
 // Plugin discovery
 // ---------------------------------------------------------------------------
 
-/// A discovered plugin: the parsed manifest plus the resolved entry path.
+pub use sicompass_sdk::installed_plugins::PluginOrigin;
+
+/// A discovered plugin: the parsed manifest, where it is, and where it came
+/// from.
 #[derive(Debug, Clone)]
 pub struct DiscoveredPlugin {
     pub manifest: PluginManifest,
-    /// Absolute path to the entry point (`.so` or `.ts`/`.js` script).
+    /// Absolute path to the program to start: `entry` in [`dir`](Self::dir).
     pub entry_path: PathBuf,
+    /// The plugin's own folder, holding its `plugin.json`, `locales/` and
+    /// `assets/`, and its working directory.
+    pub dir: PathBuf,
+    pub origin: PluginOrigin,
 }
 
-/// Scan `~/.config/sicompass/plugins/` for subdirectories containing a
-/// `plugin.json`.  Returns all successfully parsed manifests.
+/// Every installed plugin: the folders this computer's configuration provides,
+/// then `~/.config/sicompass/plugins/`, one per name
+/// ([`sicompass_sdk::installed_plugins::discover_all`]). Returns all
+/// successfully parsed manifests.
 pub fn discover_user_plugins() -> Vec<DiscoveredPlugin> {
-    match sicompass_sdk::platform::plugins_dir() {
-        Some(dir) => discover_plugins_in(&dir),
-        None => Vec::new(),
-    }
+    from_discovered(sicompass_sdk::installed_plugins::discover_all())
 }
 
-/// [`discover_user_plugins`] for an explicit plugins directory. The scan is the
-/// SDK's, shared with the tutorial, which lists the same plugins.
+/// [`discover_user_plugins`] for an explicit user plugins directory and no
+/// system ones. The scan is the SDK's, shared with the tutorial, which lists
+/// the same plugins.
 pub fn discover_plugins_in(plugins_dir: &Path) -> Vec<DiscoveredPlugin> {
-    sicompass_sdk::installed_plugins::discover_in(plugins_dir)
+    from_discovered(sicompass_sdk::installed_plugins::discover_all_in(
+        &[],
+        Some(plugins_dir),
+    ))
+}
+
+fn from_discovered(
+    found: Vec<sicompass_sdk::installed_plugins::Discovered>,
+) -> Vec<DiscoveredPlugin> {
+    found
         .into_iter()
-        .filter_map(|(dir, manifest)| match manifest {
+        .filter_map(|(dir, origin, manifest)| match manifest {
             Ok(manifest) => Some(DiscoveredPlugin {
                 // Resolve entry relative to the manifest's directory.
                 entry_path: dir.join(&manifest.entry),
                 manifest,
+                dir,
+                origin,
             }),
             Err(e) => {
                 // `parse_manifest` names a retired plugin type itself.
@@ -612,6 +640,31 @@ mod tests {
             found[0].manifest.allowed_hosts(),
             vec!["api.weather.example".to_owned()]
         );
+    }
+
+    #[test]
+    fn a_system_plugin_wins_and_its_folder_is_the_manifests_even_for_a_nested_entry() {
+        let system = tempfile::tempdir().unwrap();
+        let user = tempfile::tempdir().unwrap();
+        for root in [system.path(), user.path()] {
+            let dir = root.join("b");
+            std::fs::create_dir(&dir).unwrap();
+            std::fs::write(
+                dir.join("plugin.json"),
+                r#"{"name":"b","displayName":"B","type":"process","entry":"bin/b"}"#,
+            )
+            .unwrap();
+        }
+
+        let found = from_discovered(sicompass_sdk::installed_plugins::discover_all_in(
+            &[system.path().to_owned()],
+            Some(user.path()),
+        ));
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].origin, PluginOrigin::System);
+        // Not `entry_path.parent()`, which is `b/bin`.
+        assert_eq!(found[0].dir, system.path().join("b"));
+        assert_eq!(found[0].entry_path, system.path().join("b/bin/b"));
     }
 
     #[test]

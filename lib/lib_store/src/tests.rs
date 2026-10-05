@@ -1433,3 +1433,52 @@ fn a_plugin_copied_in_by_hand_waits_for_the_users_approval() {
     );
     assert!(has(&h.entry(), "<button>approve:demo</button>"), "{:?}", h.entry());
 }
+
+/// `demo` in a folder this computer's configuration provides, with `h`'s Store
+/// told about that folder. The returned guard keeps the folder alive.
+fn provide_by_system(h: &mut Harness, manifest: &str) -> tempfile::TempDir {
+    let system = tempfile::tempdir().unwrap();
+    let dir = system.path().join("demo");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("plugin.json"), manifest).unwrap();
+    std::fs::write(dir.join("plugin"), PROGRAM).unwrap();
+    let store = std::mem::take(&mut h.store);
+    h.store = store.with_system_plugin_dirs(vec![system.path().to_owned()]);
+    system
+}
+
+#[test]
+fn a_plugin_the_configuration_provides_is_shown_and_never_changed() {
+    let (server, keys) = (Server::start(), keys());
+    server.serve_store(&keys, &keys.store_secret, &[]);
+    server.serve_release(&release(&keys, "2.0.0", r#""process": ["git"]"#));
+    let mut h = harness(&server, &keys);
+    // The user's own, older copy, which the system one hides.
+    install_by_hand(&h, &plugin_json("1.0.0", "", "0.1.0"));
+    let system = provide_by_system(
+        &mut h,
+        &plugin_json("0.9.0-dev", r#""process": ["git"]"#, "0.1.0"),
+    );
+
+    let list = h.open_programs();
+    let state = t_with("store-state-system", &[("version", "0.9.0-dev")]);
+    assert!(has(&list, &format!("demo, {state}")), "{list:?}");
+
+    let entry = h.entry();
+    let path = system.path().join("demo").display().to_string();
+    assert!(
+        has(&entry, &t_with("store-system", &[("path", &path)])),
+        "{entry:?}"
+    );
+    // No approval asked, and nothing the Store would do to it: a newer release
+    // is listed, but installing it would be hidden behind this copy.
+    assert!(!entry.iter().any(|l| l.contains("<button>")), "{entry:?}");
+
+    // Pressed anyway (an old list on screen): refused, and nothing written.
+    h.press("update:demo");
+    h.press("uninstall:demo");
+    assert_eq!(h.installed_version().as_deref(), Some("1.0.0"));
+    assert!(h.fired().is_empty(), "{:?}", h.fired());
+    let refused = t_with("store-system-refused", &[("name", "demo")]);
+    assert!(has(&h.entry(), &refused), "{:?}", h.entry());
+}

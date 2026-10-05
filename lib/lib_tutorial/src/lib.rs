@@ -311,7 +311,7 @@ fn get_children_at_path<'a>(nodes: &'a [Node], path_parts: &[&str]) -> Option<&'
 
 /// Append what `node` renders as to `out`: one element, or for
 /// [`Node::InstalledPrograms`] one per leaf.
-fn push_ffon(node: &Node, plugins_dir: Option<&Path>, out: &mut Vec<FfonElement>) {
+fn push_ffon(node: &Node, plugins_dir: &PluginDirs, out: &mut Vec<FfonElement>) {
     match node {
         Node::Leaf(s) => {
             // Resolve the translation key first, then run asset-placeholder
@@ -369,7 +369,7 @@ fn apply_asset_placeholders(s: &str) -> String {
         .replace("__LOREM_IPSUM__", lorem_ipsum())
 }
 
-fn nodes_to_ffon(nodes: &[Node], plugins_dir: Option<&Path>) -> Vec<FfonElement> {
+fn nodes_to_ffon(nodes: &[Node], plugins_dir: &PluginDirs) -> Vec<FfonElement> {
     let mut out = Vec::new();
     for node in nodes {
         push_ffon(node, plugins_dir, &mut out);
@@ -392,12 +392,11 @@ fn nodes_to_ffon(nodes: &[Node], plugins_dir: Option<&Path>) -> Vec<FfonElement>
 /// The files are read from disk, not through the plugin, so this works where no
 /// plugin can run (the desicompass superkey) and for plugins that are installed
 /// but switched off. With nothing installed, one leaf points to the Store.
-fn installed_program_leaves(plugins_dir: Option<&Path>) -> Vec<String> {
+fn installed_program_leaves(plugins_dir: &PluginDirs) -> Vec<String> {
     let mut programs: Vec<(String, Vec<String>)> = plugins_dir
-        .map(sicompass_sdk::installed_plugins::discover_in)
-        .unwrap_or_default()
+        .discover()
         .into_iter()
-        .filter_map(|(dir, manifest)| {
+        .filter_map(|(dir, _, manifest)| {
             let manifest = manifest.ok()?;
             let name = manifest.name;
             // A refused locale file just leaves its ids unresolved, so the
@@ -425,25 +424,45 @@ fn installed_program_leaves(plugins_dir: Option<&Path>) -> Vec<String> {
     programs.into_iter().flat_map(|(_, leaves)| leaves).collect()
 }
 
-/// What the programs section was built from: each entry of the plugins folder,
-/// with when its `plugin.json` and its `locales/` last changed. Cheap enough to
-/// read every second, and an install or an uninstall changes it.
-type PluginsFingerprint = Vec<(std::ffi::OsString, Option<SystemTime>, Option<SystemTime>)>;
+/// Where the installed plugins are: the folders this computer's configuration
+/// provides (`SICOMPASS_PLUGIN_PATH`), then the user's plugins folder.
+#[derive(Debug, Clone, Default)]
+struct PluginDirs {
+    system: Vec<PathBuf>,
+    user: Option<PathBuf>,
+}
 
-fn plugins_fingerprint(plugins_dir: Option<&Path>) -> PluginsFingerprint {
-    let Some(entries) = plugins_dir.and_then(|d| std::fs::read_dir(d).ok()) else {
-        return Vec::new();
-    };
+impl PluginDirs {
+    /// One per plugin name, the one the app runs
+    /// ([`sicompass_sdk::installed_plugins::discover_all`]).
+    fn discover(&self) -> Vec<sicompass_sdk::installed_plugins::Discovered> {
+        sicompass_sdk::installed_plugins::discover_all_in(&self.system, self.user.as_deref())
+    }
+
+    fn folders(&self) -> impl Iterator<Item = &Path> {
+        self.system
+            .iter()
+            .map(PathBuf::as_path)
+            .chain(self.user.as_deref())
+    }
+}
+
+/// What the programs section was built from: each entry of the plugins
+/// folders, with when its `plugin.json` and its `locales/` last changed. Cheap
+/// enough to read every second, and an install or an uninstall changes it.
+type PluginsFingerprint = Vec<(PathBuf, Option<SystemTime>, Option<SystemTime>)>;
+
+fn plugins_fingerprint(plugins_dir: &PluginDirs) -> PluginsFingerprint {
     let modified = |p: PathBuf| std::fs::metadata(p).and_then(|m| m.modified()).ok();
-    let mut fingerprint: PluginsFingerprint = entries
-        .flatten()
+    let mut fingerprint: PluginsFingerprint = plugins_dir
+        .folders()
+        .filter_map(|d| std::fs::read_dir(d).ok())
+        .flat_map(|entries| entries.flatten())
         .map(|e| {
             let dir = e.path();
-            (
-                e.file_name(),
-                modified(dir.join("plugin.json")),
-                modified(dir.join(sicompass_sdk::installed_plugins::LOCALE_SUBDIR)),
-            )
+            let manifest = modified(dir.join("plugin.json"));
+            let locales = modified(dir.join(sicompass_sdk::installed_plugins::LOCALE_SUBDIR));
+            (dir, manifest, locales)
         })
         .collect();
     fingerprint.sort();
@@ -474,8 +493,8 @@ fn capitalized(s: &str) -> String {
 pub struct TutorialProvider {
     current_path: String,
     /// Where the installed plugins are, whose own text fills the programs
-    /// section. `None` lists none.
-    plugins_dir: Option<PathBuf>,
+    /// section.
+    plugins_dir: PluginDirs,
     /// The plugins folder as it was when the programs section was last built,
     /// and when `tick` last compared it with the folder now.
     programs_built_from: Option<PluginsFingerprint>,
@@ -493,17 +512,27 @@ impl Default for TutorialProvider {
 }
 
 impl TutorialProvider {
-    /// The tutorial for this machine's installed plugins
-    /// ([`sicompass_sdk::platform::plugins_dir`]).
+    /// The tutorial for this machine's installed plugins: the ones its
+    /// configuration provides ([`sicompass_sdk::platform::system_plugin_dirs`])
+    /// and the user's ([`sicompass_sdk::platform::plugins_dir`]).
     pub fn new() -> Self {
-        Self::with_plugins_dir(sicompass_sdk::platform::plugins_dir())
+        Self::with_plugin_dirs(
+            sicompass_sdk::platform::system_plugin_dirs(),
+            sicompass_sdk::platform::plugins_dir(),
+        )
     }
 
-    /// The tutorial for the plugins installed under `plugins_dir`.
+    /// The tutorial for the plugins installed under `plugins_dir`, and none
+    /// provided by the configuration. `None` lists none.
     pub fn with_plugins_dir(plugins_dir: Option<PathBuf>) -> Self {
+        Self::with_plugin_dirs(Vec::new(), plugins_dir)
+    }
+
+    /// The tutorial for the plugins in the `system` folders, then in `user`.
+    pub fn with_plugin_dirs(system: Vec<PathBuf>, user: Option<PathBuf>) -> Self {
         TutorialProvider {
             current_path: "/".to_owned(),
-            plugins_dir,
+            plugins_dir: PluginDirs { system, user },
             programs_built_from: None,
             programs_checked: None,
             pending_announce: None,
@@ -544,11 +573,11 @@ impl Provider for TutorialProvider {
     fn fetch(&mut self) -> Vec<FfonElement> {
         // The root's rows carry every section's, the programs section's included.
         if self.current_path == "/" || self.in_programs_section() {
-            self.programs_built_from = Some(plugins_fingerprint(self.plugins_dir.as_deref()));
+            self.programs_built_from = Some(plugins_fingerprint(&self.plugins_dir));
         }
         let parts = self.path_parts();
         match get_children_at_path(SECTIONS, &parts) {
-            Some(nodes) => nodes_to_ffon(nodes, self.plugins_dir.as_deref()),
+            Some(nodes) => nodes_to_ffon(nodes, &self.plugins_dir),
             None => vec![],
         }
     }
@@ -572,7 +601,7 @@ impl Provider for TutorialProvider {
         }
         self.programs_checked = Some(Instant::now());
         self.programs_built_from.as_ref()
-            != Some(&plugins_fingerprint(self.plugins_dir.as_deref()))
+            != Some(&plugins_fingerprint(&self.plugins_dir))
     }
 
     fn push_path(&mut self, segment: &str) {
@@ -689,7 +718,7 @@ mod tests {
         }
 
         let mut found = Vec::new();
-        walk(&nodes_to_ffon(SECTIONS, None), &mut found);
+        walk(&nodes_to_ffon(SECTIONS, &PluginDirs::default()), &mut found);
 
         let assets: Vec<&String> = found
             .iter()
@@ -1064,6 +1093,47 @@ mod tests {
             p.programs_checked = None;
             assert!(!p.tick(), "{path} must not be refreshed");
         }
+    }
+
+    #[test]
+    fn test_a_plugin_the_configuration_provides_is_listed_once_with_its_own_text() {
+        let system = tempfile::tempdir().unwrap();
+        let user = tempfile::tempdir().unwrap();
+        install(
+            system.path(),
+            "tutfake-sys",
+            "fake sys",
+            "tutfake-sys-tutorial = Told by the configuration's copy\n",
+        );
+        install(
+            user.path(),
+            "tutfake-sys",
+            "fake sys",
+            "tutfake-sys-tutorial = Told by the user's copy\n",
+        );
+        let mut p = TutorialProvider::with_plugin_dirs(
+            vec![system.path().to_owned()],
+            Some(user.path().to_owned()),
+        );
+        p.push_path("The programs");
+        let text = joined(&p.fetch());
+        assert_eq!(text.matches("Told by").count(), 1, "got:\n{text}");
+        assert!(
+            text.contains("Told by the configuration's copy"),
+            "got:\n{text}"
+        );
+
+        // A change in a system folder has the section read again too.
+        p.programs_checked = None;
+        assert!(!p.tick());
+        install(
+            system.path(),
+            "tutfake-sys2",
+            "fake sys2",
+            "tutfake-sys2-tutorial = x\n",
+        );
+        p.programs_checked = None;
+        assert!(p.tick());
     }
 
     #[test]

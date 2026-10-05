@@ -106,11 +106,40 @@ impl Source {
     }
 }
 
+pub use sicompass_sdk::installed_plugins::PluginOrigin;
+
 /// A plugin that is on disk now.
 #[derive(Debug, Clone)]
 pub struct Installed {
     pub dir: PathBuf,
     pub manifest: PluginManifest,
+    /// [`PluginOrigin::System`] for one this computer's configuration provides,
+    /// which the Store neither updates nor removes.
+    pub origin: PluginOrigin,
+}
+
+/// Every plugin on this computer, by manifest name: the folders the
+/// configuration provides first (`SICOMPASS_PLUGIN_PATH`), then
+/// `plugins_dir`. One per name, the first found kept, which is the one the app
+/// runs ([`sicompass_sdk::installed_plugins::discover_all`]).
+pub fn installed_everywhere(
+    system: &[PathBuf],
+    plugins_dir: Option<&Path>,
+) -> BTreeMap<String, Installed> {
+    sicompass_sdk::installed_plugins::discover_all_in(system, plugins_dir)
+        .into_iter()
+        .filter_map(|(dir, origin, manifest)| {
+            let manifest = manifest.ok()?;
+            Some((
+                manifest.name.clone(),
+                Installed {
+                    dir,
+                    manifest,
+                    origin,
+                },
+            ))
+        })
+        .collect()
 }
 
 /// Every plugin in `plugins_dir`, by manifest name.
@@ -125,7 +154,14 @@ pub fn installed(plugins_dir: &Path) -> BTreeMap<String, Installed> {
             continue;
         };
         if let Ok(manifest) = parse_manifest(&text) {
-            out.insert(manifest.name.clone(), Installed { dir, manifest });
+            out.insert(
+                manifest.name.clone(),
+                Installed {
+                    dir,
+                    manifest,
+                    origin: PluginOrigin::User,
+                },
+            );
         }
     }
     out
