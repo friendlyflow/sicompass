@@ -36,6 +36,9 @@ delete a pushed tag. If a release is broken, release the next patch.
    cargo clippy --all-targets
    timeout 1200 nix build "git+file://$PWD"
    ```
+   Skip `nix build` where `flake.nix` has no `packages.default`, which is every
+   plugin: a plugin's build check is the dry-run release in step 6, which builds
+   this computer's release and verifies it the way the Store will.
    Also run any extra check `CLAUDE.md` lists under "Releasing".
 4. **Version.** Read `[package] version` in `Cargo.toml` and compare it with
    `git tag --sort=-v:refname | head -1`.

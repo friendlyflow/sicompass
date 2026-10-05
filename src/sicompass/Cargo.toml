@@ -388,7 +388,7 @@ claude-plugin = { git = "https://github.com/friendlyflow/claude-plugin-sicompass
 terminal-plugin = { git = "https://github.com/friendlyflow/terminal-plugin-sicompass", rev = "8632d0f16bed0948dbb483f0f2767e2059e45692" }
 chatclient-plugin = { git = "https://github.com/friendlyflow/chatclient-plugin-sicompass", rev = "d6254e659beedf49a6caa4b396f3c889d57efd17" }
 emailclient-plugin = { git = "https://github.com/friendlyflow/emailclient-plugin-sicompass", rev = "05a2e4dff1f58ba8970cdd683233d7fc14d7f64f" }
-webbrowser-plugin = { git = "https://github.com/friendlyflow/webbrowser-plugin-sicompass", rev = "5fb0abd55ede2f1f2b16a641169da1b4a60f4c01" }
+webbrowser-plugin = { git = "https://github.com/friendlyflow/webbrowser-plugin-sicompass", rev = "c8872fd07952204bbff9f5463d9b72031d70c2a9" }
 sicompass-builtins = { workspace = true }
 sicompass-settings = { workspace = true }
 sicompass-tutorial = { workspace = true }

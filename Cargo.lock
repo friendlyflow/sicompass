@@ -4941,7 +4941,7 @@ dependencies = [
 [[package]]
 name = "webbrowser-plugin"
 version = "0.2.0"
-source = "git+https://github.com/friendlyflow/webbrowser-plugin-sicompass?rev=5fb0abd55ede2f1f2b16a641169da1b4a60f4c01#5fb0abd55ede2f1f2b16a641169da1b4a60f4c01"
+source = "git+https://github.com/friendlyflow/webbrowser-plugin-sicompass?rev=c8872fd07952204bbff9f5463d9b72031d70c2a9#c8872fd07952204bbff9f5463d9b72031d70c2a9"
 dependencies = [
  "libc",
  "scraper",
