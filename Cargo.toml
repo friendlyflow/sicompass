@@ -38,7 +38,7 @@ license = "GPL-3.0-only"
 # used unconditionally by lib_notes, lib_filebrowser and
 # lib_project_management — and the provider-scoped asset registry and
 # `read-asset` host import from 0.4.0, likewise required unconditionally.)
-sicompass-sdk = "0.9.0"
+sicompass-sdk = "0.9.1"
 sicompass-tutorial = { path = "lib/lib_tutorial" }
 sicompass-settings = { path = "lib/lib_settings" }
 sicompass-store = { path = "lib/lib_store" }
@@ -161,13 +161,6 @@ wiremock = "0.6"
 #
 # [patch."https://github.com/friendlyflow/sicompass-ui"]
 # sicompass-ui = { path = "../sicompass-ui" }
-
-# TEMPORARY, until sicompass-sdk 0.9.1 is on crates.io: the SDK commit that
-# adds `Provider::set_external_setting_keys` and `installed_plugins`, by git rev
-# so `nix build` can fetch it. Replace with `sicompass-sdk = "0.9.1"` above at
-# the release.
-[patch.crates-io]
-sicompass-sdk = { git = "https://github.com/friendlyflow/sicompass-plugin-sdk", rev = "06a9037b5a1194be87af786bdfde928be173473e" }
 
 # Optimize heavy third-party deps even in debug builds — html5ever and the
 # TLS/HTTP stack are 10-50x slower without optimizations.
