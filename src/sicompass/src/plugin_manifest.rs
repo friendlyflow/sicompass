@@ -1,12 +1,9 @@
 //! Plugin manifest — parses `plugin.json` and discovers user plugins.
 //!
-//! User plugins live under `~/.config/sicompass/plugins/<name>/plugin.json`.
-//! Each manifest describes the plugin type (native `.so` or script), entry
-//! point path, optional `supportsConfigFiles`, and optional extra settings
-//! to inject into the settings provider.
-//!
-//! Equivalent to the `PluginManifest` / `discoverUserPlugins` logic in
-//! `src/sicompass/programs.c`.
+//! User plugins live under `<config>/sicompass/plugins/<name>/plugin.json`.
+//! Each manifest names the plugin's program (`entry`), what it declares it
+//! does (`permissions`), and the settings to inject into the settings
+//! provider.
 
 use std::path::{Path, PathBuf};
 
@@ -112,47 +109,28 @@ fn edit_config(
     }
 }
 
-/// What a plugin gets, from its manifest and the user's approvals.
+/// What a plugin gets, from its manifest and the user's approval.
 ///
-/// - `allowedHosts`: as declared (shown when the plugin is enabled).
-/// - `storage`: its own folder, `app_data_dir()/<name>`. No approval needed, it
-///   reaches nothing else. The notes and board plugins find their existing data
-///   there, since that is where the built-ins keep it.
-/// - `filesystem`: only if the user approved exactly this manifest's access
-///   ([`sicompass_sdk::plugin_abi::approval_fingerprint`]); `~` means home.
-/// - `process`: the listed programs, under the same approval.
-/// - `sockets`: TCP to the listed `host:port` pairs, under the same approval.
+/// A plugin is a program that runs with the user's rights, so it loads only
+/// once the user approved exactly this manifest
+/// ([`sicompass_sdk::plugin_abi::approval_fingerprint`]): the Store records
+/// that when they install it, and an update that declares more asks again.
+/// Then it gets its own folder (`storage`, `app_data_dir()/<name>`, where the
+/// notes and board built-ins kept their data), its settings, and its service.
 ///
-/// `Err` says why the plugin cannot load: a permission this build cannot grant,
-/// or access the user has not approved.
+/// `Err` says why the plugin cannot load.
 pub fn grants_for(
     m: &PluginManifest,
     approvals: &std::collections::HashMap<String, String>,
-) -> Result<crate::wasm_host::Grants, String> {
+) -> Result<crate::plugin_host::Grants, String> {
     if sicompass_sdk::plugin_abi::needs_approval(m)
         && approvals.get(&m.name) != Some(&sicompass_sdk::plugin_abi::approval_fingerprint(m))
     {
-        let asked: Vec<String> = m
-            .permissions
-            .filesystem
-            .iter()
-            .map(|f| format!("folder {f}"))
-            .chain(m.permissions.process.iter().map(|p| format!("program {p}")))
-            .chain(
-                m.permissions
-                    .sockets
-                    .iter()
-                    .map(|s| format!("connection to {s}")),
-            )
-            .chain(
-                sicompass_sdk::plugin_abi::reaches_any_server(&m.allowed_hosts())
-                    .then(|| "any server on the internet".to_owned()),
-            )
-            .collect();
-        return Err(format!(
-            "it asks for access you have not approved ({}); approve it in the Store",
-            asked.join(", ")
-        ));
+        return Err(
+            "it runs as a program on this computer, and you have not approved this \
+             version; approve it in the Store"
+                .to_owned(),
+        );
     }
     let storage_dir = if m.permissions.storage {
         Some(
@@ -163,18 +141,8 @@ pub fn grants_for(
     } else {
         None
     };
-    let filesystem = m
-        .permissions
-        .filesystem
-        .iter()
-        .map(|p| PathBuf::from(expand_home(p)))
-        .collect();
-    Ok(crate::wasm_host::Grants {
-        allowed_hosts: m.allowed_hosts(),
+    Ok(crate::plugin_host::Grants {
         storage_dir,
-        filesystem,
-        process: m.permissions.process.clone(),
-        sockets: m.permissions.sockets.clone(),
         settings: m.settings.iter().map(|s| s.key.clone()).collect(),
         service_tier: m.service.as_ref().map(|s| s.tier.clone()),
         renders_pages: m.renders_pages,
@@ -187,8 +155,7 @@ pub fn grants_for(
     })
 }
 
-/// `~` or `~/…` as the user's home folder: in a filesystem grant, and in a
-/// setting's default (a plugin has no environment to find the home in).
+/// `~` or `~/…` as the user's home folder, in a setting's value or default.
 /// Anything else, and `~` on a system without a home, is left as it is.
 pub fn expand_home(value: &str) -> String {
     let rest = match value.strip_prefix('~') {
@@ -273,22 +240,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn home_is_expanded_in_grants_and_setting_defaults() {
+    fn home_is_expanded_in_setting_defaults() {
         let home = sicompass_sdk::platform::home_dir().expect("a home in the test sandbox");
         let m = parse_manifest(
-            r#"{ "name": "texteditor", "displayName": "text editor", "entry": "plugin.wasm",
+            r#"{ "name": "texteditor", "displayName": "text editor", "type": "process", "entry": "plugin",
                  "settings": [ { "type": "text", "label": "l", "key": "textEditorPath", "default": "~" },
                                { "type": "text", "label": "m", "key": "other", "default": "~user" },
                                { "type": "text", "label": "n", "key": "none" } ],
                  "permissions": { "filesystem": ["~/Documents", "/"] } }"#,
         )
         .unwrap();
-        let approved = std::collections::HashMap::from([(
-            m.name.clone(),
-            sicompass_sdk::plugin_abi::approval_fingerprint(&m),
-        )]);
-        let g = grants_for(&m, &approved).unwrap();
-        assert_eq!(g.filesystem, vec![home.join("Documents"), PathBuf::from("/")]);
+        let g = grants_for(&m, &approved(&m)).unwrap();
         assert_eq!(
             g.setting_defaults,
             vec![
@@ -299,15 +261,23 @@ mod tests {
         );
     }
 
+    /// What the Store records when the user installs `m`.
+    fn approved(m: &PluginManifest) -> std::collections::HashMap<String, String> {
+        std::collections::HashMap::from([(
+            m.name.clone(),
+            sicompass_sdk::plugin_abi::approval_fingerprint(m),
+        )])
+    }
+
     #[test]
     fn grants_carry_the_declared_setting_keys_and_nothing_else() {
         let m = parse_manifest(
-            r#"{ "name": "x", "displayName": "x", "entry": "plugin.wasm",
+            r#"{ "name": "x", "displayName": "x", "type": "process", "entry": "plugin",
                  "settings": [ { "type": "text", "label": "l", "key": "servers" },
                                { "type": "password", "label": "k", "key": "apiKeys" } ] }"#,
         )
         .unwrap();
-        let g = grants_for(&m, &Default::default()).unwrap();
+        let g = grants_for(&m, &approved(&m)).unwrap();
         assert_eq!(g.settings, vec!["servers".to_owned(), "apiKeys".to_owned()]);
     }
 
@@ -315,7 +285,7 @@ mod tests {
     fn permissions_parse_and_both_allowed_hosts_lists_merge() {
         let m: PluginManifest = serde_json::from_str(
             r#"{
-                "name": "notes", "displayName": "notes", "entry": "plugin.wasm",
+                "name": "notes", "displayName": "notes", "type": "process", "entry": "plugin",
                 "allowedHosts": ["cloud.example.org"],
                 "permissions": {
                     "allowedHosts": ["Cloud.example.org", "api.example.org"],
@@ -339,16 +309,34 @@ mod tests {
     }
 
     #[test]
-    fn nothing_is_granted_by_default() {
-        let m: PluginManifest =
-            serde_json::from_str(r#"{ "name": "x", "displayName": "x", "entry": "plugin.wasm" }"#)
-                .unwrap();
+    fn nothing_is_declared_by_default_and_no_folder_is_made() {
+        let m: PluginManifest = serde_json::from_str(
+            r#"{ "name": "x", "displayName": "x", "type": "process", "entry": "plugin" }"#,
+        )
+        .unwrap();
         assert_eq!(m.permissions, Permissions::default());
         assert!(m.allowed_hosts().is_empty());
-        // And the host grants it nothing: no hosts, folders, programs, sockets.
-        let g = grants_for(&m, &Default::default()).unwrap();
-        assert!(g.allowed_hosts.is_empty() && g.storage_dir.is_none());
-        assert!(g.filesystem.is_empty() && g.process.is_empty() && g.sockets.is_empty());
+        let g = grants_for(&m, &approved(&m)).unwrap();
+        assert!(g.storage_dir.is_none() && g.settings.is_empty() && g.service_tier.is_none());
+    }
+
+    #[test]
+    fn a_plugin_loads_only_once_this_version_was_approved() {
+        let m = parse_manifest(
+            r#"{ "name": "x", "displayName": "x", "type": "process", "entry": "plugin",
+                 "permissions": { "process": ["git"] } }"#,
+        )
+        .unwrap();
+        let e = grants_for(&m, &Default::default()).unwrap_err();
+        assert!(e.contains("approve it in the Store"), "{e}");
+        assert!(grants_for(&m, &approved(&m)).is_ok());
+        // An update declaring more is a new line, so it asks again.
+        let more = parse_manifest(
+            r#"{ "name": "x", "displayName": "x", "type": "process", "entry": "plugin",
+                 "permissions": { "process": ["git", "ssh"] } }"#,
+        )
+        .unwrap();
+        assert!(grants_for(&more, &approved(&m)).is_err());
     }
 
     use std::io::Write;
@@ -370,16 +358,16 @@ mod tests {
             r#"{
                 "name": "my-plugin",
                 "displayName": "my plugin",
-                "type": "wasm",
-                "entry": "plugin.wasm",
+                "type": "process",
+                "entry": "plugin",
                 "supportsConfigFiles": true
             }"#,
         );
         let m = load_manifest(&path).unwrap();
         assert_eq!(m.name, "my-plugin");
         assert_eq!(m.display_name, "my plugin");
-        assert_eq!(m.plugin_type, PluginType::Wasm);
-        assert_eq!(m.entry, "plugin.wasm");
+        assert_eq!(m.plugin_type, PluginType::Process);
+        assert_eq!(m.entry, "plugin");
         assert!(m.supports_config_files);
         assert!(m.settings.is_empty());
         assert!(m.version.is_none());
@@ -393,8 +381,8 @@ mod tests {
             r#"{
                 "name": "versioned",
                 "displayName": "Versioned",
-                "type": "wasm",
-                "entry": "v.wasm",
+                "type": "process",
+                "entry": "plugin",
                 "version": "1.2.3"
             }"#,
         );
@@ -404,11 +392,10 @@ mod tests {
 
     #[test]
     fn a_retired_plugin_type_is_rejected() {
-        // `native` and `script` are gone. A manifest naming one must fail to load
-        // rather than be quietly reinterpreted as something else — silently
-        // treating a `.so` plugin as WASM would be far more confusing than a
-        // refusal, and `load_manifest` logs which type it recognised.
-        for kind in ["native", "script"] {
+        // `native`, `script` and `wasm` are gone. A manifest naming one must fail
+        // to load rather than be quietly reinterpreted as something else, and
+        // `load_manifest` logs which type it recognised.
+        for kind in ["native", "script", "wasm"] {
             let dir = tempfile::tempdir().unwrap();
             let path = write_manifest(
                 &dir,
@@ -426,8 +413,8 @@ mod tests {
             r#"{
                 "name": "p",
                 "displayName": "P",
-                "type": "wasm",
-                "entry": "p.wasm",
+                "type": "process",
+                "entry": "plugin",
                 "settings": [
                     {"type": "text",     "label": "Host",    "key": "host",   "default": "localhost"},
                     {"type": "checkbox", "label": "Enabled", "key": "enabled","defaultChecked": true},
@@ -468,46 +455,23 @@ mod tests {
     }
 
     #[test]
-    fn load_manifest_missing_type_defaults_to_wasm() {
-        // The safe default: a manifest that says nothing gets the sandbox rather
-        // than having to ask for it.
+    fn a_manifest_without_a_type_is_a_wasm_plugin_and_refused() {
+        // Until sicompass 0.3 a missing type meant `wasm`, so such a manifest is
+        // a WASM plugin, which needs a new release.
         let dir = tempfile::tempdir().unwrap();
         let path = write_manifest(
             &dir,
             r#"{"name":"plugin","displayName":"Plugin","entry":"plugin.wasm"}"#,
         );
-        let m = load_manifest(&path).unwrap();
-        assert_eq!(m.plugin_type, PluginType::Wasm);
-    }
-
-    // --- wasm ---
-
-    #[test]
-    fn load_wasm_manifest() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = write_manifest(
-            &dir,
-            r#"{
-                "name": "weather",
-                "displayName": "weather",
-                "type": "wasm",
-                "entry": "plugin.wasm"
-            }"#,
-        );
-        let m = load_manifest(&path).unwrap();
-        assert_eq!(m.plugin_type, PluginType::Wasm);
-        assert_eq!(m.entry, "plugin.wasm");
+        assert!(load_manifest(&path).is_none());
     }
 
     #[test]
-    fn allowed_hosts_defaults_to_empty_which_means_no_network_at_all() {
-        // Absent is the safe default and must stay that way: an empty list is what
-        // makes the host leave the network interface unlinked, so a plugin that
-        // forgets to declare hosts gets no network rather than unrestricted access.
+    fn allowed_hosts_defaults_to_empty() {
         let dir = tempfile::tempdir().unwrap();
         let path = write_manifest(
             &dir,
-            r#"{"name":"w","displayName":"W","type":"wasm","entry":"p.wasm"}"#,
+            r#"{"name":"w","displayName":"W","type":"process","entry":"plugin"}"#,
         );
         let m = load_manifest(&path).unwrap();
         assert!(m.allowed_hosts().is_empty());
@@ -521,8 +485,8 @@ mod tests {
             r#"{
                 "name": "weather",
                 "displayName": "weather",
-                "type": "wasm",
-                "entry": "plugin.wasm",
+                "type": "process",
+                "entry": "plugin",
                 "allowedHosts": ["api.weather.example", "tiles.weather.example"]
             }"#,
         );
@@ -538,9 +502,9 @@ mod tests {
 
     #[test]
     fn allowed_hosts_parses_on_a_factory_manifest_but_grants_nothing() {
-        // A factory entry names a provider already compiled in, so it is not
-        // sandboxed and nothing consults its allowlist. Parsing it anyway keeps the
-        // manifest shape uniform; only the wasm loader reads the field.
+        // A factory entry names a provider already compiled in, and nothing
+        // consults its allowlist. Parsing it anyway keeps the manifest shape
+        // uniform.
         let dir = tempfile::tempdir().unwrap();
         let path = write_manifest(
             &dir,
@@ -569,21 +533,29 @@ mod tests {
     fn discover_finds_valid_plugins() {
         let plugins_root = tempfile::tempdir().unwrap();
 
-        // Plugin A — explicit type
         let a = plugins_root.path().join("plugin-a");
         std::fs::create_dir(&a).unwrap();
         std::fs::write(
             a.join("plugin.json"),
-            r#"{"name":"a","displayName":"A","type":"wasm","entry":"a.wasm"}"#,
+            r#"{"name":"a","displayName":"A","type":"process","entry":"plugin"}"#,
         )
         .unwrap();
 
-        // Plugin B — omits the type, so it defaults to wasm
         let b = plugins_root.path().join("plugin-b");
         std::fs::create_dir(&b).unwrap();
         std::fs::write(
             b.join("plugin.json"),
-            r#"{"name":"b","displayName":"B","entry":"b.wasm"}"#,
+            r#"{"name":"b","displayName":"B","type":"process","entry":"bin/b"}"#,
+        )
+        .unwrap();
+
+        // A WASM plugin from before 0.3, which omitted the type: skipped, with a
+        // logged reason
+        let e = plugins_root.path().join("plugin-wasm");
+        std::fs::create_dir(&e).unwrap();
+        std::fs::write(
+            e.join("plugin.json"),
+            r#"{"name":"e","displayName":"E","entry":"plugin.wasm"}"#,
         )
         .unwrap();
 
@@ -611,34 +583,30 @@ mod tests {
         );
         assert_eq!(found[0].manifest.name, "a");
         assert_eq!(found[1].manifest.name, "b");
-        assert_eq!(found[0].entry_path, a.join("a.wasm"));
-        assert_eq!(found[1].entry_path, b.join("b.wasm"));
-        assert_eq!(
-            found[1].manifest.plugin_type,
-            PluginType::Wasm,
-            "absent type defaults to wasm"
-        );
+        assert_eq!(found[0].entry_path, a.join("plugin"));
+        assert_eq!(found[1].entry_path, b.join("bin/b"));
+        assert_eq!(found[1].manifest.plugin_type, PluginType::Process);
     }
 
     #[test]
-    fn discover_resolves_a_wasm_entry_next_to_its_manifest() {
-        // The resolved `entry_path` is what the loader opens, and its parent is the
-        // confinement root for any path the guest hands back, so both must land
-        // inside the plugin's own directory.
+    fn discover_resolves_the_entry_next_to_its_manifest() {
+        // The resolved `entry_path` is what the app starts, and its parent is the
+        // plugin's directory (its assets, its locales, its working directory), so
+        // both must land inside the plugin's own directory.
         let root = tempfile::tempdir().unwrap();
         let dir = root.path().join("weather");
         std::fs::create_dir(&dir).unwrap();
         std::fs::write(
             dir.join("plugin.json"),
-            r#"{"name":"weather","displayName":"Weather","type":"wasm",
-                "entry":"plugin.wasm","allowedHosts":["api.weather.example"]}"#,
+            r#"{"name":"weather","displayName":"Weather","type":"process",
+                "entry":"plugin","allowedHosts":["api.weather.example"]}"#,
         )
         .unwrap();
 
         let found = discover_plugins_in(root.path());
         assert_eq!(found.len(), 1);
-        assert_eq!(found[0].manifest.plugin_type, PluginType::Wasm);
-        assert_eq!(found[0].entry_path, dir.join("plugin.wasm"));
+        assert_eq!(found[0].manifest.plugin_type, PluginType::Process);
+        assert_eq!(found[0].entry_path, dir.join("plugin"));
         assert_eq!(found[0].entry_path.parent().unwrap(), dir);
         assert_eq!(
             found[0].manifest.allowed_hosts(),

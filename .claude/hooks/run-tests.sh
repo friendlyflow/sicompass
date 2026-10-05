@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Runs the relevant test suite after source file edits.
 # RS files: cargo test (non-blocking, exit 0 so Claude can keep iterating)
-# (TypeScript is gone: providers are Rust, third-party plugins are WASM.)
+# (TypeScript is gone: providers are Rust, and so are plugins, which are
+# programs of their own that sicompass starts.)
 #
 # The suite is the one of the repo that *owns the edited file*, not always this
 # one. Work on the sibling repos (../desicompass, ../sicompass-ui,

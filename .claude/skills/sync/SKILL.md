@@ -1,7 +1,7 @@
 ---
 name: sync
 description: Fast-forward main from origin, then build and run the test suite to verify the synced tree
-argument-hint: "[repo|all] [clippy] [no-jit] [graph]"
+argument-hint: "[repo|all] [clippy] [graph]"
 disable-model-invocation: true
 model: sonnet
 effort: medium
@@ -47,11 +47,6 @@ something else, never force-push. This repo's whole workflow is linear on
 - (empty, the default) — sync, `cargo build --workspace`, `cargo test --workspace`.
 - `clippy` — also run `cargo clippy --workspace --all-targets`, matching the
   lint leg of `ci.yml`.
-- `no-jit` — additionally run the tests over the Pulley backend
-  (`--no-default-features --features no-jit-wasm`). CI runs both wasmtime
-  backends on Linux because they are genuinely different code paths, not a
-  flag. Worth asking for when the pull touched `src/sicompass/src/plugin*`,
-  `lib/lib_builtins`, or the `wasmtime` dependency.
 - `graph` — finish with `graphify update .` so the knowledge graph in
   `graphify-out/` reflects the code that was just pulled in. AST-only, no API
   cost.
@@ -122,7 +117,11 @@ runners have no SDL3.
      shell is now stale; tell the user to exit and re-enter it. Prefixed
      `nix develop -c` invocations pick the change up on their own.
    - `Cargo.toml` or `Cargo.lock` moved — expect the build to fetch and
-     compile new crates, so a long first build is normal, not a hang.
+     compile new crates, so a long first build is normal, not a hang. A moved
+     plugin `rev` in `src/sicompass/Cargo.toml` fetches that plugin repo, and
+     `src/sicompass/tests/fixtures/plugins/<name>/` should have moved with it
+     (that commit's `plugin.json` and `locales/`). If only one of the two
+     moved, the integration tests may fail for that reason alone. Say so.
    - `assets/icons/*` or `THIRD-PARTY-LICENSES.html` moved —
      these are committed generated files. You do not regenerate them here;
      `cargo test -p sicompass` fails if they drifted, which is exactly the
@@ -161,21 +160,15 @@ runners have no SDL3.
    cargo clippy --workspace --all-targets
    ```
 
-8. **Pulley leg** — only when `$ARGUMENTS` contains `no-jit`:
-
-   ```sh
-   cargo test --workspace --no-default-features --features no-jit-wasm
-   ```
-
-9. **Refresh the graph** — only when `$ARGUMENTS` contains `graph`:
+8. **Refresh the graph** — only when `$ARGUMENTS` contains `graph`:
    `graphify update .`.
 
-10. **Report.** Four lines, no more:
-    - what moved (`old..new`, commit count, one-line summary of the range);
-    - build result;
-    - test result, with counts;
-    - anything the user has to act on — a stale `nix develop`, unpushed
-      commits, a failing test, generated-file drift.
+9. **Report.** Four lines, no more:
+   - what moved (`old..new`, commit count, one-line summary of the range);
+   - build result;
+   - test result, with counts;
+   - anything the user has to act on — a stale `nix develop`, unpushed
+     commits, a failing test, generated-file drift.
 
 ## Relationship to the other skills
 

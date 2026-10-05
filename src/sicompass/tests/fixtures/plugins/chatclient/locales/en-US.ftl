@@ -38,3 +38,7 @@ chatclient-error-select-public-room = select a public room row first
 chatclient-error-set-server-user-pass-first = set homeserver, username, and password first
 chatclient-error-unban-failed = unban failed: { $err }
 chatclient-error-undo-failed = undo failed: { $err }
+
+# The tutorial's paragraphs about this program, under its programs section:
+# <name>-tutorial, then <name>-tutorial-2 and so on, read until one is missing.
+chatclient-tutorial = Chat, from the Store: a Matrix client. Log in inline, your rooms appear as a tree, and you type a message and press Enter to send.

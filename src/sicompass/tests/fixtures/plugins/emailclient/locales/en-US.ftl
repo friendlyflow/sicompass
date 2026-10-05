@@ -24,3 +24,8 @@ emailclient-error-archive-failed = archive failed: { $err }
 emailclient-error-archive-not-viewing = archive: not viewing a message
 emailclient-error-move-not-viewing = move: not viewing a message
 emailclient-error-unknown-command = unknown command: { $cmd }
+
+# The tutorial's paragraphs about this program, under its programs section:
+# <name>-tutorial, then <name>-tutorial-2 and so on, read until one is missing.
+emailclient-tutorial = Email, from the Store: IMAP and SMTP with Gmail OAuth. Folders and messages form a tree, and you can compose, reply, move, and delete, all undoable.
+emailclient-tutorial-2 = Set up Gmail: Gmail uses OAuth, not a password. In the Google Cloud Console, create a project, enable the Gmail API, and on the OAuth consent screen add the scope https://mail.google.com/. That mail scope is the one that matters. Without it, Google issues a token with no mail access and login fails with invalid credentials. Then create an OAuth client ID, paste its client ID and secret into Settings, and log in. Watch that the Google consent screen actually asks to read and send your mail. If you get stuck, run the colon command :refresh to force a re-fetch, and to re-authorize run :logout and then log in again so a fresh token is minted with the mail scope.

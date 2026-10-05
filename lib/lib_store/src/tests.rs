@@ -10,7 +10,7 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use sicompass_sdk::package::{self, ARCHIVE_FILE, RELEASE_FILE, ReleaseInfo, SIGNATURE_FILE};
+use sicompass_sdk::package::{self, RELEASE_FILE, ReleaseInfo, SIGNATURE_FILE};
 use sicompass_sdk::plugin_manifest::parse_manifest;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -37,12 +37,12 @@ fn keys() -> Keys {
     }
 }
 
-/// A signed release: `(release.json, release.json.sig, plugin.tar.gz, info)`.
+/// A signed release: `release.json`, `release.json.sig` and this platform's
+/// archive.
 struct Release {
     json: Vec<u8>,
     sig: String,
     archive: Vec<u8>,
-    info: ReleaseInfo,
 }
 
 fn plugin_json(version: &str, permissions: &str, min_app: &str) -> String {
@@ -52,62 +52,37 @@ fn plugin_json(version: &str, permissions: &str, min_app: &str) -> String {
 /// `extra` is more top-level fields, each starting with a comma.
 fn plugin_json_with(version: &str, permissions: &str, min_app: &str, extra: &str) -> String {
     format!(
-        r#"{{ "name": "demo", "displayName": "demo", "entry": "plugin.wasm",
+        r#"{{ "name": "demo", "displayName": "demo", "type": "process", "entry": "plugin",
              "version": "{version}", "minAppVersion": "{min_app}",
              "permissions": {{ {permissions} }} {extra} }}"#
     )
 }
 
-/// What the tests' fake components contain, and the marker the test auditor
-/// refuses (standing in for an import the permissions do not grant).
-const COMPONENT: &[u8] = b"\0asm, not really";
-const FORBIDDEN: &[u8] = b"forbidden import";
-
-/// The app registers wasmtime's audit; these tests register a stand-in that
-/// refuses [`FORBIDDEN`] (and anything that is not "\0asm").
-fn register_test_auditor() {
-    package::register_component_auditor(|wasm, _m| {
-        if !wasm.starts_with(b"\0asm") {
-            return Err("not a component".to_owned());
-        }
-        if wasm.windows(FORBIDDEN.len()).any(|w| w == FORBIDDEN) {
-            return Err("imports something its permissions do not grant".to_owned());
-        }
-        Ok(())
-    });
-}
+/// What the tests' fake programs contain.
+const PROGRAM: &[u8] = b"a program, not really";
 
 /// Build and sign a release of `demo`. `archived_manifest` is what goes into
 /// the archive, when it should differ from the one `release.json` describes.
+/// It is built for this platform only.
 fn release_with(keys: &Keys, manifest: &str, archived_manifest: Option<&str>) -> Release {
-    release_full(keys, manifest, archived_manifest, COMPONENT)
-}
-
-fn release_full(
-    keys: &Keys,
-    manifest: &str,
-    archived_manifest: Option<&str>,
-    wasm: &[u8],
-) -> Release {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(
         dir.path().join("plugin.json"),
         archived_manifest.unwrap_or(manifest),
     )
     .unwrap();
-    std::fs::write(dir.path().join("plugin.wasm"), wasm).unwrap();
     let m = parse_manifest(manifest).unwrap();
     let files = package::collect_files(dir.path(), &m).unwrap();
-    let archive = package::build_archive(dir.path(), &files).unwrap();
-    let info = ReleaseInfo::new(&m, &archive).unwrap();
+    let archive =
+        package::build_process_archive(dir.path(), &files, &m, this_target(), PROGRAM).unwrap();
+    let info = ReleaseInfo::new_process(
+        &m,
+        &std::collections::BTreeMap::from([(this_target().to_owned(), archive.clone())]),
+    )
+    .unwrap();
     let json = serde_json::to_vec_pretty(&info).unwrap();
     let sig = package::sign(&json, &keys.plugin_secret).unwrap();
-    Release {
-        json,
-        sig,
-        archive,
-        info,
-    }
+    Release { json, sig, archive }
 }
 
 /// A release of `demo` as a plugin process, with a fake build for each of
@@ -229,7 +204,7 @@ impl Server {
         let at = |file: &str| format!("{folder}{file}");
         self.serve(&at(RELEASE_FILE), r.json.clone());
         self.serve(&at(SIGNATURE_FILE), r.sig.clone().into_bytes());
-        self.serve(&at(ARCHIVE_FILE), r.archive.clone());
+        self.serve(&at(&package::archive_file(this_target())), r.archive.clone());
     }
 }
 
@@ -243,7 +218,6 @@ struct Harness {
 }
 
 fn harness(server: &Server, keys: &Keys) -> Harness {
-    register_test_auditor();
     let plugins = tempfile::tempdir().unwrap();
     let data = tempfile::tempdir().unwrap();
     let mut store = StoreProvider::new()
@@ -373,7 +347,13 @@ fn a_listed_plugin_installs_after_its_access_is_shown() {
 
     h.press("install:demo");
     assert_eq!(h.installed_version().as_deref(), Some("1.0.0"));
-    assert!(h.plugins.path().join("demo/plugin.wasm").is_file());
+    assert!(
+        h.plugins
+            .path()
+            .join("demo")
+            .join(sicompass_sdk::plugin_abi::executable_name("plugin", this_target()))
+            .is_file()
+    );
     assert_eq!(h.fired(), vec![(PLUGIN_INSTALLED.into(), "demo".into())]);
     h.assert_staging_clean();
 
@@ -591,7 +571,9 @@ fn an_update_asking_for_less_is_offered_plainly() {
 fn a_revoked_release_cannot_be_installed() {
     let (server, keys) = (Server::start(), keys());
     let r = release(&keys, "1.0.0", "");
-    server.serve_store(&keys, &keys.store_secret, &[r.info.archive_sha256.as_str()]);
+    // A release is withdrawn by the hash of an archive, this platform's here.
+    let sha = package::sha256_hex(&r.archive);
+    server.serve_store(&keys, &keys.store_secret, &[sha.as_str()]);
     server.serve_release(&r);
     let mut h = harness(&server, &keys);
 
@@ -672,7 +654,10 @@ fn uninstall_removes_the_program_and_tells_the_app() {
     std::fs::write(neighbour.join("keep.txt"), "x").unwrap();
 
     h.open_programs();
-    assert!(has(&h.entry(), &localize::t("store-access-own-folder")));
+    // A program with its own folder: what it is comes first, never "only its
+    // own folder", which a program with the user's rights is not.
+    assert!(has(&h.entry(), &localize::t("store-access-program")));
+    assert!(!has(&h.entry(), &localize::t("store-access-own-folder")));
     h.press("install:demo");
     h.press("uninstall:demo");
 
@@ -816,38 +801,12 @@ fn every_locale_has_every_key() {
     }
 }
 
-#[test]
-fn a_component_that_fails_the_import_audit_is_not_installed() {
-    let (server, keys) = (Server::start(), keys());
-    let mut wasm = COMPONENT.to_vec();
-    wasm.extend_from_slice(FORBIDDEN);
-    server.serve_store(&keys, &keys.store_secret, &[]);
-    server.serve_release(&release_full(
-        &keys,
-        &plugin_json("1.0.0", "", "0.1.0"),
-        None,
-        &wasm,
-    ));
-    let mut h = harness(&server, &keys);
-
-    h.open_programs();
-    h.press("install:demo");
-    assert_eq!(h.installed_version(), None);
-    assert!(h.fired().is_empty());
-    assert!(
-        has(&h.entry(), "permissions do not grant"),
-        "{:?}",
-        h.entry()
-    );
-    h.assert_staging_clean();
-}
-
 /// Put `demo` in the plugins folder the way a user installing by hand would.
 fn install_by_hand(h: &Harness, manifest: &str) {
     let dir = h.plugins.path().join("demo");
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("plugin.json"), manifest).unwrap();
-    std::fs::write(dir.join("plugin.wasm"), COMPONENT).unwrap();
+    std::fs::write(dir.join("plugin"), PROGRAM).unwrap();
 }
 
 #[test]
@@ -1050,7 +1009,6 @@ fn any_server_on_a_port_is_said_plainly_and_never_as_a_star() {
 #[test]
 fn the_releases_of_a_long_list_are_fetched_side_by_side_and_listed_in_order() {
     let (server, keys) = (Server::start(), keys());
-    register_test_auditor();
     let names: Vec<String> = (0..8).map(|i| format!("p{i}")).collect();
     let entries: Vec<_> = names
         .iter()
@@ -1069,7 +1027,7 @@ fn the_releases_of_a_long_list_are_fetched_side_by_side_and_listed_in_order() {
     server.serve("/store/store.json.sig", sig.into_bytes());
     for n in &names {
         let manifest = format!(
-            r#"{{ "name": "{n}", "displayName": "{n}", "entry": "plugin.wasm",
+            r#"{{ "name": "{n}", "displayName": "{n}", "type": "process", "entry": "plugin",
                  "version": "1.0.0", "minAppVersion": "0.1.0" }}"#
         );
         server.serve_release_at(
@@ -1136,7 +1094,6 @@ fn the_releases_of_a_long_list_are_fetched_side_by_side_and_listed_in_order() {
 
 /// A Store over `fetch` that keeps its downloads in `cache`, as the app's does.
 fn cached_store(server: &Server, keys: &Keys, fetch: http::Fetch, cache: &Path) -> StoreProvider {
-    register_test_auditor();
     let plugins = cache.join("plugins");
     let data = cache.join("data");
     StoreProvider::new()
@@ -1319,7 +1276,10 @@ fn a_plugin_process_says_it_runs_as_a_program_and_installs_runnable() {
     h.open_programs();
     let entry = h.entry();
     let program = localize::t("store-access-program");
-    let at = entry.iter().position(|l| l == &program).expect(&format!("{entry:?}"));
+    let at = entry
+        .iter()
+        .position(|l| l == &program)
+        .unwrap_or_else(|| panic!("{entry:?}"));
     assert!(
         entry[at + 1].contains(&t_with("store-access-programs", &[("list", "git")])),
         "the declared access follows: {entry:?}"
@@ -1364,17 +1324,11 @@ fn a_plugin_process_without_a_build_for_this_computer_is_not_offered() {
 }
 
 #[test]
-fn a_wasm_plugin_updating_to_a_program_must_be_approved_again() {
+fn a_wasm_plugin_from_before_is_replaced_by_its_program() {
+    // What sicompass 0.2 left on disk: a WASM component, its manifest without a
+    // `type`. This sicompass cannot read it, so the Store offers the program as
+    // an install, and installing replaces the whole folder.
     let (server, keys) = (Server::start(), keys());
-    server.serve_store(&keys, &keys.store_secret, &[]);
-    server.serve_release(&release(&keys, "1.0.0", r#""process": ["git"]"#));
-    let mut h = harness(&server, &keys);
-    h.open_programs();
-    h.press("install:demo");
-    assert_eq!(h.installed_version().as_deref(), Some("1.0.0"));
-
-    // The same permissions, now as a program outside the sandbox.
-    server.reset();
     server.serve_store(&keys, &keys.store_secret, &[]);
     server.serve_process_release(&process_release(
         &keys,
@@ -1382,14 +1336,24 @@ fn a_wasm_plugin_updating_to_a_program_must_be_approved_again() {
         r#""process": ["git"]"#,
         &[this_target()],
     ));
-    h.press("refresh");
+    let mut h = harness(&server, &keys);
+    let old = h.plugins.path().join("demo");
+    std::fs::create_dir_all(&old).unwrap();
+    std::fs::write(
+        old.join("plugin.json"),
+        r#"{ "name": "demo", "displayName": "demo", "entry": "plugin.wasm", "version": "1.0.0" }"#,
+    )
+    .unwrap();
+    std::fs::write(old.join("plugin.wasm"), b"\0asm").unwrap();
+
+    h.open_programs();
     let entry = h.entry();
-    assert!(has(&entry, &localize::t("store-more-access")), "{entry:?}");
     assert!(has(&entry, &localize::t("store-access-program")), "{entry:?}");
-    h.press("update:demo");
+    assert!(has(&entry, "<button>install:demo</button>"), "{entry:?}");
+    h.press("install:demo");
     assert_eq!(h.installed_version().as_deref(), Some("2.0.0"));
     assert!(
-        !h.plugins.path().join("demo/plugin.wasm").exists(),
+        !old.join("plugin.wasm").exists(),
         "the old component went with the old version"
     );
 }

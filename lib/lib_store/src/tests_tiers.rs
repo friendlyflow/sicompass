@@ -367,7 +367,7 @@ fn a_third_party_tier_is_checked_against_the_issuer_the_store_list_names() {
     assert_eq!(license_status("acme/pro"), LicenseStatus::Missing);
     // A tier nobody lists has no issuer to believe.
     assert_eq!(license_status("nobody/tier"), LicenseStatus::Missing);
-    // The registration is what the WASM host asks.
+    // The registration is what the plugin host asks.
     register();
     assert_eq!(
         sicompass_sdk::license::status("nobody/tier"),

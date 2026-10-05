@@ -66,3 +66,6 @@ projectmanagement-cmd-restore-backup = restaurer la sauvegarde cloud
 projectmanagement-restore-done = sauvegarde cloud restaurée
 projectmanagement-restore-empty = il n'y a aucune sauvegarde cloud à restaurer
 projectmanagement-restore-refused = votre tableau n'est pas vide, rien n'a été restauré
+
+projectmanagement-tutorial = Gestion de projet, depuis le store : un tableau kanban. Appuyez sur ctrl+a pour ajouter une colonne, Droite pour l'ouvrir, et ctrl+a à l'intérieur pour ajouter une carte. Une colonne contient des cartes et rien de plus profond, donc une carte est le dernier niveau.
+projectmanagement-tutorial-2 = d : ouvrez le tableau lui-même, avec les colonnes côte à côte. Le curseur se pose sur une carte, et seule cette carte est mise en évidence. Gauche et Droite passent d'une colonne à l'autre, Haut et Bas parcourent les cartes d'une colonne. i et a modifient la carte, o et maj+o en ouvrent une nouvelle en dessous ou au dessus, ctrl+d supprime, et ctrl+x, ctrl+c et ctrl+v coupent, copient et collent. Une colonne vide montre un emplacement où vous poser pour ajouter sa première carte. Les colonnes elles-mêmes se gèrent dans la liste. Échap revient en arrière.

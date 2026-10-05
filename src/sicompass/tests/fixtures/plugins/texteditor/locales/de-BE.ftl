@@ -11,3 +11,5 @@ texteditor-error-redo-delete-trash-failed = Löschen wiederholen: Papierkorb feh
 
 texteditor-description = Bearbeiten Sie jede Textdatei als Liste ihrer Zeilen, mit Einrückung und Abschnitten als Ebenen, und jede Änderung rückgängig zu machen.
 texteditor-setting-path = Pfad des Texteditors
+
+texteditor-tutorial = Texteditor, aus dem Store: drücken Sie Rechts auf einer Datei, um ihren Inhalt als Baum zu öffnen und die Zeilen vor Ort zu bearbeiten. Jede Änderung steht auf der Undo-Zeitleiste.

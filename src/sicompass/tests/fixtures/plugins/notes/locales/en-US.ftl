@@ -56,3 +56,7 @@ notes-cmd-restore-backup = restore cloud backup
 notes-restore-done = cloud backup restored
 notes-restore-empty = there is no cloud backup to restore
 notes-restore-refused = your notes are not empty, so nothing was restored
+
+# The tutorial's paragraphs about this program, under its programs section:
+# <name>-tutorial, then <name>-tutorial-2 and so on, read until one is missing.
+notes-tutorial = Notes, from the Store: press ctrl+a to write a note, Right to open it, and ctrl+a again inside it to add a line. Notes nest as deep as you like, and every change is on the undo timeline. The first row of a note is its list meta, where you set whether the note is private or public.

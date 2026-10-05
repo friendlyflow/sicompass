@@ -25,7 +25,7 @@ Nix users can also build the packaged version with `nix build`.
 
 - [sicompass](https://github.com/friendlyflow/sicompass), the application
 - [sicompass-plugin-sdk](https://github.com/friendlyflow/sicompass-plugin-sdk),
-  the SDK and the WASM plugin kit
+  the SDK and the plugin kit
 
 ## Community
 

@@ -9,6 +9,7 @@ allowed-tools:
   - "Bash(cargo update:*)"
   - "Bash(cargo build:*)"
   - "Bash(cargo test:*)"
+  - "Bash(cargo check:*)"
   - "Bash(cargo tree:*)"
   - "Bash(cargo search:*)"
   - "Bash(nix flake update:*)"
@@ -62,7 +63,7 @@ handles and step 11 always reports.
   `Cargo.toml` edits.
 - `major` — also raise version requirements in `Cargo.toml` for crates whose
   new release is outside the current requirement. This workspace only; the SDK
-  repo is never edited (step 9f).
+  repo is never edited (step 9e).
 - `push` — push the commit to `origin/main` at the end. Without it, stop after
   committing and tell the user to run `/commit-and-push` or re-run with `push`.
 - `no-sdk` — skip the step 9 canary and say so in the report.
@@ -73,9 +74,9 @@ Check `command -v cargo` once. Non-empty: run `cargo ...` directly. Empty:
 prefix every toolchain command with `nix develop -c` (the `warning: Git tree
 ... is dirty` line on stderr is noise). Stick with the answer for the session.
 
-The SDK repo has its **own** flake, whose Rust comes from rust-overlay with the
-`wasm32-wasip2` target that this workspace's nixpkgs rustc lacks. Run the step 9
-canary inside it: `cd ../sicompass-plugin-sdk && nix develop -c ...`. For a
+The SDK repo has its **own** flake, whose Rust comes from rust-overlay with a
+plugin's static musl target, which this workspace's nixpkgs rustc lacks. Run the
+step 9 canary inside it: `cd ../sicompass-plugin-sdk && nix develop -c ...`. For a
 fuller refresh of that repo (its `flake.lock` too), use
 `/update-cargo sicompass-plugin-sdk`, which follows that repo's own skill.
 
@@ -134,6 +135,14 @@ fuller refresh of that repo (its `flake.lock` too), use
       `lib/*/Cargo.toml` or `src/sicompass/Cargo.toml` — grep for the crate
       name and update every occurrence.
 
+      Not the plugin repos. `src/sicompass/Cargo.toml` pins each one
+      (`notes-plugin`, `terminal-plugin`, ...) by git `rev` as a
+      dev-dependency, built into a program by
+      `src/sicompass/examples/plugin_<name>.rs`, and
+      `src/sicompass/tests/fixtures/plugins/<name>/` holds that commit's
+      `plugin.json` and `locales/`. The rev and the fixture folder move
+      together, in a commit of their own, never here.
+
    e. `cargo update` again to resolve the new requirements.
 
 4. **Flake input.** `nix flake update` to refresh `flake.lock` (nixpkgs). Skip
@@ -175,35 +184,28 @@ fuller refresh of that repo (its `flake.lock` too), use
       Untracked `Cargo.lock` churn there is expected and is not a reason to
       skip.
 
-   b. It has **two lockfiles, neither reachable from the other** — both
-      untracked. `sicompass-pdk/` declares its own bare `[workspace]`, on
-      purpose: it only builds for `wasm32-unknown-unknown`, and wit-bindgen's
-      generated `wasm_import_module` extern blocks do not link on a host
-      target, so the SDK root's `cargo` never descends into it. Refresh both,
-      to resolve what a clean CI checkout would get:
-      - `cargo update` in `../sicompass-plugin-sdk`
-      - `cargo update` in `../sicompass-plugin-sdk/sicompass-pdk`
+   b. Its root `Cargo.lock` is untracked. Refresh it, to resolve what a clean
+      CI checkout would get: `cargo update` in `../sicompass-plugin-sdk`.
 
    c. No `nix flake update` here: that repo's `flake.lock` is refreshed by its
       own `/update-cargo sicompass-plugin-sdk`, and this canary makes no commit.
 
-   d. **Check the SDK root in both feature configurations.** `host` is a
-      default-on *additive* feature; WASM guests depend on the SDK with
-      `default-features = false`. A bumped crate can break the guest
-      configuration while the default one still builds, so run both:
-      - `cargo test` (the default `host` build, plus its test suite)
-      - `cargo build --no-default-features` (the guest surface)
+   d. **Check the SDK in both feature configurations.** `host` is a
+      default-on *additive* feature. A plugin depends on the SDK with
+      `default-features = false, features = ["plugin"]`. A bumped crate can
+      break the plugin configuration while the default one still builds, so
+      run both, as the SDK's release workflow does:
+      - `cargo test --all --features plugin,package` (the `host` build, the
+        protocol, the plugin kit and releases, with their tests)
+      - `cargo check --no-default-features --features plugin` (the plugin
+        half, without the app's dependencies)
 
-   e. **Check the PDK** with `cargo build --target wasm32-unknown-unknown` in
-      `sicompass-pdk/`. Do not run `cargo test` there — there is no host target
-      to run it on, which is the whole reason for the split workspace.
-
-   f. Never edit anything in that repo — not `Cargo.toml` requirements even
+   e. Never edit anything in that repo — not `Cargo.toml` requirements even
       under `major`, and above all not its `version`. That belongs to the SDK's
       own release flow, and a bump here would strand this app's pin against a
       crates.io release that does not exist.
 
-   g. If the canary **fails**, do not try to fix the SDK here. Report the
+   f. If the canary **fails**, do not try to fix the SDK here. Report the
       failing crate and configuration; the workspace commit from step 8 still
       stands on its own.
 

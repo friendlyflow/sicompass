@@ -91,18 +91,18 @@ fn every_crate_that_can_trash_has_a_test_guard() {
             src.contains("TEST_NO_TRASH") && src.contains("_set_test_no_trash"),
             "{} depends on the `trash` crate but has no TEST_NO_TRASH stub, so its \
              tests delete into the developer's real OS trash. Copy the block from \
-             src/sicompass/src/wasm_host/desktop.rs, and call the setter from \
+             src/sicompass/src/plugin_host/desktop.rs, and call the setter from \
              `ensure_builtins()` in src/sicompass/tests/integration.rs.",
             manifest.display()
         );
     }
 
     // The file browser and the text editor used to be the other two. They are
-    // plugins now, and trash through the app's `desktop.trash`.
+    // plugins now, and trash through the app's `desktop::trash`.
     assert_eq!(
         checked, 1,
-        "expected exactly the app (for a WASM plugin's `desktop.trash`, \
-         src/wasm_host/desktop.rs) to depend on `trash`; if a crate gained or lost \
+        "expected exactly the app (for a plugin's `desktop::trash`, \
+         src/plugin_host/desktop.rs) to depend on `trash`; if a crate gained or lost \
          the dependency, update this count deliberately"
     );
 }

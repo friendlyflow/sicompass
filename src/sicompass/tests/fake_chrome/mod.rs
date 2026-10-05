@@ -1,12 +1,12 @@
 //! A fake Chrome, for the tests that drive the web browser plugin
-//! (`tests/fixtures/plugins/webbrowser`) the way the app runs it: in the
-//! sandbox, Chrome started through the host's `process` grant with a message
-//! channel, its pages loaded from the plugin's browser task.
+//! (`tests/fixtures/plugins/webbrowser`) the way the app runs it: its own
+//! process, starting Chrome with a message channel on its pipe, its pages
+//! loaded on its browser thread.
 //!
-//! No real Chrome is ever started by these tests. The program the plugin asks
-//! for, `google-chrome`, resolves (through the host's test override) to a bash
-//! script that forwards Chrome's pipe, file descriptors 3 and 4, to a server
-//! in this process. The server speaks just enough of the DevTools protocol for
+//! No real Chrome is ever started by these tests. The plugin's `PATH` is
+//! [`dir`] and nothing else, so the `google-chrome` it finds is a bash script
+//! that forwards Chrome's pipe, file descriptors 3 and 4, to a server in this
+//! process. The server speaks just enough of the DevTools protocol for
 //! the browser's load path, and serves one stub page per URL:
 //! `<p>Fake page for URL</p>`.
 
@@ -38,15 +38,20 @@ pub fn program() -> PathBuf {
             // it starts this script.
             let dir = tempfile::tempdir().unwrap().keep();
             let script = dir.join("google-chrome");
+            // Absolute paths: the plugin's `PATH` holds only this script.
+            let bash = which("bash");
+            let cat = which("cat");
             std::fs::write(
                 &script,
                 format!(
-                    "#!/usr/bin/env bash\n\
+                    "#!{bash}\n\
                      # A fake Chrome for sicompass's tests: its DevTools pipe\n\
                      # (fds 3 and 4) forwarded to the test process.\n\
                      exec 5<>/dev/tcp/127.0.0.1/{port}\n\
-                     cat <&3 >&5 &\n\
-                     cat <&5 >&4\n"
+                     {cat} <&3 >&5 &\n\
+                     {cat} <&5 >&4\n",
+                    bash = bash.display(),
+                    cat = cat.display(),
                 ),
             )
             .unwrap();
@@ -58,6 +63,20 @@ pub fn program() -> PathBuf {
             script
         })
         .clone()
+}
+
+/// The folder [`program`] is in: the whole `PATH` of a browser plugin under
+/// test.
+pub fn dir() -> PathBuf {
+    program().parent().unwrap().to_path_buf()
+}
+
+/// Where `name` is on this test's own `PATH`.
+fn which(name: &str) -> PathBuf {
+    std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
+        .map(|d| d.join(name))
+        .find(|p| p.is_file())
+        .unwrap_or_else(|| panic!("{name} is not on PATH"))
 }
 
 /// One fake Chrome: answer each command, and fire a load event after each

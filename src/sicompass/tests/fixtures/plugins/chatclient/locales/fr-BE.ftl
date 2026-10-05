@@ -38,3 +38,5 @@ chatclient-error-select-public-room = sélectionnez d'abord un salon public
 chatclient-error-set-server-user-pass-first = définissez d'abord homeserver, nom d'utilisateur et mot de passe
 chatclient-error-unban-failed = débannissement échoué : { $err }
 chatclient-error-undo-failed = annulation échouée : { $err }
+
+chatclient-tutorial = Chat, depuis le store : un client Matrix. Connectez-vous sur place, vos salons apparaissent sous forme d'arbre, et vous tapez un message et appuyez sur Enter pour l'envoyer.

@@ -38,3 +38,5 @@ chatclient-error-select-public-room = selecteer eerst een publieke room
 chatclient-error-set-server-user-pass-first = stel eerst homeserver, gebruikersnaam en wachtwoord in
 chatclient-error-unban-failed = ontbannen mislukt: { $err }
 chatclient-error-undo-failed = undo mislukt: { $err }
+
+chatclient-tutorial = Chat, uit de store: een Matrix-client. Meld je ter plaatse aan, je rooms verschijnen als een boom, en je typt een bericht en drukt op Enter om te verzenden.

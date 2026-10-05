@@ -99,3 +99,6 @@ gitclient-error-conflicts = loese zuerst die Konflikte, merke jede Datei vor, so
 gitclient-error-nothing-to-amend = es gibt noch keinen Commit zum Aendern
 gitclient-error-busy = eine andere entfernte Operation laeuft noch
 gitclient-error-undo = das konnte nicht rueckgaengig gemacht werden
+
+gitclient-tutorial = git-Client, aus dem Store: navigiere zu einem Ordner in einem Repository und druecke :, um es zu oeffnen. Die Liste enthaelt dann Aenderungen, Graph, Branches, Stashes, und Remotes, und : gibt dort die git-Befehle statt einer weiteren Ansicht. Escape fuehrt zurueck zu den Ordnern. Die oberste Zeile sagt, in welchem Repository du bist, auf welchem Branch, und wie weit du dem Remote voraus oder hinterher bist.
+gitclient-tutorial-2 = Unter Aenderungen ist die erste Zeile die Nachricht, druecke also i und tippe sie. Darunter stehen vier Schaltflaechen, committen, committen und den letzten aendern, committen und pushen, und committen und synchronisieren, und Enter auf einer davon fuehrt sie aus. Darunter steht jede geaenderte Datei, zuerst die Konflikte, dann was vorgemerkt ist, dann was nicht, und Rechts auf einer Datei liest ihre Unterschiede Zeile fuer Zeile. Vormerken, verwerfen, verzweigen, und stashen liegen alle auf den : Befehlen, und Vormerken und Committen lassen sich mit Strg z rueckgaengig machen.

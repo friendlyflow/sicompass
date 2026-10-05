@@ -1,8 +1,8 @@
 {
   "name": "webbrowser",
   "displayName": "web browser",
-  "type": "wasm",
-  "entry": "plugin.wasm",
+  "type": "process",
+  "entry": "plugin",
   "version": "0.2.0",
   "minAppVersion": "0.2.0",
   "description": "webbrowser-description",

@@ -10,7 +10,7 @@ rather than writing another one. It comes in two forms:
 
 - **`<input>`**, which the app edits for you. Almost every provider uses this.
 - **`sicompass_sdk::input`**, the same model as plain data, for a surface the app
-  does not draw (a dashboard, native or WASM).
+  does not draw (a dashboard, built in or in a plugin).
 
 ## 1. The default: emit `<input>`
 
@@ -72,8 +72,9 @@ Two capability flags change what happens around an edit:
 A dashboard receives raw keys in `dashboard_key` and text in `dashboard_text`, and
 draws its own cell grid. It has no `<input>` to lean on, so it edits text itself.
 Build that on the SDK model, not on a fresh `String` and caret. The project
-management board (`../projectmanagement-plugin-sicompass`) is the worked example. A WASM
-plugin gets the same module as `sicompass_pdk::input`.
+management board (`../projectmanagement-plugin-sicompass`) is the worked example. A
+plugin process has the same module, since `sicompass_sdk::input` is there with
+`default-features = false` too.
 
 The model has two parts:
 
@@ -95,9 +96,9 @@ The model has two parts:
    `DashboardSelection` covering every line of the field. The app paints it as one
    rounded shape. Do not fill each line separately.
 4. **Place the caret from the same lines.** `input::line_of(text, &lines, caret)`
-   gives `(line, column)`, indent included. Set `DashboardFrame::cursor`, and in a
-   native provider `cursor_style: DashboardCursor::Bar` (a WASM plugin's cursor
-   is always a filled cell, see [wasm-plugins.md](wasm-plugins.md#known-limits)).
+   gives `(line, column)`, indent included. Set `DashboardFrame::cursor` and
+   `cursor_style: DashboardCursor::Bar` (in a plugin, `Frame::cursor` and
+   `cursor_style: CursorStyle::Bar`, which the app passes through).
 5. **Route keys to `InputState`.** `insert_str`, `backspace`, `delete_forward`,
    `left`, `right`, `home`, `end`, and `up`/`down(&lines, extend)`. Pass the lines
    from step 1 **for the width you last drew at** (remember it in

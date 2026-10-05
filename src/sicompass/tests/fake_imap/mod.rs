@@ -89,11 +89,6 @@ impl FakeImap {
         format!("imap://127.0.0.1:{}", self.port)
     }
 
-    /// The socket grant the plugin needs for this server.
-    pub fn endpoint(&self) -> String {
-        format!("127.0.0.1:{}", self.port)
-    }
-
     /// New mail: a message added to INBOX, which an idling client hears of.
     pub fn deliver(&self, subject: &str, from: &str) {
         let mut st = self.state.lock().unwrap();

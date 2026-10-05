@@ -29,3 +29,7 @@ claude-confirm-delete-no = no, keep it
 claude-confirm-delete-yes = yes, delete it
 claude-session-deleted = session deleted:
 claude-session-delete-failed = could not delete that session
+
+# The tutorial's paragraphs about this program, under its programs section:
+# <name>-tutorial, then <name>-tutorial-2 and so on, read until one is missing.
+claude-tutorial = Claude, from the Store: press : to turn the list into a Claude session running in the folder you are in, with an input line at the bottom. The header then says first command mode, because a second : is available here. The folder matters, because it decides which project Claude can see, so walk into one with Right first if you want it working a level deeper. Type a prompt and press Enter, and the answer arrives as a tree of messages, tool calls, and results you can walk through. Escape returns to the folders. Pressing : again at the input line opens the project's skills in second command mode, where Enter drops the chosen skill into your prompt. Pressing : in a different folder starts a fresh session there, which replaces the previous conversation.

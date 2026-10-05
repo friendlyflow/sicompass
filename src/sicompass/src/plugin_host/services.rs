@@ -17,7 +17,7 @@ use sicompass_sdk::plugin_ipc::{
     Application, HostRequest, HostResponse, OauthReply, TierStanding, TierStatus,
 };
 
-use crate::wasm_host::desktop;
+use super::desktop;
 
 /// The URLs a plugin was asked to render and has not answered yet, shared
 /// between the provider that asks and the thread that takes the answer.
@@ -71,7 +71,7 @@ impl Services {
         if !self.setting_keys.iter().any(|k| k == key) {
             return None;
         }
-        crate::wasm_host::read_plugin_setting(&self.settings_section, key)
+        read_plugin_setting(&self.settings_section, key)
             .map(|v| crate::plugin_manifest::expand_home(&v))
             .or_else(|| {
                 self.setting_defaults
@@ -156,6 +156,33 @@ impl Services {
             }
         }
     }
+}
+
+/// Read one setting from the plugin's own section of the user's `settings.json`.
+///
+/// Only the section its own manifest declared: other providers' sections hold
+/// API keys, IMAP passwords and licence certificates. (A plugin process could
+/// read the file itself, but the app does not hand them over.) Mirrors how
+/// `programs::is_plugin_enabled_in_config` reads the same file.
+pub(crate) fn read_plugin_setting(section: &str, key: &str) -> Option<String> {
+    let path = sicompass_sdk::platform::main_config_path()?;
+    let data = std::fs::read_to_string(&path).ok()?;
+    let root: serde_json::Value = serde_json::from_str(&data).ok()?;
+
+    // `programs::inject_plugin_settings` registers under the manifest's
+    // `displayName`, which is what `section` is. The spaces-stripped fallback
+    // matches `programs::instantiate_builtin`'s leniency about names like
+    // "chat client" vs "chatclient".
+    let compact: String = section.chars().filter(|&c| c != ' ').collect();
+    for candidate in [section, compact.as_str()] {
+        if let Some(v) = root.get(candidate).and_then(|s| s.get(key)) {
+            return Some(match v {
+                serde_json::Value::String(s) => s.clone(),
+                other => other.to_string(),
+            });
+        }
+    }
+    None
 }
 
 /// A path a plugin names: absolute, as the plugin process sees the

@@ -97,10 +97,9 @@ fn ensure_builtins() {
     sicompass_builtins::register_all();
     // The web browser is a plugin now, keeping its URL history in its storage
     // folder, which the harness makes a temp folder. The Chrome it starts is
-    // a fake, for every browser plugin in this binary (see `fake_chrome`):
-    // the browser tests once leaked a real Chrome each and took the desktop
-    // down with them.
-    sicompass::wasm_host::process::_set_test_program("google-chrome", fake_chrome::program());
+    // a fake: the only program on its `PATH` (see `webbrowser_plugin`). The
+    // browser tests once leaked a real Chrome each and took the desktop down
+    // with them.
     // (The terminal, which *appends* every submitted line to its recall
     // history, is a plugin now: it keeps that history in its storage folder,
     // which `fs_plugin` does not grant, so these tests never reach one.)
@@ -108,15 +107,15 @@ fn ensure_builtins() {
     // there *deletes* a transcript, is a plugin now. It reads Claude Code's
     // folder only once its `claudeFolder` setting names one, which the harness
     // never does with the developer's own: see `claude_plugin`.)
-    // And for plugins' `desktop.trash` / `open-url` / `open-path`
-    // (wasm_host/desktop.rs): the file browser's and the text editor's deletes
+    // And for plugins' `desktop::trash` / `open_url` / `open_path`
+    // (plugin_host/desktop.rs): the file browser's and the text editor's deletes
     // go to the *OS* trash, which sicompass does not own, so no amount of
     // guarding its own directories ever caught it. Every harness delete once
     // left its fixture in the developer's real trash; that is where 37 850
     // `aaa` / `doomed.txt` / `undotest.txt` entries in a 45 479-entry trash came
     // from. Under the flag the host "trashes" into a private temp folder.
-    sicompass::wasm_host::desktop::_set_test_no_trash(true);
-    sicompass::wasm_host::desktop::_set_test_no_open(true);
+    sicompass::plugin_host::desktop::_set_test_no_trash(true);
+    sicompass::plugin_host::desktop::_set_test_no_open(true);
 }
 
 // ---------------------------------------------------------------------------
@@ -2213,10 +2212,9 @@ fn enter_in_editor_general_appends() {
     );
 }
 
-/// The sandboxed plugin starting a real Chrome (on Xvfb when there is one)
-/// through the host, with its profile in the plugin's storage, and loading a
-/// page. Needs Chrome as `google-chrome-stable` (the fake Chrome only stands
-/// in for `google-chrome`). Run alone:
+/// The plugin starting a real Chrome (on Xvfb when there is one), with its
+/// profile in the plugin's storage, and loading a page. Needs a Chrome on
+/// `PATH`. Run alone:
 /// `cargo test -p sicompass --test integration -- --ignored --test-threads=1 real_chrome`
 /// and check that no Chrome with `--remote-debugging-pipe` is left.
 #[test]
@@ -2224,11 +2222,7 @@ fn enter_in_editor_general_appends() {
 fn the_browser_plugin_loads_a_page_in_a_real_chrome() {
     let url = serve_html("<!DOCTYPE html><html><body><h1>Hello from real Chrome</h1></body></html>");
     let tmp = TempDir::new().unwrap();
-    let mut p = plugin_provider_with(
-        "webbrowser",
-        Some(tmp.path()),
-        Some(&["google-chrome-stable", "Xvfb"]),
-    );
+    let mut p = plugin_provider_with("webbrowser", Some(tmp.path()), Vec::new());
     p.fetch();
     assert!(p.commit_edit("", &url));
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
@@ -2248,8 +2242,7 @@ fn the_browser_plugin_loads_a_page_in_a_real_chrome() {
 #[test]
 fn the_browser_plugin_without_chrome_says_it_is_missing() {
     let tmp = TempDir::new().unwrap();
-    let mut p =
-        plugin_provider_with("webbrowser", Some(tmp.path()), Some(&["definitely-not-chrome-xyz"]));
+    let mut p = plugin_provider_with("webbrowser", Some(tmp.path()), no_programs_env());
     p.fetch();
     assert!(p.commit_edit("", "https://example.invalid"));
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
@@ -6828,8 +6821,7 @@ fn editing_leaf_in_nested_compose_body_does_not_empty_list() {
 }
 
 /// The email plugin signed in to `server`: a saved sign-in in its storage
-/// folder, as a Google sign-in leaves one, and a socket grant for that server
-/// alone.
+/// folder, as a Google sign-in leaves one.
 fn email_plugin_on(server: &fake_imap::FakeImap, storage: &Path) -> Box<dyn Provider> {
     std::fs::create_dir_all(storage).unwrap();
     let saved = serde_json::json!({ "email client": {
@@ -6840,7 +6832,7 @@ fn email_plugin_on(server: &fake_imap::FakeImap, storage: &Path) -> Box<dyn Prov
         "emailTokenExpiry": 4_000_000_000_i64,
     }});
     std::fs::write(storage.join("email.json"), saved.to_string()).unwrap();
-    plugin_provider_granted("emailclient", Some(storage), None, &[server.endpoint()])
+    plugin_provider_granted("emailclient", Some(storage), Vec::new())
 }
 
 /// Fetch until `pred` holds over the row keys. The plugin does its IMAP in a
@@ -7101,36 +7093,6 @@ fn email_plugin_hears_new_mail_through_its_idle_task() {
     wait_for_rows(&mut p, "the new message", |r| {
         r.iter().any(|k| k.contains("Gamma"))
     });
-}
-
-/// `*:993` is any *public* server: a mail server on the local network is out
-/// of reach, whatever the settings say.
-#[test]
-fn email_plugin_never_reaches_the_local_network() {
-    let tmp = TempDir::new().unwrap();
-    let storage = tmp.path().join("emailclient");
-    std::fs::create_dir_all(&storage).unwrap();
-    let saved = serde_json::json!({ "email client": {
-        "emailImapUrl": "imaps://127.0.0.1:993",
-        "emailUsername": "me@x.com",
-        "emailOAuthAccessToken": "fake",
-        "emailTokenExpiry": 4_000_000_000_i64,
-    }});
-    std::fs::write(storage.join("email.json"), saved.to_string()).unwrap();
-    let mut p = plugin_provider_granted(
-        "emailclient",
-        Some(&storage),
-        None,
-        &["*:993".to_owned(), "*:465".to_owned()],
-    );
-    let rows = wait_for_rows(&mut p, "the refusal", |r| {
-        r.iter().any(|k| k.starts_with("IMAP error"))
-    });
-    let error = rows
-        .iter()
-        .find_map(|e| e.as_str().filter(|s| s.starts_with("IMAP error")))
-        .unwrap();
-    assert!(error.contains("no address"), "{error}");
 }
 
 // ---------------------------------------------------------------------------
@@ -8197,22 +8159,6 @@ fn chatclient_plugin_opens_on_its_sign_in_form() {
         rows.iter().any(|r| r.contains("<button>login</button>")),
         "{rows:?}"
     );
-}
-
-/// "Any server" is any *public* server: a homeserver on the local network is
-/// refused by the host before anything is sent.
-#[test]
-fn chatclient_plugin_never_reaches_the_local_network() {
-    let tmp = TempDir::new().unwrap();
-    let mut p = plugin_provider("chatclient", &tmp.path().join("chatclient"));
-    p.on_setting_change("chatHomeserver", "http://127.0.0.1:9");
-    p.on_setting_change("chatUsername", "someone");
-    p.on_setting_change("chatPassword", "secret");
-    chat_rows(&mut p);
-    p.on_button_press("login");
-    p.tick();
-    let err = p.take_error().expect("the sign-in fails");
-    assert!(err.contains("internal address"), "{err}");
 }
 
 // ---------------------------------------------------------------------------
@@ -18328,39 +18274,38 @@ fn harness_with_notes() -> (AppRenderer, TempDir) {
     (renderer, tmp)
 }
 
-/// A program that is a plugin now, loaded the way the app loads an installed
-/// one: its component through the WASM host, its own locales, and its
-/// `/storage` at `storage`. That is the folder the built-in kept its store in,
-/// so these tests also show an existing store opening unchanged.
+/// A program that is a plugin now, started the way the app starts an
+/// installed one: its own process, its own locales, and its storage folder at
+/// `storage`. That is the folder the built-in kept its store in, so these tests
+/// also show an existing store opening unchanged.
 ///
-/// `tests/fixtures/plugins/<name>` is the plugin's release contents (built
-/// from `../<name>-plugin-sicompass`: `plugin.json`, `locales/`, and
-/// `target/wasm32-wasip2/release/<name>_plugin.wasm` as `plugin.wasm`),
-/// committed like the `hello.wasm` fixture and for the same reason.
+/// `tests/fixtures/plugins/<name>` is the plugin's `plugin.json` and
+/// `locales/`, from its repo at the rev `Cargo.toml` pins, and the program is
+/// `examples/plugin_<name>.rs`, that same crate made a program, which
+/// `cargo test` builds.
 fn plugin_provider(name: &str, storage: &Path) -> Box<dyn Provider> {
-    plugin_provider_with(name, Some(storage), None)
+    plugin_provider_with(name, Some(storage), Vec::new())
 }
 
 /// A program that is a plugin now and keeps no storage of its own: the file
-/// browser and the text editor, which reach the disk through their
-/// `filesystem` grant (`/`, the whole disk, as the user approves at install).
+/// browser and the text editor, which work on the whole disk.
 /// Their deletes go to the host's trash, which the harness keeps in a private
 /// temp folder (`desktop::_set_test_no_trash`).
 fn fs_plugin(name: &str) -> Box<dyn Provider> {
-    plugin_provider_with(name, None, None)
+    plugin_provider_with(name, None, Vec::new())
 }
 
-/// The Claude plugin, allowed to start only a program that cannot exist.
+/// The Claude plugin, in an environment where no `claude` can be found.
 ///
 /// That is the safety rail: these tests drive `:`, and a machine with a real
-/// `claude` would otherwise start an actual API session per test. The host
-/// refuses `claude`, so the spawn still *fails* usefully, and the view swap,
-/// the working directory and the placeholder behaviour under test all happen
-/// either way. Its folder (`~/.claude`) is whatever [`fake_claude_sessions`]
+/// `claude` would otherwise start an actual API session per test. With an
+/// empty `PATH` and a home folder of its own there is none to find, so the
+/// spawn still *fails* usefully, and the view swap, the working directory and
+/// the placeholder behaviour under test all happen either way. Its folder (`~/.claude`) is whatever [`fake_claude_sessions`]
 /// last made on this thread, and otherwise none, so the developer's own
 /// transcripts and skills are never read (and never deleted).
 fn claude_plugin() -> Box<dyn Provider> {
-    let mut p = plugin_provider_with("claude", None, Some(&["definitely-not-claude-xyz-9000"]));
+    let mut p = plugin_provider_with("claude", None, no_programs_env());
     if let Some(folder) = CLAUDE_FOLDER.with(|f| f.borrow().clone()) {
         p.on_setting_change("claudeFolder", folder.to_str().unwrap());
     }
@@ -18373,20 +18318,41 @@ thread_local! {
         const { std::cell::RefCell::new(None) };
 }
 
-fn plugin_provider_with(
-    name: &str,
-    storage: Option<&Path>,
-    process: Option<&[&str]>,
-) -> Box<dyn Provider> {
-    plugin_provider_granted(name, storage, process, &[])
+fn plugin_provider_with(name: &str, storage: Option<&Path>, env: Env) -> Box<dyn Provider> {
+    plugin_provider_granted(name, storage, env)
 }
 
-/// The web browser plugin, its storage in `storage`, allowed to start only
-/// `google-chrome`, which in this binary is the fake Chrome (see
-/// `ensure_builtins`). No Xvfb either, so the fake runs "headless".
+/// Environment variables for a plugin's process, on top of the test's.
+type Env = Vec<(std::ffi::OsString, std::ffi::OsString)>;
+
+/// A home folder of the plugins' own, for the whole test binary: no
+/// `~/.local/bin` (or `~/Applications`) with the developer's programs in it.
+fn plugin_home() -> &'static Path {
+    static HOME: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+    HOME.get_or_init(|| tempfile::tempdir().unwrap().keep())
+}
+
+/// An environment in which a plugin finds no program at all: an empty folder
+/// for `PATH`, and [`plugin_home`] for the home folder.
+fn no_programs_env() -> Env {
+    static EMPTY: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+    let empty = EMPTY.get_or_init(|| tempfile::tempdir().unwrap().keep());
+    vec![
+        ("PATH".into(), empty.into()),
+        ("HOME".into(), plugin_home().into()),
+    ]
+}
+
+/// The web browser plugin, its storage in `storage`, with only the fake Chrome
+/// on its `PATH` (see `fake_chrome`) and a home folder of its own. No Xvfb
+/// either, so the fake runs "headless".
 fn webbrowser_plugin(storage: &Path) -> Box<dyn Provider> {
     ensure_builtins();
-    plugin_provider_with("webbrowser", Some(storage), Some(&["google-chrome"]))
+    let env = vec![
+        ("PATH".into(), fake_chrome::dir().into()),
+        ("HOME".into(), plugin_home().into()),
+    ];
+    plugin_provider_with("webbrowser", Some(storage), env)
 }
 
 /// Run frames the way the app's loop does (ticks, the refresh of the active
@@ -18426,63 +18392,61 @@ fn wait_for_page(r: &mut AppRenderer, wb_idx: usize) {
 }
 
 /// The email plugin with no mail server: enough for everything the compose
-/// form does, which never touches the network. Its sockets are the ones its
-/// manifest asks for, public servers only.
+/// form does, which never touches the network.
 fn email_plugin() -> Box<dyn Provider> {
-    let sockets = ["*:993", "*:465", "*:587"].map(str::to_owned);
-    plugin_provider_granted("emailclient", None, None, &sockets)
+    plugin_provider_granted("emailclient", None, Vec::new())
 }
 
-/// A plugin from the fixtures, with the grants its manifest asks for, except
-/// `process` when given (only those programs) and `sockets`, which are only
-/// the ones given: the tests' servers are on loopback, which `*:<port>`
-/// never reaches.
-fn plugin_provider_granted(
-    name: &str,
-    storage: Option<&Path>,
-    process: Option<&[&str]>,
-    sockets: &[String],
-) -> Box<dyn Provider> {
+/// The program `examples/plugin_<name>.rs` builds: `target/<profile>/examples/
+/// plugin_<name>`, without the `.exe` the app adds itself.
+fn plugin_program(name: &str) -> std::path::PathBuf {
+    let exe = std::env::current_exe().unwrap();
+    let profile = exe.parent().unwrap().parent().unwrap();
+    let entry = profile.join("examples").join(format!("plugin_{name}"));
+    let built = std::path::PathBuf::from(format!("{}{}", entry.display(), std::env::consts::EXE_SUFFIX));
+    if !built.exists() {
+        let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".into());
+        let ok = std::process::Command::new(cargo)
+            .args(["build", "-p", "sicompass", "--example", &format!("plugin_{name}")])
+            .status()
+            .unwrap()
+            .success();
+        assert!(ok, "building plugin_{name} failed");
+    }
+    entry
+}
+
+/// A plugin from the fixtures, started as the app starts it, with what its
+/// manifest asks for and `env` for its process.
+fn plugin_provider_granted(name: &str, storage: Option<&Path>, env: Env) -> Box<dyn Provider> {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures/plugins")
         .join(name);
     let manifest: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(dir.join("plugin.json")).unwrap()).unwrap();
-    let strings = |key: &str| -> Vec<String> {
-        manifest["permissions"][key]
-            .as_array()
-            .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_owned)).collect())
-            .unwrap_or_default()
-    };
     if let Some(storage) = storage {
         std::fs::create_dir_all(storage).unwrap();
     }
-    let grants = sicompass::wasm_host::Grants {
-        allowed_hosts: strings("allowedHosts"),
+    let grants = sicompass::plugin_host::Grants {
         storage_dir: storage.map(Path::to_path_buf),
-        filesystem: strings("filesystem")
-            .iter()
-            .map(|p| std::path::PathBuf::from(sicompass::plugin_manifest::expand_home(p)))
-            .collect(),
-        process: match process {
-            Some(only) => only.iter().map(|p| p.to_string()).collect(),
-            None => strings("process"),
-        },
         settings: manifest["settings"]
             .as_array()
             .map(|a| a.iter().filter_map(|s| s["key"].as_str().map(str::to_owned)).collect())
             .unwrap_or_default(),
         service_tier: manifest["service"]["tier"].as_str().map(str::to_owned),
-        sockets: sockets.to_vec(),
         renders_pages: manifest["rendersPages"].as_bool().unwrap_or(false),
         ..Default::default()
     };
-    let component = sicompass::wasm_host::load_component(&dir.join("plugin.wasm")).unwrap();
     let display = manifest["displayName"].as_str().unwrap();
     Box::new(
-        sicompass::wasm_host::WasmProvider::from_component_with_grants(
-            &component, name, display, &dir, grants,
-        )
+        sicompass::plugin_host::ProcessProvider::open(sicompass::plugin_host::Spec {
+            entry_path: &plugin_program(name),
+            plugin_name: name,
+            settings_section: display,
+            plugin_dir: &dir,
+            grants,
+            env,
+        })
         .unwrap(),
     )
 }

@@ -66,3 +66,6 @@ projectmanagement-cmd-restore-backup = Cloud-Sicherung wiederherstellen
 projectmanagement-restore-done = Cloud-Sicherung wiederhergestellt
 projectmanagement-restore-empty = es gibt keine Cloud-Sicherung zum Wiederherstellen
 projectmanagement-restore-refused = Ihr Board ist nicht leer, es wurde nichts wiederhergestellt
+
+projectmanagement-tutorial = Projektverwaltung, aus dem Store: ein Kanban-Board. Drücken Sie Strg+A, um eine Spalte hinzuzufügen, Rechts, um sie zu öffnen, und Strg+A darin, um eine Karte hinzuzufügen. Eine Spalte enthält Karten und nichts Tieferes, eine Karte ist also die letzte Ebene.
+projectmanagement-tutorial-2 = d: öffnen Sie das Board selbst, mit den Spalten nebeneinander. Der Cursor steht auf einer Karte, und nur diese Karte ist hervorgehoben. Links und Rechts wechseln zwischen Spalten, Hoch und Runter gehen durch die Karten einer Spalte. i und a bearbeiten die Karte, o und Umschalt+o öffnen eine neue darunter oder darüber, Strg+D löscht, und Strg+X, Strg+C und Strg+V schneiden aus, kopieren und fügen ein. Eine leere Spalte zeigt einen Platz, auf den Sie sich stellen können, um ihre erste Karte hinzuzufügen. Die Spalten selbst verwalten Sie in der Liste. Escape geht zurück.

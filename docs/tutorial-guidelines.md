@@ -86,7 +86,7 @@ inline a manual, and do not re-list keys that already live in Shortcuts at a gla
 The programs section only writes the intro and the two programs that ship with the
 app (Store and Settings). Every other program is a Store plugin, and its paragraphs
 are its own: `<name>-tutorial`, `<name>-tutorial-2` and so on, in the plugin's
-`locales/<lang>.ftl` (docs/wasm-plugins.md). The tutorial lists the plugins
+`locales/<lang>.ftl` (docs/process-plugins.md). The tutorial lists the plugins
 installed on the machine, sorted by display name. So a change to what a plugin's
 paragraph says is made in that plugin's repo, and the rules in this document apply
 there too.

@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use sicompass::plugin_host::{ProcessProvider, Spec};
-use sicompass::wasm_host::Grants;
+use sicompass::plugin_host::Grants;
 use sicompass_sdk::{DashboardKey, DashboardKeysym, FfonElement, Provider, TimelineEntry};
 
 /// `target/<profile>/examples/<name>`, building it when `cargo test --test
@@ -71,6 +71,7 @@ fn open_in(dir: &Path, grants: Grants) -> Result<ProcessProvider, String> {
         settings_section: "fixture",
         plugin_dir: dir,
         grants,
+        env: Vec::new(),
     })
 }
 
@@ -336,6 +337,7 @@ fn a_real_plugin_starts_fetches_and_stops() {
         settings_section: &m.display_name,
         plugin_dir: &dir,
         grants,
+        env: Vec::new(),
     })
     .unwrap();
     println!("{} ({})", p.display_name(), p.name());

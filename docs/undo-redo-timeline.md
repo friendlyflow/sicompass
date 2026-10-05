@@ -193,9 +193,9 @@ breaks:
   it is the surface the undo was asked for from, and escaping it throws the user
   out of the board on their first Ctrl+Z.
 
-`dashboard_uses_app_undo()` is host-side only and absent from the WIT
-descriptor: it decides which keys a provider intercepts, and a sandboxed guest
-does not get to make that choice. See `docs/wasm-plugins.md`.
+A plugin process opts in through its `Descriptor` (`dashboard_uses_app_undo`),
+which `ProcessProvider` reports as `dashboard_uses_app_undo()`. The project
+management board is such a plugin. See `docs/process-plugins.md`.
 
 Not reversible, and worth stating:
 
@@ -245,7 +245,8 @@ The caret in a card is a **bar**, not a filled cell: `DashboardFrame::cursor_sty
 is `DashboardCursor::Bar`, and the app draws it as the same thin blinking
 rectangle it draws in its own insert mode, gated on the same `caret.visible`. A
 filled cell is what a *terminal* cursor is, which is why that stays the default
-and both the terminal and `WasmProvider` keep it.
+and the terminal keeps it. A plugin picks its style in `Frame::cursor_style`,
+and `ProcessProvider` passes it through.
 
 The dashboard key and text paths **reset the blink**, like every insert-mode
 handler in the app. Without it the bar free-runs, so a keystroke can land in its
@@ -294,9 +295,10 @@ vertically. Both halves of that need the region named rather than inferred per
 cell. Corner rounding is per rectangle, so a multi-row card drawn row by row comes
 out as a stack of separate blobs; and a cell is a whole row tall, so painting the
 highlight slightly shorter than the rows it covers is the only way to get
-breathing space around it. `WasmProvider` always reports `None` — a guest's fills
-are its own colours, not a licence to borrow the app's selection furniture — and
-so does the terminal, whose fills are SGR backgrounds a program asked for.
+breathing space around it. A plugin names the region in `Frame::selection`, which
+`ProcessProvider` clamps to the grid and passes through. The terminal always
+reports `None`: its fills are SGR backgrounds a program asked for, not a licence
+to borrow the app's selection furniture.
 
 One more thing the board owes the timeline: `Board::reseat_counter` is
 **monotonic**. Undo shrinks the board, and a counter that followed it down would

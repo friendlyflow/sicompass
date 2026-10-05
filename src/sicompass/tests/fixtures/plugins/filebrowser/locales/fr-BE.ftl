@@ -9,3 +9,5 @@ filebrowser-error-open-with-no-filename = ouvrir avec : impossible d'extraire le
 
 filebrowser-description = Vos fichiers et dossiers comme une liste de listes : parcourir, renommer, créer, copier, déplacer et supprimer, le tout annulable.
 filebrowser-radio-sort-order = ordre de tri
+
+filebrowser-tutorial = Navigateur de fichiers, depuis le store : votre système de fichiers sous forme d'arbre. Entrez dans les dossiers avec Droite, renommez avec i, et créez, copiez, collez ou supprimez des éléments sur place. Les fichiers commençant par un point sont masqués, lancez la commande deux-points show/hide hidden files pour les voir.

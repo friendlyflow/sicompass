@@ -135,3 +135,8 @@ gitclient-error-conflicts = resolve the conflicts first, stage each file once it
 gitclient-error-nothing-to-amend = there is no commit to amend yet
 gitclient-error-busy = another remote operation is still running
 gitclient-error-undo = that could not be undone
+
+# The tutorial's paragraphs about this program, under its programs section:
+# <name>-tutorial, then <name>-tutorial-2 and so on, read until one is missing.
+gitclient-tutorial = Git client, from the Store: browse to a folder inside a repository and press : to open it. The list then holds changes, graph, branches, stashes, and remotes, and : from there is the git commands rather than another view. Escape goes back to the folders. The top row says which repository you are in, which branch you are on, and how far ahead or behind the remote you are.
+gitclient-tutorial-2 = Under changes, the first row is the commit message, so press i and type it. Below it are four buttons, commit, commit amending the last one, commit and push, and commit and sync, and Enter on one runs it. Below those is every changed file, conflicts first, then what is staged, then what is not, and Right on a file reads its diff line by line. Staging, discarding, branching, and stashing all live on the : commands, and staging and committing can be undone with ctrl z.

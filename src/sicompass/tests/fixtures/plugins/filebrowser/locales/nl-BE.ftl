@@ -9,3 +9,5 @@ filebrowser-error-open-with-no-filename = openen met: kon bestandsnaam niet bepa
 
 filebrowser-description = Je bestanden en mappen als een lijst van lijsten: bladeren, hernoemen, aanmaken, kopiëren, verplaatsen en verwijderen, alles ongedaan te maken.
 filebrowser-radio-sort-order = sorteervolgorde
+
+filebrowser-tutorial = Bestandsverkenner, uit de store: je bestandssysteem als een boom. Stap met Rechts in mappen, hernoem met i, en maak, kopieer, plak of verwijder items ter plaatse. Bestanden die met een punt beginnen zijn verborgen, voer het dubbelpuntcommando show/hide hidden files uit om ze te zien.

@@ -41,3 +41,5 @@ notes-cmd-restore-backup = cloudback-up terugzetten
 notes-restore-done = cloudback-up teruggezet
 notes-restore-empty = er is geen cloudback-up om terug te zetten
 notes-restore-refused = je notities zijn niet leeg, er werd niets teruggezet
+
+notes-tutorial = Notities, uit de store: druk op ctrl+a om een notitie te schrijven, Rechts om ze te openen en opnieuw ctrl+a erin om een regel toe te voegen. Notities kunnen zo diep genest worden als u wilt en elke wijziging staat op de undo-tijdlijn. De eerste rij van een notitie is de lijstinfo, waar u instelt of de notitie privé of openbaar is.

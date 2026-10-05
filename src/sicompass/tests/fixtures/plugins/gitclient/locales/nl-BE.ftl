@@ -99,3 +99,6 @@ gitclient-error-conflicts = los eerst de conflicten op, zet elk bestand klaar zo
 gitclient-error-nothing-to-amend = er is nog geen commit om aan te passen
 gitclient-error-busy = er loopt nog een andere externe bewerking
 gitclient-error-undo = dat kon niet ongedaan gemaakt worden
+
+gitclient-tutorial = Git client, uit de store: blader naar een map in een repository en druk : om ze te openen. De lijst bevat dan wijzigingen, grafiek, takken, opzijgezet werk, en remotes, en : daar geeft de git commando's in plaats van nog een weergave. Escape brengt je terug naar de mappen. De bovenste rij zegt in welke repository je zit, op welke tak je staat, en hoever je voor of achter de remote loopt.
+gitclient-tutorial-2 = Onder wijzigingen is de eerste rij het bericht, dus druk i en typ het. Daaronder staan vier knoppen, vastleggen, vastleggen en de vorige aanpassen, vastleggen en versturen, en vastleggen en synchroniseren, en Enter op een ervan voert ze uit. Daaronder staat elk gewijzigd bestand, eerst de conflicten, dan wat klaarstaat, dan wat niet klaarstaat, en Rechts op een bestand leest de verschillen regel per regel. Klaarzetten, weggooien, vertakken, en opzijzetten zitten allemaal in de : commando's, en klaarzetten en vastleggen kan je ongedaan maken met ctrl z.

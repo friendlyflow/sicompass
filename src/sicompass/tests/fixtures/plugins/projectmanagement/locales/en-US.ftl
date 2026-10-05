@@ -78,3 +78,8 @@ projectmanagement-cmd-restore-backup = restore cloud backup
 projectmanagement-restore-done = cloud backup restored
 projectmanagement-restore-empty = there is no cloud backup to restore
 projectmanagement-restore-refused = your board is not empty, so nothing was restored
+
+# The tutorial's paragraphs about this program, under its programs section:
+# <name>-tutorial, then <name>-tutorial-2 and so on, read until one is missing.
+projectmanagement-tutorial = Project management, from the Store: a kanban board. Press ctrl+a to add a column, Right to open it, and ctrl+a inside to add a card. A column holds cards and nothing deeper, so a card is the last level.
+projectmanagement-tutorial-2 = d: open the board itself, with the columns side by side. The cursor sits on a card, and the one card it is on is the only thing highlighted. Left and Right move between columns, Up and Down through the cards in one. i and a edit the card, o and shift+o open a new one below or above, ctrl+d deletes, and ctrl+x, ctrl+c and ctrl+v cut, copy and paste. An empty column shows one slot you can stand on to add its first card. Columns themselves are managed in the list. Escape goes back.

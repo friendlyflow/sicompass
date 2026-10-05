@@ -10,3 +10,5 @@ terminal-setting-auto-dashboard = dashboard automatisch openen voor interactieve
 # Commandonamen, getoond waar de commando's van de provider opgesomd worden.
 terminal-command-shell = shell
 terminal-command-browse = mappen
+
+terminal-tutorial = Terminal, uit de store: druk op : om de lijst te veranderen in een echte shell die draait in de map waar je nu bent, met onderaan een invoerregel. De koptekst zegt dan commandomodus. Ga eerst met Rechts een map binnen als je de shell een niveau dieper wilt. Escape brengt je terug naar de mappen, en schermvullende programma's zoals vim en htop krijgen hun eigen interactieve modus.

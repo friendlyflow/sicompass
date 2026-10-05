@@ -287,29 +287,6 @@ assets = [
 ]
 
 [features]
-# What the WASM plugin host compiles guests *to*.
-#
-#   cargo build --no-default-features --features no-jit-wasm,bundled-sdl3
-#
-# is the App Store / iOS build: it emits no native code at runtime, so it needs no
-# `allow-jit` entitlement. Runtime native codegen is forbidden outright on iOS.
-#
-# Both features keep Cranelift, and that is not an oversight. Pulley is an
-# *interpreter for a bytecode that Cranelift lowers wasm into*, not a replacement
-# for it — with `pulley` alone, `Component::new` does not even exist, because
-# nothing can turn a `.wasm` into anything runnable. What `no-jit-wasm` changes is
-# the Cranelift *target*: `pulley64` instead of the host ISA, so the output is
-# interpreted bytecode rather than executable machine code. No W^X pages, no JIT.
-#
-# The cost is speed: an interpreted guest is far slower than a JIT-compiled one,
-# which is why the WIT world batches per-frame reads into a single `poll()` call.
-#
-# Cargo features are additive, so a feature cannot *remove* Cranelift — hence the
-# default-on/opt-out shape rather than an opt-in `no-jit` flag.
-default = ["jit-wasm"]
-jit-wasm = ["wasmtime/cranelift"]
-no-jit-wasm = ["wasmtime/cranelift", "wasmtime/pulley"]
-
 # Build SDL3 from its vendored source and link it statically, so the resulting
 # binary is self-contained (no system SDL3 / SDL3.dll / libSDL3.dylib needed).
 # Off by default — local dev builds keep linking the system SDL3. Release
@@ -364,22 +341,11 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 tracing-appender = { workspace = true }
 
-wasmtime = { workspace = true }
-wasmtime-wasi = { workspace = true }
-# `Bytes`, the buffer type wasmtime-wasi's stream traits take (wasm_host/wasi.rs).
-bytes = "1"
-# The OS trash, for a plugin's `desktop.trash` (wasm_host/desktop.rs).
+# The OS trash, for a plugin's `desktop::trash` (plugin_host/desktop.rs).
 trash = "5"
-# A plugin's `process` children on a pseudo-terminal (wasm_host/process.rs).
-portable-pty = { workspace = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 accesskit_unix = { workspace = true }
-
-[target.'cfg(unix)'.dependencies]
-# A plugin's `desktop.stat`: owner and group names, and the local UTC offset
-# (wasm_host/desktop.rs).
-libc = { workspace = true }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 accesskit_windows = { workspace = true }
@@ -410,6 +376,19 @@ winresource = { workspace = true }
 # `plugin` for the plugin processes in examples/, which tests/process_plugin.rs
 # runs (`cargo test` builds examples).
 sicompass-sdk = { workspace = true, features = ["package", "ipc", "plugin"] }
+# The plugins tests/integration.rs runs, each built into a program by its
+# `examples/plugin_<name>.rs`. Pinned by rev to the commit whose `plugin.json` and
+# `locales/` are in tests/fixtures/plugins/<name>; move both together.
+notes-plugin = { git = "https://github.com/friendlyflow/notes-plugin-sicompass", rev = "fb344e22dce1ab6973fd171cbcf6f29d78052a2b" }
+projectmanagement-plugin = { git = "https://github.com/friendlyflow/projectmanagement-plugin-sicompass", rev = "1341d8867f9fca977cedaa9b1a2e1577242956d9" }
+filebrowser-plugin = { git = "https://github.com/friendlyflow/filebrowser-plugin-sicompass", rev = "6ac1822b1f87a820d659f004a7d52cd5c4f7739d" }
+texteditor-plugin = { git = "https://github.com/friendlyflow/texteditor-plugin-sicompass", rev = "e2fc88c3f05566d7ddf00f144485e47fb3d81f9f" }
+gitclient-plugin = { git = "https://github.com/friendlyflow/gitclient-plugin-sicompass", rev = "360d8c0e58c671d9fbd82656e061da10f2418d4f" }
+claude-plugin = { git = "https://github.com/friendlyflow/claude-plugin-sicompass", rev = "d247ae66b1cc8cb3b48e7423f871391049c362b6" }
+terminal-plugin = { git = "https://github.com/friendlyflow/terminal-plugin-sicompass", rev = "8632d0f16bed0948dbb483f0f2767e2059e45692" }
+chatclient-plugin = { git = "https://github.com/friendlyflow/chatclient-plugin-sicompass", rev = "d6254e659beedf49a6caa4b396f3c889d57efd17" }
+emailclient-plugin = { git = "https://github.com/friendlyflow/emailclient-plugin-sicompass", rev = "05a2e4dff1f58ba8970cdd683233d7fc14d7f64f" }
+webbrowser-plugin = { git = "https://github.com/friendlyflow/webbrowser-plugin-sicompass", rev = "5fb0abd55ede2f1f2b16a641169da1b4a60f4c01" }
 sicompass-builtins = { workspace = true }
 sicompass-settings = { workspace = true }
 sicompass-tutorial = { workspace = true }
@@ -424,8 +403,6 @@ sicompass-tutorial = { workspace = true }
 # would have these tests contacting it.
 mockall = { workspace = true }
 tempfile = { workspace = true }
-wit-parser = "0.258.0"
-wit-component = "0.258.0"
 wiremock.workspace = true
 # tests/store.rs drives a Store pointed at a local server into the app's queue.
 sicompass-store = { workspace = true }

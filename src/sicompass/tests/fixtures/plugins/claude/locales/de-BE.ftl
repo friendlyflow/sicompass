@@ -29,3 +29,5 @@ claude-confirm-delete-no = nein, behalten
 claude-confirm-delete-yes = ja, löschen
 claude-session-deleted = Sitzung gelöscht:
 claude-session-delete-failed = diese Sitzung konnte nicht gelöscht werden
+
+claude-tutorial = Claude, aus dem Store: Drücken Sie :, um die Liste in eine Claude-Sitzung zu verwandeln, die in dem Ordner läuft, in dem Sie gerade sind, mit einer Eingabezeile unten. Die Kopfzeile sagt dann erster Befehlsmodus, denn hier ist ein zweites : verfügbar. Der Ordner ist wichtig, denn er bestimmt, welches Projekt Claude sieht, gehen Sie also zuerst mit Rechts in einen Ordner, wenn Sie eine Ebene tiefer arbeiten möchten. Tippen Sie eine Frage und drücken Sie Enter, und die Antwort erscheint als Baum aus Nachrichten, Werkzeugaufrufen und Ergebnissen, den Sie durchgehen können. Escape führt zurück zu den Ordnern. Drücken Sie an der Eingabezeile erneut :, öffnen sich die Fähigkeiten des Projekts im zweiten Befehlsmodus, wo Enter die gewählte Fähigkeit in Ihre Frage einsetzt. Drücken Sie : in einem anderen Ordner, startet dort eine neue Sitzung, die das vorherige Gespräch ersetzt.

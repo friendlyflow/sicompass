@@ -41,3 +41,5 @@ notes-cmd-restore-backup = Cloud-Sicherung wiederherstellen
 notes-restore-done = Cloud-Sicherung wiederhergestellt
 notes-restore-empty = es gibt keine Cloud-Sicherung zum Wiederherstellen
 notes-restore-refused = Ihre Notizen sind nicht leer, es wurde nichts wiederhergestellt
+
+notes-tutorial = Notizen, aus dem Store: drücken Sie Strg+A, um eine Notiz zu schreiben, Rechts, um sie zu öffnen, und Strg+A erneut darin, um eine Zeile hinzuzufügen. Notizen lassen sich beliebig tief verschachteln und jede Änderung steht auf der Undo-Zeitleiste. Die erste Zeile einer Notiz ist ihre Listeninfo, wo Sie festlegen, ob die Notiz privat oder öffentlich ist.

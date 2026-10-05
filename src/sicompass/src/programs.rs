@@ -170,10 +170,6 @@ pub fn load_programs_with(
         sicompass_sdk::localize::set_locale(&lang);
     }
 
-    // The Store audits a plugin's component with the same check a load runs,
-    // before it replaces anything on disk.
-    sicompass_sdk::package::register_component_auditor(crate::wasm_host::audit_plugin_bytes);
-
     let queue: SettingsQueue = Arc::new(Mutex::new(Vec::new()));
     let queue_clone = Arc::clone(&queue);
 
@@ -544,7 +540,7 @@ fn trash_plugin_data(name: &str) -> Result<(), String> {
     if !dir.is_dir() {
         return Ok(());
     }
-    crate::wasm_host::desktop::trash_delete(&dir)
+    crate::plugin_host::desktop::trash_delete(&dir)
 }
 
 /// Inject setting entries from a `BuiltinManifest` into the settings provider.
@@ -590,13 +586,22 @@ fn instantiate_builtin(name: &str) -> Option<Box<dyn Provider>> {
     sicompass_sdk::create_provider_by_name(&compact)
 }
 
-/// Instantiate a user plugin (Script, Native, or Factory) from its discovered manifest.
+/// Instantiate a user plugin (a plugin process, or a built-in by `factory`) from
+/// its discovered manifest.
 ///
-/// Rejects plugins whose `minAppVersion` exceeds the running app version —
-/// the plugin file may already be on disk from an update, but if it
-/// declares it needs a newer app than this one, loading it would risk a
-/// missing-symbol crash. Logging makes the skip visible.
+/// Rejects plugins whose `minAppVersion` exceeds the running app version: the
+/// plugin may already be on disk from an update, but if it declares it needs a
+/// newer app than this one, loading it would risk a protocol it cannot speak.
+/// Logging makes the skip visible.
 fn instantiate_user_plugin(plugin: &DiscoveredPlugin) -> Option<Box<dyn Provider>> {
+    instantiate_user_plugin_approved(plugin, &crate::plugin_manifest::read_approvals())
+}
+
+/// [`instantiate_user_plugin`] with the user's approvals handed in.
+fn instantiate_user_plugin_approved(
+    plugin: &DiscoveredPlugin,
+    approvals: &std::collections::HashMap<String, String>,
+) -> Option<Box<dyn Provider>> {
     let m = &plugin.manifest;
 
     if let Some(min) = m.min_app_version.as_deref() {
@@ -617,57 +622,14 @@ fn instantiate_user_plugin(plugin: &DiscoveredPlugin) -> Option<Box<dyn Provider
     }
 
     match m.plugin_type {
-        PluginType::Wasm => {
-            // The plugin's own directory is the confinement root for any path the
-            // guest hands back, and the manifest's `allowedHosts` decides whether
-            // the network interface is linked into it at all.
-            let plugin_dir = plugin
-                .entry_path
-                .parent()
-                .unwrap_or_else(|| std::path::Path::new("."));
-
-            let grants = match crate::plugin_manifest::grants_for(
-                m,
-                &crate::plugin_manifest::read_approvals(),
-            ) {
-                Ok(g) => g,
-                Err(e) => {
-                    eprintln!("sicompass: plugin '{}' was not loaded: {e}", m.name);
-                    return None;
-                }
-            };
-
-            match crate::wasm_host::WasmProvider::open_with_grants(
-                &plugin.entry_path,
-                &m.name,
-                // Settings are injected under the display name, so that is the
-                // section `get_setting` has to read back from.
-                &m.display_name,
-                plugin_dir,
-                grants,
-            ) {
-                Ok(p) => Some(Box::new(p) as Box<dyn Provider>),
-                // Log here rather than leaving it to the caller's generic "failed to
-                // load" line: this error says *why* — an over-reaching capability, a
-                // malformed component, a trap during `init` — and that is the
-                // difference between a fixable report and a shrug.
-                Err(e) => {
-                    eprintln!("sicompass: plugin '{}' was not loaded: {e}", m.name);
-                    None
-                }
-            }
-        }
         PluginType::Process => {
             let plugin_dir = plugin
                 .entry_path
                 .parent()
                 .unwrap_or_else(|| std::path::Path::new("."));
-            // A plugin process runs with the user's rights, so it always needs
-            // their approval, recorded by the Store when they installed it.
-            let grants = match crate::plugin_manifest::grants_for(
-                m,
-                &crate::plugin_manifest::read_approvals(),
-            ) {
+            // A plugin runs with the user's rights, so it loads only once they
+            // approved it, which the Store records when they install it.
+            let grants = match crate::plugin_manifest::grants_for(m, approvals) {
                 Ok(g) => g,
                 Err(e) => {
                     eprintln!("sicompass: plugin '{}' was not loaded: {e}", m.name);
@@ -677,11 +639,16 @@ fn instantiate_user_plugin(plugin: &DiscoveredPlugin) -> Option<Box<dyn Provider
             match crate::plugin_host::ProcessProvider::open(crate::plugin_host::Spec {
                 entry_path: &plugin.entry_path,
                 plugin_name: &m.name,
+                // Settings are injected under the display name, so that is the
+                // section the plugin's settings are read back from.
                 settings_section: &m.display_name,
                 plugin_dir,
                 grants,
+                env: Vec::new(),
             }) {
                 Ok(p) => Some(Box::new(p) as Box<dyn Provider>),
+                // This error says *why*: a program that would not start, a
+                // protocol it does not speak, a panic during `init`.
                 Err(e) => {
                     eprintln!("sicompass: plugin '{}' was not loaded: {e}", m.name);
                     None
@@ -775,18 +742,15 @@ fn load_user_plugins(renderer: &mut AppRenderer, mut settings: Option<&mut dyn P
             Some(p) => {
                 register_provider(renderer, p);
                 if let Some(s) = settings.as_deref_mut() {
-                    // Announce the load once, on the initial pass — every later tab
-                    // instantiates its own copy, and three identical lines at startup
-                    // is noise. Naming the capabilities makes it obvious at a glance
-                    // when a manifest grants more than its author meant to.
-                    if m.plugin_type == PluginType::Wasm {
-                        let hosts = m.allowed_hosts();
-                        let caps = if hosts.is_empty() {
-                            "no network".to_owned()
-                        } else {
-                            format!("network: {}", hosts.join(", "))
-                        };
-                        eprintln!("sicompass: loaded wasm plugin '{}' ({caps})", m.name);
+                    // Announce the load once, on the initial pass: every later tab
+                    // starts its own copy, and three identical lines at startup is
+                    // noise.
+                    if m.plugin_type == PluginType::Process {
+                        eprintln!(
+                            "sicompass: loaded plugin '{}' {}",
+                            m.name,
+                            m.version.as_deref().unwrap_or("")
+                        );
                     }
 
                     // Third-party plugin version: prefer plugin.json's `version`
@@ -2740,8 +2704,8 @@ mod tests {
         PluginManifest {
             name: name.to_owned(),
             display_name: name.to_owned(),
-            plugin_type: PluginType::Wasm,
-            entry: "plugin.ts".to_owned(),
+            plugin_type: PluginType::Process,
+            entry: "plugin".to_owned(),
             supports_config_files: false,
             settings: vec![],
             version: None,
@@ -2760,74 +2724,86 @@ mod tests {
     fn make_discovered_plugin(name: &str) -> DiscoveredPlugin {
         DiscoveredPlugin {
             manifest: make_test_manifest(name),
-            entry_path: PathBuf::from("/nonexistent/plugin.ts"),
+            entry_path: PathBuf::from("/nonexistent/plugin"),
         }
     }
 
-    // --- wasm plugin instantiation ---
+    // --- plugin instantiation ---
 
-    /// The committed `hello-plugin` component. See `tests/wasm_plugin.rs` for how to
-    /// regenerate it.
-    fn wasm_fixture(name: &str) -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/fixtures/wasm")
-            .join(name)
+    /// `examples/process_fixture.rs`, the plugin process `cargo test` builds:
+    /// `target/<profile>/examples/process_fixture`, without the `.exe`.
+    fn fixture_entry() -> PathBuf {
+        let exe = std::env::current_exe().unwrap();
+        let profile = exe.parent().unwrap().parent().unwrap();
+        let entry = profile.join("examples").join("process_fixture");
+        let built = PathBuf::from(format!(
+            "{}{}",
+            entry.display(),
+            std::env::consts::EXE_SUFFIX
+        ));
+        if !built.exists() {
+            let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".into());
+            let ok = std::process::Command::new(cargo)
+                .args(["build", "-p", "sicompass", "--example", "process_fixture"])
+                .status()
+                .unwrap()
+                .success();
+            assert!(ok, "building the fixture failed");
+        }
+        entry
     }
 
-    fn make_wasm_plugin(name: &str, fixture: &str, allowed_hosts: Vec<String>) -> DiscoveredPlugin {
-        let mut manifest = make_test_manifest(name);
-        manifest.plugin_type = PluginType::Wasm;
-        manifest.entry = fixture.to_owned();
-        manifest.top_level_allowed_hosts = allowed_hosts;
+    fn make_process_plugin(name: &str) -> DiscoveredPlugin {
         DiscoveredPlugin {
-            manifest,
-            entry_path: wasm_fixture(fixture),
+            manifest: make_test_manifest(name),
+            entry_path: fixture_entry(),
         }
     }
 
-    #[test]
-    fn a_wasm_plugin_is_instantiated_from_its_manifest() {
-        let plugin = make_wasm_plugin("hello", "hello.wasm", vec![]);
-        let provider = instantiate_user_plugin(&plugin).expect("the fixture should load");
-
-        // Identity comes from the guest's `describe()`, not from the manifest, so a
-        // sensible name here means the component really was instantiated and called.
-        assert_eq!(provider.name(), "hello");
+    /// What the Store records when the user installs `plugin`.
+    fn approved(plugin: &DiscoveredPlugin) -> std::collections::HashMap<String, String> {
+        std::collections::HashMap::from([(
+            plugin.manifest.name.clone(),
+            sicompass_sdk::plugin_abi::approval_fingerprint(&plugin.manifest),
+        )])
     }
 
     #[test]
-    fn a_wasm_plugin_reaching_the_network_without_declaring_hosts_is_refused() {
-        // The manifest is the user's only view of what a plugin will connect to, so
-        // a component that skips the declaration must not load at all.
-        let plugin = make_wasm_plugin("net-demo", "net.wasm", vec![]);
+    fn a_plugin_is_instantiated_from_its_manifest() {
+        let plugin = make_process_plugin("fixture");
+        let provider = instantiate_user_plugin_approved(&plugin, &approved(&plugin))
+            .expect("the fixture should load");
+        // Identity comes from the plugin's `describe()`, not from the manifest, so
+        // a sensible name here means the process really was started and called.
+        assert_eq!(provider.name(), "fixture");
+    }
+
+    #[test]
+    fn a_plugin_the_user_did_not_approve_is_not_started() {
+        // It would run with the user's rights, so it waits for their approval.
+        let plugin = make_process_plugin("fixture");
+        assert!(instantiate_user_plugin_approved(&plugin, &Default::default()).is_none());
+        let mut other = std::collections::HashMap::new();
+        other.insert("fixture".to_owned(), "process;hosts=;filesystem=;process=git;sockets=".to_owned());
         assert!(
-            instantiate_user_plugin(&plugin).is_none(),
-            "an undeclared network capability must block loading"
+            instantiate_user_plugin_approved(&plugin, &other).is_none(),
+            "an approval of other access is not this one"
         );
     }
 
     #[test]
-    fn the_same_wasm_plugin_loads_once_its_hosts_are_declared() {
-        // Confirms the refusal above is about the missing declaration rather than
-        // the fixture being unloadable.
-        let plugin = make_wasm_plugin("net-demo", "net.wasm", vec!["example.com".to_owned()]);
-        assert!(instantiate_user_plugin(&plugin).is_some());
+    fn a_missing_program_is_reported_rather_than_panicking() {
+        let mut plugin = make_process_plugin("ghost");
+        plugin.entry_path = PathBuf::from("/nonexistent/plugin");
+        assert!(instantiate_user_plugin_approved(&plugin, &approved(&plugin)).is_none());
     }
 
     #[test]
-    fn a_missing_wasm_file_is_reported_rather_than_panicking() {
-        let mut plugin = make_wasm_plugin("ghost", "hello.wasm", vec![]);
-        plugin.entry_path = PathBuf::from("/nonexistent/plugin.wasm");
-        assert!(instantiate_user_plugin(&plugin).is_none());
-    }
-
-    #[test]
-    fn a_wasm_plugin_needing_a_newer_app_is_still_skipped() {
-        // The min-app-version gate runs before the type match, so it must apply to
-        // wasm plugins exactly as it did to native ones.
-        let mut plugin = make_wasm_plugin("futuristic", "hello.wasm", vec![]);
+    fn a_plugin_needing_a_newer_app_is_still_skipped() {
+        // The min-app-version gate runs before the type match.
+        let mut plugin = make_process_plugin("futuristic");
         plugin.manifest.min_app_version = Some("9999.0.0".to_owned());
-        assert!(instantiate_user_plugin(&plugin).is_none());
+        assert!(instantiate_user_plugin_approved(&plugin, &approved(&plugin)).is_none());
     }
 
     /// Serializes tests that mutate the process-wide `USER_PLUGIN_CACHE`. The
@@ -2856,35 +2832,37 @@ mod tests {
     fn disable_then_reenable_user_plugin_via_cache() {
         // Checks that `enable_provider` finds a user plugin in the cache and
         // registers it. Uses the real fixture rather than a placeholder path,
-        // because a WASM plugin either loads or does not — unlike the old
-        // ScriptProvider, which was constructed even when its script was missing and
-        // only failed later, when something called it.
+        // because a plugin either starts or does not.
         let _cache_guard = PLUGIN_CACHE_TEST_LOCK
             .lock()
             .unwrap_or_else(|e| e.into_inner());
         let mut r = AppRenderer::new();
-        let plugin = make_wasm_plugin("hello", "hello.wasm", vec![]);
+        let plugin = make_process_plugin("fixture");
+        // Approved, as the Store records it on install, in this test binary's
+        // own settings file.
+        crate::plugin_manifest::record_store_install(&plugin.manifest, false).unwrap();
         _reset_user_plugin_cache(vec![plugin]);
 
         // Pre-register a settings sentinel at the end
         register_provider(&mut r, Box::new(MockProv::new("settings")));
         let before = r.providers.len();
 
-        enable_provider(&mut r, "hello");
+        enable_provider(&mut r, "fixture");
         assert_eq!(r.providers.len(), before + 1);
-        assert!(r.providers.iter().any(|p| p.name() == "hello"));
+        assert!(r.providers.iter().any(|p| p.name() == "fixture"));
     }
 
     #[test]
     fn enabling_a_plugin_whose_file_is_missing_adds_nothing() {
-        // The behaviour that changed with WASM: a provider that cannot load is not
-        // registered at all, rather than registered as a shell that fails on use.
+        // A provider that cannot start is not registered at all, rather than
+        // registered as a shell that fails on use.
         let _cache_guard = PLUGIN_CACHE_TEST_LOCK
             .lock()
             .unwrap_or_else(|e| e.into_inner());
         let mut r = AppRenderer::new();
-        let mut plugin = make_wasm_plugin("ghost", "hello.wasm", vec![]);
-        plugin.entry_path = PathBuf::from("/nonexistent/plugin.wasm");
+        let mut plugin = make_process_plugin("ghost");
+        plugin.entry_path = PathBuf::from("/nonexistent/plugin");
+        crate::plugin_manifest::record_store_install(&plugin.manifest, false).unwrap();
         _reset_user_plugin_cache(vec![plugin]);
 
         register_provider(&mut r, Box::new(MockProv::new("settings")));

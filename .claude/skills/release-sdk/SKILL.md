@@ -1,6 +1,6 @@
 ---
 name: release-sdk
-description: Publish sicompass-sdk / sicompass-pdk to crates.io (moved to /release sicompass-plugin-sdk)
+description: Publish sicompass-sdk to crates.io (moved to /release sicompass-plugin-sdk)
 disable-model-invocation: true
 model: sonnet
 ---

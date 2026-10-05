@@ -56,19 +56,6 @@
               clippy
               rustfmt
 
-              # WASM plugin guests are built in the sicompass-plugin-sdk repo's
-              # own dev shell, not here: they target wasm32-wasip2 (ABI 0.2), and
-              # nixpkgs' rustc has no std for it, so that shell takes Rust from
-              # rust-overlay. This shell keeps two tools for inspecting guests:
-              #
-              # lld: nixpkgs strips rustc's bundled rust-lld, so a
-              # `wasm32-unknown-unknown` link needs wasm-ld from here (only for
-              # rebuilding an ABI 0.1 guest, which nothing should need).
-              lld
-              # wasm-tools: `wasm-tools component wit plugin.wasm` prints what a
-              # guest imports, which is its capability set.
-              wasm-tools
-
               # git: the git client plugin (from the Store) shells out to it
               # rather than linking libgit2, and the integration tests drive
               # that plugin against throwaway repositories. Pinned here so
@@ -363,8 +350,6 @@
               # then every test binary dies at startup with
               #   error while loading shared libraries: libssl.so.3
               # because its RUNPATH is only the placeholder outputs/out/lib.
-              # (lld is still in buildInputs above: the wasm guests invoke
-              # wasm-ld directly, where no rpath injection is involved.)
 
               # Cap parallel cargo jobs by RAM as well as cores. A single rustc
               # on this workspace can hold ~1 GB (chromiumoxide is the worst,

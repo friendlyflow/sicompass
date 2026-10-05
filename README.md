@@ -159,7 +159,7 @@ the icon.
 - **Native accessibility**: built-in screen reader support on Linux, macOS, and Windows
 - **Cross-platform**: packaged for Windows, macOS, and Linux, with paths, shells, and PTYs routed through platform helpers
 - **High-performance rendering**: Vulkan graphics with a FreeType2 glyph atlas
-- **Extensible**: sandboxed plugins, installed and updated from the built-in Store without a restart
+- **Extensible**: plugins, installed and updated from the built-in Store without a restart
 
 ## Built-in providers
 
@@ -172,8 +172,8 @@ Email, Remote and the Sales demo are installed from the Store. Saving and openin
 The Store lists the programs you can add. Each one says what it may reach
 before you install it (a server, your files, another program) and whether it
 uses a paid service. Installing and updating is free, and a program is ready
-the moment it is installed. Plugins run in a sandbox, so a program can reach
-only what its entry says. The Store also holds the paid tiers: Sicompass Cloud
+the moment it is installed. A program runs with your rights, so its entry says
+what it does before you install it, and installing it is your approval. The Store also holds the paid tiers: Sicompass Cloud
 (cloud backup of your notes and board), Sicompass Commercial (Cloud plus the
 commercial licence), Sponsor and Support. Your own data never depends on
 paying: without a subscription your notes and board stay on your computer,

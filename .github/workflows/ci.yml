@@ -3,12 +3,6 @@ name: CI
 # Runs the test suite and clippy. Manual only — start it from the GitHub web UI:
 # Actions -> CI -> Run workflow. Nothing in this repository runs as a side effect
 # of committing; every run is something someone chose to start.
-#
-# The WASM plugin host is built two different ways — Cranelift for normal builds,
-# Pulley for the App Store / iOS one — and they are genuinely different code paths,
-# not a flag. A guest that traps on fuel under Cranelift trips the wall-clock
-# deadline under Pulley instead, and `Component::new` does not even exist without a
-# compiler backend. Testing one leg would leave the other untested until release.
 on:
   workflow_dispatch:
 
@@ -30,14 +24,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Linux runs the full suite over both wasmtime backends.
-          - name: linux cranelift (jit)
+          # Linux runs the full suite, plugins included: the integration tests
+          # build the plugin repos the app pins into programs and run them.
+          - name: linux
             os: ubuntu-22.04
             flags: ""
-            full: true
-          - name: linux pulley (no-jit)
-            os: ubuntu-22.04
-            flags: "--no-default-features --features no-jit-wasm"
             full: true
           # macOS and Windows compile and lint rather than running the full
           # suite, which reaches the network and wants a display. The
@@ -275,57 +266,3 @@ jobs:
 
       - name: Show the release plan
         run: dist plan
-
-  # The guest half of the SDK has to keep building for wasm, and the example plugin
-  # has to keep producing a component that imports nothing beyond the host
-  # interfaces. That audit is the security property in this design, so it belongs in
-  # CI rather than in a script someone remembers to run.
-  guest:
-    name: wasm guest builds and audits clean
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: wasm32-unknown-unknown
-
-      - name: Install wasm-tools
-        uses: bytecodealliance/actions/wasm-tools/setup@v1
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: guest
-
-      # The fixtures the host tests run against are committed, so this checks they
-      # still match what the current sources produce rather than silently drifting.
-      - name: Rebuild the example plugin and compare with the committed fixture
-        run: |
-          if [ ! -d ../sicompass-plugin-sdk ]; then
-            echo "::notice::SDK checkout not present; skipping guest rebuild."
-            exit 0
-          fi
-          cd ../sicompass-plugin-sdk && ./scripts/verify-guest.sh
-
-      # Independent of the SDK checkout: the committed fixtures (the capability
-      # examples and the released plugins) must import nothing the host does not
-      # offer. Since ABI 0.2 that is the sicompass interfaces and WASI p2's
-      # baseline and TCP (sicompass_sdk::plugin_abi: WASI_BASELINE, WASI_SOCKETS),
-      # each linked only as plugin.json grants, which the host tests exercise.
-      # Never `wasi:sockets/ip-name-lookup`: resolving any name could leak data,
-      # so the host does not link it.
-      - name: Audit the committed fixtures
-        run: |
-          allowed='^import (sicompass:plugin/[a-z-]+|wasi:(cli/(environment|exit|stdin|stdout|stderr|terminal-(input|output|stdin|stdout|stderr))|clocks/(wall-clock|monotonic-clock)|random/(random|insecure|insecure-seed)|io/(error|poll|streams)|filesystem/(types|preopens)|sockets/(network|instance-network|tcp|tcp-create-socket|udp|udp-create-socket)))@'
-          for f in src/sicompass/tests/fixtures/wasm/*.wasm src/sicompass/tests/fixtures/plugins/*/plugin.wasm; do
-            echo "== $f"
-            imports=$(wasm-tools component wit "$f" | grep -E '^\s*import' | sed 's/^\s*//' || true)
-            echo "$imports"
-            if echo "$imports" | grep -q 'wasi:sockets/ip-name-lookup'; then
-              echo "::error::$f imports ip-name-lookup, which the host never links"
-              exit 1
-            fi
-            if echo "$imports" | grep -vE "$allowed" | grep -q 'import'; then
-              echo "::error::$f imports an interface the host does not provide"
-              exit 1
-            fi
-          done

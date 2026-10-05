@@ -1,16 +1,30 @@
 # The plugin platform (design, Step 4 of the 0.2.0 split)
 
-Status: **design for review**. Nothing here is implemented yet. Once a part is
-built, its section moves into [wasm-plugins.md](wasm-plugins.md) and this file
-shrinks to what is still open.
+> **Plugins are processes since 0.3.** A plugin is a native program that
+> sicompass starts and talks to over its stdin and stdout, and it runs with the
+> user's rights. [process-plugins.md](process-plugins.md) describes the host
+> side, and the SDK's `sicompass_sdk::plugin` module the plugin side. This file
+> is the 0.2.0 design, written for sandboxed WebAssembly components, and is kept
+> for the parts that still hold and as history.
+>
+> - **Still holds:** the business model (§1), translations shipped by a plugin
+>   (§6), packaging and signing (§7, now one archive per platform), the store
+>   (§8), lib_store (§9), tiers and certificates (§10) and the decisions (§14).
+>   The manifest fields and the approval in §4 hold too, as declarations.
+> - **Describes the retired WASM design:** the guest toolchain (§2), the WIT
+>   world (§3), permissions as enforced capabilities (§4), the capabilities one
+>   by one (§5), the host changes (§11) and the pdk (§12). What a plugin still
+>   asks the app for (settings, translations, the licence, the desktop, rendered
+>   pages) is listed in process-plugins.md. The step notes in §13 are the
+>   history of the WASM ports.
 
-Every program except the tutorial and Settings is leaving sicompass to become a
-WASM plugin in its own repo, installed on demand from a Store. Today's plugin
-host can run a sandboxed provider with no filesystem, no processes, no sockets,
-no background work and no translations of its own, and can only be installed by
-copying a folder by hand. This document is everything needed to close that gap:
-the guest ABI, the permissions model, packaging and signing, the Store, and the
-paid tiers.
+For 0.2.0, every program except the tutorial and Settings left sicompass to
+become a WASM plugin in its own repo, installed on demand from a Store. The
+plugin host of the time could run a sandboxed provider with no filesystem, no
+processes, no sockets, no background work and no translations of its own, and
+could only be installed by copying a folder by hand. This document was
+everything needed to close that gap: the guest ABI, the permissions model,
+packaging and signing, the Store, and the paid tiers.
 
 ## Contents
 
@@ -72,6 +86,10 @@ Decided with the maintainer on 2026-09-24.
 
 ## 2. Guest toolchain
 
+*Retired in 0.3.* A plugin is a program built for its platform's ordinary
+target now (static musl on Linux), and its flake takes rust-overlay for that
+target. What follows is the WASM toolchain of 0.2.
+
 Guests move from `wasm32-unknown-unknown` to **`wasm32-wasip2`**. rustc's wasip2
 target links through `wasm-component-ld` and emits a component directly, so the
 `wasm-tools component new` step disappears.
@@ -94,6 +112,11 @@ nixpkgs' rustc: the host never compiles a guest, and the committed test fixtures
 are built in the SDK repo.
 
 ## 3. The WIT world 0.2.0
+
+*Retired in 0.3.* There is no WIT world any more. The protocol between the app
+and a plugin process is `sicompass_sdk::plugin_ipc`, with one request per
+thing a provider does (the same set as the WIT `provider` interface below,
+trait parity included). What follows is the 0.2 design.
 
 `package sicompass:plugin@0.2.0`. WASI is 0.2.9, the version the current
 wasip2 `std` imports (measured: hello-plugin built for `wasm32-wasip2` imports
@@ -165,6 +188,15 @@ it, so the 13 ports in Steps 5-10 do not each discover a missing method.
 
 ## 4. Permissions
 
+*Since 0.3, declarations.* A plugin process runs with the user's rights, so
+nothing below is enforced: the `permissions` say what the plugin means to do,
+and the Store shows them before install. The manifest is the same apart from
+`"type": "process"` and `"entry": "plugin"` (no extension, the app adds `.exe`
+on Windows). The approval still works as described at the end of this section,
+except that a plugin process always needs it and its fingerprint starts with
+`process;`, so a plugin that moved from WASM to a process asks again. The
+"Grants" column is what the WASM host enforced.
+
 `plugin.json` 0.2:
 
 ```json
@@ -223,6 +255,12 @@ access" until the user approves.** A plugin copied into `plugins/` by hand asks
 on first enable instead.
 
 ## 5. Capabilities, one by one
+
+*Retired in 0.3.* A plugin process uses `std` for files, programs, sockets,
+threads and the network, so tasks, `process`, `sockets` and `net` are gone.
+`desktop` and `license` live on as requests a plugin makes to the app
+(process-plugins.md, "What a plugin asks the app"), with `oauth-redirect` among
+them. What follows is how the WASM host provided each capability.
 
 ### desktop (always)
 
@@ -368,52 +406,66 @@ A plugin ships `locales/<lang>.ftl`. At load, the host registers each file into
 the global Fluent bundles, **only if every message id starts with `<name>-`**.
 Otherwise the file is refused and the refusal logged. Without that rule, a plugin
 could silently lose a key to a built-in (first registration wins) or override
-another plugin's. `translate(key)` then works unchanged, and
-`translate-args(key, list<tuple<string, string>>)` covers what built-ins do with
-`t_args`.
+another plugin's. A plugin then asks the app with `host::translate(key)`, and
+`host::translate_args(key, args)` covers what built-ins do with `t_args`. The
+plugin's runtime caches the answers until the user's language changes.
 
 ## 7. Packaging and signing
 
-A plugin release is **one archive plus two small files**, attached to a GitHub
-Release under fixed names so `releases/latest/download/<file>` always works:
+A plugin release is **one archive per platform plus two small files**,
+attached to a GitHub Release under fixed names so
+`releases/latest/download/<file>` always works:
 
 | File | Contents |
 |---|---|
-| `plugin.tar.gz` | `plugin.json`, `plugin.wasm`, `assets/`, `locales/`, `LICENSE`, `THIRD-PARTY-LICENSES.html` |
-| `release.json` | `{ name, version, minAppVersion, permissions, service, archiveSha256 }` |
+| `plugin-<target>.tar.gz` | one per platform: `plugin.json`, that platform's build of the program (`plugin`, `plugin.exe` on Windows), `assets/`, `locales/`, `LICENSE`, `THIRD-PARTY-LICENSES.html` |
+| `release.json` | `{ name, version, abi, minAppVersion, permissions, service, targets }`, where `targets` names each archive's SHA-256 by target triple and `abi` is `process/1.0` |
 | `release.json.sig` | Ed25519 signature over `release.json`, by the plugin's key |
 
-The signature covers `release.json`, which pins the archive by hash. So the Store
-can show version, permissions and tier from a 1 KB download, and verify the
-archive after fetching it. This replaces today's updater format, which signs only
-`plugin.wasm` and therefore **drops a plugin's `assets/` on every update** (a bug
-this fixes).
+The targets are `x86_64-unknown-linux-musl` and `aarch64-unknown-linux-musl`
+(static, so one build runs on every distribution, NixOS included),
+`x86_64-apple-darwin`, `aarch64-apple-darwin` and `x86_64-pc-windows-msvc`.
 
-A new CLI in the SDK repo, `sicompass-plugin` (published with the SDK, so third
-parties `cargo install` the same tool CI uses), does the whole cycle:
+The signature covers `release.json`, which pins every archive by hash. So the
+Store can show version, permissions and tier from a 1 KB download, then
+download only this platform's archive and verify it. This replaced the 0.1
+updater format, which signed only `plugin.wasm` and therefore **dropped a
+plugin's `assets/` on every update**. A 0.2 release (one `plugin.tar.gz` holding
+a WASM component, named by `archiveSha256`) is refused with a reason, and an app
+that runs only WASM refuses a `process/1.0` release and keeps the version it
+has.
+
+A CLI in the SDK repo, `sicompass-plugin` (so third parties `cargo install` the
+same tool CI uses), does the whole cycle:
 
 ```
-sicompass-plugin keygen                # prints the public key for the store
-sicompass-plugin pack                  # builds, audits imports against plugin.json, archives
-sicompass-plugin sign --key <file>     # writes release.json(.sig)
-sicompass-plugin verify <dir|url>      # what the Store does, runnable by hand
+sicompass-plugin keygen --out <file>    # writes the secret key, prints the public one
+sicompass-plugin pubkey --key <file>    # the public key again, for the store list
+sicompass-plugin pack --bin <target>=<executable> ...
+                                        # one archive per --bin, and release.json
+sicompass-plugin sign --key <file>      # writes release.json.sig
+sicompass-plugin verify --pubkey <key>  # what the Store does, for every archive
 ```
 
-The plugin template's `release.yml`: tag, then build, then `pack`, then
-`sign` (key from the `PLUGIN_SIGNING_KEY` repo secret), then attach to the
-release.
+There is no import audit: a program has no import list, and what the user
+approves is that it runs at all. (In 0.2, `pack` audited a component's
+imports against `plugin.json`.)
 
-**Built in 4.10:** `/split-repo --kind plugin` uses `template/plugin/`: a
-rust-overlay flake with `wasm32-wasip2`, `scripts/release-plugin.sh` (build,
-pack and audit, sign, verify as the Store will, with `--dry-run` signing with a
-throwaway key), and `release.yml`/`ci.yml` that run it. The release job also
-checks the tag against `plugin.json`'s version and the signing key against the
-`PLUGIN_PUBLIC_KEY` variable (the key the store list names), so neither mistake
-reaches a user. Dry-run on a copy of `hello-plugin` outside the SDK tree: it
-packs, signs and verifies, and a wrong key or tag is refused. Plugin keys are
-kept in `~/.config/sicompass/plugin-keys/` and set as repo secrets with `gh`.
-docs/wasm-plugins.md has "Publishing a plugin", the README and the tutorial
-mention the Store.
+The plugin template's `release.yml`: tag, then build the program on one runner
+per platform, then `pack` the builds, `sign` (key from the `PLUGIN_SIGNING_KEY`
+repo secret) and `verify` in one job, then attach to the release.
+
+**Built in 4.10, redone for processes in 0.3:** `/split-repo --kind plugin` uses
+`template/plugin/`: a rust-overlay flake with this computer's plugin target,
+`scripts/release-plugin.sh` (`build <target>`, then `pack`, which packs, signs
+and verifies as the Store will, with `--dry-run` signing with a throwaway key,
+and with no command both for this computer's platform), and `release.yml` and
+`ci.yml` that run it. The release job also checks the tag against
+`plugin.json`'s version and the signing key against the `PLUGIN_PUBLIC_KEY`
+variable (the key the store list names), so neither mistake reaches a user.
+`salesdemo-plugin-sicompass` is the smallest plugin made this way. Plugin keys
+are kept in `~/.config/sicompass/plugin-keys/` and set as repo secrets with
+`gh`. The README and the tutorial mention the Store.
 
 ## 8. The store
 
@@ -494,8 +546,9 @@ Store
 ```
 
 - **Install, update and uninstall happen in the running app.** The Store works in
-  the background: download, verify, stage, audit the imports against the
-  approved permissions, then swap into `plugins/<name>/` atomically. It then tells
+  the background: download this platform's archive, verify it, stage it, check
+  its manifest against `release.json`, make the program executable, then swap
+  into `plugins/<name>/` atomically. It then tells
   the app through the same queued-callback pattern Settings uses (the SDK
   boundary forbids a direct call). The app rescans, loads, **injects the plugin's
   settings** (today a hot enable skips them, which is a bug), and enables it. No
@@ -515,7 +568,8 @@ Store
 
 - Store > programs lists the signed store list. Each entry's title says its
   state (`notes, installed, version 0.2.0`), and inside are the latest
-  version, the access in plain words, a paid service, and the buttons.
+  version, that it runs as a program on this computer with the user's rights,
+  the access it declares in plain words, a paid service, and the buttons.
   Nothing touches the network until programs is opened.
 - Install and Update run on a worker thread. They install only the exact
   release that was shown (a release published in between must be looked at
@@ -527,19 +581,20 @@ Store
   settings section, and loads or unloads it in every tab.
 - `/store` edits and re-signs the list with `~/.config/sicompass/store.key`.
 - Tests: `lib/lib_store/src/tests.rs` (wiremock, every refusal) and
-  `src/sicompass/tests/store.rs` (a real component, install to uninstall).
+  `src/sicompass/tests/store.rs` (a real plugin program, built from
+  `examples/process_fixture.rs`, install to uninstall).
 
-- Before the swap, the component is audited against the permissions the user
-  is approving, with the same wasmtime check a load runs
-  (`wasm_host::audit_plugin_bytes`, registered through
-  `sicompass_sdk::package::register_component_auditor`). With no auditor
-  registered, nothing installs.
+- Before the swap, the manifest inside the archive must say what `release.json`
+  says, and the program is made executable. There is no import audit since 0.3
+  (until then the component was audited against the permissions the user was
+  approving, with the same wasmtime check a load ran). What the user approves
+  is the declared access and that the plugin runs as a program at all.
 - After an uninstall the entry offers, as a separate button, to move the data
   folder to the trash. The app does it (`pluginDataTrash`) with its guarded
   trash, and refuses while the plugin is installed or when a built-in program
   shares the folder.
 - Plugins installed by hand are listed too. With an `updateUrl` (the folder
-  holding the three release files) and a `pubkey` in `plugin.json`, they
+  holding the release files) and a `pubkey` in `plugin.json`, they
   update here, and an update naming another key is refused. `lib_updater`
   now updates only the app.
 
@@ -585,7 +640,7 @@ is enough.)
 tier links in Settings and serves the server's tier pages from the Store's own
 tree (a `<link>` graft has no path, so the refresh after redeeming a token put
 the tiers list where the page was); the usage lines under the tiers; the
-`license` import. `lib_settings` no longer depends on `sicompass-payments`.
+`license` interface (since 0.3, the `license` requests of a plugin process). `lib_settings` no longer depends on `sicompass-payments`.
 Checked against a local server by hand (see each file's header): the
 certificates per tier, Commercial including Cloud and grace on the client in
 `lib/lib_store/tests/live_server.rs`, and grace on the server, usage and a
@@ -593,6 +648,10 @@ support licence refused for backup in `sicompass-plugin-sdk`'s
 `sicompass-payments/tests/live_server.rs`.
 
 ## 11. Host changes in sicompass
+
+*Retired in 0.3.* wasmtime, `src/sicompass/src/wasm_host/` and the import audit
+are deleted. The host is `src/sicompass/src/plugin_host/` now. This was the
+0.2 plan.
 
 - `wasmtime-wasi` 48 joins `wasmtime` in the app crate only. sicompass-ui, and
   so the greeter, stays free of it. That boundary is enforced by its Stop hook.
@@ -609,6 +668,10 @@ support licence refused for backup in `sicompass-plugin-sdk`'s
   startup today).
 
 ## 12. SDK and pdk changes
+
+*Retired in 0.3.* `sicompass-pdk` and the WIT file are gone. A plugin depends on
+`sicompass-sdk` with `default-features = false, features = ["plugin"]`. This
+was the 0.2 plan.
 
 - `sicompass-sdk` 0.9.0: the 0.2 WIT, and trait parity (§3).
 - `sicompass-pdk` 0.6.0:
@@ -630,6 +693,11 @@ support licence refused for backup in `sicompass-plugin-sdk`'s
   CLAUDE.md.
 
 ## 13. Build order and tests
+
+*History.* The build order and the step notes below record how each program
+became a WASM plugin. The limits they worked around (WASI's symlink handling,
+the empty environment, tasks and their inbox, the call deadline, SQLite for
+WASI) went with the sandbox in 0.3.
 
 Each part ends in something runnable, like Steps 1-3.
 

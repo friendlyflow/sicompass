@@ -27,3 +27,5 @@ claude-confirm-delete-no = non, la garder
 claude-confirm-delete-yes = oui, la supprimer
 claude-session-deleted = session supprimée :
 claude-session-delete-failed = impossible de supprimer cette session
+
+claude-tutorial = Claude, depuis le store : appuyez sur : pour transformer la liste en une session Claude qui s'exécute dans le dossier où vous êtes, avec une ligne d'entrée en bas. L'en-tête indique alors premier mode commande, car un second : est disponible ici. Le dossier compte, car il détermine quel projet Claude peut voir, alors entrez d'abord dans un dossier avec Droite si vous le voulez un niveau plus bas. Tapez une question et appuyez sur Enter, et la réponse arrive sous forme d'arbre de messages, d'appels d'outils et de résultats que vous pouvez parcourir. Échap ramène aux dossiers. Appuyer de nouveau sur : à la ligne d'entrée ouvre les compétences du projet en second mode commande, où Enter place la compétence choisie dans votre question. Appuyer sur : dans un autre dossier y démarre une nouvelle session, qui remplace la conversation précédente.

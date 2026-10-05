@@ -11,3 +11,5 @@ texteditor-error-redo-delete-trash-failed = redo verwijderen: prullenbak mislukt
 
 texteditor-description = Bewerk elk tekstbestand als een lijst van zijn regels, met inspringing en secties als niveaus, en elke wijziging ongedaan te maken.
 texteditor-setting-path = pad van de teksteditor
+
+texteditor-tutorial = Tekstverwerker, uit de store: druk op Rechts op een bestand om de inhoud als een boom te openen en de regels ter plaatse te bewerken. Elke wijziging staat op de undo-tijdlijn.

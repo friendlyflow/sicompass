@@ -25,14 +25,9 @@ a sicompass checkout. **Prefix every command with `cd PROJECT_ROOT &&`.**
 4. `nix flake update`.
 5. Build and test in **this repo's own** dev shell (`nix develop -c ...` run
    here). A shell entered from another checkout can lack this repo's targets.
-   - A plugin (a `cdylib` that its `Cargo.toml` says is only built for
-     `wasm32-wasip2`): `cargo build --target wasm32-wasip2`, then `cargo test`.
-     Never a plain host `cargo build`. The WIT export names
-     (`...provider@0.2.0#method`) go into the linker's version script, where
-     `#` starts a comment, so `ld.bfd` stops with `syntax error in VERSION
-     script` whether or not anything was updated. CI never builds a plugin
-     for the host either.
-   - Anything else: `cargo build`, then `cargo test`.
+   - `cargo build`, then `cargo test`. A plugin is a program like any other,
+     and in a plugin `./scripts/release-plugin.sh --dry-run` then builds this
+     computer's release and verifies it the way the Store will.
 
    If a bumped crate needs a large migration, revert that one requirement, note
    it as held back, and continue. Never weaken a test to get it to pass.

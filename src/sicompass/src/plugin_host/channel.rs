@@ -19,19 +19,14 @@ use sicompass_sdk::plugin_ipc::{
     write_message,
 };
 
-/// How long a plugin has to answer one call before it is stopped. Every call
-/// comes from the UI thread, so this is the longest the app can freeze on one.
-pub const CALL_DEADLINE: Duration = Duration::from_secs(10);
-
-/// How long a plugin has to say hello once started.
+/// How long a plugin has to say hello once started. A call has no deadline:
+/// the app waits as long as the plugin takes, as it always did for a plugin
+/// that was a program or a library. A plugin keeps slow work on a thread of
+/// its own, so the app does not freeze on it.
 const HELLO_DEADLINE: Duration = Duration::from_secs(10);
 
 /// How long a plugin let go of has to exit on its own before it is killed.
 const EXIT_GRACE: Duration = Duration::from_secs(3);
-
-/// Set to anything to wait for a plugin's answer forever: for a developer
-/// stepping through a plugin in a debugger.
-pub const NO_DEADLINE_ENV: &str = "SICOMPASS_PLUGIN_NO_DEADLINE";
 
 /// How many of the plugin's last log lines are kept, to say why it stopped.
 const LOG_TAIL: usize = 20;
@@ -47,7 +42,8 @@ enum Incoming {
 /// Why a call got no answer.
 #[derive(Debug, Clone, PartialEq)]
 pub enum CallError {
-    /// No answer within [`CALL_DEADLINE`]; the plugin has been stopped.
+    /// No answer within the deadline set with [`Channel::set_deadline`]; the
+    /// plugin has been stopped.
     TimedOut,
     /// The plugin is gone, with what its log said last.
     Closed(String),
@@ -66,7 +62,7 @@ pub struct Channel {
     /// sign-in the plugin is waiting on.
     closed: Arc<AtomicBool>,
     log_tail: Arc<Mutex<Vec<String>>>,
-    /// How long one call may take; `None` waits forever ([`NO_DEADLINE_ENV`]).
+    /// How long one call may take; `None`, the default, waits forever.
     deadline: Mutex<Option<Duration>>,
     pid: u32,
     name: String,
@@ -79,11 +75,13 @@ impl Channel {
         exe: &Path,
         dir: &Path,
         name: &str,
+        env: &[(std::ffi::OsString, std::ffi::OsString)],
         answer: Answer,
         closed: Arc<AtomicBool>,
     ) -> Result<Self, String> {
         let mut cmd = Command::new(exe);
         cmd.current_dir(dir)
+            .envs(env.iter().map(|(k, v)| (k, v)))
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
@@ -182,11 +180,7 @@ impl Channel {
             next_id: AtomicU64::new(1),
             closed,
             log_tail,
-            deadline: Mutex::new(
-                std::env::var_os(NO_DEADLINE_ENV)
-                    .is_none()
-                    .then_some(CALL_DEADLINE),
-            ),
+            deadline: Mutex::new(None),
             pid,
             name: name.to_owned(),
         };

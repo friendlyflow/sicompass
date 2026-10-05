@@ -4,14 +4,13 @@
 //! `release.json` is signed by the key its [`Source`] names, and its archive
 //! is believed when it hashes to what that `release.json` says. The archive's
 //! own `plugin.json` must then agree with `release.json` on everything the
-//! user approved, what gets installed must be exactly the release the user was
-//! shown, and the component must pass the host's import audit
-//! ([`sicompass_sdk::package::audit_component`]) against those permissions.
+//! user approved, and what gets installed must be exactly the release the user
+//! was shown.
 //!
-//! A plugin process has one archive per platform, and only this platform's is
-//! downloaded ([`ReleaseInfo::archive_for`]). It is a program, so there is no
-//! import list to audit: what the user approved is that it runs at all, with
-//! their rights. Its executable is made runnable after unpacking.
+//! A plugin is a program, released once per platform, and only this platform's
+//! archive is downloaded ([`ReleaseInfo::archive_for`]). What the user approves
+//! is that it runs at all, with their rights. Its executable is made runnable
+//! after unpacking.
 //!
 //! An install is staged in `plugins/.store/` and swapped into
 //! `plugins/<name>/` with a rename, so a failure half-way leaves the previous
@@ -22,7 +21,7 @@ use std::path::{Path, PathBuf};
 
 use sicompass_sdk::package::{self, RELEASE_FILE, ReleaseInfo, SIGNATURE_FILE};
 use sicompass_sdk::plugin_abi::{
-    ABI_VERSION, PROTOCOL_VERSION, executable_name, plugin_target, process_abi_compatible,
+    PROTOCOL_VERSION, executable_name, plugin_target, process_abi_compatible,
 };
 use sicompass_sdk::plugin_manifest::{PluginManifest, PluginType, parse_manifest};
 use sicompass_sdk::store::StoreEntry;
@@ -42,8 +41,8 @@ pub const RELEASES_URL: &str = "https://github.com";
 #[derive(Debug, Clone, PartialEq)]
 pub struct Source {
     pub name: String,
-    /// The folder holding `release.json`, `release.json.sig` and
-    /// `plugin.tar.gz`, ending in `/`.
+    /// The folder holding `release.json`, `release.json.sig` and the
+    /// `plugin-<target>.tar.gz` archives, ending in `/`.
     pub folder: String,
     /// Ed25519 public key (base64) the releases must be signed with.
     pub pubkey: String,
@@ -168,18 +167,12 @@ fn check_release_info(source: &Source, info: &ReleaseInfo) -> Result<(), String>
             source.name, info.name
         ));
     }
-    if info.is_process() {
-        if !process_abi_compatible(&info.abi) {
-            return Err(format!(
-                "it was built for plugin protocol {}, and this sicompass speaks {PROTOCOL_VERSION}",
-                info.abi.trim_start_matches("process/")
-            ));
-        }
-        info.archive_for(plugin_target())?;
-    } else if info.abi != ABI_VERSION {
+    // A WASM release, from before sicompass 0.3: `archive_for` says why not.
+    info.archive_for(plugin_target())?;
+    if !process_abi_compatible(&info.abi) {
         return Err(format!(
-            "it was built for plugin ABI {}, and this sicompass runs {ABI_VERSION}",
-            info.abi
+            "it was built for plugin protocol {}, and this sicompass speaks {PROTOCOL_VERSION}",
+            info.abi.trim_start_matches("process/")
         ));
     }
     version(&info.version)?;
@@ -207,7 +200,8 @@ pub fn fetch_release(fetch: &Fetch, source: &Source) -> Result<ReleaseInfo, Stri
 ///
 /// Refused when the release on the server is no longer that one, when it is
 /// revoked, needs a newer sicompass, is not newer than what is installed, when
-/// anything fails to verify, or when the component fails the import audit.
+/// anything fails to verify, or when the archive has no program for this
+/// platform.
 /// Returns the installed manifest.
 pub fn install(
     fetch: &Fetch,
@@ -217,8 +211,8 @@ pub fn install(
 ) -> Result<PluginManifest, String> {
     let json = fetch(&source.url(RELEASE_FILE))?;
     let signature = text(fetch(&source.url(SIGNATURE_FILE))?, SIGNATURE_FILE)?;
-    // Which archive to download is in the signed release.json: one for every
-    // platform, or this platform's build of a plugin process.
+    // Which archive to download is in the signed release.json: this
+    // platform's build.
     let listed = package::verify_release_info(&json, &signature, &source.pubkey)?;
     check_release_info(source, &listed)?;
     let (archive_file, _) = listed.archive_for(plugin_target())?;
@@ -276,27 +270,18 @@ fn stage_and_swap(
                 .to_owned(),
         );
     }
-    if info.is_process() != (manifest.plugin_type == PluginType::Process) {
-        return Err(
-            "plugin.json in the archive and release.json disagree on whether it is a program"
-                .to_owned(),
-        );
+    if manifest.plugin_type != PluginType::Process {
+        return Err("plugin.json in the archive does not name a program".to_owned());
     }
-    if manifest.plugin_type == PluginType::Process {
-        let target = plugin_target().ok_or("sicompass has no plugin builds for this platform")?;
-        let exe = staged.join(executable_name(&manifest.entry, target));
-        if !exe.is_file() {
-            return Err(format!(
-                "the archive has no `{}`",
-                executable_name(&manifest.entry, target)
-            ));
-        }
-        make_executable(&exe)?;
-    } else {
-        let wasm = std::fs::read(staged.join(&manifest.entry))
-            .map_err(|_| format!("the archive has no `{}`", manifest.entry))?;
-        package::audit_component(&wasm, &manifest)?;
+    let target = plugin_target().ok_or("sicompass has no plugin builds for this platform")?;
+    let exe = staged.join(executable_name(&manifest.entry, target));
+    if !exe.is_file() {
+        return Err(format!(
+            "the archive has no `{}`",
+            executable_name(&manifest.entry, target)
+        ));
     }
+    make_executable(&exe)?;
     swap_in(plugins_dir, &source.name, staged)?;
     Ok(manifest)
 }
@@ -390,7 +375,7 @@ mod tests {
     fn a_hand_install_updates_only_with_an_address_and_a_key() {
         let m = |extra: &str| {
             parse_manifest(&format!(
-                r#"{{ "name": "x", "displayName": "x", "entry": "plugin.wasm" {extra} }}"#
+                r#"{{ "name": "x", "displayName": "x", "type": "process", "entry": "plugin" {extra} }}"#
             ))
             .unwrap()
         };

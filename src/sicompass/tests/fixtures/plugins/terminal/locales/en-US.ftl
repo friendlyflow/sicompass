@@ -11,3 +11,7 @@ terminal-setting-auto-dashboard = auto-launch dashboard for interactive programs
 # swaps the folder listing for the shell, `browse` swaps back.
 terminal-command-shell = shell
 terminal-command-browse = folders
+
+# The tutorial's paragraphs about this program, under its programs section:
+# <name>-tutorial, then <name>-tutorial-2 and so on, read until one is missing.
+terminal-tutorial = Terminal, from the Store: press : to turn the list into a real shell running in the folder you are in, with an input line at the bottom. The header then says command mode. Walk into a folder with Right first if you want the shell one level deeper. Escape returns to the folders, and full-screen programs like vim and htop get their own interactive mode.

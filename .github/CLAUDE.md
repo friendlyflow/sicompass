@@ -131,10 +131,10 @@ and including 0.1.8, whose published binary read `shaders/*.spv` and
   in `about.toml`). `about.toml` now covers all four target triples, so a
   dependency change on any single platform can move
   `THIRD-PARTY-LICENSES.html`.
-- `ci.yml` runs the test suite and clippy on Linux over both wasmtime backends
-  (Cranelift and Pulley), compiles and lints on macOS (both architectures) and
-  Windows, audits the committed WASM fixtures, and checks that the generated
-  `release.yml` is in sync.
+- `ci.yml` runs the test suite and clippy on Linux (the plugins included: the
+  integration tests build the plugin repos the app pins into programs and run
+  them), compiles and lints on macOS (both architectures) and Windows, and
+  checks that the generated `release.yml` is in sync.
   - It builds with `--features bundled-sdl3`, the same as the release. It used
     to build SDL 3.2.28 from source instead, on the belief that SDL 3.4.12
     would not compile under GCC. The real cause was ours: the feature also set

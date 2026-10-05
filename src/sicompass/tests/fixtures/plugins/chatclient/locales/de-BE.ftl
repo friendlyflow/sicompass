@@ -38,3 +38,5 @@ chatclient-error-select-public-room = wählen Sie zuerst einen öffentlichen Rau
 chatclient-error-set-server-user-pass-first = geben Sie zuerst Homeserver, Benutzernamen und Passwort an
 chatclient-error-unban-failed = Entbannen fehlgeschlagen: { $err }
 chatclient-error-undo-failed = Undo fehlgeschlagen: { $err }
+
+chatclient-tutorial = Chat, aus dem Store: ein Matrix-Client. Melden Sie sich vor Ort an, Ihre Räume erscheinen als Baum, und Sie tippen eine Nachricht und drücken Enter zum Senden.

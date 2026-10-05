@@ -41,3 +41,5 @@ notes-cmd-restore-backup = restaurer la sauvegarde cloud
 notes-restore-done = sauvegarde cloud restaurée
 notes-restore-empty = il n'y a aucune sauvegarde cloud à restaurer
 notes-restore-refused = vos notes ne sont pas vides, rien n'a été restauré
+
+notes-tutorial = Notes, depuis le store : appuyez sur ctrl+a pour écrire une note, Droite pour l'ouvrir, et ctrl+a de nouveau à l'intérieur pour ajouter une ligne. Les notes s'imbriquent aussi profondément que vous voulez et chaque changement est sur la chronologie d'annulation. La première ligne d'une note est son info de liste, où vous définissez si la note est privée ou publique.

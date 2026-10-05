@@ -11,3 +11,5 @@ terminal-setting-auto-dashboard = Dashboard für interaktive Programme automatis
 # aufgelistet werden.
 terminal-command-shell = Shell
 terminal-command-browse = Ordner
+
+terminal-tutorial = Terminal, aus dem Store: Drücken Sie :, um die Liste in eine echte Shell zu verwandeln, die in dem Ordner läuft, in dem Sie gerade sind, mit einer Eingabezeile unten. Die Kopfzeile sagt dann Befehlsmodus. Gehen Sie zuerst mit Rechts in einen Ordner, wenn Sie die Shell eine Ebene tiefer möchten. Escape führt zurück zu den Ordnern, und Vollbild-Programme wie vim und htop erhalten ihren eigenen interaktiven Modus.

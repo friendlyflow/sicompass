@@ -915,7 +915,7 @@ mod tests {
         std::fs::write(
             dir.join("plugin.json"),
             format!(
-                r#"{{"name":"{name}","displayName":"{display_name}","entry":"plugin.wasm"}}"#
+                r#"{{"name":"{name}","displayName":"{display_name}","type":"process","entry":"plugin"}}"#
             ),
         )
         .unwrap();
@@ -1167,16 +1167,22 @@ mod tests {
             text.contains("salesdemo-plugin-sicompass"),
             "must point to the reference program"
         );
-        // Rust for built-ins, WASM for anything installed. The `native` and
-        // `script` plugin kinds are gone (docs/wasm-plugins.md), so naming them
-        // here would send a plugin author down a road that no longer exists.
+        // Rust for built-ins, a program of its own for anything installed, one
+        // that runs with the user's rights. The `native`, `script` and `wasm`
+        // plugin kinds are gone, so naming them here would send a plugin
+        // author down a road that no longer exists.
         assert!(
-            text.contains("Rust") && text.contains("WASM"),
-            "must name Rust (the standard) and WASM (the only installable kind)"
+            text.contains("Rust") && text.contains("program of its own"),
+            "must name Rust (the standard) and a program (the only installable kind)"
         );
         assert!(
-            text.contains("docs/wasm-plugins.md"),
-            "must point at the sandbox contract rather than inlining it"
+            text.contains("with your rights"),
+            "must say a plugin runs with the user's rights"
+        );
+        assert!(!text.contains("WASM"), "WASM plugins are gone");
+        assert!(
+            text.contains("docs/process-plugins.md"),
+            "must point at the plugin contract rather than inlining it"
         );
     }
 

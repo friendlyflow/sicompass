@@ -1,14 +1,13 @@
 //! The Store, end to end: a signed store list and a signed release of a real
-//! component on a local server, installed by the Store, delivered through the
-//! app's settings queue, loaded without a restart, then uninstalled.
+//! plugin program on a local server, installed by the Store, delivered through
+//! the app's settings queue, started without a restart, then uninstalled.
 //!
 //! lib_store's own tests cover what is refused (bad signatures, tampered
 //! archives, more access than approved). This one covers the hand-over to the
 //! app: that a finished install ends up as a running program with its settings
 //! section, an approval and an enable switch in settings.json, that an
 //! uninstall takes all of that away again, and that the data folder goes to the
-//! trash only when asked. It also runs the app's real pre-install audit
-//! (wasmtime), which lib_store's tests replace with a stand-in.
+//! trash only when asked.
 //!
 //! # Why this is its own test binary
 //!
@@ -21,17 +20,31 @@ use std::time::{Duration, Instant};
 
 use sicompass::programs;
 use sicompass_sdk::FfonElement;
-use sicompass_sdk::package::{self, ARCHIVE_FILE, RELEASE_FILE, ReleaseInfo, SIGNATURE_FILE};
+use sicompass_sdk::package::{self, RELEASE_FILE, ReleaseInfo, SIGNATURE_FILE};
 use sicompass_ui::app_state::AppRenderer;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-const REPO: &str = "friendlyflow/hello-plugin-sicompass";
+const REPO: &str = "friendlyflow/fixture-plugin-sicompass";
 
-fn fixture(name: &str) -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/fixtures/wasm")
-        .join(name)
+/// `examples/process_fixture.rs`, which `cargo test` builds, as this
+/// platform's program in the release.
+fn fixture_program() -> PathBuf {
+    let exe = std::env::current_exe().unwrap();
+    let profile = exe.parent().unwrap().parent().unwrap();
+    let path = profile
+        .join("examples")
+        .join(format!("process_fixture{}", std::env::consts::EXE_SUFFIX));
+    if !path.exists() {
+        let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".into());
+        let ok = std::process::Command::new(cargo)
+            .args(["build", "-p", "sicompass", "--example", "process_fixture"])
+            .status()
+            .unwrap()
+            .success();
+        assert!(ok, "building the fixture failed");
+    }
+    path
 }
 
 /// Point the platform's config and data directories into `dir`; see the
@@ -122,16 +135,17 @@ fn the_store_installs_a_plugin_into_the_running_app_and_removes_it() {
     sandbox_config(config_home.path());
     sicompass_builtins::register_all();
     // The data folder goes to a private temp trash, never the developer's.
-    sicompass::wasm_host::desktop::_set_test_no_trash(true);
+    sicompass::plugin_host::desktop::_set_test_no_trash(true);
 
-    // ---- A release of the real hello component, signed by its own key ----
+    // ---- A release of a real plugin program, signed by its own key ----
     let (plugin_secret, plugin_public) = package::generate_keypair().unwrap();
     let (store_secret, store_public) = package::generate_keypair().unwrap();
     let src = tempfile::tempdir().unwrap();
     let manifest_json = r#"{
-        "name": "hello",
-        "displayName": "hello demo",
-        "entry": "plugin.wasm",
+        "name": "fixture",
+        "displayName": "fixture demo",
+        "type": "process",
+        "entry": "plugin",
         "version": "0.2.0",
         "minAppVersion": "0.1.0",
         "settings": [
@@ -139,15 +153,24 @@ fn the_store_installs_a_plugin_into_the_running_app_and_removes_it() {
         ]
     }"#;
     std::fs::write(src.path().join("plugin.json"), manifest_json).unwrap();
-    std::fs::copy(fixture("hello.wasm"), src.path().join("plugin.wasm")).unwrap();
     let manifest = sicompass_sdk::plugin_manifest::parse_manifest(manifest_json).unwrap();
     let files = package::collect_files(src.path(), &manifest).unwrap();
-    let archive = package::build_archive(src.path(), &files).unwrap();
-    let release = serde_json::to_vec(&ReleaseInfo::new(&manifest, &archive).unwrap()).unwrap();
+    let target = sicompass_sdk::plugin_abi::plugin_target().unwrap();
+    let program = std::fs::read(fixture_program()).unwrap();
+    let archive =
+        package::build_process_archive(src.path(), &files, &manifest, target, &program).unwrap();
+    let release = serde_json::to_vec(
+        &ReleaseInfo::new_process(
+            &manifest,
+            &std::collections::BTreeMap::from([(target.to_owned(), archive.clone())]),
+        )
+        .unwrap(),
+    )
+    .unwrap();
     let release_sig = package::sign(&release, &plugin_secret).unwrap();
     let store = serde_json::to_vec(&serde_json::json!({
         "version": 1,
-        "plugins": [{ "name": "hello", "repo": REPO, "pubkey": plugin_public }]
+        "plugins": [{ "name": "fixture", "repo": REPO, "pubkey": plugin_public }]
     }))
     .unwrap();
     let store_sig = package::sign(&store, &store_secret).unwrap();
@@ -169,7 +192,7 @@ fn the_store_installs_a_plugin_into_the_running_app_and_removes_it() {
         &download(SIGNATURE_FILE),
         release_sig.into_bytes(),
     );
-    serve(&rt, &server, &download(ARCHIVE_FILE), archive);
+    serve(&rt, &server, &download(&package::archive_file(target)), archive);
 
     // ---- The app, with its Store pointed at that server ----
     let mut renderer = AppRenderer::new();
@@ -184,21 +207,6 @@ fn the_store_installs_a_plugin_into_the_running_app_and_removes_it() {
     let data_dir = sicompass_sdk::platform::app_data_dir().unwrap();
     assert!(data_dir.starts_with(config_home.path()));
 
-    // ---- The real pre-install audit, registered by load_programs ----
-    // net.wasm imports the network, so it passes only for a manifest that
-    // lists a host, which is what the Store checks before swapping it in.
-    let net = std::fs::read(fixture("net.wasm")).unwrap();
-    let net_manifest = |hosts: &str| {
-        sicompass_sdk::plugin_manifest::parse_manifest(&format!(
-            r#"{{ "name": "net", "displayName": "net", "entry": "plugin.wasm",
-                 "allowedHosts": [{hosts}] }}"#
-        ))
-        .unwrap()
-    };
-    let err = package::audit_component(&net, &net_manifest("")).unwrap_err();
-    assert!(err.contains("net"), "{err}");
-    package::audit_component(&net, &net_manifest(r#""example.com""#)).unwrap();
-    assert!(package::audit_component(b"not wasm", &net_manifest("")).is_err());
     renderer.providers[idx] = Box::new(sicompass_store::StoreProvider::new().with_sources(
         sicompass_store::http::http_fetch(),
         &format!("{}/store/", server.uri()),
@@ -207,25 +215,25 @@ fn the_store_installs_a_plugin_into_the_running_app_and_removes_it() {
         plugins_dir.clone(),
     ));
     programs::wire_store(&mut renderer.providers, &queue);
-    assert!(!loaded(&renderer, "hello"));
+    assert!(!loaded(&renderer, "fixture"));
 
     // ---- Install ----
     renderer.providers[idx].set_current_path("/programs");
     renderer.providers[idx].fetch();
     settle(&mut renderer, idx);
-    renderer.providers[idx].on_button_press("install:hello");
+    renderer.providers[idx].on_button_press("install:fixture");
     settle(&mut renderer, idx);
     programs::apply_pending_settings(&mut renderer, &queue, false);
 
-    assert!(plugins_dir.join("hello/plugin.wasm").is_file());
-    assert!(loaded(&renderer, "hello"), "installed but not loaded");
+    assert!(plugins_dir.join("fixture").join(sicompass_sdk::plugin_abi::executable_name("plugin", target)).is_file());
+    assert!(loaded(&renderer, "fixture"), "installed but not loaded");
     let cfg = settings_json();
     assert_eq!(
-        cfg["pluginApprovals"]["hello"].as_str(),
+        cfg["pluginApprovals"]["fixture"].as_str(),
         Some(sicompass_sdk::plugin_abi::approval_fingerprint(&manifest).as_str())
     );
-    assert_eq!(cfg["Available programs:"]["enable_hello"], true);
-    let section = settings_section(&renderer, "hello demo")
+    assert_eq!(cfg["Available programs:"]["enable_fixture"], true);
+    let section = settings_section(&renderer, "fixture demo")
         .expect("the plugin's settings section appears without a restart");
     assert!(
         section.iter().any(|l| l.contains("greeting")),
@@ -246,46 +254,46 @@ fn the_store_installs_a_plugin_into_the_running_app_and_removes_it() {
         .filter_map(|c| c.as_obj().map(|o| o.key.clone()))
         .collect();
     assert_eq!(
-        sections.iter().filter(|k| k.contains("hello")).count(),
+        sections.iter().filter(|k| k.contains("fixture")).count(),
         1,
         "one section per plugin, as at startup: {sections:?}"
     );
     let programs_section = settings_section(&renderer, "Available programs").unwrap();
     assert!(
-        programs_section.iter().any(|l| l.contains("hello demo")),
+        programs_section.iter().any(|l| l.contains("fixture demo")),
         "{programs_section:?}"
     );
 
     // The plugin's data folder, as it would have made one.
-    let data = data_dir.join("hello");
+    let data = data_dir.join("fixture");
     std::fs::create_dir_all(&data).unwrap();
     std::fs::write(data.join("kept.txt"), "mine").unwrap();
 
     // ---- Uninstall ----
-    // `hello` sorts before `store`, so the Store has moved down one place.
+    // `fixture` sorts before `store`, so the Store has moved down one place.
     let idx = store_index(&renderer);
-    renderer.providers[idx].on_button_press("uninstall:hello");
+    renderer.providers[idx].on_button_press("uninstall:fixture");
     programs::apply_pending_settings(&mut renderer, &queue, false);
 
-    assert!(!plugins_dir.join("hello").exists());
-    assert!(!loaded(&renderer, "hello"), "uninstalled but still loaded");
+    assert!(!plugins_dir.join("fixture").exists());
+    assert!(!loaded(&renderer, "fixture"), "uninstalled but still loaded");
     let cfg = settings_json();
-    assert!(cfg["pluginApprovals"].get("hello").is_none(), "{cfg}");
+    assert!(cfg["pluginApprovals"].get("fixture").is_none(), "{cfg}");
     assert!(
-        cfg["Available programs:"].get("enable_hello").is_none(),
+        cfg["Available programs:"].get("enable_fixture").is_none(),
         "{cfg}"
     );
-    assert!(settings_section(&renderer, "hello demo").is_none());
+    assert!(settings_section(&renderer, "fixture demo").is_none());
     let programs_section = settings_section(&renderer, "Available programs").unwrap();
     assert!(
-        !programs_section.iter().any(|l| l.contains("hello demo")),
+        !programs_section.iter().any(|l| l.contains("fixture demo")),
         "{programs_section:?}"
     );
 
     // Uninstalling keeps the data; moving it to the trash is a separate press.
     assert!(data.join("kept.txt").is_file());
     let idx = store_index(&renderer);
-    renderer.providers[idx].on_button_press("trashdata:hello");
+    renderer.providers[idx].on_button_press("trashdata:fixture");
     programs::apply_pending_settings(&mut renderer, &queue, false);
     assert!(
         !data.exists(),

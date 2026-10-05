@@ -125,36 +125,11 @@ reqwest = { version = "0.13", features = ["json", "blocking", "cookies", "form"]
 async-trait = "0.1"
 futures = "0.3"
 
-# WASM plugin host. No compiler backend is selected here: the `sicompass` crate's
-# `jit-wasm` (default) and `no-jit-wasm` features pick `cranelift` or `pulley`, so
-# an App Store / iOS build can be built with no runtime code generation at all.
-wasmtime = { version = "48", default-features = false, features = [
-    "runtime",
-    "component-model",
-    "std",
-    # On-disk compilation cache. Compiling a component is the dominant plugin
-    # startup cost (~1.2s for a 65 KiB plugin), and without this every launch pays
-    # it again. The cached artifact matches the backend: native code for the JIT
-    # build, Pulley bytecode for the no-JIT one.
-    "cache",
-] }
-# WASI p2 for plugin guests (they target wasm32-wasip2). Only what a sandboxed
-# provider may get: the host links an inert baseline for every plugin and the
-# rest per manifest grant, see docs/plugin-platform.md. `p2` only, synchronous:
-# guest calls are synchronous today, and `p1` would only matter for guests
-# built for the old preview-1 target, which none are.
-wasmtime-wasi = { version = "48", default-features = false, features = ["p2"] }
-
-# PTY: a plugin's `process` children on a pseudo-terminal (the terminal's shell)
-portable-pty = "0.9"
 
 # Logging
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing-appender = "0.2"
-
-# System
-libc = "0.2"
 
 # Windows .exe icon and version-resource embedding (build-time only).
 # `winresource` is the maintained fork of the abandoned `winres`. It is a
@@ -192,7 +167,7 @@ wiremock = "0.6"
 # so `nix build` can fetch it. Replace with `sicompass-sdk = "0.9.1"` above at
 # the release.
 [patch.crates-io]
-sicompass-sdk = { git = "https://github.com/friendlyflow/sicompass-plugin-sdk", rev = "60dfd27f7c0949ea8d22fe41d0a331c38ed65ae3" }
+sicompass-sdk = { git = "https://github.com/friendlyflow/sicompass-plugin-sdk", rev = "06a9037b5a1194be87af786bdfde928be173473e" }
 
 # Optimize heavy third-party deps even in debug builds — html5ever and the
 # TLS/HTTP stack are 10-50x slower without optimizations.

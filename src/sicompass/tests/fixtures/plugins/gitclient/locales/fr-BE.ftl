@@ -99,3 +99,6 @@ gitclient-error-conflicts = resolvez d'abord les conflits, preparez chaque fichi
 gitclient-error-nothing-to-amend = il n'y a pas encore de commit a corriger
 gitclient-error-busy = une autre operation distante est encore en cours
 gitclient-error-undo = cela n'a pas pu etre annule
+
+gitclient-tutorial = Client git, depuis le store : naviguez vers un dossier d'un depot et appuyez sur : pour l'ouvrir. La liste contient alors modifications, graphe, branches, remises, et depots distants, et : a partir de la donne les commandes git plutot qu'une autre vue. Echap ramene aux dossiers. La premiere ligne dit dans quel depot vous etes, sur quelle branche, et de combien vous etes en avance ou en retard sur le distant.
+gitclient-tutorial-2 = Sous modifications, la premiere ligne est le message, appuyez donc sur i et tapez-le. En dessous il y a quatre boutons, valider, valider en corrigeant le dernier, valider et pousser, et valider et synchroniser, et Entree sur l'un d'eux l'execute. En dessous se trouve chaque fichier modifie, les conflits d'abord, puis ce qui est prepare, puis ce qui ne l'est pas, et Droite sur un fichier lit ses differences ligne par ligne. Preparer, annuler, creer une branche, et remiser passent tous par les commandes :, et preparer et valider s'annulent avec ctrl z.

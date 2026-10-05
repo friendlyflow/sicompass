@@ -19,8 +19,9 @@ MACOSX_DEPLOYMENT_TARGET = { value = "11.0", force = true }
 # guarding sicompass's own paths could ever have covered it.
 #
 # Nothing is ever cleared by this. The app simply looks somewhere else; the real
-# directories are not read, written or deleted. The sandbox persists across runs,
-# so `cargo run` keeps its own settings, and only `cargo clean` removes it.
+# directories are not read, written or deleted. The throwaway tree persists across
+# runs, so `cargo run` keeps its own settings, and only `cargo clean` removes it.
+# The plugin processes the app starts under test inherit these variables too.
 #
 # Deliberately *not* HOME. Redirecting HOME makes cargo re-fetch the entire
 # registry (33 000 files, measured); redirecting only the XDG variables does not,

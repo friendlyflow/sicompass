@@ -2,12 +2,13 @@
 //!
 //! The renderer itself lives in the `sicompass-ui` crate; what is left here is
 //! everything an *application* has and a login screen does not: the provider
-//! catalogue and the settings file that selects from it (`programs`), the WASM
-//! plugin host (`wasm_host`, `plugin_manifest`), the self-updater, and the
+//! catalogue and the settings file that selects from it (`programs`), the
+//! plugin host (`plugin_host`, `plugin_manifest`), the self-updater, and the
 //! Windows Start Menu entry (`start_menu`).
 //!
-//! That split is what keeps `loginsicompass` from linking wasmtime, a bundled
-//! SQLite and a headless-Chromium driver. See sicompass-ui's `Cargo.toml`.
+//! That split is what keeps `loginsicompass` from linking the plugin host, the
+//! updater's HTTP client and the built-in providers. See sicompass-ui's
+//! `Cargo.toml`.
 //!
 //! The renderer calls back into this crate through
 //! [`sicompass_ui::registry::HostHooks`], implemented by [`boot::ProgramsHooks`].
@@ -21,9 +22,6 @@ pub mod plugin_host;
 pub mod plugin_manifest;
 pub mod programs;
 pub mod start_menu;
-/// Host for sandboxed WASM plugins — the replacement for `dlopen`ed native plugins
-/// and `bun`-spawned script plugins, neither of which can ship on Apple's stores.
-pub mod wasm_host;
 
 // The renderer, re-exported so `tests/integration.rs` and the binary can reach
 // it by the same paths they used before the split.

@@ -34,7 +34,7 @@ them. So far:
 - `../loginsicompass`, the greetd login screen.
 - `../sicompass-ui`, the renderer shared with the greeter, with the shaders
   and the embedded fonts. A git dependency, see "the sicompass-ui split" below.
-- `../sicompass-plugin-sdk`, the SDK and the WASM plugin kit (on crates.io).
+- `../sicompass-plugin-sdk`, the SDK and the plugin kit (on crates.io).
 
 The Store (`lib/lib_store`, package `sicompass-store`) installs plugins from
 the signed store list `lib/lib_store/store.json`. Edit it only through
@@ -94,8 +94,8 @@ that.
 in `register()` with `sicompass_sdk::assets::register_bytes("<provider>", "<file>", BYTES)`.
 Refer to it as `asset:<provider>/<file>` wherever a path used to go — an
 `<image>`/`<link>` tag, `dashboard_image_path()` — and the host resolves it. A
-WASM plugin does the same, with its files in `<plugin_dir>/assets/`; see
-[docs/wasm-plugins.md](docs/wasm-plugins.md).
+plugin does the same, with its files in `<plugin_dir>/assets/`; see
+[docs/process-plugins.md](docs/process-plugins.md).
 
 Shipping a loose file instead means editing **four** hand-maintained lists that
 nothing verifies (`include` in `dist-workspace.toml` reaches the archives only,
@@ -113,10 +113,11 @@ Ed25519 signing key must never sit in GPL client code).
 The backups themselves are the plugins'. Notes and project management are
 plugins now (`../notes-plugin-sicompass`, `../projectmanagement-plugin-sicompass`)
 and back up the way a third party's plugin would, with the `sicompass-payments`
-guest library (`sicompass-payments/` in `../sicompass-plugin-sdk`). The host gives a plugin two
-things through the `license` interface: where the user stands with a tier
-(`license.standing`), and the redeem token, only for the tier its `plugin.json`
-names as `service` (`license.token`, gated by `Grants::service_tier`).
+library (`sicompass-payments/` in `../sicompass-plugin-sdk`). The app gives a plugin two
+things through `sicompass_sdk::plugin::license`: where the user stands with a
+tier (`license::standing`), and the redeem token, only for the tier its
+`plugin.json` names as `service` (`license::token`, gated by
+`Grants::service_tier`).
 
 Three things are easy to get wrong here:
 
@@ -124,15 +125,39 @@ Three things are easy to get wrong here:
   says verification is display-only, and that stays true: a plugin shows and
   saves the user's data whatever `license.standing` says. Only the copy on our
   server is gated.
-- **A token is for one plugin's own service.** `license.token` answers only
+- **A token is for one plugin's own service.** `license::token` answers only
   for `service.tier`. Widening it would hand every plugin the user's
-  credential for a server that holds their data.
+  credential for a server that holds their data. This is the app's manners,
+  not a boundary: a plugin is a program with the user's rights, and could
+  read `settings.json` itself. Keep the manners anyway.
 - **Tier pages are served from the Store's own tree**, not grafted into
   another provider, so a refresh after redeeming keeps the page (and the typed
   token) where it was.
 
 Restoring never runs over a store that already has files in it. A backup is not
 a sync, and the machine in front of the user wins.
+
+## Architecture: plugins
+
+A plugin is a program of its own: the app starts it (one process per tab) and
+talks to it over its stdin and stdout (`sicompass_sdk::plugin_ipc`). The host
+is `src/sicompass/src/plugin_host/`. Follow
+[docs/process-plugins.md](docs/process-plugins.md). Easy to get wrong:
+
+- **It runs with the user's rights.** `plugin.json` permissions are what it
+  declares, shown in the Store and approved by the user (the fingerprint is
+  prefixed `process;`), never limits the app enforces. Do not describe them as
+  a sandbox anywhere.
+- **The app waits for every call**, on its UI thread, with no deadline. Slow
+  work belongs on the plugin's own thread, reported through `poll`.
+- **The tests run the real plugins.** `src/sicompass/Cargo.toml` pins each
+  plugin repo by git rev as a dev-dependency, `examples/plugin_<name>.rs`
+  makes it a program, and `tests/fixtures/plugins/<name>` holds its
+  `plugin.json` and `locales/` from that same rev. Move the rev and refresh the
+  folder together. Claude and the web browser get an environment with no real
+  `claude` or Chrome to find (`no_programs_env`, `fake_chrome::dir`).
+- WASM components (0.2) are gone: `"type": "wasm"`, or no `type`, is refused
+  with "update it from the Store".
 
 ## Architecture: text fields
 
@@ -229,11 +254,11 @@ two binaries: the `sicompass` application and the `loginsicompass` greetd
 greeter. It holds the SDL3 window, the Vulkan device, font rasterisation, the
 list layout, the key handlers and the AccessKit bridge. `src/sicompass` keeps
 what only an *application* has: the provider catalogue and the `settings.json`
-that selects from it (`programs`), the WASM plugin host, the self-updater and
-the Windows Start Menu entry.
+that selects from it (`programs`), the plugin host (`plugin_host`), the
+self-updater and the Windows Start Menu entry.
 
-**`sicompass-ui` must not depend on `sicompass-builtins`, `sicompass-updater`,
-`wasmtime` or `reqwest`.** That is the rule the split exists to enforce: linking
+**`sicompass-ui` must not depend on `sicompass-builtins`, `sicompass-updater`
+or `reqwest`.** That is the rule the split exists to enforce: linking
 the application into a login screen cost 465 crates, including a bundled SQLite,
 a headless-Chromium driver, an IMAP client and an SMTP client, none of which a
 login screen ever calls. The sicompass-ui repo's Stop hook checks this.

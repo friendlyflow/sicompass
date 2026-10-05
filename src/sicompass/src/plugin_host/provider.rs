@@ -1,16 +1,17 @@
 //! [`ProcessProvider`]: a plugin process wearing the SDK's `Provider` trait.
 //!
-//! The rest of the app cannot tell a plugin process from a compiled-in
-//! built-in or a WASM component: all three arrive as `Box<dyn Provider>`. This
-//! follows `wasm_host::WasmProvider` closely, so the two behave alike: the same
-//! batched `poll` once per frame, the same caches, the same error shown once.
+//! The rest of the app cannot tell a plugin from a compiled-in built-in: both
+//! arrive as `Box<dyn Provider>`. The app calls `tick` (and so `poll`) for
+//! every provider on every frame, so one batched `poll` call answers what five
+//! trait methods ask, and the answer is cached; values that never change come
+//! from one `describe` call.
 //!
 //! ## Failure
 //!
 //! A plugin can crash, hang or answer nonsense. None of that may take the app
 //! down, so every call goes through [`ProcessProvider::call`], which turns a
-//! panic, an exit or a missed [`super::channel::CALL_DEADLINE`] (after which the
-//! process is killed) into an error row, and **poisons** the provider: every
+//! panic, an exit, or a missed deadline when one is set (after which the process
+//! is killed) into an error row, and **poisons** the provider: every
 //! later call answers like an inert provider. A broken plugin is visible as a
 //! broken plugin, never as a broken app.
 
@@ -52,7 +53,11 @@ pub struct Spec<'a> {
     /// The manifest `displayName`, which names its settings section.
     pub settings_section: &'a str,
     pub plugin_dir: &'a Path,
-    pub grants: crate::wasm_host::Grants,
+    pub grants: super::Grants,
+    /// Environment variables set for the plugin's process on top of the app's.
+    /// The app sets none; the tests use it to keep a plugin from finding the
+    /// developer's real programs.
+    pub env: Vec<(std::ffi::OsString, std::ffi::OsString)>,
 }
 
 /// A plugin process driven through the `Provider` trait.
@@ -97,10 +102,11 @@ impl ProcessProvider {
             settings_section,
             plugin_dir,
             grants,
+            env,
         } = spec;
 
         // Before `init`, which may already translate the display name.
-        for refusal in crate::wasm_host::register_plugin_locales(plugin_name, plugin_dir) {
+        for refusal in super::register_plugin_locales(plugin_name, plugin_dir) {
             tracing::warn!(target: "plugin", plugin = %plugin_name, "{refusal}");
             eprintln!("plugin '{plugin_name}': {refusal}");
         }
@@ -132,7 +138,7 @@ impl ProcessProvider {
         let exe = executable(entry_path);
         // The channel sets `closed` when the plugin is gone, which also ends a
         // sign-in it is waiting on.
-        let channel = Channel::spawn(&exe, plugin_dir, plugin_name, answer, closed)
+        let channel = Channel::spawn(&exe, plugin_dir, plugin_name, &env, answer, closed)
             .map_err(|e| format!("{}: {e}", exe.display()))?;
 
         let mut me = ProcessProvider {
@@ -169,7 +175,7 @@ impl ProcessProvider {
 
         // `asset:<plugin-name>/<file>` resolves to this plugin's `assets/`,
         // before the dashboard image below is checked against it.
-        crate::wasm_host::register_plugin_assets(plugin_name, plugin_dir);
+        super::register_plugin_assets(plugin_name, plugin_dir);
         let dashboard_image = if descriptor.dashboard_kind == ipc::DashboardKind::Image {
             me.resolve_dashboard_image(plugin_dir)
         } else {
@@ -277,8 +283,8 @@ impl ProcessProvider {
         self.state.borrow().poisoned
     }
 
-    /// How long one call may take before the plugin is stopped. For tests,
-    /// and for a host that knows better than the default.
+    /// How long one call may take before the plugin is stopped. There is no
+    /// limit unless one is set here (the tests set one).
     pub fn set_call_deadline(&self, deadline: Option<std::time::Duration>) {
         self.channel.set_deadline(deadline);
     }
@@ -405,7 +411,7 @@ impl ProcessProvider {
             }
             None => {}
         }
-        match crate::wasm_host::confine_in(plugin_dir, &rel) {
+        match super::confine_in(plugin_dir, &rel) {
             Ok(path) => Some(path.to_string_lossy().into_owned()),
             Err(e) => {
                 self.note_error(format!(
@@ -458,8 +464,12 @@ fn expect_unit(r: Result<Response, String>) -> Result<(), String> {
 }
 
 /// Run a call so that waiting is allowed even from inside async code: the app
-/// reaches `undo` and `redo` from inside `sicompass_sdk::block_on`. See the
-/// same function in `wasm_host::provider`.
+/// reaches `undo` and `redo` from inside `sicompass_sdk::block_on`, and tokio
+/// panics when a thread blocks inside its own `block_on` ("Cannot start a
+/// runtime from within a runtime"). On a multi-thread runtime,
+/// `block_in_place` leaves the async context for the length of the call. A
+/// current-thread runtime cannot do that, and outside a runtime nothing is
+/// needed.
 fn outside_async<T>(f: impl FnOnce() -> T) -> T {
     match tokio::runtime::Handle::try_current().map(|h| h.runtime_flavor()) {
         Ok(tokio::runtime::RuntimeFlavor::MultiThread) => tokio::task::block_in_place(f),

@@ -66,3 +66,6 @@ projectmanagement-cmd-restore-backup = cloudback-up terugzetten
 projectmanagement-restore-done = cloudback-up teruggezet
 projectmanagement-restore-empty = er is geen cloudback-up om terug te zetten
 projectmanagement-restore-refused = je bord is niet leeg, er werd niets teruggezet
+
+projectmanagement-tutorial = Projectbeheer, uit de store: een kanbanbord. Druk op ctrl+a om een kolom toe te voegen, Rechts om ze te openen en ctrl+a erin om een kaart toe te voegen. Een kolom bevat kaarten en niets dieper, dus een kaart is het laatste niveau.
+projectmanagement-tutorial-2 = d: open het bord zelf, met de kolommen naast elkaar. De cursor staat op een kaart, en enkel die kaart licht op. Links en Rechts gaan tussen kolommen, Omhoog en Omlaag door de kaarten van een kolom. i en a bewerken de kaart, o en shift+o openen een nieuwe eronder of erboven, ctrl+d verwijdert, en ctrl+x, ctrl+c en ctrl+v knippen, kopiëren en plakken. Een lege kolom toont een plek waar u kan staan om de eerste kaart toe te voegen. De kolommen zelf beheert u in de lijst. Escape gaat terug.

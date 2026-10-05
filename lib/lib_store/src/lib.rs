@@ -829,10 +829,11 @@ impl StoreProvider {
             out.push(line("store-paid-features", &[]));
         }
 
-        let revoked = offer
-            .entry
-            .as_ref()
-            .is_some_and(|e| e.is_revoked(&release.archive_sha256));
+        // Withdrawn by the hash of the archive this computer would install.
+        let revoked = match release.archive_for(sicompass_sdk::plugin_abi::plugin_target()) {
+            Ok((_, sha)) => offer.entry.as_ref().is_some_and(|e| e.is_revoked(sha)),
+            Err(_) => false,
+        };
         let too_new = install::needs_newer_app(release);
         if revoked {
             out.push(line("store-revoked", &[]));

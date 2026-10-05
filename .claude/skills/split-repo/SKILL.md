@@ -79,8 +79,11 @@ with `command -v git-filter-repo`, and fall back to `nix develop -c`.
    - `about.hbs`: copy sicompass's, replacing `sicompass` in its `<title>` with
      the new name.
    - `about.toml`: fill `@TARGETS@` (Linux-only kinds:
-     `"x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu"`, plugins:
-     `"wasm32-wasip2"`).
+     `"x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu"`, plugins: the
+     five release targets, `"x86_64-unknown-linux-musl",
+     "aarch64-unknown-linux-musl", "x86_64-apple-darwin",
+     "aarch64-apple-darwin", "x86_64-pc-windows-msvc"`), and delete the
+     sections of first-party crates the repo does not use.
    - `README.md` and `CLAUDE.md`: fill every `@...@`. Write the README for
      someone who has never seen sicompass: what it is, how to install it, how to
      build it. Follow the prose rule (no em dashes, no semicolons). Carry over
@@ -107,22 +110,70 @@ with `command -v git-filter-repo`, and fall back to `nix develop -c`.
    - `chmod +x .claude/hooks/*.sh`.
 
 3b. **A plugin (`--kind plugin`) takes `template/plugin/` instead** of the
-   top-level `flake.nix` and `dot-github/workflows/ci.yml`:
-   - `flake.nix`: rust-overlay's toolchain with the `wasm32-wasip2` target,
-     `wasm-tools` and `jq`. There is no `packages.default`: a plugin ships as a
-     signed archive, not a Nix package.
-   - `scripts/release-plugin.sh` (keep it executable): build the component,
-     `sicompass-plugin pack` (which audits its imports against `plugin.json`),
-     sign, and verify the way the Store will. `--dry-run` signs with a
-     throwaway key. The workflows call it, and so can a person before tagging.
-   - `dot-github/workflows/release.yml` (tag `vX.Y.Z`: runs the script, then
-     attaches `plugin.tar.gz`, `release.json`, `release.json.sig` to the
-     GitHub release) and `dot-github/workflows/ci.yml`. Fill `@SDK_REV@` with
-     the SDK commit the plugin builds against.
-   - The crate is a `cdylib` built for `wasm32-wasip2` with the pdk, like the
-     SDK's `examples/*`, and has a `plugin.json` with `version` and
-     `permissions` (docs/plugin-platform.md §4). Its strings are
-     `locales/<lang>.ftl` with ids prefixed `<name>-`, in all four languages.
+   top-level `flake.nix`, `gitignore` and `dot-github/workflows/ci.yml`. A plugin
+   is a **plugin process**: a program sicompass starts and talks to over its
+   stdin and stdout (sicompass's `docs/process-plugins.md`). The result has the
+   shape of `../salesdemo-plugin-sicompass`, the reference plugin repo, so
+   compare with it whenever in doubt.
+   - `flake.nix`: fill `@NAME@` and `@DESCRIPTION@`. rust-overlay's toolchain
+     with this computer's plugin target (static musl on Linux, which nixpkgs'
+     rustc has no `std` for) and `jq`. There is no `packages.default`: a plugin
+     ships as signed archives, not a Nix package.
+   - `gitignore` becomes `.gitignore`. It adds `dist/` and `build/`, which the
+     release script writes.
+   - `scripts/release-plugin.sh` (keep it executable), as is:
+     `build <target>` builds the program for one platform into
+     `build/<target>/`, `pack` packs every build with `sicompass-plugin pack`,
+     signs and verifies the way the Store will, and with no command it does
+     both for this computer's platform. `--dry-run` signs with a throwaway key.
+     The workflows call it, and so can a person before tagging.
+   - `dot-github/workflows/release.yml` (tag `vX.Y.Z`: builds on five runners,
+     Linux x86_64 and arm64 as static musl, macOS arm64 and x86_64, Windows
+     x86_64, then packs, signs and verifies in one job and attaches one
+     `plugin-<target>.tar.gz` per platform, `release.json` and
+     `release.json.sig` to the GitHub release) and `dot-github/workflows/ci.yml`
+     (tests, a dry-run release of this computer's platform, clippy, format).
+     Both install the release tool from the SDK release in `SDK_TAG`. Keep it
+     equal to the SDK version the plugin depends on.
+   - `Cargo.toml`: a library with the plugin's logic, which the unit tests use,
+     and a `[[bin]]` for the program, with the release profile salesdemo has:
+     ```toml
+     [[bin]]
+     name = "<crate-name>"
+     path = "src/main.rs"
+
+     [dependencies]
+     sicompass-sdk = { version = "<sdk>", default-features = false, features = ["plugin"] }
+
+     [profile.release]
+     opt-level = "s"
+     lto = true
+     strip = true
+     codegen-units = 1
+     ```
+     The `[[bin]]` name is the crate name, which the release script builds and
+     copies to `plugin.json`'s `entry`.
+   - `src/main.rs` only names the plugin type, which the library defines and
+     which implements `sicompass_sdk::plugin::Plugin`:
+     ```rust
+     //! The program sicompass starts: <what it is>, served over stdin and stdout.
+
+     sicompass_sdk::plugin::main!(<crate_name>::<PluginType>);
+     ```
+   - `plugin.json` says `"type": "process"` and `"entry": "plugin"` (no
+     extension, sicompass adds `.exe` on Windows), with `version` (equal to
+     `[package] version`, and to the release tag) and the `permissions` it
+     declares (docs/plugin-platform.md §4). Nothing enforces them: a plugin runs
+     with the user's rights, and the Store shows them before install. Its
+     strings are `locales/<lang>.ftl` with ids prefixed `<name>-`, in all four
+     languages.
+   - `README.md` and `CLAUDE.md` follow salesdemo's: the README's install
+     section is the Store (and the plugins folder for a build of one's own),
+     and its building section ends with `./scripts/release-plugin.sh
+     --dry-run` instead of `nix build`. CLAUDE.md says it is a plugin process,
+     what it declares, that the version lives in both `plugin.json` and
+     `Cargo.toml`, that testing includes the dry run, and how releases are
+     signed (below).
    - **Its signing key**, once per plugin. Ask the user before creating it, and
      never print, copy or commit the secret half:
      ```sh
@@ -136,7 +187,14 @@ with `command -v git-filter-repo`, and fall back to `nix develop -c`.
      into the store list with `/store add <name> friendlyflow/<new-repo-name>
      <pubkey>`. Losing the key is survivable: the store list names a new one.
    - Check with `nix develop -c ./scripts/release-plugin.sh --dry-run` in step 5
-     instead of `nix build`.
+     instead of `nix build`. It needs the release tool:
+     `cargo install --git https://github.com/friendlyflow/sicompass-plugin-sdk sicompass-plugin`.
+   - For sicompass's integration tests, pin the new repo by git `rev` as a
+     dev-dependency in `src/sicompass/Cargo.toml`, add
+     `src/sicompass/examples/plugin_<name>.rs` to build it into a program, and
+     copy that commit's `plugin.json` and `locales/` into
+     `src/sicompass/tests/fixtures/plugins/<name>/`. The rev and the fixture
+     folder move together.
 
 4. **Make `Cargo.toml` standalone.**
    - Replace every `*.workspace = true` with a real value. The version is
