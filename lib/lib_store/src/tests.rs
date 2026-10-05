@@ -233,8 +233,16 @@ fn harness(server: &Server, keys: &Keys) -> Harness {
         .with_settings_path(data.path().join("settings.json"));
     let fired: Fired = Arc::default();
     let sink = fired.clone();
+    let (plugins_dir, settings) = (
+        plugins.path().to_path_buf(),
+        data.path().join("settings.json"),
+    );
     store.set_apply_callback(Box::new(move |k, v| {
         sink.lock().unwrap().push((k.to_owned(), v.to_owned()));
+        // What the app does next: record the approval of what is on disk.
+        if k == PLUGIN_INSTALLED || k == PLUGIN_UPDATED {
+            record_approval(&plugins_dir, &settings, v);
+        }
     }));
     Harness {
         store,
@@ -242,6 +250,21 @@ fn harness(server: &Server, keys: &Keys) -> Harness {
         plugins,
         data,
     }
+}
+
+/// Record that the user approved the plugin `name` in `plugins_dir`, the way
+/// the app's `plugin_manifest::record_store_install` does.
+fn record_approval(plugins_dir: &Path, settings: &Path, name: &str) {
+    let Some(i) = install::installed(plugins_dir).remove(name) else {
+        return;
+    };
+    let mut root: serde_json::Value = std::fs::read_to_string(settings)
+        .ok()
+        .and_then(|t| serde_json::from_str(&t).ok())
+        .unwrap_or_else(|| serde_json::json!({}));
+    root[APPROVALS_KEY][name] =
+        serde_json::Value::String(sicompass_sdk::plugin_abi::approval_fingerprint(&i.manifest));
+    std::fs::write(settings, serde_json::to_string(&root).unwrap()).unwrap();
 }
 
 impl Harness {
@@ -1370,4 +1393,43 @@ fn a_withdrawn_build_of_a_plugin_process_is_not_installed() {
     h.press("install:demo");
     assert_eq!(h.installed_version(), None);
     h.assert_staging_clean();
+}
+
+#[test]
+fn a_plugin_copied_in_by_hand_waits_for_the_users_approval() {
+    let (server, keys) = (Server::start(), keys());
+    server.serve_empty_store(&keys);
+    let mut h = harness(&server, &keys);
+    install_by_hand(
+        &h,
+        &plugin_json_with("1.0.0", r#""process": ["git"]"#, "0.1.0", ""),
+    );
+
+    let list = h.open_programs();
+    let state = t_with("store-state-not-approved", &[("version", "1.0.0")]);
+    assert!(has(&list, &format!("demo, {state}")), "{list:?}");
+    let entry = h.entry();
+    assert!(has(&entry, &localize::t("store-not-approved")), "{entry:?}");
+    // What it is and what it declares, before the user says yes.
+    assert!(has(&entry, &localize::t("store-access-program")), "{entry:?}");
+    assert!(
+        has(&entry, &t_with("store-access-programs", &[("list", "git")])),
+        "{entry:?}"
+    );
+    assert!(has(&entry, "<button>approve:demo</button>"), "{entry:?}");
+
+    // Approving tells the app, which records it and starts the plugin.
+    h.press("approve:demo");
+    assert_eq!(h.fired(), vec![(PLUGIN_INSTALLED.into(), "demo".into())]);
+    let list = lines(h.store.fetch());
+    let installed = t_with("store-state-installed", &[("version", "1.0.0")]);
+    assert!(has(&list, &format!("demo, {installed}")), "{list:?}");
+    assert!(!has(&h.entry(), "<button>approve:"), "{:?}", h.entry());
+
+    // A new version on disk declaring more is a new line, so it asks again.
+    install_by_hand(
+        &h,
+        &plugin_json_with("1.0.1", r#""process": ["git", "ssh"]"#, "0.1.0", ""),
+    );
+    assert!(has(&h.entry(), "<button>approve:demo</button>"), "{:?}", h.entry());
 }

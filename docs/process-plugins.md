@@ -161,7 +161,10 @@ every distribution, NixOS included), `x86_64` and `aarch64-apple-darwin`, and
 
 **Approval.** A plugin process always needs the user's approval
 (`plugin_abi::needs_approval`). Its fingerprint starts with `process;`, so an
-approval given to a WASM plugin in 0.2 does not carry over. A WASM plugin left on
+approval given to a WASM plugin in 0.2 does not carry over. A plugin copied into
+the plugins folder by hand has no approval either: it does not start, and its
+Store entry says so, lists what it declares and offers "approve", which records
+the approval and starts it, as an install would. A WASM plugin left on
 disk is refused when the app starts ("update it from the Store"), and the Store
 offers its program as an install. The Store's page leads with "runs as a program
 on this computer, with your rights", then lists what the plugin declares, and an

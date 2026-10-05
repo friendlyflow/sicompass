@@ -130,6 +130,10 @@ fn the_store_installs_a_plugin_into_the_running_app_and_removes_it() {
     );
     assert_eq!(programs::PLUGIN_UPDATED, sicompass_store::PLUGIN_UPDATED);
     assert_eq!(programs::PLUGIN_REMOVED, sicompass_store::PLUGIN_REMOVED);
+    assert_eq!(
+        sicompass::plugin_manifest::APPROVALS_KEY,
+        sicompass_store::APPROVALS_KEY
+    );
 
     let config_home = tempfile::tempdir().unwrap();
     sandbox_config(config_home.path());
@@ -298,5 +302,39 @@ fn the_store_installs_a_plugin_into_the_running_app_and_removes_it() {
     assert!(
         !data.exists(),
         "the data folder should be in the (test) trash"
+    );
+
+    // ---- A plugin copied in by hand: it waits for the user's approval ----
+    let hand = plugins_dir.join("fixture");
+    std::fs::create_dir_all(&hand).unwrap();
+    std::fs::write(hand.join("plugin.json"), manifest_json).unwrap();
+    let exe = hand.join(sicompass_sdk::plugin_abi::executable_name("plugin", target));
+    std::fs::write(&exe, &program).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let idx = store_index(&renderer);
+    renderer.providers[idx].set_current_path("/programs");
+    renderer.providers[idx].on_button_press("refresh");
+    settle(&mut renderer, idx);
+    renderer.providers[idx].set_current_path("/programs/fixture");
+    let entry: Vec<String> = renderer.providers[idx]
+        .fetch()
+        .iter()
+        .filter_map(|e| e.as_str().map(str::to_owned))
+        .collect();
+    assert!(
+        entry.iter().any(|l| l.contains("<button>approve:fixture</button>")),
+        "{entry:?}"
+    );
+    assert!(!loaded(&renderer, "fixture"), "not running before the approval");
+    renderer.providers[idx].on_button_press("approve:fixture");
+    programs::apply_pending_settings(&mut renderer, &queue, false);
+    assert!(loaded(&renderer, "fixture"), "approved but not started");
+    assert_eq!(
+        settings_json()["pluginApprovals"]["fixture"].as_str(),
+        Some(sicompass_sdk::plugin_abi::approval_fingerprint(&manifest).as_str())
     );
 }

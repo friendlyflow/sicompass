@@ -64,6 +64,11 @@ pub const PLUGIN_UPDATED: &str = "pluginUpdated";
 pub const PLUGIN_REMOVED: &str = "pluginRemoved";
 pub const PLUGIN_DATA_TRASH: &str = "pluginDataTrash";
 
+/// The `settings.json` key where the app records what the user approved, per
+/// plugin (`plugin_manifest::APPROVALS_KEY` in the app, which a test keeps
+/// equal to this).
+pub const APPROVALS_KEY: &str = "pluginApprovals";
+
 type ApplyFn = Box<dyn Fn(&str, &str) + Send + 'static>;
 
 /// A plugin the Store shows, with what its latest release says.
@@ -346,6 +351,22 @@ impl StoreProvider {
             .as_deref()
             .map(install::installed)
             .unwrap_or_default()
+    }
+
+    /// Whether the user approved this version of an installed plugin: the
+    /// line the app recorded for it is the one its manifest asks for now. A
+    /// plugin the Store installed is approved by that install. One copied in
+    /// by hand is not, until the user presses approve.
+    fn approved(&self, m: &sicompass_sdk::plugin_manifest::PluginManifest) -> bool {
+        if !sicompass_sdk::plugin_abi::needs_approval(m) {
+            return true;
+        }
+        let want = sicompass_sdk::plugin_abi::approval_fingerprint(m);
+        self.tiers
+            .settings_path()
+            .and_then(|p| std::fs::read_to_string(p).ok())
+            .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+            .is_some_and(|v| v[APPROVALS_KEY][&m.name].as_str() == Some(want.as_str()))
     }
 
     fn fire(&self, key: &str, value: &str) {
@@ -718,9 +739,13 @@ impl StoreProvider {
             Some(i) => {
                 args.set("version", i.manifest.version.clone().unwrap_or_default());
                 match &offer.release {
+                    // An update first: installing it from here approves it too.
                     Ok(r) if install::is_newer(r, &i.manifest) => {
                         args.set("new", r.version.clone());
                         localize::t_args("store-state-update", &args)
+                    }
+                    _ if !self.approved(&i.manifest) => {
+                        localize::t_args("store-state-not-approved", &args)
                     }
                     _ => localize::t_args("store-state-installed", &args),
                 }
@@ -748,6 +773,20 @@ impl StoreProvider {
         let mut out = Vec::new();
         if let Some(note) = self.notes.get(name) {
             out.push(FfonElement::new_str(note.clone()));
+        }
+        // On disk but not approved, as a plugin copied in by hand is: it does
+        // not run until the user has seen what it is and said yes.
+        if let Some(current) = installed
+            && !self.approved(&current.manifest)
+        {
+            let m = &current.manifest;
+            out.push(line("store-not-approved", &[]));
+            out.extend(
+                access_lines_of(true, &m.allowed_hosts(), &m.permissions)
+                    .into_iter()
+                    .map(FfonElement::new_str),
+            );
+            out.push(button("approve", name, localize::t("store-approve")));
         }
         if installed.is_none() {
             // Data here, from a built-in of an earlier version or an install
@@ -888,17 +927,24 @@ fn button(action: &str, name: &str, label: String) -> FfonElement {
 /// A plugin process leads with what matters most: it is a program with the
 /// user's rights, so the lines after it are what it declares, not limits.
 fn access_lines(release: &ReleaseInfo) -> Vec<String> {
-    let p = &release.permissions;
+    access_lines_of(release.is_process(), &release.allowed_hosts, &release.permissions)
+}
+
+/// [`access_lines`] from its parts, for a plugin on disk with no release.
+fn access_lines_of(
+    is_process: bool,
+    allowed_hosts: &[String],
+    p: &sicompass_sdk::plugin_manifest::Permissions,
+) -> Vec<String> {
     let mut out = Vec::new();
-    if release.is_process() {
+    if is_process {
         out.push(localize::t("store-access-program"));
     }
-    let any_server = sicompass_sdk::plugin_abi::reaches_any_server(&release.allowed_hosts);
+    let any_server = sicompass_sdk::plugin_abi::reaches_any_server(allowed_hosts);
     if any_server {
         out.push(localize::t("store-access-any-server"));
     }
-    let named: Vec<String> = release
-        .allowed_hosts
+    let named: Vec<String> = allowed_hosts
         .iter()
         .filter(|h| h.trim() != sicompass_sdk::plugin_abi::ANY_SERVER)
         .cloned()
@@ -1005,6 +1051,9 @@ impl Provider for StoreProvider {
             Some(("install", name)) => self.start_install(name, false),
             Some(("update", name)) => self.start_install(name, true),
             Some(("uninstall", name)) => self.uninstall(name),
+            // The app records the approval, adds the enable switch and starts
+            // the plugin, as after an install.
+            Some(("approve", name)) => self.fire(PLUGIN_INSTALLED, name),
             Some(("trashdata", name)) => self.trash_data(name),
             _ if function_name == "refresh" && self.job.is_none() => {
                 self.loaded = None;
