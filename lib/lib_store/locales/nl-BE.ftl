@@ -18,6 +18,7 @@ store-data-waiting-root = Niet geïnstalleerd, maar je gebruikte ze eerder: { $n
 store-release-unavailable = De laatste release kon niet gecontroleerd worden: { $err }
 store-version = Laatste versie: { $version }
 store-category = Categorie: { $category }
+store-access-program = Draait als programma op deze computer, met jouw rechten. Wat volgt is wat het zegt te doen, en sicompass kan het daar niet aan houden.
 store-access-none = Toegang: niets buiten het programma zelf
 store-access-own-folder = Toegang: alleen zijn eigen map
 store-access-any-server = Toegang: maakt verbinding met elke server op het internet, nooit met je eigen computer of lokale netwerk

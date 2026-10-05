@@ -8,6 +8,11 @@
 //! shown, and the component must pass the host's import audit
 //! ([`sicompass_sdk::package::audit_component`]) against those permissions.
 //!
+//! A plugin process has one archive per platform, and only this platform's is
+//! downloaded ([`ReleaseInfo::archive_for`]). It is a program, so there is no
+//! import list to audit: what the user approved is that it runs at all, with
+//! their rights. Its executable is made runnable after unpacking.
+//!
 //! An install is staged in `plugins/.store/` and swapped into
 //! `plugins/<name>/` with a rename, so a failure half-way leaves the previous
 //! version in place.
@@ -15,9 +20,11 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use sicompass_sdk::package::{self, ARCHIVE_FILE, RELEASE_FILE, ReleaseInfo, SIGNATURE_FILE};
-use sicompass_sdk::plugin_abi::ABI_VERSION;
-use sicompass_sdk::plugin_manifest::{PluginManifest, parse_manifest};
+use sicompass_sdk::package::{self, RELEASE_FILE, ReleaseInfo, SIGNATURE_FILE};
+use sicompass_sdk::plugin_abi::{
+    ABI_VERSION, PROTOCOL_VERSION, executable_name, plugin_target, process_abi_compatible,
+};
+use sicompass_sdk::plugin_manifest::{PluginManifest, PluginType, parse_manifest};
 use sicompass_sdk::store::StoreEntry;
 
 use crate::http::Fetch;
@@ -161,7 +168,15 @@ fn check_release_info(source: &Source, info: &ReleaseInfo) -> Result<(), String>
             source.name, info.name
         ));
     }
-    if info.abi != ABI_VERSION {
+    if info.is_process() {
+        if !process_abi_compatible(&info.abi) {
+            return Err(format!(
+                "it was built for plugin protocol {}, and this sicompass speaks {PROTOCOL_VERSION}",
+                info.abi.trim_start_matches("process/")
+            ));
+        }
+        info.archive_for(plugin_target())?;
+    } else if info.abi != ABI_VERSION {
         return Err(format!(
             "it was built for plugin ABI {}, and this sicompass runs {ABI_VERSION}",
             info.abi
@@ -202,16 +217,21 @@ pub fn install(
 ) -> Result<PluginManifest, String> {
     let json = fetch(&source.url(RELEASE_FILE))?;
     let signature = text(fetch(&source.url(SIGNATURE_FILE))?, SIGNATURE_FILE)?;
-    let archive = fetch(&source.url(ARCHIVE_FILE))?;
+    // Which archive to download is in the signed release.json: one for every
+    // platform, or this platform's build of a plugin process.
+    let listed = package::verify_release_info(&json, &signature, &source.pubkey)?;
+    check_release_info(source, &listed)?;
+    let (archive_file, _) = listed.archive_for(plugin_target())?;
+    let archive = fetch(&source.url(&archive_file))?;
     let info = package::verify_release(&json, &signature, &source.pubkey, &archive)?;
-    check_release_info(source, &info)?;
+    let archive_sha256 = package::sha256_hex(&archive);
 
     // The user approved what they saw. A release published in between may ask
     // for other access, so it has to be shown again first.
     if info != *shown {
         return Err("a newer release appeared while you were looking, check again".to_owned());
     }
-    if source.is_revoked(&info.archive_sha256) {
+    if source.is_revoked(&archive_sha256) {
         return Err("this release was withdrawn".to_owned());
     }
     if let Some(min) = needs_newer_app(&info) {
@@ -256,11 +276,42 @@ fn stage_and_swap(
                 .to_owned(),
         );
     }
-    let wasm = std::fs::read(staged.join(&manifest.entry))
-        .map_err(|_| format!("the archive has no `{}`", manifest.entry))?;
-    package::audit_component(&wasm, &manifest)?;
+    if info.is_process() != (manifest.plugin_type == PluginType::Process) {
+        return Err(
+            "plugin.json in the archive and release.json disagree on whether it is a program"
+                .to_owned(),
+        );
+    }
+    if manifest.plugin_type == PluginType::Process {
+        let target = plugin_target().ok_or("sicompass has no plugin builds for this platform")?;
+        let exe = staged.join(executable_name(&manifest.entry, target));
+        if !exe.is_file() {
+            return Err(format!(
+                "the archive has no `{}`",
+                executable_name(&manifest.entry, target)
+            ));
+        }
+        make_executable(&exe)?;
+    } else {
+        let wasm = std::fs::read(staged.join(&manifest.entry))
+            .map_err(|_| format!("the archive has no `{}`", manifest.entry))?;
+        package::audit_component(&wasm, &manifest)?;
+    }
     swap_in(plugins_dir, &source.name, staged)?;
     Ok(manifest)
+}
+
+/// Let a plugin process's executable run: unpacking writes every file 0644.
+#[cfg(unix)]
+fn make_executable(path: &Path) -> Result<(), String> {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755))
+        .map_err(|e| format!("{}: {e}", path.display()))
+}
+
+#[cfg(not(unix))]
+fn make_executable(_path: &Path) -> Result<(), String> {
+    Ok(())
 }
 
 /// Replace `plugins/<name>` by `staged`, keeping the old version until the new

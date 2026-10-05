@@ -657,6 +657,37 @@ fn instantiate_user_plugin(plugin: &DiscoveredPlugin) -> Option<Box<dyn Provider
                 }
             }
         }
+        PluginType::Process => {
+            let plugin_dir = plugin
+                .entry_path
+                .parent()
+                .unwrap_or_else(|| std::path::Path::new("."));
+            // A plugin process runs with the user's rights, so it always needs
+            // their approval, recorded by the Store when they installed it.
+            let grants = match crate::plugin_manifest::grants_for(
+                m,
+                &crate::plugin_manifest::read_approvals(),
+            ) {
+                Ok(g) => g,
+                Err(e) => {
+                    eprintln!("sicompass: plugin '{}' was not loaded: {e}", m.name);
+                    return None;
+                }
+            };
+            match crate::plugin_host::ProcessProvider::open(crate::plugin_host::Spec {
+                entry_path: &plugin.entry_path,
+                plugin_name: &m.name,
+                settings_section: &m.display_name,
+                plugin_dir,
+                grants,
+            }) {
+                Ok(p) => Some(Box::new(p) as Box<dyn Provider>),
+                Err(e) => {
+                    eprintln!("sicompass: plugin '{}' was not loaded: {e}", m.name);
+                    None
+                }
+            }
+        }
         PluginType::Factory => instantiate_builtin(&m.name),
     }
 }

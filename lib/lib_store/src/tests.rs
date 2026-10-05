@@ -110,6 +110,56 @@ fn release_full(
     }
 }
 
+/// A release of `demo` as a plugin process, with a fake build for each of
+/// `targets`, and the archive for this platform when it is among them.
+struct ProcessRelease {
+    json: Vec<u8>,
+    sig: String,
+    archives: Vec<(String, Vec<u8>)>,
+}
+
+fn process_release(keys: &Keys, version: &str, permissions: &str, targets: &[&str]) -> ProcessRelease {
+    let manifest = format!(
+        r#"{{ "name": "demo", "displayName": "demo", "type": "process", "entry": "plugin",
+             "version": "{version}", "permissions": {{ {permissions} }} }}"#
+    );
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("plugin.json"), &manifest).unwrap();
+    let m = parse_manifest(&manifest).unwrap();
+    let files = package::collect_files(dir.path(), &m).unwrap();
+    let mut archives = std::collections::BTreeMap::new();
+    for t in targets {
+        let exe = format!("a build for {t}").into_bytes();
+        archives.insert(
+            (*t).to_owned(),
+            package::build_process_archive(dir.path(), &files, &m, t, &exe).unwrap(),
+        );
+    }
+    let info = ReleaseInfo::new_process(&m, &archives).unwrap();
+    let json = serde_json::to_vec_pretty(&info).unwrap();
+    let sig = package::sign(&json, &keys.plugin_secret).unwrap();
+    ProcessRelease {
+        json,
+        sig,
+        archives: archives.into_iter().collect(),
+    }
+}
+
+impl Server {
+    fn serve_process_release(&self, r: &ProcessRelease) {
+        let at = |file: &str| format!("/{REPO}/releases/latest/download/{file}");
+        self.serve(&at(RELEASE_FILE), r.json.clone());
+        self.serve(&at(SIGNATURE_FILE), r.sig.clone().into_bytes());
+        for (target, archive) in &r.archives {
+            self.serve(&at(&package::archive_file(target)), archive.clone());
+        }
+    }
+}
+
+fn this_target() -> &'static str {
+    sicompass_sdk::plugin_abi::plugin_target().expect("the tests run where plugins do")
+}
+
 fn release(keys: &Keys, version: &str, permissions: &str) -> Release {
     release_with(keys, &plugin_json(version, permissions, "0.1.0"), None)
 }
@@ -1247,4 +1297,113 @@ fn a_kept_file_that_no_longer_matches_its_signature_is_not_shown() {
         has(&entry, &t_with("store-version", &[("version", "1.0.0")])),
         "{entry:?}"
     );
+}
+
+#[test]
+fn a_plugin_process_says_it_runs_as_a_program_and_installs_runnable() {
+    let (server, keys) = (Server::start(), keys());
+    server.serve_store(&keys, &keys.store_secret, &[]);
+    // A build for another platform is listed too, and never downloaded.
+    let other = if this_target() == "aarch64-apple-darwin" {
+        "x86_64-pc-windows-msvc"
+    } else {
+        "aarch64-apple-darwin"
+    };
+    server.serve_process_release(&process_release(
+        &keys,
+        "1.0.0",
+        r#""process": ["git"]"#,
+        &[this_target(), other],
+    ));
+    let mut h = harness(&server, &keys);
+    h.open_programs();
+    let entry = h.entry();
+    let program = localize::t("store-access-program");
+    let at = entry.iter().position(|l| l == &program).expect(&format!("{entry:?}"));
+    assert!(
+        entry[at + 1].contains(&t_with("store-access-programs", &[("list", "git")])),
+        "the declared access follows: {entry:?}"
+    );
+    assert!(!has(&entry, &localize::t("store-access-none")), "{entry:?}");
+
+    h.press("install:demo");
+    assert_eq!(h.installed_version().as_deref(), Some("1.0.0"));
+    let exe = h
+        .plugins
+        .path()
+        .join("demo")
+        .join(sicompass_sdk::plugin_abi::executable_name("plugin", this_target()));
+    assert_eq!(
+        std::fs::read(&exe).unwrap(),
+        format!("a build for {}", this_target()).into_bytes()
+    );
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(&exe).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o755);
+    }
+    h.assert_staging_clean();
+}
+
+#[test]
+fn a_plugin_process_without_a_build_for_this_computer_is_not_offered() {
+    let (server, keys) = (Server::start(), keys());
+    server.serve_store(&keys, &keys.store_secret, &[]);
+    server.serve_process_release(&process_release(
+        &keys,
+        "1.0.0",
+        "",
+        &["riscv64gc-unknown-linux-musl"],
+    ));
+    let mut h = harness(&server, &keys);
+    h.open_programs();
+    let entry = h.entry();
+    assert!(has(&entry, "no build for this computer"), "{entry:?}");
+    assert!(!has(&entry, "<button>install:"), "{entry:?}");
+}
+
+#[test]
+fn a_wasm_plugin_updating_to_a_program_must_be_approved_again() {
+    let (server, keys) = (Server::start(), keys());
+    server.serve_store(&keys, &keys.store_secret, &[]);
+    server.serve_release(&release(&keys, "1.0.0", r#""process": ["git"]"#));
+    let mut h = harness(&server, &keys);
+    h.open_programs();
+    h.press("install:demo");
+    assert_eq!(h.installed_version().as_deref(), Some("1.0.0"));
+
+    // The same permissions, now as a program outside the sandbox.
+    server.reset();
+    server.serve_store(&keys, &keys.store_secret, &[]);
+    server.serve_process_release(&process_release(
+        &keys,
+        "2.0.0",
+        r#""process": ["git"]"#,
+        &[this_target()],
+    ));
+    h.press("refresh");
+    let entry = h.entry();
+    assert!(has(&entry, &localize::t("store-more-access")), "{entry:?}");
+    assert!(has(&entry, &localize::t("store-access-program")), "{entry:?}");
+    h.press("update:demo");
+    assert_eq!(h.installed_version().as_deref(), Some("2.0.0"));
+    assert!(
+        !h.plugins.path().join("demo/plugin.wasm").exists(),
+        "the old component went with the old version"
+    );
+}
+
+#[test]
+fn a_withdrawn_build_of_a_plugin_process_is_not_installed() {
+    let (server, keys) = (Server::start(), keys());
+    let r = process_release(&keys, "1.0.0", "", &[this_target()]);
+    let sha = package::sha256_hex(&r.archives[0].1);
+    server.serve_store(&keys, &keys.store_secret, &[sha.as_str()]);
+    server.serve_process_release(&r);
+    let mut h = harness(&server, &keys);
+    h.open_programs();
+    h.press("install:demo");
+    assert_eq!(h.installed_version(), None);
+    h.assert_staging_clean();
 }

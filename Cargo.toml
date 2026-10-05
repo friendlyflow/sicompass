@@ -192,7 +192,7 @@ wiremock = "0.6"
 # so `nix build` can fetch it. Replace with `sicompass-sdk = "0.9.1"` above at
 # the release.
 [patch.crates-io]
-sicompass-sdk = { git = "https://github.com/friendlyflow/sicompass-plugin-sdk", rev = "f3c1c4fef3d4633b7e0f2ac1b59636d2edd947bb" }
+sicompass-sdk = { git = "https://github.com/friendlyflow/sicompass-plugin-sdk", rev = "60dfd27f7c0949ea8d22fe41d0a331c38ed65ae3" }
 
 # Optimize heavy third-party deps even in debug builds — html5ever and the
 # TLS/HTTP stack are 10-50x slower without optimizations.

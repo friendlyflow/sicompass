@@ -323,9 +323,125 @@ fn await_redirect(
     }
 }
 
+// ---------------------------------------------------------------------------
+// The desktop itself, for both plugin runtimes
+// ---------------------------------------------------------------------------
+//
+// A WASM guest names paths inside its sandbox, which `HostState::confine_granted`
+// maps and checks first; a plugin process names real paths. Either way, what
+// happens to the desktop is one of these.
+
+/// The browser comes back to a loopback port only this call listens on, and
+/// only once. Waits until it does, `timeout_secs` passes, or `cancel` is set.
+/// Returns `(redirect_uri, query)`.
+pub(crate) fn sign_in(
+    auth_url: &str,
+    timeout_secs: u32,
+    cancel: &AtomicBool,
+) -> Result<(String, String), String> {
+    if !auth_url.to_ascii_lowercase().starts_with("https://") {
+        return Err("the sign-in URL must be https".to_owned());
+    }
+    let listener = std::net::TcpListener::bind("127.0.0.1:0")
+        .map_err(|e| format!("no loopback port for the sign-in: {e}"))?;
+    listener.set_nonblocking(true).map_err(|e| e.to_string())?;
+    let port = listener.local_addr().map_err(|e| e.to_string())?.port();
+    let redirect_uri = format!("http://127.0.0.1:{port}");
+    let url = auth_url.replace("{redirect-uri}", &percent_encode(&redirect_uri));
+    if no_open() {
+        if let Ok(mut r) = SIGN_INS.lock() {
+            r.push(url);
+        }
+    } else {
+        open_url(&url)?;
+    }
+    let deadline = std::time::Instant::now()
+        + std::time::Duration::from_secs(timeout_secs.clamp(1, OAUTH_MAX_SECS).into());
+    let query = await_redirect(&listener, deadline, Some(cancel))?;
+    Ok((redirect_uri, query))
+}
+
+/// Open a URL in the user's browser or mail client: `http`, `https` and
+/// `mailto` only.
+pub(crate) fn open_url(url: &str) -> Result<(), String> {
+    let scheme = url.split_once(':').map(|(s, _)| s.to_ascii_lowercase());
+    if !matches!(scheme.as_deref(), Some("http" | "https" | "mailto")) {
+        return Err("only http, https and mailto URLs can be opened".to_owned());
+    }
+    if no_open() {
+        if let Ok(mut r) = RECORDED.lock() {
+            r.push(format!("open-url:{url}"));
+        }
+        return Ok(());
+    }
+    if sicompass_sdk::platform::open_with_default(url) {
+        Ok(())
+    } else {
+        Err("the desktop could not open that URL".to_owned())
+    }
+}
+
+/// Open a file with the application the desktop associates with it.
+pub(crate) fn open_path(host: &Path) -> Result<(), String> {
+    if no_open() {
+        if let Ok(mut r) = RECORDED.lock() {
+            r.push(format!("open-path:{}", host.display()));
+        }
+        return Ok(());
+    }
+    if sicompass_sdk::platform::open_with_default(&host.to_string_lossy()) {
+        Ok(())
+    } else {
+        Err("the desktop could not open that file".to_owned())
+    }
+}
+
+/// The installed applications as `(name, id)`. Read from the system each
+/// time, so an application installed while sicompass runs is there. The id is
+/// the command the system launches it with, which [`open_with`] checks
+/// against this same list.
+pub(crate) fn applications() -> Vec<(String, String)> {
+    sicompass_sdk::platform::get_applications()
+        .into_iter()
+        .map(|a| (a.name, a.exec))
+        .collect()
+}
+
+/// Only an id [`applications`] lists: a plugin chooses among the user's
+/// installed applications, and never names a program this way.
+pub(crate) fn open_with(id: &str, host: &Path) -> Result<(), String> {
+    if !sicompass_sdk::platform::get_applications()
+        .iter()
+        .any(|a| a.exec == id)
+    {
+        return Err("that is not an installed application".to_owned());
+    }
+    if no_open() {
+        if let Ok(mut r) = RECORDED.lock() {
+            r.push(format!("open-with:{id}:{}", host.display()));
+        }
+        return Ok(());
+    }
+    if sicompass_sdk::platform::open_with(id, &host.to_string_lossy()) {
+        Ok(())
+    } else {
+        Err("the application could not be started".to_owned())
+    }
+}
+
+/// Move the entry itself to the trash: for a symlink, the link.
+pub(crate) fn trash(host: &Path) -> Result<(), String> {
+    std::fs::symlink_metadata(host).map_err(|e| format!("{}: {e}", host.display()))?;
+    trash_delete(host)
+}
+
+/// Undo [`trash`] for `host`.
+pub(crate) fn restore(host: &Path) -> Result<(), String> {
+    trash_restore(host)
+}
+
 impl wit::desktop::Host for HostState {
-    /// See the WIT. The browser comes back to a loopback port only this call
-    /// listens on, and only once.
+    /// See the WIT, and [`sign_in`].
     fn oauth_redirect(
         &mut self,
         auth_url: String,
@@ -335,25 +451,7 @@ impl wit::desktop::Host for HostState {
             super::tasks::TaskRole::Worker { cancel, .. } => cancel.clone(),
             _ => return Err("a sign-in waits for the browser: start it from a task".to_owned()),
         };
-        if !auth_url.to_ascii_lowercase().starts_with("https://") {
-            return Err("the sign-in URL must be https".to_owned());
-        }
-        let listener = std::net::TcpListener::bind("127.0.0.1:0")
-            .map_err(|e| format!("no loopback port for the sign-in: {e}"))?;
-        listener.set_nonblocking(true).map_err(|e| e.to_string())?;
-        let port = listener.local_addr().map_err(|e| e.to_string())?.port();
-        let redirect_uri = format!("http://127.0.0.1:{port}");
-        let url = auth_url.replace("{redirect-uri}", &percent_encode(&redirect_uri));
-        if no_open() {
-            if let Ok(mut r) = SIGN_INS.lock() {
-                r.push(url);
-            }
-        } else {
-            self.open_url(url)?;
-        }
-        let deadline = std::time::Instant::now()
-            + std::time::Duration::from_secs(timeout_secs.clamp(1, OAUTH_MAX_SECS).into());
-        let query = await_redirect(&listener, deadline, Some(&cancel))?;
+        let (redirect_uri, query) = sign_in(&auth_url, timeout_secs, &cancel)?;
         Ok(wit::desktop::OauthReply {
             redirect_uri,
             query,
@@ -361,72 +459,22 @@ impl wit::desktop::Host for HostState {
     }
 
     fn open_url(&mut self, url: String) -> Result<(), String> {
-        let scheme = url.split_once(':').map(|(s, _)| s.to_ascii_lowercase());
-        if !matches!(scheme.as_deref(), Some("http" | "https" | "mailto")) {
-            return Err("only http, https and mailto URLs can be opened".to_owned());
-        }
-        if no_open() {
-            if let Ok(mut r) = RECORDED.lock() {
-                r.push(format!("open-url:{url}"));
-            }
-            return Ok(());
-        }
-        if sicompass_sdk::platform::open_with_default(&url) {
-            Ok(())
-        } else {
-            Err("the desktop could not open that URL".to_owned())
-        }
+        open_url(&url)
     }
 
     fn open_path(&mut self, path: String) -> Result<(), String> {
-        let host = self.confine_granted(&path, true)?;
-        if no_open() {
-            if let Ok(mut r) = RECORDED.lock() {
-                r.push(format!("open-path:{}", host.display()));
-            }
-            return Ok(());
-        }
-        if sicompass_sdk::platform::open_with_default(&host.to_string_lossy()) {
-            Ok(())
-        } else {
-            Err("the desktop could not open that file".to_owned())
-        }
+        open_path(&self.confine_granted(&path, true)?)
     }
 
-    /// Read from the system each time, so an application installed while
-    /// sicompass runs is there. The id is the command the system launches it
-    /// with, which `open-with` checks against this same list.
     fn applications(&mut self) -> Vec<wit::desktop::Application> {
-        sicompass_sdk::platform::get_applications()
+        applications()
             .into_iter()
-            .map(|a| wit::desktop::Application {
-                name: a.name,
-                id: a.exec,
-            })
+            .map(|(name, id)| wit::desktop::Application { name, id })
             .collect()
     }
 
-    /// Only an id `applications` lists: a plugin can choose among the user's
-    /// installed applications, never name a program of its own.
     fn open_with(&mut self, id: String, path: String) -> Result<(), String> {
-        let host = self.confine_granted(&path, true)?;
-        if !sicompass_sdk::platform::get_applications()
-            .iter()
-            .any(|a| a.exec == id)
-        {
-            return Err("that is not an installed application".to_owned());
-        }
-        if no_open() {
-            if let Ok(mut r) = RECORDED.lock() {
-                r.push(format!("open-with:{id}:{}", host.display()));
-            }
-            return Ok(());
-        }
-        if sicompass_sdk::platform::open_with(&id, &host.to_string_lossy()) {
-            Ok(())
-        } else {
-            Err("the application could not be started".to_owned())
-        }
+        open_with(&id, &self.confine_granted(&path, true)?)
     }
 
     /// The entry itself, like `ls -l`: a symlink is described, not followed.
@@ -441,12 +489,11 @@ impl wit::desktop::Host for HostState {
     fn trash(&mut self, path: String) -> Result<(), String> {
         let host = self.confine_granted(&path, false)?;
         std::fs::symlink_metadata(&host).map_err(|e| format!("{path}: {e}"))?;
-        trash_delete(&host)
+        trash(&host)
     }
 
     fn restore(&mut self, path: String) -> Result<(), String> {
-        let host = self.confine_granted(&path, false)?;
-        trash_restore(&host)
+        restore(&self.confine_granted(&path, false)?)
     }
 
     /// The link's own folder is confined (resolved), the link itself is not:

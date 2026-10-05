@@ -1,0 +1,181 @@
+# Plugin processes
+
+A plugin is a program of its own. sicompass starts it, talks to it over its stdin
+and stdout, and lets it go when the tab closes. This document is the host side:
+what the app does with a plugin process, and why it does it that way.
+
+If you are writing a plugin, start with the SDK's `sicompass_sdk::plugin` module
+(the `Plugin` trait and `main!`) in the [sicompass-plugin-sdk][sdk] repo, and with
+any plugin repo as an example (`salesdemo-plugin-sicompass` is the smallest).
+
+[sdk]: https://github.com/friendlyflow/sicompass-plugin-sdk
+
+## Why a process
+
+Until 0.2.x, plugins were sandboxed WebAssembly components ([wasm-plugins.md]).
+The sandbox was real: a component could reach only the host functions linked into
+it, so `plugin.json`'s permissions were enforced by construction. It also cost a
+great deal. Every capability a plugin wanted (a PTY, a socket, a child process with
+a private pipe, a browser sign-in, background work) had to be a host function first,
+and the plugins grew a second copy of their logic for the sandbox beside the
+native one their tests used.
+
+A plugin process has neither problem. It is ordinary Rust with `std`: threads,
+files, sockets, programs and the network work the way they work everywhere. What
+it gives up is the sandbox. **It runs with the user's rights**, like any program
+they start.
+
+That has consequences, accepted on purpose:
+
+- `plugin.json`'s `permissions` say what the plugin means to do. The Store shows
+  them before install, but nothing here enforces them.
+- A plugin can read `settings.json`, which holds other providers' secrets and the
+  user's licence certificates. The token scoping in `license.token` is the app's
+  manners, not a boundary.
+- No Mac App Store or iOS build: Apple forbids running downloaded native code.
+- One build per platform in every release.
+
+[wasm-plugins.md]: wasm-plugins.md
+
+## The shape of it
+
+| Piece | Where |
+|---|---|
+| The protocol: records, messages, framing | `sicompass_sdk::plugin_ipc` (SDK `src/plugin_ipc/`) |
+| The plugin side: `Plugin`, `main!`, the runtime | `sicompass_sdk::plugin` (SDK `src/plugin/`) |
+| Starting a plugin, the channel, deadlines, letting it go | `src/sicompass/src/plugin_host/channel.rs` |
+| What a plugin asks the app, and the answers | `src/sicompass/src/plugin_host/services.rs` |
+| The `Provider` it wears | `src/sicompass/src/plugin_host/provider.rs` |
+| Discovery and instantiation | `src/sicompass/src/programs.rs` (`instantiate_user_plugin`) |
+
+`ProcessProvider` implements the SDK's `Provider` trait, so the rest of the app
+cannot tell a plugin from a compiled-in built-in. It follows `WasmProvider` closely:
+the same batched `poll` once per frame, the same caches, the same handling of a
+broken plugin.
+
+## The protocol
+
+Each message is a little-endian `u32` byte count, then the message in postcard
+(`plugin_ipc::Message`). Either side may call the other at any time, so every call
+carries an id and its reply names it.
+
+1. The plugin speaks first: `Hello { protocol, name }`. The app refuses a plugin
+   whose protocol major differs from its own (`PROTOCOL_VERSION`, now `1.0`) and
+   says "update it from the Store".
+2. The app calls with `Call { id, request }`. There is one `Request` per thing a
+   provider does, the same set the WIT `provider` interface had, plus
+   `LocaleChanged`. The plugin answers with `Reply { id, response, moved_to }`.
+   `moved_to` is where the plugin is now, when the call moved it (a command, an
+   edit, a shell's `cd`), so `current_path` never needs a call.
+3. The plugin asks with `HostCall { id, request }` for what only the app knows, and
+   gets `HostReply { id, response }`. It may do so in the middle of answering a
+   call, and from any of its threads.
+
+FFON still travels as bytes in the SDK's binary codec, because it is a tree.
+
+A minor bump adds requests at the end. A peer that does not know one answers
+`Unsupported`, and the app treats that like the trait's default.
+
+### What a plugin asks the app
+
+| Request | Why it is the app's |
+|---|---|
+| `GetSetting` | its own `plugin.json` settings, from the user's `settings.json` section for it. They also arrive with `Init` and through `OnSettingChange` |
+| `Translate` | the app's Fluent bundles, which hold the plugin's own `locales/` in the user's language. The runtime caches them until `LocaleChanged` |
+| `LicenseStatus`, `LicenseStanding`, `LicenseToken` | the Store's certificates. The token only for the tier `plugin.json` names as its `service` |
+| `OpenUrl`, `OpenPath`, `Applications`, `OpenWith` | the user's desktop, the same code as the built-ins |
+| `Trash`, `Restore` | the OS trash, through the app, so the undo tests' stub (`TEST_NO_TRASH`) covers plugins too |
+| `OauthRedirect` | a browser sign-in on a loopback port the app opens once, ended when the plugin goes |
+| `Rendered` | a page the plugin rendered for a link (`"rendersPages"`), taken only for URLs it was asked about |
+
+Everything else is the plugin's own business: files, programs, sockets, HTTP.
+
+## Starting and stopping
+
+`Channel::spawn` starts `<plugin dir>/<entry><EXE_SUFFIX>` in its own directory,
+with stdin, stdout and stderr piped (and `CREATE_NO_WINDOW` on Windows). `entry` has
+no extension in `plugin.json`, so one manifest serves every platform.
+
+- **stdout is the channel.** The plugin runtime moves the real stdin and stdout to
+  private descriptors before any plugin code runs, points fd 0 at `/dev/null` and
+  fd 1 at stderr. So a `println!` lands in the log, and a program the plugin starts
+  with inherited stdio (git, the claude CLI) cannot read the app's messages
+  (`sicompass_sdk::plugin` `stdio.rs`).
+- **stderr is the log**, line by line into tracing (`target: "plugin"`), with the
+  last lines kept to say why a plugin stopped.
+- **ETXTBSY.** A just-written executable (the Store installing one, a test copying
+  one) is briefly held open for writing by any process another thread forks in the
+  meantime, and executing it fails. The spawn is retried for a few milliseconds.
+- **One process per tab.** The app builds a provider set per tab, and each gets its
+  own plugin process. A process starts in milliseconds, so there is no shared
+  plugin process and no state shared between tabs. Only the active tab's providers
+  are ticked.
+- **Letting go.** Dropping the provider closes the plugin's stdin. The runtime sees
+  the end, calls `cleanup` if the app did not, and exits, so a plugin stops what it
+  started (Chrome, a shell) itself. One still running three seconds later is
+  killed. Waiting for it happens on a thread of its own, so closing a tab never
+  waits on a plugin. If the app crashes, the pipes close the same way.
+
+## A broken plugin
+
+Every call has a deadline of 10 seconds, the longest the app can freeze on one call
+from its UI thread. Anything slower belongs on a thread of the plugin's own. Past
+the deadline the process is killed. `SICOMPASS_PLUGIN_NO_DEADLINE` turns the
+deadline off, for stepping through a plugin in a debugger.
+
+A panic arrives as `Response::Failed` with its message (the runtime catches it,
+answers, and exits, because the plugin's state is whatever it was mid-call). An
+exit arrives as the end of the channel. An answer of the wrong shape is a broken
+plugin too.
+
+All of them **poison** the provider: the error is queued once for `take_error`, the
+process is killed, and every later call answers like an inert provider. `tick` runs
+every frame, so the error is shown once, never 60 times a second. A dashboard frame
+whose cell count disagrees with its grid is the one exception: it is reported and
+drawn blank, without stopping the plugin, because it may be an off-by-one during a
+resize.
+
+## Installing
+
+A release of a plugin process has one archive per platform,
+`plugin-<target>.tar.gz`, named in `release.json` under `targets` by SHA-256, and
+still one signature. `abi` is `process/1.0`, which an app that only runs WASM
+refuses, keeping the plugin version it has.
+
+The Store reads `release.json`, picks this platform's archive
+(`plugin_abi::plugin_target`), downloads only that one, checks it against the
+signed hash, unpacks it into staging, checks the manifest against `release.json`,
+makes the executable runnable, and swaps the folder in. There is no import audit:
+a program has no import list, and what the user approves is that it runs at all.
+
+The targets: `x86_64` and `aarch64-unknown-linux-musl` (static, so one build runs on
+every distribution, NixOS included), `x86_64` and `aarch64-apple-darwin`, and
+`x86_64-pc-windows-msvc`.
+
+**Approval.** A plugin process always needs the user's approval
+(`plugin_abi::needs_approval`). Its fingerprint starts with `process;`, so a plugin
+that moves from the WASM sandbox to a process asks again, whatever its
+`permissions` say, and the Store shows the update as asking for more. The Store's
+page leads with "runs as a program on this computer, with your rights", then lists
+what the plugin declares.
+
+## Testing
+
+```sh
+cargo test -p sicompass --test process_plugin   # against real plugin processes
+cargo test -p sicompass plugin_host             # unit
+cargo test -p sicompass-store                   # installing process releases
+```
+
+The fixtures are examples of the app crate (`src/sicompass/examples/process_fixture*.rs`),
+built by `cargo test`. They start a real process for every behaviour: settings,
+translations, the licence token's scope, storage, config, the timeline, the
+dashboard, rendered pages, the tab switcher's child pid, a panic, a hang, a
+protocol from the future, and nothing left running after a tab closes.
+
+A real plugin, from an unpacked release or a checkout with its executable copied in:
+
+```sh
+SICOMPASS_TEST_PLUGIN=<plugin dir> cargo test -p sicompass --test process_plugin \
+  -- --ignored a_real_plugin --nocapture
+```

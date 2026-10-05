@@ -441,7 +441,7 @@ impl wit::host::Host for HostState {
 /// passwords and licence certificates, and a sandbox that hands those over on
 /// request is not a sandbox. Mirrors how `programs::is_plugin_enabled_in_config`
 /// reads the same file.
-fn read_plugin_setting(section: &str, key: &str) -> Option<String> {
+pub(crate) fn read_plugin_setting(section: &str, key: &str) -> Option<String> {
     let path = sicompass_sdk::platform::main_config_path()?;
     let data = std::fs::read_to_string(&path).ok()?;
     let root: serde_json::Value = serde_json::from_str(&data).ok()?;

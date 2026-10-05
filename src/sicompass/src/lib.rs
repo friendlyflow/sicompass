@@ -15,6 +15,9 @@
 #![allow(dead_code, unused_imports)]
 
 pub mod boot;
+/// Host for plugin processes: a plugin is a program the app starts and talks
+/// to over its stdin and stdout.
+pub mod plugin_host;
 pub mod plugin_manifest;
 pub mod programs;
 pub mod start_menu;

@@ -325,7 +325,7 @@ bundled-sdl3 = ["sdl3/build-from-source-static"]
 
 [dependencies]
 # `package`: the Store's pre-install audit hook (register_component_auditor).
-sicompass-sdk = { workspace = true, features = ["package"] }
+sicompass-sdk = { workspace = true, features = ["package", "ipc"] }
 async-trait = { workspace = true }
 sicompass-builtins = { workspace = true }
 sicompass-updater = { workspace = true }
@@ -407,6 +407,9 @@ accesskit_macos = { workspace = true }
 winresource = { workspace = true }
 
 [dev-dependencies]
+# `plugin` for the plugin processes in examples/, which tests/process_plugin.rs
+# runs (`cargo test` builds examples).
+sicompass-sdk = { workspace = true, features = ["package", "ipc", "plugin"] }
 sicompass-builtins = { workspace = true }
 sicompass-settings = { workspace = true }
 sicompass-tutorial = { workspace = true }

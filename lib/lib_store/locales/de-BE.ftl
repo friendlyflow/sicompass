@@ -18,6 +18,7 @@ store-data-waiting-root = Nicht installiert, aber Sie haben sie früher benutzt:
 store-release-unavailable = Die neueste Version konnte nicht geprüft werden: { $err }
 store-version = Neueste Version: { $version }
 store-category = Kategorie: { $category }
+store-access-program = Läuft als Programm auf diesem Computer, mit Ihren Rechten. Was folgt, ist das, was es nach eigener Aussage tut, und sicompass kann es nicht darauf festlegen.
 store-access-none = Zugriff: nichts außerhalb des Programms selbst
 store-access-own-folder = Zugriff: nur der eigene Ordner
 store-access-any-server = Zugriff: verbindet sich mit jedem Server im Internet, nie mit Ihrem eigenen Computer oder lokalen Netzwerk

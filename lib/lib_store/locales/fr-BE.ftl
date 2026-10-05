@@ -18,6 +18,7 @@ store-data-waiting-root = Pas installés, mais vous les utilisiez avant : { $nam
 store-release-unavailable = Sa dernière version n'a pas pu être vérifiée : { $err }
 store-version = Dernière version : { $version }
 store-category = Catégorie : { $category }
+store-access-program = S'exécute comme un programme sur cet ordinateur, avec vos droits. Ce qui suit est ce qu'il dit faire, et sicompass ne peut pas l'y contraindre.
 store-access-none = Accès : rien en dehors du programme lui-même
 store-access-own-folder = Accès : uniquement son propre dossier
 store-access-any-server = Accès : se connecte à n'importe quel serveur sur Internet, jamais à votre ordinateur ni à votre réseau local

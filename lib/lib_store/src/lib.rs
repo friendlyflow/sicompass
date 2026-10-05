@@ -883,9 +883,15 @@ fn button(action: &str, name: &str, label: String) -> FfonElement {
 }
 
 /// One line per kind of access, in plain words, or one line saying there is none.
+///
+/// A plugin process leads with what matters most: it is a program with the
+/// user's rights, so the lines after it are what it declares, not limits.
 fn access_lines(release: &ReleaseInfo) -> Vec<String> {
     let p = &release.permissions;
     let mut out = Vec::new();
+    if release.is_process() {
+        out.push(localize::t("store-access-program"));
+    }
     let any_server = sicompass_sdk::plugin_abi::reaches_any_server(&release.allowed_hosts);
     if any_server {
         out.push(localize::t("store-access-any-server"));

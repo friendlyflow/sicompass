@@ -4093,8 +4093,8 @@ dependencies = [
 
 [[package]]
 name = "sicompass-sdk"
-version = "0.9.0"
-source = "git+https://github.com/friendlyflow/sicompass-plugin-sdk?rev=f3c1c4fef3d4633b7e0f2ac1b59636d2edd947bb#f3c1c4fef3d4633b7e0f2ac1b59636d2edd947bb"
+version = "0.9.1"
+source = "git+https://github.com/friendlyflow/sicompass-plugin-sdk?rev=60dfd27f7c0949ea8d22fe41d0a331c38ed65ae3#60dfd27f7c0949ea8d22fe41d0a331c38ed65ae3"
 dependencies = [
  "async-trait",
  "base64 0.23.1",
@@ -4104,6 +4104,8 @@ dependencies = [
  "fluent-langneg 0.14.2",
  "getrandom 0.3.4",
  "intl-memoizer",
+ "libc",
+ "postcard",
  "scraper",
  "serde",
  "serde_json",
@@ -4114,6 +4116,7 @@ dependencies = [
  "unic-langid",
  "unicode-normalization",
  "url",
+ "windows-sys 0.61.2",
  "winreg 0.56.0",
  "xdg",
 ]
