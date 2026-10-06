@@ -81,7 +81,7 @@ tutorial-hiw-accessibility = Screen reader support is built in through AccessKit
 # 4. The programs (one short leaf each)
 # ---------------------------------------------------------------------------
 tutorial-sec-programs = The programs
-tutorial-prog-intro = Sicompass turns each data source into the same navigable tree. Enable or disable programs in Settings under 'Available programs'. Programs that do not ship with the app are installed from the Store, and each one you have installed describes itself here, followed by the two that ship with the app.
+tutorial-prog-intro = Sicompass turns each data source into the same navigable tree. Every installed program is in the root list. Programs that do not ship with the app are installed from the Store and removed there too, and each one you have installed describes itself here, followed by the two that ship with the app.
 tutorial-prog-none = No programs installed yet. Open store, then programs, to add one.
 tutorial-prog-store = Store: adds, updates and removes programs. Open store, then programs, pick one, and press Enter on install. Each program says what it may reach before you install it, and installing is free. Under tiers are Sicompass Cloud, Sicompass Commercial, Sponsor and Support.
 tutorial-prog-settings = Settings: always the last item at the root. It configures Sicompass and every program, and changes take effect immediately.
@@ -112,7 +112,7 @@ tutorial-play-lorem = __LOREM_IPSUM__
 tutorial-sec-config = Settings and config
 tutorial-cfg-file = All configuration lives in one file, ~/.config/sicompass/settings.json, organized by namespace with a section per program.
 tutorial-cfg-logs = Sicompass writes a daily log file, sicompass.log, to a platform directory: ~/.local/state/sicompass/ on Linux, ~/Library/Logs/sicompass/ on macOS, and %LOCALAPPDATA%\sicompass\ on Windows. Set the RUST_LOG environment variable to also print logs to the terminal. Logs help when you report a problem.
-tutorial-cfg-settings = The Settings program edits everything live: color scheme, display scaling, a shoulder-surfing blank that hides the screen while the screen reader keeps working, and which programs load. Each program brings its own values too, such as URL history under web browser, which sets how many addresses are remembered. In a desicompass session, color scheme, language and the accessibility settings, the screen reader among them, are in the superkey's Settings instead, shared with the login screen.
+tutorial-cfg-settings = The Settings program edits everything live: color scheme, display scaling, and a shoulder-surfing blank that hides the screen while the screen reader keeps working. Each program brings its own values too, such as URL history under web browser, which sets how many addresses are remembered. In a desicompass session, color scheme, language and the accessibility settings, the screen reader among them, are in the superkey's Settings instead, shared with the login screen.
 tutorial-cfg-saveload = Some programs support their own config files. Ctrl+S saves, Ctrl+Shift+S saves under a new name, and Ctrl+O opens a saved file.
 tutorial-cfg-updates = Sicompass checks for updates at launch. When one is staged, press Ctrl+U to apply it. Plugins update the same way, verified by SHA-256 and an optional ed25519 signature.
 
@@ -120,5 +120,5 @@ tutorial-cfg-updates = Sicompass checks for updates at launch. When one is stage
 # 7. Extending Sicompass (pointer to the real docs)
 # ---------------------------------------------------------------------------
 tutorial-sec-extending = Extending Sicompass
-tutorial-ext-build = You can build your own programs. Rust is the standard way, implement the Provider trait from the sicompass-sdk crate and register it, exactly as every built-in program does. A plugin you install is a program of its own instead, which Sicompass starts and talks to. It runs with your rights, so its permissions say what it means to do, and you approve them before it runs. Install one under ~/.config/sicompass/plugins/ and enable it in Settings.
+tutorial-ext-build = You can build your own programs. Rust is the standard way, implement the Provider trait from the sicompass-sdk crate and register it, exactly as every built-in program does. A plugin you install is a program of its own instead, which Sicompass starts and talks to. It runs with your rights, so its permissions say what it means to do, and you approve them before it runs. Install one under ~/.config/sicompass/plugins/ and approve it in the Store.
 tutorial-ext-docs = The full Provider trait, the element tags, and a worked example are in the repository docs and the sicompass-sdk crate, not in this tutorial. See docs/process-plugins.md for how a plugin talks to Sicompass, the lib/ crates for built-in Rust providers, and the sales demo plugin (salesdemo-plugin-sicompass on GitHub) for a complete plugin.

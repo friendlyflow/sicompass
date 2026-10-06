@@ -16,7 +16,6 @@ settings-language-option-de-BE = Deutsch (Belgien)
 # Section display names. "sicompass" is the product name and stays in all
 # locales.
 settings-section-sicompass = sicompass
-settings-section-available-programs = Programmes disponibles :
 settings-section-file-browser = navigateur de fichiers
 settings-section-web-browser = navigateur web
 settings-section-email-client = client de messagerie

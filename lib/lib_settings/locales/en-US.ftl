@@ -19,7 +19,6 @@ settings-language-option-de-BE = Deutsch (Belgien)
 # settings.json) stays language-neutral; these entries only translate the
 # displayed FFON Obj key when navigating into a section.
 settings-section-sicompass = sicompass
-settings-section-available-programs = Available programs:
 settings-section-file-browser = file browser
 settings-section-web-browser = web browser
 settings-section-email-client = email client

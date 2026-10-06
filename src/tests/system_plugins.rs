@@ -121,8 +121,7 @@ fn a_plugin_the_configuration_provides_runs_unasked_in_place_of_the_users_copy()
     let queue = programs::load_programs(&mut renderer);
     programs::apply_pending_settings(&mut renderer, &queue, true);
 
-    // Running, though nobody approved it or switched it on. (The settings panel
-    // then writes the switch it shows, on.)
+    // Running, though nobody approved it.
     assert!(
         renderer.providers.iter().any(|p| p.name() == "fixture"),
         "the configuration's plugin was not started"
@@ -131,17 +130,8 @@ fn a_plugin_the_configuration_provides_runs_unasked_in_place_of_the_users_copy()
     assert!(cfg["pluginApprovals"].get("fixture").is_none(), "{cfg}");
 
     // The system copy, once, and not the user's.
-    let programs_section = settings_section(&renderer, "Available programs").unwrap();
-    assert!(
-        programs_section
-            .iter()
-            .any(|l| l.contains("system fixture")),
-        "{programs_section:?}"
-    );
-    assert!(
-        !programs_section.iter().any(|l| l.contains("user fixture")),
-        "{programs_section:?}"
-    );
+    assert!(settings_section(&renderer, "system fixture").is_some());
+    assert!(settings_section(&renderer, "user fixture").is_none());
     assert_eq!(
         renderer
             .providers

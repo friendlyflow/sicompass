@@ -251,8 +251,8 @@ hosts, folders, programs and sockets (storage is left out, it needs no approval)
 Implemented in 4.4: a plugin whose `filesystem` access is not approved with the
 current fingerprint does not load, and says so. **If an update asks for more, the plugin
 stays on the old version, and the Store shows "this update asks for more
-access" until the user approves.** A plugin copied into `plugins/` by hand asks
-on first enable instead.
+access" until the user approves.** A plugin copied into `plugins/` by hand waits
+for an approve button on its Store entry instead.
 
 ## 5. Capabilities, one by one
 
@@ -551,8 +551,7 @@ Store
   into `plugins/<name>/` atomically. It then tells
   the app through the same queued-callback pattern Settings uses (the SDK
   boundary forbids a direct call). The app rescans, loads, **injects the plugin's
-  settings** (today a hot enable skips them, which is a bug), and enables it. No
-  restart, unlike today.
+  settings**, and shows it in the root list. No restart, unlike today.
 - **Updates** move here from `lib_updater`, which keeps only the app's own
   update. Store plugins update through their `release.json`. A plugin copied in
   by hand with an `updateUrl` uses the same format.
@@ -577,8 +576,9 @@ Store
   and swap `plugins/<name>/` in with a rename from `plugins/.store/`.
 - The app receives `pluginInstalled`, `pluginUpdated` or `pluginRemoved`
   through the settings queue (`programs::wire_store`). It records the approval
-  and the enable switch in `settings.json`, adds the program's line and its
-  settings section, and loads or unloads it in every tab.
+  in `settings.json`, adds the program's settings section, and loads or unloads
+  it in every tab. There is no switch: an installed plugin is in the root list,
+  and the way to remove it is the Store's uninstall.
 - `/store` edits and re-signs the list with `~/.config/sicompass/store.key`.
 - Tests: `lib/lib_store/src/tests.rs` (wiremock, every refusal) and
   `src/tests/store.rs` (a real plugin program, built from

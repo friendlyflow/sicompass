@@ -45,28 +45,22 @@ pub fn read_approvals() -> std::collections::HashMap<String, String> {
 
 /// Record what the Store just installed or updated: the access the user
 /// approved by pressing Install or Update (whatever the manifest asks, so a
-/// later update asking for more is noticed), and, for an install, the program
-/// enabled in "Available programs:".
-pub fn record_store_install(m: &PluginManifest, enable: bool) -> Result<(), String> {
+/// later update asking for more is noticed).
+pub fn record_store_install(m: &PluginManifest) -> Result<(), String> {
     edit_config(|root| {
         let approvals = object_at(root, APPROVALS_KEY);
         approvals.insert(
             m.name.clone(),
             serde_json::Value::String(sicompass_sdk::plugin_abi::approval_fingerprint(m)),
         );
-        if enable {
-            object_at(root, "Available programs:")
-                .insert(format!("enable_{}", m.name), serde_json::Value::Bool(true));
-        }
     })
 }
 
-/// Forget an uninstalled plugin's approval and enable switch. Its own settings
-/// section is kept, like its data folder: reinstalling finds them again.
+/// Forget an uninstalled plugin's approval. Its own settings section is kept,
+/// like its data folder: reinstalling finds them again.
 pub fn forget_store_install(name: &str) -> Result<(), String> {
     edit_config(|root| {
         object_at(root, APPROVALS_KEY).remove(name);
-        object_at(root, "Available programs:").remove(&format!("enable_{name}"));
     })
 }
 

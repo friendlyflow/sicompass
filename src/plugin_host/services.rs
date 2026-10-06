@@ -162,8 +162,7 @@ impl Services {
 ///
 /// Only the section its own manifest declared: other providers' sections hold
 /// API keys, IMAP passwords and licence certificates. (A plugin process could
-/// read the file itself, but the app does not hand them over.) Mirrors how
-/// `programs::is_plugin_enabled_in_config` reads the same file.
+/// read the file itself, but the app does not hand them over.)
 pub(crate) fn read_plugin_setting(section: &str, key: &str) -> Option<String> {
     let path = sicompass_sdk::platform::main_config_path()?;
     let data = std::fs::read_to_string(&path).ok()?;

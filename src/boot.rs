@@ -126,7 +126,7 @@ pub fn app_state(hooks: ProgramsHooks) -> Result<AppState, SiError> {
 
     // Load providers (tutorial + settings by default)
     let queue = crate::programs::load_programs_with(&mut state.renderer, shared.as_deref());
-    // Apply initial settings (skip enable_* — providers already loaded above)
+    // Apply initial settings (providers already loaded above)
     crate::programs::apply_pending_settings_with(
         &mut state.renderer,
         &queue,

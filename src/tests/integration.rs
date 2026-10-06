@@ -9874,59 +9874,6 @@ fn ctrl_shift_t_busy_tab_cancel_button_keeps_tab() {
     assert_ne!(h.renderer.coordinate, Coordinate::ConfirmCloseTab);
 }
 
-#[test]
-fn enabling_app_in_settings_propagates_to_all_tabs() {
-    let mut h = Harness::new(); // [filebrowser] + shared settings, 1 tab
-    press_ctrl(h.r(), Keycode::T); // 2 tabs, each its own filebrowser
-    assert_eq!(h.renderer.tabs.len(), 2);
-    let inactive = if h.renderer.active_tab == 0 { 1 } else { 0 };
-
-    // Enable the tutorial (the one built-in program that can be switched
-    // off) via the settings-apply path.
-    let queue: sicompass::programs::SettingsQueue = std::sync::Arc::new(std::sync::Mutex::new(
-        vec![("enable_tutorial".to_owned(), "true".to_owned())],
-    ));
-    sicompass::programs::apply_pending_settings(h.r(), &queue, false);
-
-    // Active tab (live providers) has it.
-    assert!(
-        h.renderer
-            .providers
-            .iter()
-            .any(|p| p.name() == "tutorial"),
-        "active tab should have the newly enabled provider"
-    );
-    // Inactive tab's parked set has it too.
-    assert!(
-        h.renderer.tabs[inactive]
-            .providers
-            .iter()
-            .any(|p| p.name() == "tutorial"),
-        "inactive tab should ALSO have the newly enabled provider"
-    );
-
-    // Now disable it again — both tabs lose it.
-    let queue: sicompass::programs::SettingsQueue = std::sync::Arc::new(std::sync::Mutex::new(
-        vec![("enable_tutorial".to_owned(), "false".to_owned())],
-    ));
-    sicompass::programs::apply_pending_settings(h.r(), &queue, false);
-
-    assert!(
-        !h.renderer
-            .providers
-            .iter()
-            .any(|p| p.name() == "tutorial"),
-        "active tab should drop the disabled provider"
-    );
-    assert!(
-        !h.renderer.tabs[inactive]
-            .providers
-            .iter()
-            .any(|p| p.name() == "tutorial"),
-        "inactive tab should ALSO drop the disabled provider"
-    );
-}
-
 /// Regression: the user reported that after restart, landing in the "second
 /// layer" (a provider's own list, `current_id` depth 2) of almost every
 /// in-memory provider (tutorial, settings, …) showed NO list until a manual
@@ -14564,7 +14511,7 @@ fn general_right_into_settings_records_path_not_provider_name() {
     // Settings is a non-filebrowser, non-refresh_on_navigate provider that
     // nonetheless tracks current_path. Right-from-root + Right-into-section
     // must capture from_path/to_path so the timeline view shows the
-    // descent as paths (e.g. "/" → "/Available programs:") instead of
+    // descent as paths (e.g. "/" → "/sicompass") instead of
     // falling back to the provider's display_name on both sides.
     let mut h = Harness::new();
     let settings_idx = h.provider_idx("settings").expect("settings provider");

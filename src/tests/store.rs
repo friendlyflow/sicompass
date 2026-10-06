@@ -4,10 +4,10 @@
 //!
 //! lib_store's own tests cover what is refused (bad signatures, tampered
 //! archives, more access than approved). This one covers the hand-over to the
-//! app: that a finished install ends up as a running program with its settings
-//! section, an approval and an enable switch in settings.json, that an
-//! uninstall takes all of that away again, and that the data folder goes to the
-//! trash only when asked.
+//! app: that a finished install ends up as a running program in every tab's
+//! root list, with its settings section and an approval in settings.json, that
+//! an uninstall takes all of that away again, and that the data folder goes to
+//! the trash only when asked.
 //!
 //! # Why this is its own test binary
 //!
@@ -119,6 +119,15 @@ fn loaded(renderer: &AppRenderer, name: &str) -> bool {
     renderer.providers.iter().any(|p| p.name() == name)
 }
 
+/// Whether the root list shows the program `name`: a provider, and its line.
+fn in_root_list(renderer: &AppRenderer, name: &str) -> bool {
+    renderer
+        .providers
+        .iter()
+        .position(|p| p.name() == name)
+        .is_some_and(|i| renderer.ffon.get(i).and_then(|e| e.as_obj()).is_some())
+}
+
 #[test]
 fn the_store_installs_a_plugin_into_the_running_app_and_removes_it() {
     // The app spells the Store's keys out itself (the SDK boundary keeps it from
@@ -205,6 +214,15 @@ fn the_store_installs_a_plugin_into_the_running_app_and_removes_it() {
     programs::apply_pending_settings(&mut renderer, &queue, true);
     renderer.settings_queue = Some(queue.clone());
 
+    // A second tab, parked while the first one installs: the program appears
+    // in it too, and goes from it too.
+    sicompass_ui::handlers::handle_tab_new(&mut renderer);
+    renderer.switch_to_tab(0);
+    assert_eq!(renderer.tabs.len(), 2);
+    let parked = 1;
+    let in_parked =
+        |r: &AppRenderer, name: &str| r.tabs[parked].providers.iter().any(|p| p.name() == name);
+
     let idx = store_index(&renderer);
     let plugins_dir = sicompass_sdk::platform::plugins_dir().unwrap();
     assert!(plugins_dir.starts_with(config_home.path()));
@@ -231,12 +249,17 @@ fn the_store_installs_a_plugin_into_the_running_app_and_removes_it() {
 
     assert!(plugins_dir.join("fixture").join(sicompass_sdk::plugin_abi::executable_name("plugin", target)).is_file());
     assert!(loaded(&renderer, "fixture"), "installed but not loaded");
+    assert!(in_parked(&renderer, "fixture"), "not in the other tab");
     let cfg = settings_json();
     assert_eq!(
         cfg["pluginApprovals"]["fixture"].as_str(),
         Some(sicompass_sdk::plugin_abi::approval_fingerprint(&manifest).as_str())
     );
-    assert_eq!(cfg["Available programs:"]["enable_fixture"], true);
+    assert!(
+        cfg.get("Available programs:").is_none(),
+        "installed is shown, there is no switch to record: {cfg}"
+    );
+    assert!(in_root_list(&renderer, "fixture"));
     let section = settings_section(&renderer, "fixture demo")
         .expect("the plugin's settings section appears without a restart");
     assert!(
@@ -262,11 +285,6 @@ fn the_store_installs_a_plugin_into_the_running_app_and_removes_it() {
         1,
         "one section per plugin, as at startup: {sections:?}"
     );
-    let programs_section = settings_section(&renderer, "Available programs").unwrap();
-    assert!(
-        programs_section.iter().any(|l| l.contains("fixture demo")),
-        "{programs_section:?}"
-    );
 
     // The plugin's data folder, as it would have made one.
     let data = data_dir.join("fixture");
@@ -281,18 +299,11 @@ fn the_store_installs_a_plugin_into_the_running_app_and_removes_it() {
 
     assert!(!plugins_dir.join("fixture").exists());
     assert!(!loaded(&renderer, "fixture"), "uninstalled but still loaded");
+    assert!(!in_parked(&renderer, "fixture"), "still in the other tab");
     let cfg = settings_json();
     assert!(cfg["pluginApprovals"].get("fixture").is_none(), "{cfg}");
-    assert!(
-        cfg["Available programs:"].get("enable_fixture").is_none(),
-        "{cfg}"
-    );
     assert!(settings_section(&renderer, "fixture demo").is_none());
-    let programs_section = settings_section(&renderer, "Available programs").unwrap();
-    assert!(
-        !programs_section.iter().any(|l| l.contains("fixture demo")),
-        "{programs_section:?}"
-    );
+    assert!(!in_root_list(&renderer, "fixture"));
 
     // Uninstalling keeps the data; moving it to the trash is a separate press.
     assert!(data.join("kept.txt").is_file());
@@ -330,6 +341,14 @@ fn the_store_installs_a_plugin_into_the_running_app_and_removes_it() {
         "{entry:?}"
     );
     assert!(!loaded(&renderer, "fixture"), "not running before the approval");
+    // Nor at the next start: an unapproved plugin is not in the root list, and
+    // has no settings section either.
+    let mut restarted = AppRenderer::new();
+    restarted.hooks = Box::new(sicompass::boot::ProgramsHooks::default());
+    programs::load_programs(&mut restarted);
+    assert!(!loaded(&restarted, "fixture"), "started without approval");
+    assert!(settings_section(&restarted, "fixture demo").is_none());
+    drop(restarted);
     renderer.providers[idx].on_button_press("approve:fixture");
     programs::apply_pending_settings(&mut renderer, &queue, false);
     assert!(loaded(&renderer, "fixture"), "approved but not started");

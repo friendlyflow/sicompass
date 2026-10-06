@@ -1103,8 +1103,8 @@ impl Provider for StoreProvider {
             Some(("install", name)) => self.start_install(name, false),
             Some(("update", name)) => self.start_install(name, true),
             Some(("uninstall", name)) => self.uninstall(name),
-            // The app records the approval, adds the enable switch and starts
-            // the plugin, as after an install.
+            // The app records the approval and starts the plugin, as after an
+            // install.
             Some(("approve", name)) => self.fire(PLUGIN_INSTALLED, name),
             Some(("trashdata", name)) => self.trash_data(name),
             _ if function_name == "refresh" && self.job.is_none() => {
@@ -1248,8 +1248,7 @@ pub fn license_token(tier_id: &str) -> Option<String> {
     (!token.is_empty()).then_some(token)
 }
 
-/// Register the Store with the SDK: always present, never in "Available
-/// programs:".
+/// Register the Store with the SDK: always present, it installs the others.
 pub fn register() {
     register_translations();
     let keys: Vec<&str> = source::TRUSTED_KEYS.to_vec();

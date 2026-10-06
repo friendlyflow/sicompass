@@ -79,7 +79,6 @@ pub struct SettingsProvider {
     current_path: String,
     color_scheme: String,
     sections: Vec<String>,
-    priority_section: Option<String>,
     radio_entries: Vec<RadioEntry>,
     text_entries: Vec<TextEntry>,
     checkbox_entries: Vec<CheckboxEntry>,
@@ -113,7 +112,6 @@ impl SettingsProvider {
             current_path: "/".to_owned(),
             color_scheme: "dark".to_owned(),
             sections: Vec::new(),
-            priority_section: None,
             radio_entries: Vec::new(),
             text_entries: Vec::new(),
             checkbox_entries: Vec::new(),
@@ -133,7 +131,6 @@ impl SettingsProvider {
             current_path: "/".to_owned(),
             color_scheme: "dark".to_owned(),
             sections: Vec::new(),
-            priority_section: None,
             radio_entries: Vec::new(),
             text_entries: Vec::new(),
             checkbox_entries: Vec::new(),
@@ -240,11 +237,6 @@ impl SettingsProvider {
         self.radio_entries.retain(|e| e.section != name);
         self.text_entries.retain(|e| e.section != name);
         self.checkbox_entries.retain(|e| e.section != name);
-    }
-
-    pub fn add_priority_section(&mut self, name: &str) {
-        self.priority_section = Some(name.to_owned());
-        self.add_section(name);
     }
 
     pub fn add_radio(
@@ -400,30 +392,14 @@ impl SettingsProvider {
         }
     }
 
-    // On first run (settings.json absent), write a seed file containing only the
-    // priority section's currently-checked entries (i.e. the default programs).
-    // Nothing else is written — no colorScheme, no maximized, no other sections.
-    fn seed_priority_section_on_disk(&self, path: &Path) {
-        let Some(section_name) = self.priority_section.clone() else {
-            return;
-        };
+    // On first run (settings.json absent), write an empty settings.json, so
+    // the next launch is not a first run again. Nothing else is written: no
+    // colorScheme, no maximized, no sections.
+    fn seed_empty_file_on_disk(path: &Path) {
         if let Some(parent) = path.parent() {
             platform::make_dirs(parent);
         }
-        let mut section_map = Map::new();
-        for e in &self.checkbox_entries {
-            if e.section == section_name && e.checked {
-                section_map.insert(e.config_key.clone(), Value::Bool(true));
-            }
-        }
-        if section_map.is_empty() {
-            return;
-        }
-        let mut root = Map::new();
-        root.insert(section_name, Value::Object(section_map));
-        if let Ok(json) = serde_json::to_string_pretty(&Value::Object(root)) {
-            let _ = platform::atomic_write(path, &json);
-        }
+        let _ = platform::atomic_write(path, "{}");
     }
 
     /// Load the settings root object for an in-place key write.
@@ -544,8 +520,8 @@ impl SettingsProvider {
 
     /// Resolve a section's display name. Convention: section storage id `S`
     /// maps to Fluent message ID `settings-section-<S>` with spaces→hyphens
-    /// and trailing `:` stripped (so `"Available programs:"` → key
-    /// `settings-section-available-programs`). Falls back to the raw
+    /// and trailing `:` stripped (so `"file browser"` → key
+    /// `settings-section-file-browser`). Falls back to the raw
     /// storage id so callers without an FTL entry render their literal.
     /// Section storage ids are also used as keys in `settings.json`, so they
     /// must stay language-neutral — only the displayed FFON Obj key changes.
@@ -650,7 +626,6 @@ impl Provider for SettingsProvider {
         // radio, other radios, checkboxes, text inputs) goes into one list that
         // is sorted alphanumerically by displayed text, so the order matches what
         // the user reads on screen regardless of registration order or language.
-        let prio = self.priority_section.clone();
         let mut entries: Vec<(String, FfonElement)> = Vec::new();
 
         // Two version lines, deliberately labelled apart: the app version (what
@@ -747,16 +722,11 @@ impl Provider for SettingsProvider {
         }
         result.push(sc_obj);
 
-        // Priority section after sicompass
-        if let Some(ref p) = prio {
-            result.push(self.populate_section(p));
-        }
-
-        // Other sections (skip sicompass and priority — already rendered), sorted alphabetically
+        // Other sections (skip sicompass — already rendered), sorted alphabetically
         let mut other_sections: Vec<String> = self
             .sections
             .iter()
-            .filter(|s| s.as_str() != "sicompass" && prio.as_deref() != Some(s.as_str()))
+            .filter(|s| s.as_str() != "sicompass")
             .cloned()
             .collect();
         other_sections.sort_by(|a, b| a.to_ascii_lowercase().cmp(&b.to_ascii_lowercase()));
@@ -773,10 +743,10 @@ impl Provider for SettingsProvider {
             if path.exists() {
                 self.load_config(&path);
             } else {
-                // First launch: no settings.json yet. Seed the default program
-                // set; the app focuses the onboarding guide on first run.
+                // First launch: no settings.json yet. Create it; the app
+                // focuses the onboarding guide on first run.
                 self.first_run = true;
-                self.seed_priority_section_on_disk(&path);
+                Self::seed_empty_file_on_disk(&path);
             }
         }
         self.fire_all_apply();
@@ -1100,11 +1070,6 @@ impl Provider for SettingsProvider {
         self.remove_section(name);
     }
 
-    fn remove_checkbox_setting(&mut self, section: &str, config_key: &str) {
-        self.checkbox_entries
-            .retain(|e| !(e.section == section && e.config_key == config_key));
-    }
-
     fn set_section_version(&mut self, section: &str, version: &str) {
         self.section_versions
             .insert(section.to_owned(), version.to_owned());
@@ -1153,12 +1118,6 @@ impl Provider for SettingsProvider {
         self.external_keys = keys.iter().map(|k| (*k).to_owned()).collect();
     }
 
-    fn add_priority_section(&mut self, name: &str) {
-        // Inline the inherent add_priority_section body to avoid recursive
-        // dispatch (both inherent and trait have the same name).
-        self.priority_section = Some(name.to_owned());
-        self.add_section(name);
-    }
 
     fn set_apply_callback(&mut self, cb: Box<dyn Fn(&str, &str) + Send + 'static>) {
         self.apply_fn = Some(cb);
@@ -1522,20 +1481,11 @@ mod tests {
             SettingsProvider::localize_section_name("file browser"),
             "file browser"
         );
-        assert_eq!(
-            SettingsProvider::localize_section_name("Available programs:"),
-            // The tiers moved to the Store in 0.2.0, and the title with them.
-            "Available programs:"
-        );
 
         sicompass_sdk::localize::set_locale("nl-BE");
         assert_eq!(
             SettingsProvider::localize_section_name("file browser"),
             "bestandsverkenner"
-        );
-        assert_eq!(
-            SettingsProvider::localize_section_name("Available programs:"),
-            "Beschikbare programma's:"
         );
 
         sicompass_sdk::localize::set_locale("fr-BE");
@@ -1543,19 +1493,11 @@ mod tests {
             SettingsProvider::localize_section_name("file browser"),
             "navigateur de fichiers"
         );
-        assert_eq!(
-            SettingsProvider::localize_section_name("Available programs:"),
-            "Programmes disponibles :"
-        );
 
         sicompass_sdk::localize::set_locale("de-BE");
         assert_eq!(
             SettingsProvider::localize_section_name("file browser"),
             "Dateimanager"
-        );
-        assert_eq!(
-            SettingsProvider::localize_section_name("Available programs:"),
-            "Verfügbare Programme:"
         );
 
         // Unknown section name falls back to its literal.
@@ -1872,19 +1814,6 @@ mod tests {
                 .map_or(false, |s| s.starts_with("<checkbox checked>"))
         });
         assert!(has);
-    }
-
-    // --- priority section ---
-
-    #[test]
-    fn test_sicompass_section_comes_before_priority_section() {
-        let mut p = headless();
-        p.add_checkbox("prio", "item", "key", false);
-        p.add_priority_section("prio");
-        let elems = p.fetch();
-        // Order: [sicompass, prio, ...]
-        assert_eq!(elems[0].as_obj().unwrap().key, "sicompass");
-        assert_eq!(elems[1].as_obj().unwrap().key, "prio");
     }
 
     // --- on_radio_change ---
@@ -2366,18 +2295,6 @@ mod tests {
     }
 
     #[test]
-    fn test_priority_section_not_duplicated() {
-        let mut p = SettingsProvider::new_headless();
-        p.add_priority_section("programs");
-        p.add_checkbox("programs", "tutorial", "enable_tutorial", true);
-        let items = p.fetch();
-        // sicompass + programs — programs not duplicated
-        assert_eq!(items.len(), 2);
-        assert_eq!(items[0].as_obj().unwrap().key, "sicompass");
-        assert_eq!(items[1].as_obj().unwrap().key, "programs");
-    }
-
-    #[test]
     fn test_set_checkbox_state_no_change_skips() {
         let call_count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let cc2 = Arc::clone(&call_count);
@@ -2458,57 +2375,35 @@ mod tests {
 
     #[test]
     fn test_other_sections_sorted_alphabetically() {
-        // Resolves the priority section name per-locale; serialize against the
-        // locale-switching tests so the locale can't flip between `fetch()` and
-        // the `localize_section_name` lookup below.
+        // Section names are localized; serialize against the locale-switching
+        // tests so the locale can't flip during `fetch()`.
         let _g = locale_test_lock();
         sicompass_sdk::localize::set_locale("en-US");
         let mut p = SettingsProvider::new_headless();
-        p.add_priority_section("Available programs:");
-        p.add_checkbox("Available programs:", "tutorial", "enable_tutorial", true);
         p.add_text("tutorial", "label", "key", "val");
         p.add_text("chat client", "label", "key", "val");
         p.add_text("email client", "label", "key", "val");
         p.add_text("web browser", "label", "key", "val");
         let items = p.fetch();
-        // Expected order: sicompass, <localized Available programs:>, chat client, email client, tutorial, web browser.
-        // The priority section's displayed key depends on the active locale,
-        // so resolve it dynamically rather than asserting a literal.
-        let priority_key = SettingsProvider::localize_section_name("Available programs:");
+        // Expected order: sicompass, chat client, email client, tutorial, web browser.
         let keys: Vec<&str> = items
             .iter()
             .filter_map(|e| e.as_obj().map(|o| o.key.as_str()))
             .collect();
-        assert_eq!(keys[0], "sicompass");
-        assert_eq!(keys[1], priority_key.as_str());
-        assert_eq!(keys[2], "chat client");
-        assert_eq!(keys[3], "email client");
-        assert_eq!(keys[4], "tutorial");
-        assert_eq!(keys[5], "web browser");
+        assert_eq!(
+            keys,
+            vec!["sicompass", "chat client", "email client", "tutorial", "web browser"]
+        );
     }
 
-    // --- init seeds only enabled-by-default programs when file is missing ---
+    // --- init creates an empty settings.json when the file is missing ---
 
     #[test]
-    fn test_init_seeds_only_default_programs_when_file_missing() {
+    fn test_init_writes_an_empty_file_when_file_missing() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("settings.json");
         let mut p = SettingsProvider::new_headless().with_config_path(path.clone());
-        p.add_priority_section("Available programs:");
-        p.add_checkbox("Available programs:", "tutorial", "enable_tutorial", true);
-        p.add_checkbox(
-            "Available programs:",
-            "sales demo",
-            "enable_sales demo",
-            false,
-        );
-        p.add_checkbox(
-            "Available programs:",
-            "chat client",
-            "enable_chat client",
-            false,
-        );
-        // Unrelated settings that must NOT appear in the seeded file:
+        // Settings that must NOT appear in the seeded file:
         p.add_radio(
             "sicompass",
             "color scheme",
@@ -2527,35 +2422,11 @@ mod tests {
 
         p.init();
 
+        // The file exists, so the next launch is not a first run, and holds
+        // nothing: every value keeps its default until the user changes it.
         let data = std::fs::read_to_string(&path).expect("settings.json should have been created");
         let root: serde_json::Value = serde_json::from_str(&data).unwrap();
-
-        // Only the enabled-by-default entry is written.
-        let available = root
-            .get("Available programs:")
-            .expect("Available programs: section missing");
-        assert_eq!(
-            available.get("enable_tutorial").and_then(|v| v.as_bool()),
-            Some(true)
-        );
-        assert!(
-            available.get("enable_sales demo").is_none(),
-            "disabled-by-default entries must not be written"
-        );
-        assert!(
-            available.get("enable_chat client").is_none(),
-            "disabled-by-default entries must not be written"
-        );
-
-        // No other sections.
-        assert!(
-            root.get("sicompass").is_none(),
-            "sicompass section must not appear in seed"
-        );
-        assert!(
-            root.get("file browser").is_none(),
-            "file browser section must not appear in seed"
-        );
+        assert_eq!(root, serde_json::json!({}));
     }
 
     #[test]
@@ -2565,16 +2436,15 @@ mod tests {
         std::fs::write(&path, r#"{"sicompass":{"colorScheme":"light"}}"#).unwrap();
 
         let mut p = SettingsProvider::new_headless().with_config_path(path.clone());
-        p.add_priority_section("Available programs:");
-        p.add_checkbox("Available programs:", "tutorial", "enable_tutorial", true);
+        p.add_checkbox("sicompass", "maximized", "maximized", false);
         p.init();
 
         // Existing file must be unchanged (loaded, not overwritten).
         let data = std::fs::read_to_string(&path).unwrap();
         let root: serde_json::Value = serde_json::from_str(&data).unwrap();
         assert_eq!(root["sicompass"]["colorScheme"].as_str(), Some("light"));
-        // Seed must not have added Available programs: on top of the existing file.
-        assert!(root.get("Available programs:").is_none());
+        // The seed must not have replaced the existing file.
+        assert_eq!(root, serde_json::json!({"sicompass":{"colorScheme":"light"}}));
     }
 
     #[test]
@@ -2589,28 +2459,6 @@ mod tests {
         p.add_checkbox("s", "my flag", "myFlag", false);
         p.on_checkbox_change("my flag", true);
         assert!(fired.lock().unwrap().contains(&"myFlag".to_owned()));
-    }
-
-    #[test]
-    fn remove_checkbox_setting_drops_only_that_line() {
-        use sicompass_sdk::provider::Provider;
-        let mut p = SettingsProvider::new_headless().with_config_path(test_config_path());
-        p.add_checkbox("Available programs:", "notes", "enable_notes", true);
-        p.add_checkbox("Available programs:", "demo", "enable_demo", true);
-        p.add_checkbox("other", "demo", "enable_demo", true);
-        p.remove_checkbox_setting("Available programs:", "enable_demo");
-        let left: Vec<(&str, &str)> = p
-            .checkbox_entries
-            .iter()
-            .map(|e| (e.section.as_str(), e.config_key.as_str()))
-            .collect();
-        assert_eq!(
-            left,
-            vec![
-                ("Available programs:", "enable_notes"),
-                ("other", "enable_demo")
-            ]
-        );
     }
 
     #[test]
@@ -2817,22 +2665,6 @@ mod tests {
                 "no {key} line should appear when set_section_version was not called"
             );
         }
-    }
-
-    #[test]
-    fn add_priority_section_trait_method_registers_section() {
-        use sicompass_sdk::provider::Provider;
-        let mut p = SettingsProvider::new_headless().with_config_path(test_config_path());
-        Provider::add_priority_section(&mut p, "My Priority");
-        p.add_checkbox("My Priority", "flag", "myFlag", false);
-        let items = p.fetch();
-        let has_section = items
-            .iter()
-            .any(|e| e.as_obj().map(|o| o.key == "My Priority").unwrap_or(false));
-        assert!(
-            has_section,
-            "priority section should appear in fetch output"
-        );
     }
 
     // --- settings someone else owns (a desicompass session) ---

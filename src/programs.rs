@@ -140,7 +140,7 @@ pub fn load_programs_with(
 ) -> SettingsQueue {
     // Run one-time migrations of obsolete config keys.
     if let Some(path) = sicompass_sdk::platform::main_config_path() {
-        migrate_programs_to_load(&path);
+        drop_program_switches(&path);
         migrate_editor_to_text_editor(&path);
     }
     if let (Some(state), Some(config), Some(data)) = (
@@ -195,8 +195,6 @@ pub fn load_programs_with(
 
     register_accessibility_settings(settings.as_mut(), shared);
 
-    register_available_programs(settings.as_mut(), shared.is_some());
-
     // ---- Build the content providers + configure their settings sections ----
     load_content_providers(renderer, Some(settings.as_mut()));
     wire_store(&mut renderer.providers, &queue);
@@ -208,8 +206,8 @@ pub fn load_programs_with(
 }
 
 /// Built-in programs that a desicompass session shows in the superkey instead,
-/// the way it owns the accessibility settings: in a session sicompass neither
-/// loads them nor offers a checkbox for them.
+/// the way it owns the accessibility settings: in a session sicompass does not
+/// load them.
 const SESSION_OWNED_PROGRAMS: &[&str] = &["tutorial"];
 
 /// `names` without the programs the superkey shows when `session` is true.
@@ -218,28 +216,6 @@ fn session_filtered(mut names: Vec<String>, session: bool) -> Vec<String> {
         names.retain(|n| !SESSION_OWNED_PROGRAMS.contains(&n.as_str()));
     }
     names
-}
-
-/// The "Available programs:" section: one checkbox per opt-in built-in, except
-/// in a session the ones the superkey owns ([`SESSION_OWNED_PROGRAMS`]).
-/// User-plugin checkboxes are added by `load_user_plugins()` later, after
-/// discovery.
-fn register_available_programs(settings: &mut dyn Provider, session: bool) {
-    settings.add_priority_section("Available programs:");
-    for m in sicompass_sdk::builtin_manifests() {
-        if m.always_enabled
-            || (session && SESSION_OWNED_PROGRAMS.contains(&m.display_name.as_str()))
-        {
-            continue;
-        }
-        let config_key = format!("enable_{}", m.display_name);
-        settings.add_checkbox_setting(
-            "Available programs:",
-            &m.display_name,
-            &config_key,
-            m.enable_default,
-        );
-    }
 }
 
 /// Move `current_id` onto the onboarding line in the settings provider's
@@ -287,15 +263,15 @@ pub fn focus_onboarding(renderer: &mut AppRenderer) {
 
 /// Build and register the content providers (everything except the shared
 /// settings provider) into `renderer`, in canonical order: always-enabled
-/// builtins first, then enabled opt-in builtins, then user plugins, then remote
-/// services, all sorted alphabetically.
+/// builtins first, then the other builtins, then user plugins, all sorted
+/// alphabetically.
 ///
 /// When `settings` is `Some`, also configures the settings provider (injects
-/// per-provider setting entries, registers sections, adds plugin/remote
-/// checkboxes) — done once, at initial app load (`load_programs`). New tabs
-/// pass `None`: they reuse the already-configured shared settings provider and
-/// only need fresh provider instances, so they must NOT mutate settings (which
-/// would duplicate sections/checkboxes). The registered provider set is
+/// per-provider setting entries, registers sections) — done once, at initial
+/// app load (`load_programs`). New tabs pass `None`: they reuse the
+/// already-configured shared settings provider and only need fresh provider
+/// instances, so they must NOT mutate settings (which would duplicate
+/// sections). The registered provider set is
 /// identical either way, so provider indices stay stable across tabs.
 pub fn load_content_providers(renderer: &mut AppRenderer, mut settings: Option<&mut dyn Provider>) {
     // Always-enabled providers first (e.g. file browser).
@@ -312,13 +288,10 @@ pub fn load_content_providers(renderer: &mut AppRenderer, mut settings: Option<&
         }
     }
 
-    // Enabled opt-in content providers. Filtered after `enabled_programs`, whose
-    // "nothing enabled" fallback would otherwise bring a session's tutorial back.
-    let enabled = session_filtered(
-        enabled_programs(),
-        sicompass_ui::session_mode::is_session_mode(),
-    );
-    for name in &enabled {
+    // The other built-ins, all of them: the app's own programs are always
+    // there, except those a session shows in the superkey.
+    let builtins = builtin_programs(sicompass_ui::session_mode::is_session_mode());
+    for name in &builtins {
         if let Some(p) = instantiate_builtin(name.as_str()) {
             if let Some(s) = settings.as_deref_mut() {
                 let manifest = sicompass_sdk::builtin_manifests()
@@ -447,16 +420,8 @@ fn apply_store_change(renderer: &mut AppRenderer, key: &str, name: &str) {
                     "installed, but not found in the plugins folder".into(),
                 );
             };
-            if let Err(e) = crate::plugin_manifest::record_store_install(&m, true) {
+            if let Err(e) = crate::plugin_manifest::record_store_install(&m) {
                 complain(renderer, e);
-            }
-            if let Some(settings) = renderer.providers.last_mut() {
-                settings.add_checkbox_setting(
-                    "Available programs:",
-                    &m.display_name,
-                    &format!("enable_{}", m.name),
-                    true,
-                );
             }
             enable_provider(renderer, name);
             propagate_enable_to_parked_tabs(renderer, name);
@@ -474,7 +439,7 @@ fn apply_store_change(renderer: &mut AppRenderer, key: &str, name: &str) {
                     "updated, but not found in the plugins folder".into(),
                 );
             };
-            if let Err(e) = crate::plugin_manifest::record_store_install(&m, false) {
+            if let Err(e) = crate::plugin_manifest::record_store_install(&m) {
                 complain(renderer, e);
             }
             if was_loaded {
@@ -495,11 +460,9 @@ fn apply_store_change(renderer: &mut AppRenderer, key: &str, name: &str) {
             if let Err(e) = crate::plugin_manifest::forget_store_install(name) {
                 complain(renderer, e);
             }
-            if let Some(settings) = renderer.providers.last_mut() {
-                settings.remove_checkbox_setting("Available programs:", &format!("enable_{name}"));
-                if let Some(section) = display_name {
-                    settings.remove_settings_section(&section);
-                }
+            if let (Some(settings), Some(section)) = (renderer.providers.last_mut(), display_name)
+            {
+                settings.remove_settings_section(&section);
             }
         }
         PLUGIN_DATA_TRASH => {
@@ -698,14 +661,14 @@ fn inject_plugin_settings(settings: &mut dyn Provider, manifest: &PluginManifest
     }
 }
 
-/// Discover plugins in `~/.config/sicompass/plugins/`, add their checkboxes to
-/// "Available programs:", and register those that are enabled.
+/// Discover the installed plugins and register every one that loads: an
+/// installed plugin is always in the root list. One the user copied in by hand
+/// loads once they approve it in the Store (`instantiate_user_plugin`).
 ///
-/// Mirrors `discoverUserPlugins` + `registerProgramsSection` (user half) +
-/// the user-plugin loading loop in `programsLoad` from `src/sicompass/programs.c`.
-/// Load enabled user plugins into `renderer`. When `settings` is `Some`, also
-/// configures the settings provider (checkboxes, per-plugin settings, sections,
-/// versions) — done once at initial load. New tabs pass `None`: they reuse the
+/// When `settings` is `Some`, also configures the settings provider
+/// (per-plugin settings, sections, versions) — done once at initial load, and
+/// only for the plugins that loaded, so one waiting for approval has no
+/// settings section either. New tabs pass `None`: they reuse the
 /// already-configured shared settings provider and must only instantiate fresh
 /// provider instances, so settings is left untouched. The set of registered
 /// providers is identical regardless of `settings`, keeping provider indices
@@ -719,88 +682,44 @@ fn load_user_plugins(renderer: &mut AppRenderer, mut settings: Option<&mut dyn P
     for plugin in &discovered {
         let m = &plugin.manifest;
 
-        // Add the enable checkbox to "Available programs:" (same as C's registerProgramsSection).
-        let config_key = format!("enable_{}", m.name);
-        // One this computer's configuration provides was put there to run.
-        let currently_enabled =
-            is_plugin_enabled_in_config(&m.name, plugin.origin == PluginOrigin::System);
-        if let Some(s) = settings.as_deref_mut() {
-            s.add_checkbox_setting(
-                "Available programs:",
-                &m.display_name,
-                &config_key,
-                currently_enabled,
-            );
-        }
-
-        // Skip disabled plugins (mirrors C's isEnabledInConfig check in programsLoad).
-        if !currently_enabled {
-            continue;
-        }
-
-        if let Some(s) = settings.as_deref_mut() {
-            // Inject per-plugin settings and register a section.
-            inject_plugin_settings(s, m);
-            s.add_settings_section(&m.display_name);
-        }
-
-        // Construct and register the provider.
-        match instantiate_user_plugin(plugin) {
-            Some(p) => {
-                register_provider(renderer, p);
-                if let Some(s) = settings.as_deref_mut() {
-                    // Announce the load once, on the initial pass: every later tab
-                    // starts its own copy, and three identical lines at startup is
-                    // noise.
-                    if m.plugin_type == PluginType::Process {
-                        eprintln!(
-                            "sicompass: loaded plugin '{}' {}",
-                            m.name,
-                            m.version.as_deref().unwrap_or("")
-                        );
-                    }
-
-                    // Third-party plugin version: prefer plugin.json's `version`
-                    // field; fall back to the provider's own `Provider::version()`.
-                    let v: Option<String> = m.version.clone().or_else(|| {
-                        renderer
-                            .providers
-                            .last()
-                            .and_then(|p| p.version().map(|s| s.to_owned()))
-                    });
-                    if let Some(v) = v {
-                        s.set_section_version(&m.display_name, &v);
-                    }
-                }
-            }
-            None => eprintln!(
+        let Some(p) = instantiate_user_plugin(plugin) else {
+            eprintln!(
                 "sicompass: failed to load plugin '{}' from {}",
                 m.name,
                 plugin.entry_path.display()
-            ),
+            );
+            continue;
+        };
+        register_provider(renderer, p);
+
+        if let Some(s) = settings.as_deref_mut() {
+            inject_plugin_settings(s, m);
+            s.add_settings_section(&m.display_name);
+
+            // Announce the load once, on the initial pass: every later tab
+            // starts its own copy, and three identical lines at startup is
+            // noise.
+            if m.plugin_type == PluginType::Process {
+                eprintln!(
+                    "sicompass: loaded plugin '{}' {}",
+                    m.name,
+                    m.version.as_deref().unwrap_or("")
+                );
+            }
+
+            // Third-party plugin version: prefer plugin.json's `version`
+            // field; fall back to the provider's own `Provider::version()`.
+            let v: Option<String> = m.version.clone().or_else(|| {
+                renderer
+                    .providers
+                    .last()
+                    .and_then(|p| p.version().map(|s| s.to_owned()))
+            });
+            if let Some(v) = v {
+                s.set_section_version(&m.display_name, &v);
+            }
         }
     }
-}
-
-/// Check whether a user plugin (by manifest `name`) is enabled in `settings.json`.
-/// Returns `default` if the file doesn't exist, the section is absent, or the
-/// key is missing: `false` for the user's plugins (opt-in, matches C behavior),
-/// `true` for one this computer's configuration provides.
-fn is_plugin_enabled_in_config(name: &str, default: bool) -> bool {
-    let Some(path) = sicompass_sdk::platform::main_config_path() else {
-        return default;
-    };
-    let Ok(data) = std::fs::read_to_string(&path) else {
-        return default;
-    };
-    let Ok(root) = serde_json::from_str::<serde_json::Value>(&data) else {
-        return default;
-    };
-    let config_key = format!("enable_{}", name);
-    root.get("Available programs:")
-        .and_then(|s| s.get(&config_key))
-        .and_then(|v| v.as_bool())
-        .unwrap_or(default)
 }
 
 /// Move what built-ins kept outside the folder their plugin's storage is
@@ -844,7 +763,6 @@ fn migrate_builtin_data_to_plugins(state: &Path, config: &Path, data: &Path) {
     }
 }
 
-/// Migrate obsolete `sicompass.programsToLoad` array to individual
 /// The app's own rows in the Settings page's `sicompass` section.
 ///
 /// `system` holds the machine's accessibility defaults, and `session` is true
@@ -1000,53 +918,28 @@ fn read_language_from_config(path: &Path) -> Option<String> {
     }
 }
 
-/// `Available programs:.enable_<name> = true` entries.
-///
-/// Mirrors `programs.c:422-448`. Runs once at startup; if the key is absent
-/// the function is a no-op.
-fn migrate_programs_to_load(path: &Path) {
+/// Drop the switches that used to choose which programs load: the old
+/// `sicompass.programsToLoad` array, and the `"Available programs:"` section
+/// that replaced it. Every installed program loads now. Runs at startup; with
+/// neither present the file is left as it is.
+fn drop_program_switches(path: &Path) {
     let Ok(data) = std::fs::read_to_string(path) else {
         return;
     };
-    let Ok(mut root) = serde_json::from_str::<serde_json::Value>(&data) else {
+    let Ok(serde_json::Value::Object(mut root)) = serde_json::from_str::<serde_json::Value>(&data)
+    else {
         return;
     };
-
-    let programs_to_load: Vec<String> = {
-        let Some(sc) = root.get("sicompass").and_then(|v| v.as_object()) else {
-            return;
-        };
-        let Some(ptl) = sc.get("programsToLoad").and_then(|v| v.as_array()) else {
-            return;
-        };
-        ptl.iter()
-            .filter_map(|v| v.as_str().map(|s| s.to_owned()))
-            .filter(|s| !s.is_empty())
-            .collect()
-    };
-
-    // Insert enable_<name> = true into "Available programs:"
-    {
-        let available = root
-            .as_object_mut()
-            .unwrap()
-            .entry("Available programs:")
-            .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
-        let map = available.as_object_mut().unwrap();
-        for name in &programs_to_load {
-            let key = format!("enable_{name}");
-            map.entry(key).or_insert(serde_json::Value::Bool(true));
-        }
-    }
-
-    // Remove programsToLoad
+    let mut changed = root.remove("Available programs:").is_some();
     if let Some(sc) = root.get_mut("sicompass").and_then(|v| v.as_object_mut()) {
-        sc.remove("programsToLoad");
+        changed |= sc.remove("programsToLoad").is_some();
     }
-
+    if !changed {
+        return;
+    }
     // Write back atomically so a concurrent sicompass instance never reads a
     // truncated settings.json (which it would then rebuild from an empty map).
-    if let Ok(json) = serde_json::to_string_pretty(&root) {
+    if let Ok(json) = serde_json::to_string_pretty(&serde_json::Value::Object(root)) {
         let _ = sicompass_sdk::platform::atomic_write(path, &json);
     }
 }
@@ -1054,7 +947,7 @@ fn migrate_programs_to_load(path: &Path) {
 /// Move the built-in remote services' settings into the remote plugin's.
 ///
 /// Remote services used to be one built-in program per server: a section named
-/// after it with `remoteUrl` and `apiKey`, switched on by `enable_<name>`. The
+/// after it with `remoteUrl` and `apiKey`. The
 /// remote plugin (installed from the Store) serves them all from its own
 /// section, `remote`, as one `name URL` per line in `servers` and one
 /// `name key` per line in `apiKeys`. Runs once at startup; with nothing to move,
@@ -1117,12 +1010,6 @@ fn migrate_remotes_to_plugin(path: &Path) {
     }
     for (name, _, _) in &remotes {
         root.remove(name);
-        if let Some(available) = root
-            .get_mut("Available programs:")
-            .and_then(|a| a.as_object_mut())
-        {
-            available.remove(&format!("enable_{name}"));
-        }
     }
     if let Ok(json) = serde_json::to_string_pretty(&serde_json::Value::Object(root)) {
         let _ = sicompass_sdk::platform::atomic_write(path, &json);
@@ -1132,9 +1019,8 @@ fn migrate_remotes_to_plugin(path: &Path) {
 /// Migrate the renamed "editor" plugin to "text editor".
 ///
 /// Renames the top-level `"editor"` settings section to `"text editor"` (and
-/// its inner `"editorPath"` key to `"textEditorPath"`), and the
-/// `Available programs:.enable_editor` toggle to `enable_text editor`. Runs
-/// once at startup; if no old keys are present the function is a no-op.
+/// its inner `"editorPath"` key to `"textEditorPath"`). Runs once at startup;
+/// if no old keys are present the function is a no-op.
 fn migrate_editor_to_text_editor(path: &Path) {
     let Ok(data) = std::fs::read_to_string(path) else {
         return;
@@ -1171,24 +1057,11 @@ fn migrate_editor_to_text_editor(path: &Path) {
         changed = true;
     }
 
-    // Rename the "Available programs:" enable toggle.
-    if let Some(available) = obj
-        .get_mut("Available programs:")
-        .and_then(|v| v.as_object_mut())
-    {
-        if let Some(v) = available.remove("enable_editor") {
-            available
-                .entry("enable_text editor".to_owned())
-                .or_insert(v);
-            changed = true;
-        }
-    }
-
     if !changed {
         return;
     }
 
-    // Write back atomically (see migrate_programs_to_load).
+    // Write back atomically (see drop_program_switches).
     if let Ok(json) = serde_json::to_string_pretty(&root) {
         let _ = sicompass_sdk::platform::atomic_write(path, &json);
     }
@@ -1464,8 +1337,7 @@ pub fn read_font_scale() -> f32 {
 /// Enable a provider by name at runtime (hot-load).
 ///
 /// Checks built-in names first, then looks up the `USER_PLUGIN_CACHE` for
-/// user-installed plugins. An unknown name is logged and ignored (a leftover
-/// `enable_<name>` from a program that no longer exists, for example).
+/// user-installed plugins. An unknown name is logged and ignored.
 ///
 /// The new provider is inserted alphabetically by name between the filebrowser
 /// (always index 0) and settings (always last). If the current root navigation
@@ -1786,7 +1658,7 @@ pub fn disable_provider(renderer: &mut AppRenderer, name: &str) {
 }
 
 /// Propagate a just-enabled provider to every INACTIVE tab's parked content set
-/// so the enabled-program list stays identical across tabs. The active tab is
+/// so the program list stays identical across tabs. The active tab is
 /// skipped (already handled by [`enable_provider`], whose changes live in
 /// `renderer.providers`). Each parked tab gets its OWN fresh instance, so other
 /// tabs' running shells are left untouched.
@@ -1870,9 +1742,9 @@ fn propagate_disable_to_parked_tabs(renderer: &mut AppRenderer, name: &str) {
 
 /// Drain the settings queue and apply each (key, value) pair to `app`.
 ///
-/// `skip_enable` — when `true`, `enable_*` events are ignored (used during
-/// the initial drain to avoid double-loading providers that were already
-/// registered by [`load_programs`]).
+/// `skip_enable` — `true` for the initial drain at startup: Store events are
+/// ignored (the plugins in `plugins/` were already registered by
+/// [`load_programs`]), and so are the runtime-only steps of a few settings.
 pub fn apply_pending_settings(
     renderer: &mut AppRenderer,
     queue: &SettingsQueue,
@@ -1969,19 +1841,6 @@ fn apply_setting(renderer: &mut AppRenderer, key: &str, value: &str, skip_enable
         }
         return;
     }
-    if let Some(name) = key.strip_prefix("enable_") {
-        if skip_enable {
-            return;
-        }
-        if value == "true" {
-            enable_provider(renderer, name);
-            propagate_enable_to_parked_tabs(renderer, name);
-        } else {
-            disable_provider(renderer, name);
-            propagate_disable_to_parked_tabs(renderer, name);
-        }
-        return;
-    }
 
     match key {
         // colorScheme, shoulderSurfingProtection, fontScale: shared with the
@@ -2061,38 +1920,15 @@ pub fn name_matches_provider(display_name: &str, provider_name: &str) -> bool {
     stripped == provider_name
 }
 
-fn enabled_programs() -> Vec<String> {
-    let manifests = sicompass_sdk::builtin_manifests();
-    let non_always: Vec<_> = manifests.iter().filter(|m| !m.always_enabled).collect();
-
-    if let Some(path) = sicompass_sdk::platform::main_config_path() {
-        if let Ok(data) = std::fs::read_to_string(&path) {
-            if let Ok(root) = serde_json::from_str::<serde_json::Value>(&data) {
-                if let Some(section) = root.get("Available programs:") {
-                    let mut result = Vec::new();
-                    for m in &non_always {
-                        let config_key = format!("enable_{}", m.display_name);
-                        let enabled = section
-                            .get(&config_key)
-                            .and_then(|v| v.as_bool())
-                            .unwrap_or(m.enable_default);
-                        if enabled {
-                            result.push(m.display_name.clone());
-                        }
-                    }
-                    if !result.is_empty() {
-                        return result;
-                    }
-                }
-            }
-        }
-    }
-
-    non_always
-        .iter()
-        .filter(|m| m.enable_default)
-        .map(|m| m.display_name.clone())
-        .collect()
+/// The display names of the built-ins that are not `always_enabled`, without
+/// the ones the superkey shows when `session` is true.
+fn builtin_programs(session: bool) -> Vec<String> {
+    let names = sicompass_sdk::builtin_manifests()
+        .into_iter()
+        .filter(|m| !m.always_enabled)
+        .map(|m| m.display_name)
+        .collect();
+    session_filtered(names, session)
 }
 
 #[cfg(test)]
@@ -2542,10 +2378,10 @@ mod tests {
         assert!(state.join("webbrowser/history").exists(), "left where it was");
     }
 
-    // --- migrate_programs_to_load ---
+    // --- drop_program_switches ---
 
     #[test]
-    fn migrate_programs_to_load_creates_enable_keys() {
+    fn drop_program_switches_removes_both_and_keeps_the_rest() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("settings.json");
         std::fs::write(
@@ -2554,59 +2390,46 @@ mod tests {
             "sicompass": {
                 "programsToLoad": ["tutorial", "web browser"],
                 "colorScheme": "dark"
-            }
+            },
+            "Available programs:": { "enable_tutorial": false, "enable_notes": true },
+            "notes": { "notesCloudBackup": true }
         }"#,
         )
         .unwrap();
 
-        migrate_programs_to_load(&path);
+        drop_program_switches(&path);
 
         let data = std::fs::read_to_string(&path).unwrap();
         let root: serde_json::Value = serde_json::from_str(&data).unwrap();
-
-        // enable keys should be set
-        let available = root.get("Available programs:").unwrap();
-        assert_eq!(
-            available.get("enable_tutorial").unwrap().as_bool(),
-            Some(true)
-        );
-        assert_eq!(
-            available.get("enable_web browser").unwrap().as_bool(),
-            Some(true)
-        );
-
-        // programsToLoad should be removed
+        assert!(root.get("Available programs:").is_none());
         assert!(root["sicompass"].get("programsToLoad").is_none());
-        // colorScheme should still be present
         assert_eq!(root["sicompass"]["colorScheme"].as_str(), Some("dark"));
+        assert_eq!(root["notes"]["notesCloudBackup"], true);
     }
 
     #[test]
-    fn migrate_programs_to_load_no_programs_to_load_is_noop() {
+    fn drop_program_switches_without_them_is_noop() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("settings.json");
         let original = r#"{"sicompass":{"colorScheme":"dark"}}"#;
         std::fs::write(&path, original).unwrap();
 
-        migrate_programs_to_load(&path);
+        drop_program_switches(&path);
 
         let data = std::fs::read_to_string(&path).unwrap();
-        // File should be unchanged (no programsToLoad key means no migration needed)
-        assert!(data.contains("colorScheme"));
-        assert!(!data.contains("Available programs:"));
+        assert_eq!(data, original, "file must be left byte-identical");
     }
 
     // --- migrate_editor_to_text_editor ---
 
     #[test]
-    fn migrate_editor_to_text_editor_renames_section_and_toggle() {
+    fn migrate_editor_to_text_editor_renames_section() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("settings.json");
         std::fs::write(
             &path,
             r#"{
-            "editor": { "editorPath": "/home/nico/Dropbox" },
-            "Available programs:": { "enable_editor": true }
+            "editor": { "editorPath": "/home/nico/Dropbox" }
         }"#,
         )
         .unwrap();
@@ -2618,15 +2441,10 @@ mod tests {
 
         // Old keys are gone.
         assert!(root.get("editor").is_none());
-        assert!(root["Available programs:"].get("enable_editor").is_none());
         // New keys present with carried-over values.
         assert_eq!(
             root["text editor"]["textEditorPath"].as_str(),
             Some("/home/nico/Dropbox")
-        );
-        assert_eq!(
-            root["Available programs:"]["enable_text editor"].as_bool(),
-            Some(true)
         );
     }
 
@@ -2654,9 +2472,7 @@ mod tests {
             r#"{
             "products": { "remoteUrl": "https://ffon.example/api", "apiKey": "k1" },
             "my wiki": { "remoteUrl": "https://wiki.example" },
-            "notes": { "notesCloudBackup": true },
-            "Available programs:": { "enable_products": true, "enable_my wiki": true,
-                                     "enable_notes": true }
+            "notes": { "notesCloudBackup": true }
         }"#,
         )
         .unwrap();
@@ -2677,12 +2493,8 @@ mod tests {
         );
         assert_eq!(root["remote"]["apiKeys"].as_str(), Some("products k1"));
         assert!(root.get("products").is_none() && root.get("my wiki").is_none());
-        let available = root["Available programs:"].as_object().unwrap();
-        assert!(!available.contains_key("enable_products"));
-        assert!(!available.contains_key("enable_my wiki"));
         // Everything else is untouched.
         assert_eq!(root["notes"]["notesCloudBackup"], true);
-        assert_eq!(available["enable_notes"], true);
     }
 
     #[test]
@@ -2864,7 +2676,7 @@ mod tests {
         let plugin = make_process_plugin("fixture");
         // Approved, as the Store records it on install, in this test binary's
         // own settings file.
-        crate::plugin_manifest::record_store_install(&plugin.manifest, false).unwrap();
+        crate::plugin_manifest::record_store_install(&plugin.manifest).unwrap();
         _reset_user_plugin_cache(vec![plugin]);
 
         // Pre-register a settings sentinel at the end
@@ -2886,7 +2698,7 @@ mod tests {
         let mut r = AppRenderer::new();
         let mut plugin = make_process_plugin("ghost");
         plugin.entry_path = PathBuf::from("/nonexistent/plugin");
-        crate::plugin_manifest::record_store_install(&plugin.manifest, false).unwrap();
+        crate::plugin_manifest::record_store_install(&plugin.manifest).unwrap();
         _reset_user_plugin_cache(vec![plugin]);
 
         register_provider(&mut r, Box::new(MockProv::new("settings")));
@@ -3116,38 +2928,15 @@ mod tests {
         assert!(fired.iter().any(|k| k == "autoUpdateCheck"), "{fired:?}");
     }
 
-    /// The `Available programs:` keys a settings provider fires on `init`,
-    /// with the built-ins registered and `session` as given.
-    fn available_program_keys(session: bool) -> Vec<String> {
+    /// Standalone, every built-in program loads, whatever an old settings.json
+    /// says: `builtin_programs` does not read it.
+    #[test]
+    fn standalone_the_tutorial_is_always_loaded() {
         sicompass_builtins::register_all();
-        let dir = tempfile::tempdir().unwrap();
-        let log: Arc<Mutex<Vec<(String, String)>>> = Arc::new(Mutex::new(Vec::new()));
-        let log2 = Arc::clone(&log);
-        let mut p = sicompass_settings::SettingsProvider::new(move |k, v| {
-            log2.lock().unwrap().push((k.to_owned(), v.to_owned()));
-        })
-        .with_config_path(dir.path().join("settings.json"));
-        register_available_programs(&mut p, session);
-        p.init();
-        let keys = log.lock().unwrap().iter().map(|(k, _)| k.clone()).collect();
-        keys
+        assert!(builtin_programs(false).iter().any(|n| n == "tutorial"));
+        assert!(!builtin_programs(true).iter().any(|n| n == "tutorial"));
     }
 
-    #[test]
-    fn in_a_session_the_tutorial_has_no_checkbox() {
-        let keys = available_program_keys(true);
-        assert!(!keys.iter().any(|k| k == "enable_tutorial"), "{keys:?}");
-        assert!(keys.iter().any(|k| k.starts_with("enable_")), "{keys:?}");
-    }
-
-    #[test]
-    fn standalone_the_tutorial_keeps_its_checkbox() {
-        let keys = available_program_keys(false);
-        assert!(keys.iter().any(|k| k == "enable_tutorial"), "{keys:?}");
-    }
-
-    /// Also after `enabled_programs`' fallback, which hands back the manifest
-    /// defaults (the tutorial among them) when nothing is enabled.
     #[test]
     fn in_a_session_the_tutorial_is_not_loaded() {
         let defaults = vec!["tutorial".to_owned(), "web browser".to_owned()];
