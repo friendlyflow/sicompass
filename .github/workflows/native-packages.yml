@@ -126,7 +126,7 @@ jobs:
         # Run from the workspace root: the `assets` source paths in
         # [package.metadata.generate-rpm] are relative to the working
         # directory, not to the manifest.
-        run: cargo generate-rpm -p src/sicompass
+        run: cargo generate-rpm -p src
 
       - name: Stage artifacts
         run: |
@@ -192,7 +192,7 @@ jobs:
           test -f "$PREFIX/lib/libMoltenVK.dylib" \
             || { echo "::error::libMoltenVK.dylib not found under $PREFIX"; exit 1; }
           sed -i '' "s#/opt/homebrew/lib/libMoltenVK.dylib#$PREFIX/lib/libMoltenVK.dylib#" \
-            src/sicompass/Cargo.toml
+            src/Cargo.toml
           # Homebrew ships this dylib mode 444 and cargo-packager copies it into
           # Contents/Frameworks with that mode intact. `xattr -d` needs write
           # permission on the file it clears, so the quarantine one-liner in the
@@ -206,9 +206,9 @@ jobs:
           chmod u+w "$PREFIX/lib/libMoltenVK.dylib"
           # cargo-packager hands the entitlements path to codesign verbatim
           # rather than resolving it against the manifest, so make it absolute.
-          sed -i '' "s#entitlements = \"src/sicompass/macos-entitlements.plist\"#entitlements = \"$PWD/src/sicompass/macos-entitlements.plist\"#" \
-            src/sicompass/Cargo.toml
-          grep -q "entitlements = \"$PWD/" src/sicompass/Cargo.toml \
+          sed -i '' "s#entitlements = \"src/macos-entitlements.plist\"#entitlements = \"$PWD/src/macos-entitlements.plist\"#" \
+            src/Cargo.toml
+          grep -q "entitlements = \"$PWD/" src/Cargo.toml \
             || { echo "::error::entitlements path was not made absolute"; exit 1; }
 
       - name: Build
@@ -239,7 +239,7 @@ jobs:
         #
         # That leaves no point in the workflow at which the bundle can be signed
         # and still reach a user, which is why `signing-identity` is set in
-        # src/sicompass/Cargo.toml and cargo-packager signs it between its own
+        # src/Cargo.toml and cargo-packager signs it between its own
         # app and dmg stages instead. See the comment there. Every release up to
         # 0.1.12 shipped an unsigned bundle because a `codesign` step here ran
         # after the .dmg had already been sealed.

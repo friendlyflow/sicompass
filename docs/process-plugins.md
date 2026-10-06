@@ -42,10 +42,10 @@ That has consequences, accepted on purpose:
 |---|---|
 | The protocol: records, messages, framing | `sicompass_sdk::plugin_ipc` (SDK `src/plugin_ipc/`) |
 | The plugin side: `Plugin`, `main!`, the runtime | `sicompass_sdk::plugin` (SDK `src/plugin/`) |
-| Starting a plugin, the channel, letting it go | `src/sicompass/src/plugin_host/channel.rs` |
-| What a plugin asks the app, and the answers | `src/sicompass/src/plugin_host/services.rs` |
-| The `Provider` it wears | `src/sicompass/src/plugin_host/provider.rs` |
-| Discovery and instantiation | `src/sicompass/src/programs.rs` (`instantiate_user_plugin`) |
+| Starting a plugin, the channel, letting it go | `src/plugin_host/channel.rs` |
+| What a plugin asks the app, and the answers | `src/plugin_host/services.rs` |
+| The `Provider` it wears | `src/plugin_host/provider.rs` |
+| Discovery and instantiation | `src/programs.rs` (`instantiate_user_plugin`) |
 
 `ProcessProvider` implements the SDK's `Provider` trait, so the rest of the app
 cannot tell a plugin from a compiled-in built-in. The app calls `tick` for every
@@ -200,14 +200,14 @@ cargo test -p sicompass plugin_host             # unit
 cargo test -p sicompass-store                   # installing process releases
 ```
 
-The fixtures are examples of the app crate (`src/sicompass/examples/process_fixture*.rs`),
+The fixtures are examples of the app crate (`src/examples/process_fixture*.rs`),
 built by `cargo test`. They start a real process for every behaviour: settings,
 translations, the licence token's scope, storage, config, the timeline, the
 dashboard, rendered pages, the tab switcher's child pid, a panic, a hang with a
 deadline set, a protocol from the future, and nothing left running after a tab
 closes.
 
-`tests/integration.rs` runs the real plugins. `src/sicompass/Cargo.toml` pins each
+`tests/integration.rs` runs the real plugins. `src/Cargo.toml` pins each
 plugin repo by git rev as a dev-dependency, `examples/plugin_<name>.rs` makes it a
 program, and `tests/fixtures/plugins/<name>` holds its `plugin.json` and
 `locales/` from the same rev. A plugin process sees the test's environment, so the

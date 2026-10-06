@@ -118,8 +118,8 @@ runners have no SDL3.
      `nix develop -c` invocations pick the change up on their own.
    - `Cargo.toml` or `Cargo.lock` moved — expect the build to fetch and
      compile new crates, so a long first build is normal, not a hang. A moved
-     plugin `rev` in `src/sicompass/Cargo.toml` fetches that plugin repo, and
-     `src/sicompass/tests/fixtures/plugins/<name>/` should have moved with it
+     plugin `rev` in `src/Cargo.toml` fetches that plugin repo, and
+     `src/tests/fixtures/plugins/<name>/` should have moved with it
      (that commit's `plugin.json` and `locales/`). If only one of the two
      moved, the integration tests may fail for that reason alone. Say so.
    - `assets/icons/*` or `THIRD-PARTY-LICENSES.html` moved —

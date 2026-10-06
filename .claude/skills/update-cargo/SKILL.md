@@ -132,14 +132,14 @@ fuller refresh of that repo (its `flake.lock` too), use
 
    d. Raise the requirement in `[workspace.dependencies]` in the root
       `Cargo.toml`. A few crates pin their own versions in
-      `lib/*/Cargo.toml` or `src/sicompass/Cargo.toml` — grep for the crate
+      `lib/*/Cargo.toml` or `src/Cargo.toml` — grep for the crate
       name and update every occurrence.
 
-      Not the plugin repos. `src/sicompass/Cargo.toml` pins each one
+      Not the plugin repos. `src/Cargo.toml` pins each one
       (`notes-plugin`, `terminal-plugin`, ...) by git `rev` as a
       dev-dependency, built into a program by
-      `src/sicompass/examples/plugin_<name>.rs`, and
-      `src/sicompass/tests/fixtures/plugins/<name>/` holds that commit's
+      `src/examples/plugin_<name>.rs`, and
+      `src/tests/fixtures/plugins/<name>/` holds that commit's
       `plugin.json` and `locales/`. The rev and the fixture folder move
       together, in a commit of their own, never here.
 

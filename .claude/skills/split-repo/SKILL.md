@@ -190,10 +190,10 @@ with `command -v git-filter-repo`, and fall back to `nix develop -c`.
      instead of `nix build`. It needs the release tool:
      `cargo install --git https://github.com/friendlyflow/sicompass-plugin-sdk sicompass-plugin`.
    - For sicompass's integration tests, pin the new repo by git `rev` as a
-     dev-dependency in `src/sicompass/Cargo.toml`, add
-     `src/sicompass/examples/plugin_<name>.rs` to build it into a program, and
+     dev-dependency in `src/Cargo.toml`, add
+     `src/examples/plugin_<name>.rs` to build it into a program, and
      copy that commit's `plugin.json` and `locales/` into
-     `src/sicompass/tests/fixtures/plugins/<name>/`. The rev and the fixture
+     `src/tests/fixtures/plugins/<name>/`. The rev and the fixture
      folder move together.
 
 4. **Make `Cargo.toml` standalone.**

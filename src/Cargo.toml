@@ -10,11 +10,11 @@ authors = ["Nico Verrijdt <nico@friendlyflow.com>"]
 
 [[bin]]
 name = "sicompass"
-path = "src/main.rs"
+path = "main.rs"
 
 [lib]
 name = "sicompass"
-path = "src/lib.rs"
+path = "lib.rs"
 
 # This crate is `publish = false` (never goes to crates.io), which by default
 # also hides it from cargo-dist. Opt the binary back into release builds.
@@ -39,7 +39,7 @@ eula = false
 # names derived from it are passed through an unquoted `$(find ...)` in
 # release-publish.yml, so a space would silently break the upload.
 #
-# Paths are relative to this file, hence the `../../` to reach the workspace
+# Paths are relative to this file, hence the `../` to reach the workspace
 # root.
 [package.metadata.packager]
 product-name = "sicompass"
@@ -53,8 +53,8 @@ macOS and Windows.
 """
 homepage = "https://github.com/friendlyflow/sicompass"
 authors = ["Nico Verrijdt <nico@friendlyflow.com>"]
-license-file = "../../LICENSE"
-out-dir = "../../target/packages"
+license-file = "../LICENSE"
+out-dir = "../target/packages"
 
 # cargo-packager runs this itself, so `cargo packager` works standalone from a
 # clean checkout. In CI the build has already happened and this is a no-op.
@@ -64,17 +64,17 @@ before-packaging-command = "cargo build --release --features bundled-sdl3 -p sic
 # become /usr/share/icons/hicolor/<size>/apps/sicompass.png in the .deb and
 # AppImage; the .icns becomes the .app bundle icon.
 icons = [
-    "../../assets/icons/16x16.png",
-    "../../assets/icons/22x22.png",
-    "../../assets/icons/24x24.png",
-    "../../assets/icons/32x32.png",
-    "../../assets/icons/48x48.png",
-    "../../assets/icons/64x64.png",
-    "../../assets/icons/128x128.png",
-    "../../assets/icons/128x128@2x.png",
-    "../../assets/icons/256x256.png",
-    "../../assets/icons/512x512.png",
-    "../../assets/icons/sicompass.icns",
+    "../assets/icons/16x16.png",
+    "../assets/icons/22x22.png",
+    "../assets/icons/24x24.png",
+    "../assets/icons/32x32.png",
+    "../assets/icons/48x48.png",
+    "../assets/icons/64x64.png",
+    "../assets/icons/128x128.png",
+    "../assets/icons/128x128@2x.png",
+    "../assets/icons/256x256.png",
+    "../assets/icons/512x512.png",
+    "../assets/icons/sicompass.icns",
 ]
 
 [[package.metadata.packager.binaries]]
@@ -91,15 +91,15 @@ main = true
 # with it. This is a real obligation, not bookkeeping: cargo-about only sees
 # Rust crates and will never list them.
 [[package.metadata.packager.resources]]
-src = "../../fonts/LICENSE-DejaVu.txt"
+src = "../fonts/LICENSE-DejaVu.txt"
 target = "licenses/LICENSE-DejaVu.txt"
 
 [[package.metadata.packager.resources]]
-src = "../../fonts/LICENSE-NotoColorEmoji.txt"
+src = "../fonts/LICENSE-NotoColorEmoji.txt"
 target = "licenses/LICENSE-NotoColorEmoji.txt"
 
 [[package.metadata.packager.resources]]
-src = "../../THIRD-PARTY-LICENSES.html"
+src = "../THIRD-PARTY-LICENSES.html"
 target = "licenses/THIRD-PARTY-LICENSES.html"
 
 [package.metadata.packager.deb]
@@ -132,7 +132,7 @@ depends = ["libvulkan1", "at-spi2-core", "libssl3", "libpng16-16", "zlib1g", "xv
 # fix the AppImage's entry, since `AppImageConfig` has no template field of its
 # own. Without it the AppImage gets the bare template above and desktop
 # integration has nothing useful to install.
-desktop-template = "../../assets/sicompass.desktop"
+desktop-template = "../assets/sicompass.desktop"
 
 # Key is the SOURCE, value is the path inside the package. That is the
 # opposite of what cargo-packager's own documentation says, but it is what
@@ -147,7 +147,7 @@ desktop-template = "../../assets/sicompass.desktop"
 # Only the scalable icon needs copying by hand. cargo-packager's `icons` list
 # handles the PNGs but skips anything that is not a `.png`.
 [package.metadata.packager.deb.files]
-"../../assets/icons/sicompass.svg" = "/usr/share/icons/hicolor/scalable/apps/sicompass.svg"
+"../assets/icons/sicompass.svg" = "/usr/share/icons/hicolor/scalable/apps/sicompass.svg"
 
 [package.metadata.packager.appimage]
 # linuxdeploy bundles every shared library it can find, which is exactly wrong
@@ -169,7 +169,7 @@ excluded-libraries = [
 # named twice. Same source, same destination, same key-is-the-source quirk as
 # `deb.files` above.
 [package.metadata.packager.appimage.files]
-"../../assets/icons/sicompass.svg" = "/usr/share/icons/hicolor/scalable/apps/sicompass.svg"
+"../assets/icons/sicompass.svg" = "/usr/share/icons/hicolor/scalable/apps/sicompass.svg"
 
 [package.metadata.packager.macos]
 # Must stay equal to MACOSX_DEPLOYMENT_TARGET in .cargo/config.toml, or the
@@ -218,7 +218,7 @@ signing-identity = "-"
 # which is stricter than plutil: a comment ahead of the DOCTYPE lints clean and
 # then fails the build with "AMFIUnserializeXML: syntax error". 0.1.15 died that
 # way, so the explanation lives here rather than in the file.
-entitlements = "src/sicompass/macos-entitlements.plist"
+entitlements = "src/macos-entitlements.plist"
 
 # ---------------------------------------------------------------------------
 # RPM (cargo-generate-rpm)
@@ -241,7 +241,7 @@ url = "https://github.com/friendlyflow/sicompass"
 # file dependency resolves on all three.
 requires = { vulkan-loader = "*", at-spi2-core = "*", openssl-libs = "*", libpng = "*", zlib = "*", "/usr/bin/Xvfb" = "*" }
 
-# The RPM equivalent of src/sicompass/deb/postinst, and required by the Fedora
+# The RPM equivalent of src/deb/postinst, and required by the Fedora
 # packaging guidelines for the same reason: installing the icons is not enough,
 # something has to invalidate the desktop's icon cache or the menu entry shows
 # up with no icon. Bumping the directory mtime comes first, because that is

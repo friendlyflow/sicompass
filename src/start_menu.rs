@@ -343,7 +343,7 @@ mod tests {
     fn shortcut_name_matches_the_one_in_the_wix_template() {
         // Guards the pairing documented on SHORTCUT_NAME: if someone renames
         // the shortcut in main.wxs, this catches the half-done rename.
-        let wxs = include_str!("../wix/main.wxs");
+        let wxs = include_str!("wix/main.wxs");
         assert!(
             wxs.contains(&format!("Name=\"{SHORTCUT_NAME}\"")),
             "wix/main.wxs no longer declares a shortcut named {SHORTCUT_NAME:?}"

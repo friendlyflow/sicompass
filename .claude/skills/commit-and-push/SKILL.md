@@ -43,7 +43,7 @@ Commit and push all changes.
    alongside the sources they were generated from**, or the tree is
    inconsistent and CI fails:
 
-   - `assets/icons/*` and `src/sicompass/wix/Product.ico` with any change to
+   - `assets/icons/*` and `src/wix/Product.ico` with any change to
      either master SVG (`scripts/gen-icons.sh`).
    - `THIRD-PARTY-LICENSES.html` with any dependency change
      (`cargo about generate about.hbs`). `licenses.yml` fails if it drifts.

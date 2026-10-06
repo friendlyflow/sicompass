@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 #
-# Inject src/sicompass/deb/{postinst,postrm} into a .deb built by
+# Inject src/deb/{postinst,postrm} into a .deb built by
 # cargo-packager, in place.
 #
 # Why this exists: a package that ships icons and a .desktop entry has to
 # refresh the icon cache and the application database on install, or the menu
-# entry shows up with no icon (see the header of src/sicompass/deb/postinst).
+# entry shows up with no icon (see the header of src/deb/postinst).
 # cargo-packager has no way to emit maintainer scripts — `DebianConfig` has no
 # field for them, and its control-file writer produces only `control` and
 # `md5sums` — so the .deb is unpacked and rebuilt here instead.
@@ -29,7 +29,7 @@ fi
 
 deb=$1
 root=$(cd "$(dirname "$0")/.." && pwd)
-src=$root/src/sicompass/deb
+src=$root/src/deb
 
 if [ ! -f "$deb" ]; then
     echo "error: no such file: $deb" >&2

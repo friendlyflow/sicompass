@@ -49,7 +49,7 @@ config-file values.
 MoltenVK, and VoiceOver speaks the list, mode changes, the typed-character
 echo, and the `w` position report. The AccessKit Cocoa adapter needed a
 macOS-specific tree to get there, see `build_tree_macos` in
-`src/sicompass/src/accesskit_sdl.rs`.
+`src/accesskit_sdl.rs`.
 
 ### Vulkan Validation Errors
 **Fixed**: Added `VkPipelineDepthStencilStateCreateInfo` to rectangle and text pipelines to satisfy render pass requirements.

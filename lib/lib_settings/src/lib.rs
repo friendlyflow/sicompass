@@ -1486,7 +1486,7 @@ mod tests {
     fn poc_language_option_labels_use_localize_helper() {
         let _g = locale_test_lock();
         // We don't have a SettingsProvider with a registered "language" radio
-        // in this test crate (that registration lives in src/sicompass).
+        // in this test crate (that registration lives in the app crate, `src/`).
         // Verify the convention directly via the helper.
         let en = SettingsProvider::localize_option_label("language", "en-US");
         let nl = SettingsProvider::localize_option_label("language", "nl-BE");

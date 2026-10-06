@@ -2,7 +2,7 @@
 //! registries.
 //!
 //! This is the **only** crate in the workspace that has direct dependencies on
-//! all the individual `lib_*` crates.  The app (`src/sicompass`) depends only
+//! all the individual `lib_*` crates.  The app (`src/`) depends only
 //! on this crate and `sicompass-sdk` — never on individual lib crates.
 //!
 //! ## Usage

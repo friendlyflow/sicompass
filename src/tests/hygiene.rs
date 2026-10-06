@@ -18,14 +18,14 @@
 use std::path::{Path, PathBuf};
 
 fn workspace_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../")
 }
 
 /// Every `Cargo.toml` that could declare a dependency: the lib crates and the
 /// app itself.
 fn workspace_manifests() -> Vec<PathBuf> {
     let root = workspace_root();
-    let mut out = vec![root.join("src/sicompass/Cargo.toml")];
+    let mut out = vec![root.join("src/Cargo.toml")];
     for entry in std::fs::read_dir(root.join("lib"))
         .expect("lib/ should exist")
         .flatten()
@@ -48,6 +48,29 @@ fn rs_files_under(dir: &Path, out: &mut Vec<PathBuf>) {
         let path = entry.path();
         if path.is_dir() {
             rs_files_under(&path, out);
+        } else if path.extension().is_some_and(|e| e == "rs") {
+            out.push(path);
+        }
+    }
+}
+
+/// The `.rs` files a crate compiles: its `src/` tree, or, for the app crate,
+/// which keeps its modules directly beside its manifest, that directory without
+/// its `tests/` and `examples/`.
+fn crate_sources(crate_dir: &Path, out: &mut Vec<PathBuf>) {
+    let src = crate_dir.join("src");
+    if src.is_dir() {
+        return rs_files_under(&src, out);
+    }
+    let Ok(entries) = std::fs::read_dir(crate_dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            if !path.ends_with("tests") && !path.ends_with("examples") {
+                rs_files_under(&path, out);
+            }
         } else if path.extension().is_some_and(|e| e == "rs") {
             out.push(path);
         }
@@ -84,15 +107,15 @@ fn every_crate_that_can_trash_has_a_test_guard() {
         checked += 1;
 
         let mut files = Vec::new();
-        rs_files_under(&manifest.parent().unwrap().join("src"), &mut files);
+        crate_sources(manifest.parent().unwrap(), &mut files);
         let src: String = files.iter().map(|f| read_path(f)).collect();
 
         assert!(
             src.contains("TEST_NO_TRASH") && src.contains("_set_test_no_trash"),
             "{} depends on the `trash` crate but has no TEST_NO_TRASH stub, so its \
              tests delete into the developer's real OS trash. Copy the block from \
-             src/sicompass/src/plugin_host/desktop.rs, and call the setter from \
-             `ensure_builtins()` in src/sicompass/tests/integration.rs.",
+             src/plugin_host/desktop.rs, and call the setter from \
+             `ensure_builtins()` in src/tests/integration.rs.",
             manifest.display()
         );
     }
@@ -131,7 +154,7 @@ fn no_call_site_bypasses_the_trash_wrapper() {
     let root = workspace_root();
     let mut files = Vec::new();
     rs_files_under(&root.join("lib"), &mut files);
-    rs_files_under(&root.join("src/sicompass/src"), &mut files);
+    crate_sources(&root.join("src"), &mut files);
     files.sort();
 
     let mut wrappers = 0;

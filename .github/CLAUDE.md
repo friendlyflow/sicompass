@@ -16,8 +16,8 @@ since CI no longer reports on its own, run it by hand before releasing.
 installer, the PowerShell installer and the MSI copy binaries and nothing else.
 
 So anything the app needs at runtime must be either compiled into the binary,
-or added explicitly to `src/sicompass/wix/main.wxs` **and** to the
-`[[package.metadata.packager.resources]]` list in `src/sicompass/Cargo.toml`.
+or added explicitly to `src/wix/main.wxs` **and** to the
+`[[package.metadata.packager.resources]]` list in `src/Cargo.toml`.
 Adding it to `include` and stopping there produces a release that passes CI,
 uploads cleanly, and cannot start. That is what happened to every release up to
 and including 0.1.8, whose published binary read `shaders/*.spv` and
@@ -42,7 +42,7 @@ and including 0.1.8, whose published binary read `shaders/*.spv` and
   - Not every config change needs regenerating: `include` is read at runtime by
     `dist build`. `dist generate --check` tells you whether the committed
     workflow is stale, and `ci.yml` now runs that check.
-  - `allow-dirty = ["msi"]` is set because `src/sicompass/wix/main.wxs` is
+  - `allow-dirty = ["msi"]` is set because `src/wix/main.wxs` is
     hand-edited: it installs the `assets/` tree, adds a Start Menu shortcut and
     sets the product icon, none of which dist's template does. dist will never
     refresh that file, so diff its new template by hand when upgrading.
@@ -79,7 +79,7 @@ and including 0.1.8, whose published binary read `shaders/*.spv` and
     0.1.13's first attempt then failed the same way by splitting the call.
 
     Signing is therefore configured, not scripted: `signing-identity = "-"` in
-    the `[package.metadata.packager.macos]` block of `src/sicompass/Cargo.toml`
+    the `[package.metadata.packager.macos]` block of `src/Cargo.toml`
     makes cargo-packager sign the bundle root between its own app and dmg
     stages, which is the only point that works. It ad-hoc signs, which makes
     the app launchable but does not satisfy Gatekeeper.
@@ -90,7 +90,7 @@ and including 0.1.8, whose published binary read `shaders/*.spv` and
     sharing its Team ID — and an ad-hoc signature has none, so the binary is
     refused its own bundled `libMoltenVK.dylib` ("different Team IDs"). That is
     the whole graphics stack on macOS, and 0.1.14 shipped it: the app started
-    and could draw nothing. `src/sicompass/macos-entitlements.plist` carries
+    and could draw nothing. `src/macos-entitlements.plist` carries
     `com.apple.security.cs.disable-library-validation` to undo it. Keep that
     file free of XML comments: `codesign` parses entitlements with AMFI, which
     is stricter than `plutil`, and a comment ahead of the DOCTYPE lints clean

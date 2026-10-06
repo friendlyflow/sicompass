@@ -19,7 +19,7 @@ use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 
 /// GitHub owner/repo for the self-update check. Derived from the
 /// `repository = "https://github.com/<owner>/<repo>"` URL in
-/// `src/sicompass/Cargo.toml` (kept here as a literal so the updater
+/// `src/Cargo.toml` (kept here as a literal so the updater
 /// thread doesn't need to parse Cargo metadata at runtime).
 const GITHUB_OWNER: &str = "friendlyflow";
 const GITHUB_REPO: &str = "sicompass";

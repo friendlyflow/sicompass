@@ -20,7 +20,7 @@ identifying which provider owns the action.
   A move that *does* change the path (Right-pressing into a subdirectory) is
   always its own undo step, because merging it would lose the pre-descent
   `from_path` and undo could not restore it. See `record_entry` in
-  `src/sicompass/src/state.rs`.
+  `src/state.rs`.
 - `TextChunk { id, before, after, chunk_seq }` — typed text. Repeated text
   edits on the same `id` within `TEXT_CHUNK_IDLE_MS` (default 500 ms) merge
   into the tail entry; typing a long word doesn't fill the timeline.

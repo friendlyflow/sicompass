@@ -35,12 +35,12 @@ fi
 
 # Edits to handler/provider code: remind about integration tests
 if [[ "$TOOL" == "Edit" ]]; then
-  if [[ "$FILE_PATH" =~ src/sicompass/src/handlers\.rs ]] || \
-     [[ "$FILE_PATH" =~ src/sicompass/src/provider\.rs ]] || \
-     [[ "$FILE_PATH" =~ src/sicompass/src/events\.rs ]] || \
+  if [[ "$FILE_PATH" =~ /sicompass/src/handlers\.rs ]] || \
+     [[ "$FILE_PATH" =~ /sicompass/src/provider\.rs ]] || \
+     [[ "$FILE_PATH" =~ /sicompass/src/events\.rs ]] || \
      [[ "$FILE_PATH" =~ lib/lib_.*/src/.*\.rs ]]; then
     echo "REMINDER: You edited $FILE_PATH" >&2
-    echo "Consider adding/updating integration tests in src/sicompass/tests/integration.rs for cross-provider or full-workflow behavior." >&2
+    echo "Consider adding/updating integration tests in src/tests/integration.rs for cross-provider or full-workflow behavior." >&2
     exit 2
   fi
 fi

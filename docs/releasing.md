@@ -57,7 +57,7 @@ archives for anyone who wants to unpack a binary by hand.
 
 The `.zip` creates no Start Menu entry, and neither does `cargo install`.
 Rather than maintain a second installer, the app registers itself:
-`src/sicompass/src/start_menu.rs` writes a per-user shortcut on startup,
+`src/start_menu.rs` writes a per-user shortcut on startup,
 skipping installs under Program Files because the MSI already ships a
 per-machine one. Its `SHORTCUT_NAME` and the `Name` on the `Shortcut` element
 in `wix/main.wxs` must stay identical, and a unit test fails if they drift.
@@ -153,7 +153,7 @@ dist generate
 `dist` is deliberately not in the flake: it must match `cargo-dist-version`
 exactly, and nixpkgs tracks its own cadence, so a flake-pinned copy would drift.
 
-`src/sicompass/wix/main.wxs` **is** hand-edited (it adds a Start Menu shortcut
+`src/wix/main.wxs` **is** hand-edited (it adds a Start Menu shortcut
 and sets the product icon), which is why `allow-dirty = ["msi"]` is set. dist will never refresh that file, so when
 upgrading cargo-dist, diff its new template against ours by hand.
 
@@ -188,8 +188,8 @@ before, so check the real thing:
   *and* that the running window has one in the taskbar and in alt-tab. These
   are two different mechanisms and each has failed on its own. The menu entry
   needs the icon cache refreshed on install, which is
-  `src/sicompass/deb/postinst` for the `.deb` and `post_install_script` in
-  `src/sicompass/Cargo.toml` for the `.rpm`. The window icon comes from
+  `src/deb/postinst` for the `.deb` and `post_install_script` in
+  `src/Cargo.toml` for the `.rpm`. The window icon comes from
   `icon.rs`, which embeds the PNG and pins the `app_id`, and is the only thing
   covering installs that ship no `.desktop` file at all: the archives,
   `nix run`, and an un-integrated AppImage.
@@ -235,5 +235,5 @@ hand-maintained lists, none compiler-checked, all of which have to agree.
 So a file the app reads at runtime belongs **in the crate that owns it**:
 `lib/lib_<x>/assets/`, embedded with `include_bytes!` and published with
 `sicompass_sdk::assets::register_bytes`. Then none of the four lists needs to
-know. `src/sicompass/tests/packaging.rs` guards this: the top-level `assets/`
+know. `src/tests/packaging.rs` guards this: the top-level `assets/`
 may hold icons and the desktop entry only.

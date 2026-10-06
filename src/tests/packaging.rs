@@ -13,7 +13,7 @@
 use std::path::{Path, PathBuf};
 
 fn workspace_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../")
 }
 
 fn read(relative: &str) -> String {
@@ -25,7 +25,7 @@ fn read(relative: &str) -> String {
 fn toml_string_array(manifest: &str, key: &str) -> Vec<String> {
     let start = manifest
         .find(&format!("\n{key} = ["))
-        .unwrap_or_else(|| panic!("{key} is missing from src/sicompass/Cargo.toml"));
+        .unwrap_or_else(|| panic!("{key} is missing from src/Cargo.toml"));
     let rest = &manifest[start..];
     let end = rest
         .find(']')
@@ -44,7 +44,7 @@ fn toml_string_array(manifest: &str, key: &str) -> Vec<String> {
 /// the AppImage silently ship one size fewer.
 #[test]
 fn packager_icon_paths_all_exist() {
-    let manifest = read("src/sicompass/Cargo.toml");
+    let manifest = read("src/Cargo.toml");
     let icons = toml_string_array(&manifest, "icons");
     assert!(
         icons.len() >= 9,
@@ -67,7 +67,7 @@ fn packager_icon_paths_all_exist() {
 /// ends up with `Name=sicompass` and no categories.
 #[test]
 fn desktop_template_points_at_the_real_entry() {
-    let manifest = read("src/sicompass/Cargo.toml");
+    let manifest = read("src/Cargo.toml");
     let line = manifest
         .lines()
         .find(|l| l.trim_start().starts_with("desktop-template"))
@@ -112,7 +112,7 @@ fn desktop_icon_name_matches_the_installed_icon_files() {
          the files under /usr/share/icons/hicolor/*/apps/"
     );
 
-    let manifest = read("src/sicompass/Cargo.toml");
+    let manifest = read("src/Cargo.toml");
     let mut hicolor_dests = 0;
     for line in manifest.lines() {
         let Some((_, dest)) = line.split_once("dest = \"/usr/share/icons/hicolor/") else {
@@ -136,14 +136,14 @@ fn desktop_icon_name_matches_the_installed_icon_files() {
 #[test]
 fn deb_maintainer_scripts_are_present_and_wired_up() {
     for script in ["postinst", "postrm"] {
-        let contents = read(&format!("src/sicompass/deb/{script}"));
+        let contents = read(&format!("src/deb/{script}"));
         assert!(
             contents.starts_with("#!/bin/sh"),
-            "src/sicompass/deb/{script} needs a POSIX sh shebang: dpkg runs it directly"
+            "src/deb/{script} needs a POSIX sh shebang: dpkg runs it directly"
         );
         assert!(
             contents.contains("/usr/share/icons/hicolor"),
-            "src/sicompass/deb/{script} no longer touches the icon cache"
+            "src/deb/{script} no longer touches the icon cache"
         );
     }
 
@@ -195,7 +195,7 @@ fn macos_builds_are_checked_for_machine_specific_load_paths() {
 /// own copy of the same refresh in `[package.metadata.generate-rpm]`.
 #[test]
 fn rpm_scriptlets_refresh_the_icon_cache() {
-    let manifest = read("src/sicompass/Cargo.toml");
+    let manifest = read("src/Cargo.toml");
     for key in ["post_install_script", "post_uninstall_script"] {
         let start = manifest
             .find(&format!("\n{key} = \"\"\""))
@@ -230,8 +230,8 @@ fn rpm_scriptlets_refresh_the_icon_cache() {
 fn no_packaging_list_still_references_the_moved_asset_trees() {
     for file in [
         "dist-workspace.toml",
-        "src/sicompass/Cargo.toml",
-        "src/sicompass/wix/main.wxs",
+        "src/Cargo.toml",
+        "src/wix/main.wxs",
         "flake.nix",
     ] {
         let contents = read(file);
@@ -259,7 +259,7 @@ fn no_packaging_list_still_references_the_moved_asset_trees() {
 /// desktop entry with them, since those really are installed from the checkout.
 #[test]
 fn the_desktop_entry_and_icons_are_still_shipped() {
-    let manifest = read("src/sicompass/Cargo.toml");
+    let manifest = read("src/Cargo.toml");
     for source in ["assets/sicompass.desktop", "assets/icons/sicompass.svg"] {
         assert!(
             manifest.contains(&format!("source = \"{source}\"")),
@@ -321,7 +321,7 @@ fn the_top_level_asset_tree_holds_only_packaging_inputs() {
 /// two lists are pinned against each other here instead.
 #[test]
 fn every_msi_component_is_referenced_exactly_once() {
-    let wxs = read("src/sicompass/wix/main.wxs");
+    let wxs = read("src/wix/main.wxs");
 
     // Ids inside XML comments do not count: the template ships a commented-out
     // `License` component *and* a commented-out ref for it, and neither reaches WiX.

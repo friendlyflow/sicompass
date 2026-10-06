@@ -5,7 +5,7 @@ members = [
     "lib/lib_store",
     "lib/lib_builtins",
     "lib/lib_updater",
-    "src/sicompass",
+    "src",
     # The compositor (desicompass), the greetd greeter (loginsicompass) and the
     # renderer they share with the app (sicompass-ui) are sibling repos, see
     # .claude/repos.json.

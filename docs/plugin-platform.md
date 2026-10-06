@@ -581,7 +581,7 @@ Store
   settings section, and loads or unloads it in every tab.
 - `/store` edits and re-signs the list with `~/.config/sicompass/store.key`.
 - Tests: `lib/lib_store/src/tests.rs` (wiremock, every refusal) and
-  `src/sicompass/tests/store.rs` (a real plugin program, built from
+  `src/tests/store.rs` (a real plugin program, built from
   `examples/process_fixture.rs`, install to uninstall).
 
 - Before the swap, the manifest inside the archive must say what `release.json`
@@ -652,8 +652,8 @@ support licence refused for backup in `sicompass-plugin-sdk`'s
 
 ## 11. Host changes in sicompass
 
-*Retired in 0.3.* wasmtime, `src/sicompass/src/wasm_host/` and the import audit
-are deleted. The host is `src/sicompass/src/plugin_host/` now. This was the
+*Retired in 0.3.* wasmtime, `src/wasm_host/` and the import audit
+are deleted. The host is `src/plugin_host/` now. This was the
 0.2 plan.
 
 - `wasmtime-wasi` 48 joins `wasmtime` in the app crate only. sicompass-ui, and

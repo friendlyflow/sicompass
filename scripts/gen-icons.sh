@@ -16,8 +16,8 @@
 # that repo and move the pin. tests/packaging.rs fails until the two match.
 #
 # Where each output is consumed:
-#   sicompass.ico   -> the .exe, via winresource in src/sicompass/build.rs
-#   Product.ico     -> the .msi, via src/sicompass/wix/main.wxs
+#   sicompass.ico   -> the .exe, via winresource in src/build.rs
+#   Product.ico     -> the .msi, via src/wix/main.wxs
 #   sicompass.icns  -> the macOS .app and .dmg, via cargo-packager
 #   *.png           -> cargo-packager's `icons` list, which installs them into
 #                      /usr/share/icons/hicolor/<size>/apps/ in the .deb and
@@ -71,9 +71,9 @@ png2icns "$OUT/sicompass.icns" \
     "$OUT/256x256.png" "$OUT/512x512.png" "$OUT/1024x1024.png"
 
 # WiX reads the icon from beside main.wxs.
-mkdir -p src/sicompass/wix
-cp "$OUT/sicompass.ico" src/sicompass/wix/Product.ico
+mkdir -p src/wix
+cp "$OUT/sicompass.ico" src/wix/Product.ico
 
 echo "Regenerated:"
 find "$OUT" -maxdepth 1 -type f -printf '  %f\n' | sort
-echo "  src/sicompass/wix/Product.ico"
+echo "  src/wix/Product.ico"

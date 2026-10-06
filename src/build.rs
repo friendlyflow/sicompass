@@ -65,8 +65,8 @@ fn link_clang_runtime() {
 #[cfg(target_os = "windows")]
 fn embed_windows_resources() {
     let manifest_dir = std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
-    // src/sicompass -> workspace root.
-    let icon = manifest_dir.join("../../assets/icons/sicompass.ico");
+    // src -> workspace root.
+    let icon = manifest_dir.join("../assets/icons/sicompass.ico");
     println!("cargo::rerun-if-changed={}", icon.display());
 
     let mut res = winresource::WindowsResource::new();

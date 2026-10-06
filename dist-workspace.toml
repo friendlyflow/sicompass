@@ -47,7 +47,7 @@ targets = [
 # The portable archives remain for anyone who wants to unpack a binary by hand.
 installers = ["msi"]
 
-# `src/sicompass/wix/main.wxs` is hand-edited: it adds a Start Menu shortcut and
+# `src/wix/main.wxs` is hand-edited: it adds a Start Menu shortcut and
 # sets the product icon, neither of which dist's template does. Without this,
 # `dist plan` reports the file as out of date and `dist init` would silently
 # revert both.
