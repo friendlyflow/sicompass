@@ -11,6 +11,7 @@
 
 // All modules are declared in lib.rs; the binary just re-uses them.
 use sicompass::boot;
+use sicompass::dev_plugins;
 use sicompass::render;
 use sicompass::start_menu;
 use std::process;
@@ -25,6 +26,12 @@ const GITHUB_OWNER: &str = "friendlyflow";
 const GITHUB_REPO: &str = "sicompass";
 
 fn main() {
+    // A debug build runs the plugins built in the checkouts beside this one,
+    // not the Store's copies. First, while this is the only thread: it sets
+    // an environment variable. See `dev_plugins`.
+    // SAFETY: no other thread exists yet.
+    let dev_plugins = unsafe { dev_plugins::use_sibling_checkouts() };
+
     // Register all built-in providers with the SDK factory and manifest registries.
     // Must happen before load_programs() so create_provider_by_name() resolves them.
     sicompass_builtins::register_all();
@@ -48,6 +55,15 @@ fn main() {
         .with(file_layer)
         .with(stderr_layer)
         .init();
+
+    match dev_plugins {
+        Some(Ok(names)) => tracing::info!(
+            "debug build: plugins from their checkouts' target/debug: {}",
+            names.join(", ")
+        ),
+        Some(Err(e)) => tracing::warn!("debug build: no plugins from the checkouts: {e}"),
+        None => {}
+    }
 
     if std::env::args().any(|a| a == "--check") {
         process::exit(render::check_runtime_files(

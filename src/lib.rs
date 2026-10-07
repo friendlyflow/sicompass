@@ -16,6 +16,8 @@
 #![allow(dead_code, unused_imports)]
 
 pub mod boot;
+/// A debug build runs the plugins of the checkouts beside it.
+pub mod dev_plugins;
 /// Host for plugin processes: a plugin is a program the app starts and talks
 /// to over its stdin and stdout.
 pub mod plugin_host;

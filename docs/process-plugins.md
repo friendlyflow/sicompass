@@ -179,6 +179,13 @@ pointing at plugins built from local checkouts (`services.desicompass.dev.plugin
 so `nixos-rebuild switch` puts a plugin edit into that session the way it does an
 app edit.
 
+A debug build of the app (`target/debug/sicompass`) does the same for itself
+when the variable is unset (`src/dev_plugins.rs`): it links every sibling
+checkout `../<x>-plugin-sicompass` that has a `target/debug/<x>-plugin` into
+`target/dev-plugins/` and points the variable there, so a plugin edit needs
+only `cargo build` in its repo. A checkout without a debug build keeps the
+Store's copy, and setting the variable, even to nothing, turns this off.
+
 - **Precedence.** These folders are read first and one plugin is kept per name
   (`installed_plugins::discover_all` in the SDK), so a plugin here replaces the
   user's copy of the same name. The app, the Store and the tutorial all read
