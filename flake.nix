@@ -471,7 +471,7 @@
           #
           # No cargoHash and no git outputHashes to keep up to date: crane
           # vendors from Cargo.lock, git sources (the sicompass-ui and
-          # sicompass-payments git dependencies, once they move out) included,
+          # sicompass-sync git dependencies, once they move out) included,
           # by the rev recorded there.
           buildMember = args:
             let

@@ -20,7 +20,7 @@ a sicompass checkout. **Prefix every command with `cd PROJECT_ROOT &&`.**
    `cargo update --dry-run --verbose 2>&1 | grep -i available`, and raise their
    requirements in `Cargo.toml`. Skip any requirement that has a comment
    explaining a pin, and ask before touching it. Then `cargo update` again.
-   First-party git dependencies (`sicompass-ui`, `sicompass-payments`) are
+   First-party git dependencies (`sicompass-ui`, `sicompass-sync`) are
    pinned by `rev`/`tag` and are moved by a release, not here.
 4. `nix flake update`.
 5. Build and test in **this repo's own** dev shell (`nix develop -c ...` run

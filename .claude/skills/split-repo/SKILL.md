@@ -202,7 +202,7 @@ with `command -v git-filter-repo`, and fall back to `nix develop -c`.
      take the version sicompass's `[workspace.dependencies]` pins, *with* the
      comment explaining any pin.
    - First-party crates: `sicompass-sdk` from crates.io (the version sicompass
-     pins). `sicompass-ui` and `sicompass-payments` come by git with `rev = ...`,
+     pins). `sicompass-ui` and `sicompass-sync` come by git with `rev = ...`,
      switching to `tag = "v0.2.0"` at the release. Add the commented-out
      `[patch...]` sections pointing at `../<repo>`, with the same "must stay
      commented on main" note as sicompass's `[patch.crates-io]`.

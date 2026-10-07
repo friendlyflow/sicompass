@@ -103,17 +103,18 @@ plus the cargo-packager `resources`, the `generate-rpm` assets and
 `wix/main.wxs`). That is what made every release up to 0.1.8 unable to start.
 See [docs/releasing.md](docs/releasing.md).
 
-## Architecture: paid cloud backup
+## Architecture: paid cloud sync
 
 The app's half of the commercial client is `lib_store`'s `payments` module
 (certificates, checkout, the tier pages' controls, redeem tokens, usage), shown
 in Store > tiers. The server is the **separate, private** repo `../server` (the
 Ed25519 signing key must never sit in GPL client code).
 
-The backups themselves are the plugins'. Notes and project management are
+The syncs themselves are the plugins'. Notes and project management are
 plugins now (`../notes-plugin-sicompass`, `../projectmanagement-plugin-sicompass`)
-and back up the way a third party's plugin would, with the `sicompass-payments`
-library (`sicompass-payments/` in `../sicompass-plugin-sdk`). The app gives a plugin two
+and sync the way a third party's plugin would, with the `sicompass-sync`
+library (`sicompass-sync/` in `../sicompass-plugin-sdk`, which has no payment code
+despite its old name, `sicompass-payments`). The app gives a plugin two
 things through `sicompass_sdk::plugin::license`: where the user stands with a
 tier (`license::standing`), and the redeem token, only for the tier its
 `plugin.json` names as `service` (`license::token`, gated by
@@ -134,8 +135,13 @@ Three things are easy to get wrong here:
   another provider, so a refresh after redeeming keeps the page (and the typed
   token) where it was.
 
-Restoring never runs over a store that already has files in it. A backup is not
-a sync, and the machine in front of the user wins.
+The sync is two-way. Every object in a store has a Merkle hash
+(`sicompass_sync::merkle`, a wire format both plugins and the server share), so
+both sides can tell which objects are out of date. A plugin merges another
+computer's changes into its store itself (three-way, against the copy both last
+agreed on), and never writes a merge over an edit made while it ran. The server
+never merges: it refuses an upload whose `base` is no longer what it holds
+(409), and `plugin_backups.updated_at` is each plugin's last change there.
 
 ## Architecture: plugins
 

@@ -643,12 +643,12 @@ is enough.)
 tier links in Settings and serves the server's tier pages from the Store's own
 tree (a `<link>` graft has no path, so the refresh after redeeming a token put
 the tiers list where the page was); the usage lines under the tiers; the
-`license` interface (since 0.3, the `license` requests of a plugin process). `lib_settings` no longer depends on `sicompass-payments`.
+`license` interface (since 0.3, the `license` requests of a plugin process). `lib_settings` no longer depends on `sicompass-payments` (since renamed `sicompass-sync`).
 Checked against a local server by hand (see each file's header): the
 certificates per tier, Commercial including Cloud and grace on the client in
 `lib/lib_store/tests/live_server.rs`, and grace on the server, usage and a
 support licence refused for backup in `sicompass-plugin-sdk`'s
-`sicompass-payments/tests/live_server.rs`.
+`sicompass-payments/tests/live_server.rs` (now `sicompass-sync/`).
 
 ## 11. Host changes in sicompass
 
@@ -745,7 +745,8 @@ rows are an app feature regardless; `tests/links.rs` follows one end to end.
 
 **Step 7 (2026-09-24):** plugins do their own cloud backup, the way a third
 party's would. The `sicompass-payments` guest library
-(`sicompass-payments/` in the SDK repo) holds the snapshot format, the backup protocol
+(`sicompass-payments/` in the SDK repo, renamed `sicompass-sync` when the backup
+became a two-way sync, see step 12) holds the snapshot format, the backup protocol
 over a plugin's `net`, the debounce, and `cloud::Cloud`, the service as a
 plugin runs it (switch, row, uploads and restores as background tasks). The
 host adds `license.standing` and `license.token`, the token only for the tier a
@@ -887,11 +888,23 @@ lookup, so no test can start a real one.
 
 **Step 11, the 0.2.0 release train (2026-09-25):** `sicompass-sdk` 0.9.0 and
 `sicompass-pdk` 0.6.0 are on crates.io (tag v0.9.0 of the SDK repo, which
-`sicompass-payments` and the release tool are taken from by git).
+`sicompass-payments`, now `sicompass-sync`, and the release tool are taken from by git).
 `sicompass-ui` and `loginsicompass` are tagged v0.2.0, and sicompass pins the
 renderer by that tag. Every plugin was released again on the published crates,
 with `minAppVersion` 0.2.0, since the 0.1.x app lacks the host functions they
 import (the file browser at 0.2.1, its version since open-with).
+
+**Step 12, two-way sync (2026-10-07):** the board became a Merkle tree like
+the notes (every card, column and the board hashed with the notes' formula),
+and both plugins' cloud backup became a two-way sync. `sicompass-payments` was
+renamed `sicompass-sync`, since it never held payment code, and gained the
+shared `merkle` module (the hash, the diff, the three-way merge) and `sync`.
+The server takes the same crate by git: it checks the hashes of every upload
+from a syncing client, refuses one whose `base` is stale with its head (409),
+names the objects an upload changed, and answers `GET /plugins/{p}/head`
+(hash and last change, no files) for the clients' minute-by-minute poll. Each
+list in both plugins opens with a `list meta:` row showing its hash and
+whether it changed since the last sync. Nothing changed in the app.
 
 ## 14. Decisions on the former open questions (2026-09-24)
 
