@@ -2362,14 +2362,13 @@ checksum = "0676bb32a98c1a483ce53e500a81ad9c3d5b3f7c920c28c24e9cb0980d0b5bc8"
 
 [[package]]
 name = "notes-plugin"
-version = "0.2.0"
-source = "git+https://github.com/friendlyflow/notes-plugin-sicompass?rev=523ba29b8fbc25a1f3e52cd1afa2986b48eab300#523ba29b8fbc25a1f3e52cd1afa2986b48eab300"
+version = "0.4.0"
+source = "git+https://github.com/friendlyflow/notes-plugin-sicompass?rev=5a3a5c7cbc3428dd0c9e653a73f166c7524a6c57#5a3a5c7cbc3428dd0c9e653a73f166c7524a6c57"
 dependencies = [
  "serde",
  "serde_json",
- "sha2",
- "sicompass-payments",
  "sicompass-sdk",
+ "sicompass-sync",
  "ureq",
 ]
 
@@ -2966,13 +2965,13 @@ dependencies = [
 
 [[package]]
 name = "projectmanagement-plugin"
-version = "0.2.0"
-source = "git+https://github.com/friendlyflow/projectmanagement-plugin-sicompass?rev=427a3b60d29850b5b7f229c9d2c2b24a95677856#427a3b60d29850b5b7f229c9d2c2b24a95677856"
+version = "0.4.0"
+source = "git+https://github.com/friendlyflow/projectmanagement-plugin-sicompass?rev=db0c500c01de9d0ab57a057034ef021b068d6700#db0c500c01de9d0ab57a057034ef021b068d6700"
 dependencies = [
  "serde",
  "serde_json",
- "sicompass-payments",
  "sicompass-sdk",
+ "sicompass-sync",
  "ureq",
 ]
 
@@ -3884,16 +3883,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "sicompass-payments"
-version = "0.2.0"
-source = "git+https://github.com/friendlyflow/sicompass-plugin-sdk?tag=v0.9.1#20b7e7e3394cda60bf622ca7291ef3b23d7c2f52"
-dependencies = [
- "serde",
- "serde_json",
- "sha2",
-]
-
-[[package]]
 name = "sicompass-sdk"
 version = "0.9.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3949,6 +3938,16 @@ dependencies = [
  "tempfile",
  "tokio",
  "wiremock",
+]
+
+[[package]]
+name = "sicompass-sync"
+version = "0.3.0"
+source = "git+https://github.com/friendlyflow/sicompass-plugin-sdk?tag=v0.9.3#9ea3489bd47d52b9ebfbddf51d1bf0c11a6f3143"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sha2",
 ]
 
 [[package]]

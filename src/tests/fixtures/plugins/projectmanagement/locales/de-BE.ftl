@@ -8,6 +8,11 @@ projectmanagement-display-name = projektverwaltung
 projectmanagement-empty-columns = noch keine spalten, drücken sie strg+a um eine hinzuzufügen
 projectmanagement-empty-cards = noch keine karten, drücken sie strg+a um eine hinzuzufügen
 
+projectmanagement-list-meta = Listeninfo:
+projectmanagement-sha256 = sha256: { $hash }
+projectmanagement-error-meta-undeletable = die Listeninfo gehört zur Liste und kann nicht gelöscht werden
+projectmanagement-error-meta-readonly = die Listeninfo kann nicht bearbeitet werden
+
 projectmanagement-cmd-move-up = nach oben verschieben
 projectmanagement-cmd-move-down = nach unten verschieben
 projectmanagement-cmd-move-left = in die vorige spalte verschieben
@@ -15,7 +20,7 @@ projectmanagement-cmd-move-right = in die nächste spalte verschieben
 projectmanagement-cmd-archive-card = karte archivieren
 
 # The settings checkbox that turns on mirroring the board to the server.
-projectmanagement-checkbox-cloud-backup = Cloud-Sicherung aktivieren
+projectmanagement-checkbox-cloud-backup = Cloud-Synchronisierung aktivieren
 
 projectmanagement-error-unreadable = ihr board konnte nicht gelesen werden, daher wurde nichts gespeichert, die dateien auf der festplatte bleiben unberührt
 projectmanagement-error-save = ihr board konnte nicht gespeichert werden
@@ -51,21 +56,23 @@ projectmanagement-op-rename-card = karte umbenennen
 projectmanagement-op-move-card = karte verschieben
 projectmanagement-op-archive-card = karte archivieren
 
-projectmanagement-description = Ein Kanban-Board, das Sie in einer Liste oder auf einem Raster ordnen, mit optionaler Cloud-Sicherung.
-projectmanagement-service = bewahrt eine Kopie Ihres Boards auf dem Server von Sicompass Cloud auf
+projectmanagement-description = Ein Kanban-Board, das Sie in einer Liste oder auf einem Raster ordnen, mit optionaler Cloud-Synchronisierung.
+projectmanagement-service = hält Ihr Board über den Server von Sicompass Cloud auf allen Ihren Computern gleich
 
-projectmanagement-cloud-needs-payment = Cloud-Sicherung: braucht Sicompass Cloud, siehe store, Abos
-projectmanagement-cloud-active = Cloud-Sicherung: an, verlängert sich in { $days } Tagen
-projectmanagement-cloud-grace = Cloud-Sicherung: Abo abgelaufen, noch { $days } Tage an, verlängern Sie in store, Abos
-projectmanagement-cloud-expired = Cloud-Sicherung: aus, das Abo ist vor { $days } Tagen abgelaufen, siehe store, Abos
-projectmanagement-cloud-needs-subscription = die Cloud-Sicherung braucht Sicompass Cloud, siehe store, Abos
-projectmanagement-cloud-failed = Cloud-Sicherung fehlgeschlagen: { $reason }
-projectmanagement-error-cloud-row-undeletable = die Zeile der Cloud-Sicherung ist keine Spalte, schalten Sie die Cloud-Sicherung in den Einstellungen aus, um sie zu entfernen
+projectmanagement-cloud-needs-payment = Cloud-Synchronisierung: braucht Sicompass Cloud, siehe store, Abos
+projectmanagement-cloud-active = Cloud-Synchronisierung: an, verlängert sich in { $days } Tagen
+projectmanagement-cloud-grace = Cloud-Synchronisierung: Abo abgelaufen, noch { $days } Tage an, verlängern Sie in store, Abos
+projectmanagement-cloud-expired = Cloud-Synchronisierung: aus, das Abo ist vor { $days } Tagen abgelaufen, siehe store, Abos
+projectmanagement-cloud-needs-subscription = die Cloud-Synchronisierung braucht Sicompass Cloud, siehe store, Abos
+projectmanagement-cloud-failed = Cloud-Synchronisierung fehlgeschlagen: { $reason }
+projectmanagement-error-cloud-row-undeletable = die Zeile der Cloud-Synchronisierung ist keine Spalte, schalten Sie die Cloud-Synchronisierung in den Einstellungen aus, um sie zu entfernen
 
-projectmanagement-cmd-restore-backup = Cloud-Sicherung wiederherstellen
-projectmanagement-restore-done = Cloud-Sicherung wiederhergestellt
-projectmanagement-restore-empty = es gibt keine Cloud-Sicherung zum Wiederherstellen
-projectmanagement-restore-refused = Ihr Board ist nicht leer, es wurde nichts wiederhergestellt
+projectmanagement-cmd-sync-now = jetzt mit der Cloud synchronisieren
+projectmanagement-sync-pulled = Änderungen von Ihren anderen Computern wurden übernommen
+projectmanagement-sync-conflicts = Änderungen von Ihren anderen Computern wurden übernommen, { $count } auf beiden Seiten bearbeitet, die neueste Bearbeitung wurde behalten
+projectmanagement-sync-status-synced = Cloud: synchronisiert
+projectmanagement-sync-status-changed = Cloud: seit der letzten Synchronisierung geändert
+projectmanagement-sync-status-new = Cloud: noch nicht synchronisiert
 
-projectmanagement-tutorial = Projektverwaltung, aus dem Store: ein Kanban-Board. Drücken Sie Strg+A, um eine Spalte hinzuzufügen, Rechts, um sie zu öffnen, und Strg+A darin, um eine Karte hinzuzufügen. Eine Spalte enthält Karten und nichts Tieferes, eine Karte ist also die letzte Ebene.
+projectmanagement-tutorial = Projektverwaltung, aus dem Store: ein Kanban-Board. Drücken Sie Strg+A, um eine Spalte hinzuzufügen, Rechts, um sie zu öffnen, und Strg+A darin, um eine Karte hinzuzufügen. Eine Spalte enthält Karten und nichts Tieferes, eine Karte ist also die letzte Ebene. Die erste Zeile jeder Liste ist ihre Listeninfo, mit dem Hash der Liste und, bei aktiver Cloud-Synchronisierung, ob sie sich seit der letzten Synchronisierung geändert hat.
 projectmanagement-tutorial-2 = d: öffnen Sie das Board selbst, mit den Spalten nebeneinander. Der Cursor steht auf einer Karte, und nur diese Karte ist hervorgehoben. Links und Rechts wechseln zwischen Spalten, Hoch und Runter gehen durch die Karten einer Spalte. i und a bearbeiten die Karte, o und Umschalt+o öffnen eine neue darunter oder darüber, Strg+D löscht, und Strg+X, Strg+C und Strg+V schneiden aus, kopieren und fügen ein. Eine leere Spalte zeigt einen Platz, auf den Sie sich stellen können, um ihre erste Karte hinzuzufügen. Die Spalten selbst verwalten Sie in der Liste. Escape geht zurück.

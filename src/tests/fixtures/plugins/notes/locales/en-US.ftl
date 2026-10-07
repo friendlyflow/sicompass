@@ -30,8 +30,8 @@ notes-cmd-move-up = move up
 notes-cmd-move-down = move down
 notes-cmd-duplicate = duplicate
 
-# The settings checkbox that turns on mirroring the notes to the server.
-notes-checkbox-cloud-backup = enable cloud backup
+# The settings checkbox that turns on syncing the notes through the server.
+notes-checkbox-cloud-backup = enable cloud sync
 
 notes-error-meta-undeletable = the list meta row belongs to the list and cannot be deleted
 notes-error-meta-readonly = the list meta row cannot be edited, change visibility from inside it
@@ -39,23 +39,27 @@ notes-error-unreadable = your notes could not be read, so nothing has been saved
 notes-error-save = your notes could not be saved
 
 # The Store's description of this plugin, and of the paid service it offers.
-notes-description = Your own notes, a tree of lists you write in, with an optional cloud backup.
-notes-service = keeps a copy of your notes on the Sicompass Cloud server
+notes-description = Your own notes, a tree of lists you write in, with an optional cloud sync.
+notes-service = keeps your notes in sync between your computers through the Sicompass Cloud server
 
-# The row at the top of the notes while cloud backup is on. It never links
+# The row at the top of the notes while cloud sync is on. It never links
 # anywhere: buying and redeeming are in store, tiers.
-notes-cloud-needs-payment = cloud backup: needs Sicompass Cloud, see store, tiers
-notes-cloud-active = cloud backup: on, renews in { $days } days
-notes-cloud-grace = cloud backup: subscription expired, still on for { $days } days, renew in store, tiers
-notes-cloud-expired = cloud backup: off, the subscription expired { $days } days ago, see store, tiers
-notes-cloud-needs-subscription = cloud backup needs Sicompass Cloud, see store, tiers
-notes-cloud-failed = cloud backup failed: { $reason }
-notes-error-cloud-row-undeletable = the cloud backup row is not a note, turn cloud backup off in settings to remove it
+notes-cloud-needs-payment = cloud sync: needs Sicompass Cloud, see store, tiers
+notes-cloud-active = cloud sync: on, renews in { $days } days
+notes-cloud-grace = cloud sync: subscription expired, still on for { $days } days, renew in store, tiers
+notes-cloud-expired = cloud sync: off, the subscription expired { $days } days ago, see store, tiers
+notes-cloud-needs-subscription = cloud sync needs Sicompass Cloud, see store, tiers
+notes-cloud-failed = cloud sync failed: { $reason }
+notes-error-cloud-row-undeletable = the cloud sync row is not a note, turn cloud sync off in settings to remove it
 
-notes-cmd-restore-backup = restore cloud backup
-notes-restore-done = cloud backup restored
-notes-restore-empty = there is no cloud backup to restore
-notes-restore-refused = your notes are not empty, so nothing was restored
+notes-cmd-sync-now = sync with the cloud now
+notes-sync-pulled = changes from your other computers were added
+notes-sync-conflicts = changes from your other computers were added, { $count } edited on both, the latest edit was kept
+# The list meta's line about the cloud: whether this list is as it was at
+# the last sync.
+notes-sync-status-synced = cloud: in sync
+notes-sync-status-changed = cloud: changed since the last sync
+notes-sync-status-new = cloud: not synced yet
 
 # The tutorial's paragraphs about this program, under its programs section:
 # <name>-tutorial, then <name>-tutorial-2 and so on, read until one is missing.

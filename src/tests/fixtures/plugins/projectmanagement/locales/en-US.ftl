@@ -11,6 +11,15 @@ projectmanagement-display-name = project management
 projectmanagement-empty-columns = no columns yet, press ctrl+a to add one
 projectmanagement-empty-cards = no cards yet, press ctrl+a to add one
 
+# The header row at the top of every list. Localized on purpose, and for one
+# hard reason it must never be the bare word "meta": the app skips `pop_path`
+# when leaving an Obj keyed exactly "meta", which would leave the provider's
+# path one level deeper than the cursor.
+projectmanagement-list-meta = list meta:
+projectmanagement-sha256 = sha256: { $hash }
+projectmanagement-error-meta-undeletable = the list meta row belongs to the list and cannot be deleted
+projectmanagement-error-meta-readonly = the list meta row cannot be edited
+
 # The name a column or card gets when it is created but never typed into.
 
 projectmanagement-cmd-move-up = move up
@@ -19,8 +28,8 @@ projectmanagement-cmd-move-left = move to previous column
 projectmanagement-cmd-move-right = move to next column
 projectmanagement-cmd-archive-card = archive card
 
-# The settings checkbox that turns on mirroring the board to the server.
-projectmanagement-checkbox-cloud-backup = enable cloud backup
+# The settings checkbox that turns on syncing the board through the server.
+projectmanagement-checkbox-cloud-backup = enable cloud sync
 
 projectmanagement-error-unreadable = your board could not be read, so nothing has been saved, the files on disk are untouched
 projectmanagement-error-save = your board could not be saved
@@ -61,25 +70,29 @@ projectmanagement-op-move-card = move card
 projectmanagement-op-archive-card = archive card
 
 # The Store's description of this plugin, and of the paid service it offers.
-projectmanagement-description = A kanban board you arrange in a list or on a grid, with an optional cloud backup.
-projectmanagement-service = keeps a copy of your board on the Sicompass Cloud server
+projectmanagement-description = A kanban board you arrange in a list or on a grid, with an optional cloud sync.
+projectmanagement-service = keeps your board in sync between your computers through the Sicompass Cloud server
 
-# The row above the columns while cloud backup is on. It never links
+# The row above the columns while cloud sync is on. It never links
 # anywhere: buying and redeeming are in store, tiers.
-projectmanagement-cloud-needs-payment = cloud backup: needs Sicompass Cloud, see store, tiers
-projectmanagement-cloud-active = cloud backup: on, renews in { $days } days
-projectmanagement-cloud-grace = cloud backup: subscription expired, still on for { $days } days, renew in store, tiers
-projectmanagement-cloud-expired = cloud backup: off, the subscription expired { $days } days ago, see store, tiers
-projectmanagement-cloud-needs-subscription = cloud backup needs Sicompass Cloud, see store, tiers
-projectmanagement-cloud-failed = cloud backup failed: { $reason }
-projectmanagement-error-cloud-row-undeletable = the cloud backup row is not a column, turn cloud backup off in settings to remove it
+projectmanagement-cloud-needs-payment = cloud sync: needs Sicompass Cloud, see store, tiers
+projectmanagement-cloud-active = cloud sync: on, renews in { $days } days
+projectmanagement-cloud-grace = cloud sync: subscription expired, still on for { $days } days, renew in store, tiers
+projectmanagement-cloud-expired = cloud sync: off, the subscription expired { $days } days ago, see store, tiers
+projectmanagement-cloud-needs-subscription = cloud sync needs Sicompass Cloud, see store, tiers
+projectmanagement-cloud-failed = cloud sync failed: { $reason }
+projectmanagement-error-cloud-row-undeletable = the cloud sync row is not a column, turn cloud sync off in settings to remove it
 
-projectmanagement-cmd-restore-backup = restore cloud backup
-projectmanagement-restore-done = cloud backup restored
-projectmanagement-restore-empty = there is no cloud backup to restore
-projectmanagement-restore-refused = your board is not empty, so nothing was restored
+projectmanagement-cmd-sync-now = sync with the cloud now
+projectmanagement-sync-pulled = changes from your other computers were added
+projectmanagement-sync-conflicts = changes from your other computers were added, { $count } edited on both, the latest edit was kept
+# The list meta's line about the cloud: whether this list is as it was at
+# the last sync.
+projectmanagement-sync-status-synced = cloud: in sync
+projectmanagement-sync-status-changed = cloud: changed since the last sync
+projectmanagement-sync-status-new = cloud: not synced yet
 
 # The tutorial's paragraphs about this program, under its programs section:
 # <name>-tutorial, then <name>-tutorial-2 and so on, read until one is missing.
-projectmanagement-tutorial = Project management, from the Store: a kanban board. Press ctrl+a to add a column, Right to open it, and ctrl+a inside to add a card. A column holds cards and nothing deeper, so a card is the last level.
+projectmanagement-tutorial = Project management, from the Store: a kanban board. Press ctrl+a to add a column, Right to open it, and ctrl+a inside to add a card. A column holds cards and nothing deeper, so a card is the last level. The first row of each list is its list meta, with the list's hash and, with cloud sync on, whether it changed since the last sync.
 projectmanagement-tutorial-2 = d: open the board itself, with the columns side by side. The cursor sits on a card, and the one card it is on is the only thing highlighted. Left and Right move between columns, Up and Down through the cards in one. i and a edit the card, o and shift+o open a new one below or above, ctrl+d deletes, and ctrl+x, ctrl+c and ctrl+v cut, copy and paste. An empty column shows one slot you can stand on to add its first card. Columns themselves are managed in the list. Escape goes back.
