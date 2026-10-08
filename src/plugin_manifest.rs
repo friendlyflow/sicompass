@@ -24,8 +24,8 @@ pub use sicompass_sdk::plugin_manifest::{
 
 /// The top-level `settings.json` key recording what the user approved, per
 /// plugin: `{ "<name>": "<approval fingerprint>" }`. Written by the Store when the
-/// user grants access; compared on every load, so an update asking for more is
-/// held back until approved again.
+/// user grants access, in whichever process runs it; compared on every load, so
+/// an update asking for more is held back until approved again.
 pub const APPROVALS_KEY: &str = "pluginApprovals";
 
 /// The user's approvals from `settings.json`, by plugin name.
@@ -43,67 +43,36 @@ pub fn read_approvals() -> std::collections::HashMap<String, String> {
         .unwrap_or_default()
 }
 
-/// Record what the Store just installed or updated: the access the user
-/// approved by pressing Install or Update (whatever the manifest asks, so a
-/// later update asking for more is noticed).
-pub fn record_store_install(m: &PluginManifest) -> Result<(), String> {
-    edit_config(|root| {
-        let approvals = object_at(root, APPROVALS_KEY);
-        approvals.insert(
-            m.name.clone(),
-            serde_json::Value::String(sicompass_sdk::plugin_abi::approval_fingerprint(m)),
-        );
-    })
+/// Whether the user approved `m` as it is now, which the Store records when
+/// they install, update or approve it (`sicompass_store::approvals`, in
+/// whichever process runs the Store: this app, or the desicompass superkey).
+/// A plugin that declares nothing needs no approval.
+pub fn is_approved(
+    m: &PluginManifest,
+    approvals: &std::collections::HashMap<String, String>,
+) -> bool {
+    !sicompass_sdk::plugin_abi::needs_approval(m)
+        || approvals.get(&m.name) == Some(&sicompass_sdk::plugin_abi::approval_fingerprint(m))
 }
 
-/// Forget an uninstalled plugin's approval. Its own settings section is kept,
-/// like its data folder: reinstalling finds them again.
-pub fn forget_store_install(name: &str) -> Result<(), String> {
-    edit_config(|root| {
-        object_at(root, APPROVALS_KEY).remove(name);
-    })
-}
-
-fn object_at<'a>(
-    root: &'a mut serde_json::Map<String, serde_json::Value>,
-    key: &str,
-) -> &'a mut serde_json::Map<String, serde_json::Value> {
-    let slot = root
-        .entry(key.to_owned())
-        .or_insert_with(|| serde_json::Value::Object(Default::default()));
-    if !slot.is_object() {
-        *slot = serde_json::Value::Object(Default::default());
-    }
-    slot.as_object_mut().expect("just made an object")
-}
-
-/// Read-modify-write `settings.json`, the way the settings provider does: a
-/// file that exists but does not parse is left alone (another process may be
-/// half-way through writing it), never rebuilt from nothing.
-fn edit_config(
-    f: impl FnOnce(&mut serde_json::Map<String, serde_json::Value>),
-) -> Result<(), String> {
-    let path =
-        sicompass_sdk::platform::main_config_path().ok_or("no settings folder on this platform")?;
-    let mut root = match std::fs::read_to_string(&path) {
-        Ok(text) => match serde_json::from_str::<serde_json::Value>(&text) {
-            Ok(serde_json::Value::Object(m)) => m,
-            _ => return Err(format!("{} does not parse, left as it is", path.display())),
-        },
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Default::default(),
-        Err(e) => return Err(format!("{}: {e}", path.display())),
-    };
-    f(&mut root);
+/// Test hook: record that the user approved `m`, as the Store does, in this
+/// test binary's own settings file.
+#[cfg(test)]
+pub(crate) fn _record_approval(m: &PluginManifest) {
+    let path = sicompass_sdk::platform::main_config_path().expect("a settings path");
+    let mut root: serde_json::Value = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|t| serde_json::from_str(&t).ok())
+        .unwrap_or_else(|| serde_json::json!({}));
+    root[APPROVALS_KEY][&m.name] =
+        serde_json::Value::String(sicompass_sdk::plugin_abi::approval_fingerprint(m));
     if let Some(parent) = path.parent() {
         sicompass_sdk::platform::make_dirs(parent);
     }
-    let json = serde_json::to_string_pretty(&serde_json::Value::Object(root))
-        .map_err(|e| e.to_string())?;
-    if sicompass_sdk::platform::atomic_write(&path, &json) {
-        Ok(())
-    } else {
-        Err(format!("{} could not be written", path.display()))
-    }
+    assert!(sicompass_sdk::platform::atomic_write(
+        &path,
+        &root.to_string()
+    ));
 }
 
 /// What a plugin gets, from its manifest and the user's approval.
@@ -120,9 +89,7 @@ pub fn grants_for(
     m: &PluginManifest,
     approvals: &std::collections::HashMap<String, String>,
 ) -> Result<crate::plugin_host::Grants, String> {
-    if sicompass_sdk::plugin_abi::needs_approval(m)
-        && approvals.get(&m.name) != Some(&sicompass_sdk::plugin_abi::approval_fingerprint(m))
-    {
+    if !is_approved(m, approvals) {
         return Err(
             "it runs as a program on this computer, and you have not approved this \
              version; approve it in the Store"

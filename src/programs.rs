@@ -207,8 +207,9 @@ pub fn load_programs_with(
 
 /// Built-in programs that a desicompass session shows in the superkey instead,
 /// the way it owns the accessibility settings: in a session sicompass does not
-/// load them.
-const SESSION_OWNED_PROGRAMS: &[&str] = &["tutorial"];
+/// load them. What the superkey's Store installs reaches this app through the
+/// plugins folder ([`follow_plugins_folder`]).
+const SESSION_OWNED_PROGRAMS: &[&str] = &["tutorial", "store"];
 
 /// `names` without the programs the superkey shows when `session` is true.
 fn session_filtered(mut names: Vec<String>, session: bool) -> Vec<String> {
@@ -274,23 +275,22 @@ pub fn focus_onboarding(renderer: &mut AppRenderer) {
 /// sections). The registered provider set is
 /// identical either way, so provider indices stay stable across tabs.
 pub fn load_content_providers(renderer: &mut AppRenderer, mut settings: Option<&mut dyn Provider>) {
-    // Always-enabled providers first (e.g. file browser).
-    for m in sicompass_sdk::builtin_manifests() {
-        if m.always_enabled {
-            if let Some(p) = instantiate_builtin(&m.name) {
-                register_provider(renderer, p);
-            }
-            if let Some(s) = settings.as_deref_mut() {
-                if !m.settings.is_empty() {
-                    inject_builtin_manifest_settings(s, &m);
-                }
+    let session = sicompass_ui::session_mode::is_session_mode();
+    // Always-enabled providers first (the Store), except in a session.
+    for m in always_enabled_builtins(session) {
+        if let Some(p) = instantiate_builtin(&m.name) {
+            register_provider(renderer, p);
+        }
+        if let Some(s) = settings.as_deref_mut() {
+            if !m.settings.is_empty() {
+                inject_builtin_manifest_settings(s, &m);
             }
         }
     }
 
     // The other built-ins, all of them: the app's own programs are always
     // there, except those a session shows in the superkey.
-    let builtins = builtin_programs(sicompass_ui::session_mode::is_session_mode());
+    let builtins = builtin_programs(session);
     for name in &builtins {
         if let Some(p) = instantiate_builtin(name.as_str()) {
             if let Some(s) = settings.as_deref_mut() {
@@ -377,7 +377,6 @@ pub const STORE: &str = "store";
 pub const PLUGIN_INSTALLED: &str = "pluginInstalled";
 pub const PLUGIN_UPDATED: &str = "pluginUpdated";
 pub const PLUGIN_REMOVED: &str = "pluginRemoved";
-pub const PLUGIN_DATA_TRASH: &str = "pluginDataTrash";
 
 /// Give every Store instance the settings queue as its apply callback, so an
 /// install is applied on the main thread like a settings change.
@@ -390,122 +389,202 @@ pub fn wire_store(providers: &mut [Box<dyn Provider>], queue: &SettingsQueue) {
     }
 }
 
-/// The Store changed what is in `plugins/`: load, reload or unload `name` in
-/// every tab, and keep settings.json and the settings panel in step.
-fn apply_store_change(renderer: &mut AppRenderer, key: &str, name: &str) {
-    let loaded = |r: &AppRenderer| {
-        r.providers
-            .iter()
-            .any(|p| name_matches_provider(name, p.name()))
-    };
-    let rescan = |name: &str| -> Option<PluginManifest> {
-        let discovered = discover_user_plugins();
-        let found = discovered
-            .iter()
-            .find(|p| p.manifest.name == name)
-            .map(|p| p.manifest.clone());
-        *user_plugin_cache().lock().unwrap() = discovered;
-        found
-    };
-    let complain = |r: &mut AppRenderer, e: String| {
-        eprintln!("sicompass: store: {name}: {e}");
-        r.error_message = format!("{name}: {e}");
-    };
+/// The Store changed what is in `plugins/` (and recorded the approval
+/// itself): look now rather than at the next check.
+fn apply_store_change(renderer: &mut AppRenderer) {
+    follow_plugins_folder(renderer, true);
+}
 
-    match key {
-        PLUGIN_INSTALLED => {
-            let Some(m) = rescan(name) else {
-                return complain(
-                    renderer,
-                    "installed, but not found in the plugins folder".into(),
-                );
-            };
-            if let Err(e) = crate::plugin_manifest::record_store_install(&m) {
-                complain(renderer, e);
+/// How often [`follow_plugins_folder`] looks at the plugin folders.
+const PLUGINS_CHECK_INTERVAL: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// What the plugin folders and the approvals looked like: each plugin folder
+/// with its `plugin.json`'s modification time, and `settings.json`'s. Cheap to
+/// take (a directory listing and a `stat` each), and different whenever a
+/// plugin is installed, updated, removed or approved.
+type FolderStamp = Vec<(PathBuf, Option<std::time::SystemTime>)>;
+
+fn folder_stamp() -> FolderStamp {
+    let modified = |p: &Path| std::fs::metadata(p).and_then(|m| m.modified()).ok();
+    let mut dirs = sicompass_sdk::platform::system_plugin_dirs();
+    dirs.extend(sicompass_sdk::platform::plugins_dir());
+    let mut stamp: FolderStamp = dirs
+        .iter()
+        .filter_map(|d| std::fs::read_dir(d).ok())
+        .flat_map(|entries| entries.flatten())
+        .map(|e| {
+            let manifest = e.path().join("plugin.json");
+            let t = modified(&manifest);
+            (manifest, t)
+        })
+        .collect();
+    stamp.sort();
+    if let Some(config) = sicompass_sdk::platform::main_config_path() {
+        let t = modified(&config);
+        stamp.push((config, t));
+    }
+    stamp
+}
+
+/// What [`follow_plugins_folder`] last saw: when it looked, the folders'
+/// stamp, and the plugins as they were then (what is loaded came from these).
+struct Follow {
+    checked: Option<std::time::Instant>,
+    stamp: FolderStamp,
+    known: Vec<DiscoveredPlugin>,
+}
+
+/// `None` until the startup load seeds it ([`seed_plugins_follow`]).
+static FOLLOW: Mutex<Option<Follow>> = Mutex::new(None);
+
+/// Remember the plugins the startup load found, as the point the follower
+/// compares with.
+fn seed_plugins_follow(discovered: &[DiscoveredPlugin]) {
+    *FOLLOW.lock().unwrap_or_else(|e| e.into_inner()) = Some(Follow {
+        checked: Some(std::time::Instant::now()),
+        stamp: folder_stamp(),
+        known: discovered.to_vec(),
+    });
+}
+
+/// What to do about one plugin after the folders changed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum PluginChange {
+    /// Approved (or provided by this computer) and not loaded yet.
+    Load(String),
+    /// Gone from the folders, or no longer approved.
+    Unload(String),
+    /// Loaded, and replaced by another version on disk.
+    Reload(String),
+}
+
+/// Whether a discovered plugin may run here: one this computer's
+/// configuration provides always, one in the user's folder once they
+/// approved it as it is, and neither if it needs a newer app.
+fn may_run(p: &DiscoveredPlugin, approvals: &std::collections::HashMap<String, String>) -> bool {
+    !needs_newer_app(&p.manifest)
+        && (p.origin == PluginOrigin::System
+            || crate::plugin_manifest::is_approved(&p.manifest, approvals))
+}
+
+/// What changed between the plugins `before` and the plugins `now`, for a
+/// renderer where `loaded` says whether a plugin is running. A name a
+/// built-in program uses is never touched.
+fn plugin_changes(
+    before: &[DiscoveredPlugin],
+    now: &[DiscoveredPlugin],
+    approvals: &std::collections::HashMap<String, String>,
+    loaded: &dyn Fn(&str) -> bool,
+) -> Vec<PluginChange> {
+    let builtin = |name: &str| {
+        sicompass_sdk::builtin_manifests()
+            .iter()
+            .any(|m| m.name == name || name_matches_provider(&m.display_name, name))
+    };
+    let same = |a: &DiscoveredPlugin, b: &DiscoveredPlugin| {
+        a.dir == b.dir
+            && a.entry_path == b.entry_path
+            && a.manifest.version == b.manifest.version
+            && sicompass_sdk::plugin_abi::approval_fingerprint(&a.manifest)
+                == sicompass_sdk::plugin_abi::approval_fingerprint(&b.manifest)
+    };
+    let mut changes = Vec::new();
+    for p in before {
+        let name = &p.manifest.name;
+        if !builtin(name) && loaded(name) && !now.iter().any(|n| &n.manifest.name == name) {
+            changes.push(PluginChange::Unload(name.clone()));
+        }
+    }
+    for p in now {
+        let name = &p.manifest.name;
+        if builtin(name) {
+            continue;
+        }
+        let runs = may_run(p, approvals);
+        match (loaded(name), runs) {
+            (true, false) => changes.push(PluginChange::Unload(name.clone())),
+            (false, true) => changes.push(PluginChange::Load(name.clone())),
+            (true, true) => {
+                let replaced = before
+                    .iter()
+                    .find(|b| &b.manifest.name == name)
+                    .is_none_or(|b| !same(b, p));
+                if replaced {
+                    changes.push(PluginChange::Reload(name.clone()));
+                }
+            }
+            (false, false) => {}
+        }
+    }
+    changes
+}
+
+/// Follow the plugin folders and the approvals, whoever changed them: this
+/// app's Store, another sicompass, the desicompass superkey (which shows the
+/// Store in a session), or the user by hand. A plugin installed and approved
+/// is loaded in every tab, one removed or no longer approved is unloaded, and
+/// one replaced by an update is reloaded, with its settings section.
+///
+/// Called every frame. It looks at the folders once a second, or at once when
+/// `force` is set, and reads the plugins again only when their stamp changed.
+pub fn follow_plugins_folder(renderer: &mut AppRenderer, force: bool) {
+    let mut follow = FOLLOW.lock().unwrap_or_else(|e| e.into_inner());
+    // Not seeded: this renderer did not load the plugins (a test's), so there
+    // is nothing to compare with.
+    let Some(f) = follow.as_mut() else {
+        return;
+    };
+    if !force
+        && f.checked
+            .is_some_and(|t| t.elapsed() < PLUGINS_CHECK_INTERVAL)
+    {
+        return;
+    }
+    f.checked = Some(std::time::Instant::now());
+    let stamp = folder_stamp();
+    if !force && stamp == f.stamp {
+        return;
+    }
+    f.stamp = stamp;
+    let now = discover_user_plugins();
+    let approvals = crate::plugin_manifest::read_approvals();
+    let before = std::mem::replace(&mut f.known, now.clone());
+    drop(follow);
+
+    let changes = {
+        let r: &AppRenderer = renderer;
+        let loaded = |name: &str| {
+            r.providers
+                .iter()
+                .any(|p| name_matches_provider(name, p.name()))
+        };
+        plugin_changes(&before, &now, &approvals, &loaded)
+    };
+    if changes.is_empty() {
+        *user_plugin_cache().lock().unwrap() = now;
+        return;
+    }
+    // Unload under the old manifests, so the right settings section goes.
+    for change in &changes {
+        if let PluginChange::Unload(name) | PluginChange::Reload(name) = change {
+            eprintln!("sicompass: plugins: {change:?}");
+            disable_provider(renderer, name);
+            propagate_disable_to_parked_tabs(renderer, name);
+        }
+    }
+    *user_plugin_cache().lock().unwrap() = now;
+    for change in &changes {
+        if let PluginChange::Load(name) | PluginChange::Reload(name) = change {
+            if matches!(change, PluginChange::Load(_)) {
+                eprintln!("sicompass: plugins: {change:?}");
             }
             enable_provider(renderer, name);
             propagate_enable_to_parked_tabs(renderer, name);
         }
-        PLUGIN_UPDATED => {
-            // Unload first, under the old manifest, so its settings section goes.
-            let was_loaded = loaded(renderer);
-            if was_loaded {
-                disable_provider(renderer, name);
-                propagate_disable_to_parked_tabs(renderer, name);
-            }
-            let Some(m) = rescan(name) else {
-                return complain(
-                    renderer,
-                    "updated, but not found in the plugins folder".into(),
-                );
-            };
-            if let Err(e) = crate::plugin_manifest::record_store_install(&m) {
-                complain(renderer, e);
-            }
-            if was_loaded {
-                enable_provider(renderer, name);
-                propagate_enable_to_parked_tabs(renderer, name);
-            }
-        }
-        PLUGIN_REMOVED => {
-            let display_name = user_plugin_cache()
-                .lock()
-                .unwrap()
-                .iter()
-                .find(|p| p.manifest.name == name)
-                .map(|p| p.manifest.display_name.clone());
-            disable_provider(renderer, name);
-            propagate_disable_to_parked_tabs(renderer, name);
-            rescan(name);
-            if let Err(e) = crate::plugin_manifest::forget_store_install(name) {
-                complain(renderer, e);
-            }
-            if let (Some(settings), Some(section)) = (renderer.providers.last_mut(), display_name) {
-                settings.remove_settings_section(&section);
-            }
-        }
-        PLUGIN_DATA_TRASH => {
-            if let Err(e) = trash_plugin_data(name) {
-                complain(renderer, e);
-            }
-            return;
-        }
-        _ => return,
     }
     rebuild_settings_ffon(renderer);
-}
-
-/// Move an uninstalled plugin's data folder (`app_data_dir()/<name>`) to the
-/// trash, which the user can empty or restore from. Refused for a plugin that
-/// is still installed, and for a name a built-in program also keeps its data
-/// under (the notes and board plugins share the built-ins' folders).
-fn trash_plugin_data(name: &str) -> Result<(), String> {
-    let plain = !name.is_empty()
-        && name
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
-    if !plain {
-        return Err("not a plugin name".to_owned());
-    }
-    let installed = sicompass_sdk::installed_plugins::discover_all()
-        .iter()
-        .any(|(_, _, m)| m.as_ref().is_ok_and(|m| m.name == name));
-    if installed {
-        return Err("it is installed again, so its data folder stays".to_owned());
-    }
-    if sicompass_sdk::builtin_manifests()
-        .iter()
-        .any(|m| name_matches_provider(&m.display_name, name) || m.name == name)
-    {
-        return Err("a built-in program uses the same data folder, so it stays".to_owned());
-    }
-    let dir = sicompass_sdk::platform::app_data_dir()
-        .ok_or("no data folder on this system")?
-        .join(name);
-    if !dir.is_dir() {
-        return Ok(());
-    }
-    crate::plugin_host::desktop::trash_delete(&dir)
+    sicompass_ui::list::create_list_current_layer(renderer);
+    renderer.needs_redraw = true;
 }
 
 /// Inject setting entries from a `BuiltinManifest` into the settings provider.
@@ -569,21 +648,14 @@ fn instantiate_user_plugin_approved(
 ) -> Option<Box<dyn Provider>> {
     let m = &plugin.manifest;
 
-    if let Some(min) = m.min_app_version.as_deref() {
-        let current = env!("CARGO_PKG_VERSION");
-        match (
-            semver::Version::parse(min.trim_start_matches('v')),
-            semver::Version::parse(current),
-        ) {
-            (Ok(min_v), Ok(cur_v)) if min_v > cur_v => {
-                eprintln!(
-                    "sicompass: skipping plugin '{}' — needs app >= {min} but running {current}",
-                    m.name
-                );
-                return None;
-            }
-            _ => {}
-        }
+    if needs_newer_app(m) {
+        eprintln!(
+            "sicompass: skipping plugin '{}' — needs app >= {} but running {}",
+            m.name,
+            m.min_app_version.as_deref().unwrap_or_default(),
+            env!("CARGO_PKG_VERSION")
+        );
+        return None;
     }
 
     match m.plugin_type {
@@ -623,6 +695,20 @@ fn instantiate_user_plugin_approved(
             }
         }
         PluginType::Factory => instantiate_builtin(&m.name),
+    }
+}
+
+/// Whether `m`'s `minAppVersion` is newer than this app.
+fn needs_newer_app(m: &PluginManifest) -> bool {
+    let Some(min) = m.min_app_version.as_deref() else {
+        return false;
+    };
+    match (
+        semver::Version::parse(min.trim_start_matches('v')),
+        semver::Version::parse(env!("CARGO_PKG_VERSION")),
+    ) {
+        (Ok(min_v), Ok(cur_v)) => min_v > cur_v,
+        _ => false,
     }
 }
 
@@ -677,6 +763,10 @@ fn load_user_plugins(renderer: &mut AppRenderer, mut settings: Option<&mut dyn P
 
     // Populate the global cache so hot-enable can find manifests later.
     *user_plugin_cache().lock().unwrap() = discovered.clone();
+    // The initial load is what the follower compares with from now on.
+    if settings.is_some() {
+        seed_plugins_follow(&discovered);
+    }
 
     for plugin in &discovered {
         let m = &plugin.manifest;
@@ -1831,12 +1921,9 @@ fn report_screen_reader_failure(renderer: &mut AppRenderer, e: std::io::Error) {
 }
 
 fn apply_setting(renderer: &mut AppRenderer, key: &str, value: &str, skip_enable: bool) {
-    if matches!(
-        key,
-        PLUGIN_INSTALLED | PLUGIN_UPDATED | PLUGIN_REMOVED | PLUGIN_DATA_TRASH
-    ) {
+    if matches!(key, PLUGIN_INSTALLED | PLUGIN_UPDATED | PLUGIN_REMOVED) {
         if !skip_enable {
-            apply_store_change(renderer, key, value);
+            apply_store_change(renderer);
         }
         return;
     }
@@ -1917,6 +2004,16 @@ pub fn name_matches_provider(display_name: &str, provider_name: &str) -> bool {
     }
     let stripped: String = display_name.chars().filter(|&c| c != ' ').collect();
     stripped == provider_name
+}
+
+/// The built-ins that are `always_enabled` (the Store), without the ones the
+/// superkey shows when `session` is true.
+fn always_enabled_builtins(session: bool) -> Vec<sicompass_sdk::BuiltinManifest> {
+    sicompass_sdk::builtin_manifests()
+        .into_iter()
+        .filter(|m| m.always_enabled)
+        .filter(|m| !session || !SESSION_OWNED_PROGRAMS.contains(&m.name.as_str()))
+        .collect()
 }
 
 /// The display names of the built-ins that are not `always_enabled`, without
@@ -2693,7 +2790,7 @@ mod tests {
         let plugin = make_process_plugin("fixture");
         // Approved, as the Store records it on install, in this test binary's
         // own settings file.
-        crate::plugin_manifest::record_store_install(&plugin.manifest).unwrap();
+        crate::plugin_manifest::_record_approval(&plugin.manifest);
         _reset_user_plugin_cache(vec![plugin]);
 
         // Pre-register a settings sentinel at the end
@@ -2715,7 +2812,7 @@ mod tests {
         let mut r = AppRenderer::new();
         let mut plugin = make_process_plugin("ghost");
         plugin.entry_path = PathBuf::from("/nonexistent/plugin");
-        crate::plugin_manifest::record_store_install(&plugin.manifest).unwrap();
+        crate::plugin_manifest::_record_approval(&plugin.manifest);
         _reset_user_plugin_cache(vec![plugin]);
 
         register_provider(&mut r, Box::new(MockProv::new("settings")));
@@ -2972,6 +3069,101 @@ mod tests {
             vec!["web browser".to_owned()]
         );
         assert_eq!(session_filtered(defaults.clone(), false), defaults);
+    }
+
+    #[test]
+    fn in_a_session_the_store_is_not_loaded() {
+        sicompass_builtins::register_all();
+        let names = |session| -> Vec<String> {
+            always_enabled_builtins(session)
+                .into_iter()
+                .map(|m| m.name)
+                .collect()
+        };
+        assert!(
+            names(false).iter().any(|n| n == STORE),
+            "{:?}",
+            names(false)
+        );
+        assert!(!names(true).iter().any(|n| n == STORE), "{:?}", names(true));
+    }
+
+    /// `name` in the user's folder at `version`.
+    fn on_disk(name: &str, version: &str) -> DiscoveredPlugin {
+        let mut p = make_process_plugin(name);
+        p.manifest.version = Some(version.to_owned());
+        p
+    }
+
+    fn changes_of(
+        before: &[DiscoveredPlugin],
+        now: &[DiscoveredPlugin],
+        approvals: &[&DiscoveredPlugin],
+        loaded: &[&str],
+    ) -> Vec<PluginChange> {
+        let approvals = approvals.iter().flat_map(|p| approved(p)).collect();
+        plugin_changes(before, now, &approvals, &|n| loaded.contains(&n))
+    }
+
+    #[test]
+    fn a_plugin_installed_elsewhere_loads_once_it_is_approved() {
+        let demo = on_disk("demo", "1.0.0");
+        assert_eq!(
+            changes_of(&[], &[demo.clone()], &[&demo], &[]),
+            vec![PluginChange::Load("demo".into())]
+        );
+        // On disk but not approved yet: it waits.
+        assert_eq!(changes_of(&[], &[demo.clone()], &[], &[]), vec![]);
+        // Approved later, with nothing new on disk.
+        assert_eq!(
+            changes_of(&[demo.clone()], &[demo.clone()], &[&demo], &[]),
+            vec![PluginChange::Load("demo".into())]
+        );
+    }
+
+    #[test]
+    fn a_plugin_this_computer_provides_loads_without_approval() {
+        let mut demo = on_disk("demo", "1.0.0");
+        demo.origin = PluginOrigin::System;
+        assert_eq!(
+            changes_of(&[], &[demo], &[], &[]),
+            vec![PluginChange::Load("demo".into())]
+        );
+    }
+
+    #[test]
+    fn a_plugin_removed_or_no_longer_approved_is_unloaded() {
+        let demo = on_disk("demo", "1.0.0");
+        assert_eq!(
+            changes_of(&[demo.clone()], &[], &[], &["demo"]),
+            vec![PluginChange::Unload("demo".into())]
+        );
+        assert_eq!(
+            changes_of(&[demo.clone()], &[demo.clone()], &[], &["demo"]),
+            vec![PluginChange::Unload("demo".into())]
+        );
+    }
+
+    #[test]
+    fn a_plugin_updated_elsewhere_is_reloaded_and_one_unchanged_is_left_alone() {
+        let old = on_disk("demo", "1.0.0");
+        let new = on_disk("demo", "1.1.0");
+        assert_eq!(
+            changes_of(&[old.clone()], &[new.clone()], &[&new], &["demo"]),
+            vec![PluginChange::Reload("demo".into())]
+        );
+        assert_eq!(
+            changes_of(&[new.clone()], &[new.clone()], &[&new], &["demo"]),
+            vec![]
+        );
+    }
+
+    #[test]
+    fn a_plugin_named_like_a_built_in_is_never_touched() {
+        sicompass_builtins::register_all();
+        let store = on_disk(STORE, "1.0.0");
+        assert_eq!(changes_of(&[], &[store.clone()], &[&store], &[]), vec![]);
+        assert_eq!(changes_of(&[store], &[], &[], &[STORE]), vec![]);
     }
 
     #[test]

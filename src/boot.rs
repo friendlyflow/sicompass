@@ -57,6 +57,11 @@ impl HostHooks for ProgramsHooks {
                 Some(&self.screen_reader),
             );
         }
+        // Plugins installed, updated, removed or approved elsewhere (the
+        // superkey's Store in a session, another sicompass).
+        if !initial {
+            crate::programs::follow_plugins_folder(renderer, false);
+        }
         // Called every frame. The session's Orca, once it listens, is handed
         // the focused row at once (see `ScreenReader::take_ready`).
         if self

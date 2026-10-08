@@ -1120,7 +1120,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3089,7 +3089,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3393,7 +3393,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3452,7 +3452,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3885,8 +3885,7 @@ dependencies = [
 [[package]]
 name = "sicompass-sdk"
 version = "0.9.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "84eae40d208858be4504303f3b3b3d4f5c8e673345d61548d0bca8440ea57173"
+source = "git+https://github.com/friendlyflow/sicompass-plugin-sdk?rev=27cdf66e5c2c42321417ec6a00c790ff70bbd821#27cdf66e5c2c42321417ec6a00c790ff70bbd821"
 dependencies = [
  "async-trait",
  "base64 0.23.1",
@@ -3937,6 +3936,7 @@ dependencies = [
  "sicompass-sdk",
  "tempfile",
  "tokio",
+ "trash",
  "wiremock",
 ]
 
@@ -3962,7 +3962,7 @@ dependencies = [
 [[package]]
 name = "sicompass-ui"
 version = "0.2.0"
-source = "git+https://github.com/friendlyflow/sicompass-ui?rev=bbe8543ae5d0f74e7bc2723e6e5ad4008e1998c4#bbe8543ae5d0f74e7bc2723e6e5ad4008e1998c4"
+source = "git+https://github.com/friendlyflow/sicompass-ui?rev=1447098b622c9df701d5c441553d2ad824be5e44#1447098b622c9df701d5c441553d2ad824be5e44"
 dependencies = [
  "accesskit",
  "accesskit_macos",
@@ -4211,7 +4211,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5007,7 +5007,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

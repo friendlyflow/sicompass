@@ -2,8 +2,7 @@
 //! applications, the OS trash, and a browser sign-in.
 //!
 //! A plugin process asks for these through `sicompass_sdk::plugin::desktop`
-//! ([`super::services`]), and the app's own code uses some of them too (the
-//! Store moves a data folder to the trash with [`trash_delete`]).
+//! ([`super::services`]).
 //!
 //! # Tests never touch the real desktop
 //!
@@ -64,8 +63,7 @@ fn no_trash() -> bool {
 }
 
 /// Move `path` to the trash: the OS trash, or under `TEST_NO_TRASH` a private
-/// temp directory that [`trash_restore`] can undo. Also what the Store's
-/// "move its data folder to the trash" goes through (`programs.rs`).
+/// temp directory that [`trash_restore`] can undo.
 pub(crate) fn trash_delete(path: &Path) -> Result<(), String> {
     if !no_trash() {
         return os_trash_delete(path);

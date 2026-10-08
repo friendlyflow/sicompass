@@ -7,7 +7,9 @@
 //! app: that a finished install ends up as a running program in every tab's
 //! root list, with its settings section and an approval in settings.json, that
 //! an uninstall takes all of that away again, and that the data folder goes to
-//! the trash only when asked.
+//! the trash only when asked. And that a Store in another process (the
+//! desicompass superkey's), which cannot tell the app anything, reaches it all
+//! the same through the plugins folder and the approvals.
 //!
 //! # Why this is its own test binary
 //!
@@ -21,6 +23,7 @@ use std::time::{Duration, Instant};
 use sicompass::programs;
 use sicompass_sdk::FfonElement;
 use sicompass_sdk::package::{self, RELEASE_FILE, ReleaseInfo, SIGNATURE_FILE};
+use sicompass_sdk::provider::Provider;
 use sicompass_ui::app_state::AppRenderer;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -149,6 +152,7 @@ fn the_store_installs_a_plugin_into_the_running_app_and_removes_it() {
     sicompass_builtins::register_all();
     // The data folder goes to a private temp trash, never the developer's.
     sicompass::plugin_host::desktop::_set_test_no_trash(true);
+    sicompass_store::_set_test_no_trash(true);
 
     // ---- A release of a real plugin program, signed by its own key ----
     let (plugin_secret, plugin_public) = package::generate_keypair().unwrap();
@@ -374,4 +378,54 @@ fn the_store_installs_a_plugin_into_the_running_app_and_removes_it() {
         settings_json()["pluginApprovals"]["fixture"].as_str(),
         Some(sicompass_sdk::plugin_abi::approval_fingerprint(&manifest).as_str())
     );
+
+    // ---- A Store in another process: the superkey's, in a session ----
+    // Nothing tells the app; it follows the plugins folder and the approvals,
+    // once a second, from its every frame.
+    let mut other = sicompass_store::StoreProvider::new().with_sources(
+        sicompass_store::http::http_fetch(),
+        &format!("{}/store/", server.uri()),
+        &server.uri(),
+        &[store_public.as_str()],
+        plugins_dir.clone(),
+    );
+    let next_check = || std::thread::sleep(Duration::from_millis(1100));
+    other.set_current_path("/programs");
+    other.fetch();
+    while other.is_working() {
+        other.tick();
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    other.on_button_press("uninstall:fixture");
+    assert!(!plugins_dir.join("fixture").exists());
+    next_check();
+    programs::follow_plugins_folder(&mut renderer, false);
+    assert!(
+        !loaded(&renderer, "fixture"),
+        "removed elsewhere, still loaded"
+    );
+    assert!(!in_parked(&renderer, "fixture"), "still in the other tab");
+    assert!(settings_section(&renderer, "fixture demo").is_none());
+
+    other.on_button_press("install:fixture");
+    while other.is_working() {
+        other.tick();
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(
+        settings_json()["pluginApprovals"]["fixture"].as_str(),
+        Some(sicompass_sdk::plugin_abi::approval_fingerprint(&manifest).as_str()),
+        "the other process's Store records the approval itself"
+    );
+    // Not before the next check.
+    programs::follow_plugins_folder(&mut renderer, false);
+    assert!(!loaded(&renderer, "fixture"));
+    next_check();
+    programs::follow_plugins_folder(&mut renderer, false);
+    assert!(
+        loaded(&renderer, "fixture"),
+        "installed elsewhere, not loaded"
+    );
+    assert!(in_parked(&renderer, "fixture"), "not in the other tab");
+    assert!(settings_section(&renderer, "fixture demo").is_some());
 }

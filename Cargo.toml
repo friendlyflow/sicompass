@@ -51,7 +51,7 @@ sicompass-updater = { path = "lib/lib_updater" }
 # rev, not a tag: no v0.2.1 has been cut yet for the accessibility.rs /
 # late-registration additions this depends on. Move to a tag at the next
 # sicompass-ui release.
-sicompass-ui = { git = "https://github.com/friendlyflow/sicompass-ui", rev = "bbe8543ae5d0f74e7bc2723e6e5ad4008e1998c4" }
+sicompass-ui = { git = "https://github.com/friendlyflow/sicompass-ui", rev = "1447098b622c9df701d5c441553d2ad824be5e44" }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
@@ -161,6 +161,13 @@ wiremock = "0.6"
 #
 # [patch."https://github.com/friendlyflow/sicompass-ui"]
 # sicompass-ui = { path = "../sicompass-ui" }
+
+# TEMPORARY, until sicompass-sdk 0.9.6 is on crates.io: the SDK commit with
+# plugin protocol 1.2 (`allows_scroll_prefetch`). By git rev so `nix build`
+# (and the desicompass dev session) can fetch it. Remove at the SDK release,
+# together with the matching patch in desicompass.
+[patch.crates-io]
+sicompass-sdk = { git = "https://github.com/friendlyflow/sicompass-plugin-sdk", rev = "27cdf66e5c2c42321417ec6a00c790ff70bbd821" }
 
 # Optimize heavy third-party deps even in debug builds — html5ever and the
 # TLS/HTTP stack are 10-50x slower without optimizations.

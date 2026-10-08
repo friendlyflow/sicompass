@@ -241,16 +241,9 @@ fn harness(server: &Server, keys: &Keys) -> Harness {
         .with_settings_path(data.path().join("settings.json"));
     let fired: Fired = Arc::default();
     let sink = fired.clone();
-    let (plugins_dir, settings) = (
-        plugins.path().to_path_buf(),
-        data.path().join("settings.json"),
-    );
+    // Only heard: the Store records the approvals itself.
     store.set_apply_callback(Box::new(move |k, v| {
         sink.lock().unwrap().push((k.to_owned(), v.to_owned()));
-        // What the app does next: record the approval of what is on disk.
-        if k == PLUGIN_INSTALLED || k == PLUGIN_UPDATED {
-            record_approval(&plugins_dir, &settings, v);
-        }
     }));
     Harness {
         store,
@@ -260,22 +253,16 @@ fn harness(server: &Server, keys: &Keys) -> Harness {
     }
 }
 
-/// Record that the user approved the plugin `name` in `plugins_dir`, the way
-/// the app's `plugin_manifest::record_store_install` does.
-fn record_approval(plugins_dir: &Path, settings: &Path, name: &str) {
-    let Some(i) = install::installed(plugins_dir).remove(name) else {
-        return;
-    };
-    let mut root: serde_json::Value = std::fs::read_to_string(settings)
-        .ok()
-        .and_then(|t| serde_json::from_str(&t).ok())
-        .unwrap_or_else(|| serde_json::json!({}));
-    root[APPROVALS_KEY][name] =
-        serde_json::Value::String(sicompass_sdk::plugin_abi::approval_fingerprint(&i.manifest));
-    std::fs::write(settings, serde_json::to_string(&root).unwrap()).unwrap();
-}
-
 impl Harness {
+    fn settings(&self) -> PathBuf {
+        self.data.path().join("settings.json")
+    }
+
+    /// The approvals recorded in the harness's own settings file.
+    fn approvals(&self) -> HashMap<String, String> {
+        approvals::read(&self.settings())
+    }
+
     /// Tick until the running job is done.
     fn settle(&mut self) {
         let start = Instant::now();
@@ -968,13 +955,12 @@ fn after_an_uninstall_the_data_folder_is_offered_for_the_trash_never_by_default(
     );
     assert!(has(&entry, "<button>trashdata:demo</button>"), "{entry:?}");
 
-    // The Store asks the app, whose trash is the guarded one.
+    // The Store moves it itself (into a private folder under test), and the
+    // app is not asked.
+    let fired = h.fired().len();
     h.press("trashdata:demo");
-    assert_eq!(
-        h.fired().last(),
-        Some(&(PLUGIN_DATA_TRASH.to_owned(), "demo".to_owned()))
-    );
-    std::fs::remove_dir_all(&data).unwrap(); // what the app does
+    assert!(!data.exists(), "the data folder was not moved");
+    assert_eq!(h.fired().len(), fired, "{:?}", h.fired());
     let entry = h.entry();
     assert!(has(&entry, &localize::t("store-data-trashed")), "{entry:?}");
     assert!(!has(&entry, "<button>trashdata:"), "{entry:?}");
@@ -1438,9 +1424,17 @@ fn a_plugin_copied_in_by_hand_waits_for_the_users_approval() {
     );
     assert!(has(&entry, "<button>approve:demo</button>"), "{entry:?}");
 
-    // Approving tells the app, which records it and starts the plugin.
+    // Approving records it, and tells the app, which starts the plugin.
     h.press("approve:demo");
     assert_eq!(h.fired(), vec![(PLUGIN_INSTALLED.into(), "demo".into())]);
+    let m = install::installed(h.plugins.path())
+        .remove("demo")
+        .unwrap()
+        .manifest;
+    assert_eq!(
+        h.approvals().get("demo"),
+        Some(&sicompass_sdk::plugin_abi::approval_fingerprint(&m))
+    );
     let list = lines(h.store.fetch());
     let installed = t_with("store-state-installed", &[("version", "1.0.0")]);
     assert!(has(&list, &format!("demo, {installed}")), "{list:?}");
@@ -1505,4 +1499,99 @@ fn a_plugin_the_configuration_provides_is_shown_and_never_changed() {
     assert!(h.fired().is_empty(), "{:?}", h.fired());
     let refused = t_with("store-system-refused", &[("name", "demo")]);
     assert!(has(&h.entry(), &refused), "{:?}", h.entry());
+}
+
+/// The approval fingerprint of `demo` as it is on disk now.
+fn demo_fingerprint(h: &Harness) -> String {
+    let m = install::installed(h.plugins.path())
+        .remove("demo")
+        .unwrap()
+        .manifest;
+    sicompass_sdk::plugin_abi::approval_fingerprint(&m)
+}
+
+#[test]
+fn the_store_records_the_approval_of_what_it_installs_and_forgets_it_on_uninstall() {
+    let (server, keys) = (Server::start(), keys());
+    server.serve_store(&keys, &keys.store_secret, &[]);
+    server.serve_release(&release(
+        &keys,
+        "1.0.0",
+        r#""allowedHosts": ["example.com"]"#,
+    ));
+    let mut h = harness(&server, &keys);
+    // Whatever else the file holds is kept.
+    std::fs::write(h.settings(), r#"{"Store": {"serverUrl": "x"}}"#).unwrap();
+
+    h.open_programs();
+    h.press("install:demo");
+    assert_eq!(
+        h.approvals().get("demo"),
+        Some(&demo_fingerprint(&h)),
+        "Install is the approval"
+    );
+    let first = demo_fingerprint(&h);
+
+    server.reset();
+    server.serve_store(&keys, &keys.store_secret, &[]);
+    server.serve_release(&release(
+        &keys,
+        "1.1.0",
+        r#""allowedHosts": ["example.com", "second.example"]"#,
+    ));
+    h.press("refresh");
+    h.settle();
+    h.press("update:demo");
+    assert_eq!(h.installed_version().as_deref(), Some("1.1.0"));
+    assert_ne!(demo_fingerprint(&h), first);
+    assert_eq!(
+        h.approvals().get("demo"),
+        Some(&demo_fingerprint(&h)),
+        "Update approves what it asks for now"
+    );
+
+    h.press("uninstall:demo");
+    assert_eq!(h.approvals().get("demo"), None);
+    let text = std::fs::read_to_string(h.settings()).unwrap();
+    let root: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(root["Store"]["serverUrl"], "x", "{text}");
+}
+
+#[test]
+fn an_install_whose_approval_cannot_be_saved_says_so_and_leaves_the_file_alone() {
+    let (server, keys) = (Server::start(), keys());
+    server.serve_store(&keys, &keys.store_secret, &[]);
+    server.serve_release(&release(
+        &keys,
+        "1.0.0",
+        r#""allowedHosts": ["example.com"]"#,
+    ));
+    let mut h = harness(&server, &keys);
+    // Another process half-way through writing it.
+    std::fs::write(h.settings(), r#"{"Store": {"#).unwrap();
+
+    h.open_programs();
+    h.press("install:demo");
+    assert!(h.fired().is_empty(), "{:?}", h.fired());
+    assert!(
+        has(&h.entry(), "the approval could not be saved"),
+        "{:?}",
+        h.entry()
+    );
+    assert_eq!(
+        std::fs::read_to_string(h.settings()).unwrap(),
+        r#"{"Store": {"#
+    );
+}
+
+#[test]
+fn only_a_plain_name_s_data_folder_is_ever_moved_to_the_trash() {
+    let data = tempfile::tempdir().unwrap();
+    let mut store = StoreProvider::new().with_data_dir(data.path().join("data"));
+    let outside = data.path().join("outside");
+    std::fs::create_dir_all(&outside).unwrap();
+    std::fs::create_dir_all(data.path().join("data")).unwrap();
+    store.uninstalled.insert("../outside".to_owned());
+    store.on_button_press("trashdata:../outside");
+    assert!(outside.is_dir(), "a path, not a plugin name, was trashed");
 }

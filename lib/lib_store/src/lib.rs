@@ -9,22 +9,26 @@
 //! Network work runs as one job at a time on a worker thread and is picked up
 //! in [`Provider::tick`]. Loading fetches the offers' releases side by side.
 //! The list downloaded last time is shown at once meanwhile ([`cache`]).
-//! The app is told about an install, update or removal
-//! through the apply callback, the same queue Settings uses (the SDK boundary
-//! forbids a direct call): `pluginInstalled`, `pluginUpdated` or
-//! `pluginRemoved`, with the plugin's name as the value. The app then rescans,
-//! records the approval, and loads or unloads the plugin, with no restart.
 //!
 //! Pressing Install or Update is the approval: the entry lists the access the
-//! release asks for, and only that exact release is installed.
+//! release asks for, and only that exact release is installed. The Store
+//! records the approval in `settings.json` itself ([`approvals`]), so it works
+//! the same whichever process runs it: the app, or the desicompass superkey,
+//! which shows the Store in a session. The app follows the plugins folder and
+//! the approvals, and loads or unloads the plugin with no restart. In the app
+//! the apply callback (the queue Settings uses, as the SDK boundary forbids a
+//! direct call) also says so at once: `pluginInstalled`, `pluginUpdated` or
+//! `pluginRemoved`, with the plugin's name as the value.
 //!
 //! Plugins installed by hand are listed too. One with an `updateUrl` and a
 //! `pubkey` in its `plugin.json` updates here in the same release format,
 //! trusting the key it was installed with. After an uninstall the entry offers,
 //! separately and never by default, to move the plugin's data folder to the
-//! trash; the app does that (`pluginDataTrash`), with its guarded trash.
+//! trash, which the Store does itself ([`data_trash`]).
 
+pub mod approvals;
 pub mod cache;
+pub mod data_trash;
 pub mod http;
 pub mod install;
 pub mod payments;
@@ -32,7 +36,7 @@ pub mod source;
 pub mod tiers;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use std::sync::mpsc;
 
@@ -58,15 +62,16 @@ pub fn register_translations() {
     });
 }
 
+pub use data_trash::_set_test_no_trash;
+
 /// The apply-callback keys the app reacts to. The value is the plugin name.
 pub const PLUGIN_INSTALLED: &str = "pluginInstalled";
 pub const PLUGIN_UPDATED: &str = "pluginUpdated";
 pub const PLUGIN_REMOVED: &str = "pluginRemoved";
-pub const PLUGIN_DATA_TRASH: &str = "pluginDataTrash";
 
-/// The `settings.json` key where the app records what the user approved, per
-/// plugin (`plugin_manifest::APPROVALS_KEY` in the app, which a test keeps
-/// equal to this).
+/// The `settings.json` key where the Store records what the user approved, per
+/// plugin ([`approvals`]; the app reads it as `plugin_manifest::APPROVALS_KEY`,
+/// which a test keeps equal to this).
 pub const APPROVALS_KEY: &str = "pluginApprovals";
 
 type ApplyFn = Box<dyn Fn(&str, &str) + Send + 'static>;
@@ -237,7 +242,7 @@ pub struct StoreProvider {
     notes: HashMap<String, String>,
     /// Uninstalled in this session: their entries offer the data folder.
     uninstalled: HashSet<String>,
-    /// Data folders the app was asked to move to the trash.
+    /// Data folders moved to the trash in this session.
     trash_asked: HashSet<String>,
     apply_fn: Option<ApplyFn>,
     announcement: Option<String>,
@@ -383,9 +388,9 @@ impl StoreProvider {
     }
 
     /// Whether the user approved this version of an installed plugin: the
-    /// line the app recorded for it is the one its manifest asks for now. A
-    /// plugin the Store installed is approved by that install. One copied in
-    /// by hand is not, until the user presses approve.
+    /// line recorded for it is the one its manifest asks for now. A plugin the
+    /// Store installed is approved by that install. One copied in by hand is
+    /// not, until the user presses approve.
     fn approved(&self, m: &sicompass_sdk::plugin_manifest::PluginManifest) -> bool {
         if !sicompass_sdk::plugin_abi::needs_approval(m) {
             return true;
@@ -393,9 +398,15 @@ impl StoreProvider {
         let want = sicompass_sdk::plugin_abi::approval_fingerprint(m);
         self.tiers
             .settings_path()
-            .and_then(|p| std::fs::read_to_string(p).ok())
-            .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
-            .is_some_and(|v| v[APPROVALS_KEY][&m.name].as_str() == Some(want.as_str()))
+            .is_some_and(|p| approvals::read(p).get(&m.name) == Some(&want))
+    }
+
+    /// Where approvals are recorded, or why there is nowhere.
+    fn approvals_path(&self) -> Result<PathBuf, String> {
+        self.tiers
+            .settings_path()
+            .map(Path::to_path_buf)
+            .ok_or_else(|| "no settings folder on this system".to_owned())
     }
 
     fn fire(&self, key: &str, value: &str) {
@@ -491,11 +502,19 @@ impl StoreProvider {
         };
         let (tx, rx) = mpsc::channel();
         let fetch = self.fetch.clone();
+        let settings = self.approvals_path();
         let name = name.to_owned();
         let job_name = name.clone();
         spawn("store:install", move || {
-            let result = install::install(&fetch, &source, &shown, &plugins_dir)
-                .map(|m| m.version.unwrap_or_default());
+            // Recorded here, not when the result is picked up: the plugin may
+            // run as soon as it is approved, whether or not the Store is still
+            // being ticked (a tab parked, a superkey closed).
+            let result = install::install(&fetch, &source, &shown, &plugins_dir).and_then(|m| {
+                settings
+                    .and_then(|path| approvals::record(&path, &m))
+                    .map_err(|e| format!("installed, but the approval could not be saved: {e}"))?;
+                Ok(m.version.unwrap_or_default())
+            });
             let _ = tx.send(Done::Installed {
                 name,
                 update,
@@ -521,6 +540,12 @@ impl StoreProvider {
         args.set("name", name.to_owned());
         match install::uninstall(&plugins_dir, &current) {
             Ok(()) => {
+                if let Err(e) = self
+                    .approvals_path()
+                    .and_then(|p| approvals::forget(&p, name))
+                {
+                    eprintln!("sicompass: store: {name}: approval not forgotten: {e}");
+                }
                 self.fire(PLUGIN_REMOVED, name);
                 self.uninstalled.insert(name.to_owned());
                 let line = localize::t_args("store-uninstalled", &args);
@@ -537,6 +562,28 @@ impl StoreProvider {
         self.refresh = true;
     }
 
+    /// The user approved a plugin copied in by hand, as it is now: record
+    /// that, and the app starts it, as after an install.
+    fn approve(&mut self, name: &str) {
+        let Some(current) = self.installed().remove(name) else {
+            return;
+        };
+        match self
+            .approvals_path()
+            .and_then(|p| approvals::record(&p, &current.manifest))
+        {
+            Ok(()) => self.fire(PLUGIN_INSTALLED, name),
+            Err(e) => {
+                let mut args = localize::Args::new();
+                args.set("name", name.to_owned());
+                args.set("err", e);
+                let line = localize::t_args("store-failed", &args);
+                self.notes.insert(name.to_owned(), line.clone());
+                self.announcement = Some(line);
+            }
+        }
+    }
+
     /// An uninstalled plugin's data folder, when there is one to offer. Never
     /// one a built-in program of the same name also uses.
     fn data_folder(&self, name: &str) -> Option<PathBuf> {
@@ -549,15 +596,33 @@ impl StoreProvider {
         self.data_dir.as_ref().map(|d| d.join(name))
     }
 
+    /// Move an uninstalled plugin's data folder to the trash. Refused for a
+    /// name that is not a plain plugin name, for a plugin that is installed
+    /// again, and for a folder a built-in program also keeps its data in
+    /// ([`Self::data_folder`]).
     fn trash_data(&mut self, name: &str) {
-        if self.installed().contains_key(name) {
+        let plain = !name.is_empty()
+            && name
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+        if !plain || self.installed().contains_key(name) {
             return;
         }
-        if let Some(dir) = self.data_folder(name)
-            && dir.is_dir()
-        {
-            self.fire(PLUGIN_DATA_TRASH, name);
-            self.trash_asked.insert(name.to_owned());
+        let Some(dir) = self.data_folder(name).filter(|d| d.is_dir()) else {
+            return;
+        };
+        match data_trash::trash_delete(&dir) {
+            Ok(()) => {
+                self.trash_asked.insert(name.to_owned());
+            }
+            Err(e) => {
+                let mut args = localize::Args::new();
+                args.set("name", name.to_owned());
+                args.set("err", e);
+                let line = localize::t_args("store-failed", &args);
+                self.notes.insert(name.to_owned(), line.clone());
+                self.announcement = Some(line);
+            }
         }
     }
 
@@ -1114,9 +1179,7 @@ impl Provider for StoreProvider {
             Some(("install", name)) => self.start_install(name, false),
             Some(("update", name)) => self.start_install(name, true),
             Some(("uninstall", name)) => self.uninstall(name),
-            // The app records the approval and starts the plugin, as after an
-            // install.
-            Some(("approve", name)) => self.fire(PLUGIN_INSTALLED, name),
+            Some(("approve", name)) => self.approve(name),
             Some(("trashdata", name)) => self.trash_data(name),
             _ if function_name == "refresh" && self.job.is_none() => {
                 self.loaded = None;

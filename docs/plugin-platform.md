@@ -574,11 +574,18 @@ Store
   release that was shown (a release published in between must be looked at
   again), refuse a revoked or older one and one that needs a newer sicompass,
   and swap `plugins/<name>/` in with a rename from `plugins/.store/`.
-- The app receives `pluginInstalled`, `pluginUpdated` or `pluginRemoved`
-  through the settings queue (`programs::wire_store`). It records the approval
-  in `settings.json`, adds the program's settings section, and loads or unloads
-  it in every tab. There is no switch: an installed plugin is in the root list,
-  and the way to remove it is the Store's uninstall.
+- The Store records the approval in `settings.json` itself
+  (`sicompass_store::approvals`), on the worker thread right after an install
+  or update, and forgets it on uninstall. So it works the same in whichever
+  process runs it: the app, or the desicompass superkey, which shows the Store
+  in a session (the app leaves it out, `programs::SESSION_OWNED_PROGRAMS`).
+- The app follows the plugin folders and the approvals
+  (`programs::follow_plugins_folder`, once a second, and at once on
+  `pluginInstalled`, `pluginUpdated` or `pluginRemoved` from its own Store
+  through the settings queue, `programs::wire_store`). It adds the program's
+  settings section, and loads, reloads or unloads it in every tab. There is no
+  switch: an installed plugin is in the root list, and the way to remove it is
+  the Store's uninstall.
 - `/store` edits and re-signs the list with `~/.config/sicompass/store.key`.
 - Tests: `lib/lib_store/src/tests.rs` (wiremock, every refusal) and
   `src/tests/store.rs` (a real plugin program, built from
@@ -590,9 +597,10 @@ Store
   approving, with the same wasmtime check a load ran). What the user approves
   is the declared access and that the plugin runs as a program at all.
 - After an uninstall the entry offers, as a separate button, to move the data
-  folder to the trash. The app does it (`pluginDataTrash`) with its guarded
-  trash, and refuses while the plugin is installed or when a built-in program
-  shares the folder.
+  folder to the trash. The Store does it itself (`data_trash`, with the
+  `TEST_NO_TRASH` guard `tests/hygiene.rs` asks for), and refuses a name that
+  is not a plain plugin name, a plugin that is installed again, and a folder a
+  built-in program shares.
 - Plugins installed by hand are listed too. With an `updateUrl` (the folder
   holding the release files) and a `pubkey` in `plugin.json`, they
   update here, and an update naming another key is refused. `lib_updater`

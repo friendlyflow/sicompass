@@ -117,6 +117,8 @@ fn ensure_builtins() {
     // from. Under the flag the host "trashes" into a private temp folder.
     sicompass::plugin_host::desktop::_set_test_no_trash(true);
     sicompass::plugin_host::desktop::_set_test_no_open(true);
+    // The Store moves an uninstalled plugin's data folder to the trash itself.
+    sicompass_store::_set_test_no_trash(true);
 }
 
 // ---------------------------------------------------------------------------

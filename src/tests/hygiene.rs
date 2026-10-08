@@ -123,10 +123,11 @@ fn every_crate_that_can_trash_has_a_test_guard() {
     // The file browser and the text editor used to be the other two. They are
     // plugins now, and trash through the app's `desktop::trash`.
     assert_eq!(
-        checked, 1,
+        checked, 2,
         "expected exactly the app (for a plugin's `desktop::trash`, \
-         src/plugin_host/desktop.rs) to depend on `trash`; if a crate gained or lost \
-         the dependency, update this count deliberately"
+         src/plugin_host/desktop.rs) and the Store (an uninstalled plugin's data \
+         folder, lib/lib_store/src/data_trash.rs) to depend on `trash`; if a crate \
+         gained or lost the dependency, update this count deliberately"
     );
 }
 
@@ -187,11 +188,11 @@ fn no_call_site_bypasses_the_trash_wrapper() {
         }
     }
 
-    // One crate (the app, for a WASM plugin's `desktop.trash`), with a macOS
-    // and a non-macOS variant behind `#[cfg]`, both of which this sees because
-    // it reads source rather than compiling it.
+    // Two crates (the app, for a plugin's `desktop::trash`, and the Store),
+    // each with a macOS and a non-macOS variant behind `#[cfg]`, all of which
+    // this sees because it reads source rather than compiling it.
     assert_eq!(
-        wrappers, 2,
-        "expected 2 `os_trash_delete` definitions (1 crate x 2 platform variants)"
+        wrappers, 4,
+        "expected 4 `os_trash_delete` definitions (2 crates x 2 platform variants)"
     );
 }
