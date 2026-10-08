@@ -32,7 +32,7 @@ settings-checkbox-maximized = gemaximaliseerd
 settings-checkbox-shoulder-surfing-protection = schermbescherming (blanco scherm)
 settings-checkbox-screen-reader = schermlezer
 settings-screen-reader-failed = Kon de schermlezer niet starten: { $error }
-settings-checkbox-auto-update-check = controleer op app-updates bij opstarten
+settings-checkbox-auto-update-check = controleer op updates bij opstarten
 settings-onboarding-body = Gebruik Omhoog en Omlaag om door de lijst te bewegen. Druk twee keer op Home om naar de wortel te gaan en al je beschikbare programma's te zien. Rechts opent een item met een plusteken (+), Links gaat naar de ouder, Enter vinkt een selectievakje aan, Escape gaat terug.
 settings-radio-font-scale = tekstgrootte
 settings-radio-sort-order = sorteervolgorde
@@ -44,3 +44,24 @@ settings-sortOrder-option-chronologically = chronologisch
 # Foutmeldingen
 settings-error-malformed-undo-payload = instellingen: ongeldige undo-payload
 settings-error-malformed-redo-payload = instellingen: ongeldige redo-payload
+
+# Updates klaar om te installeren (de melding bovenaan en Ctrl+U)
+updates-ready = Updates klaar: { $list } (Ctrl+U om te installeren)
+updates-app = sicompass { $version }
+updates-programs = { $count ->
+    [one] 1 programma
+   *[other] { $count } programma's
+}
+updates-need-approval = { $count ->
+    [one] 1 programma-update vraagt meer toegang: keur hem goed in de store
+   *[other] { $count } programma-updates vragen meer toegang: keur ze goed in de store
+}
+updates-installing = { $count ->
+    [one] 1 programma-update wordt geïnstalleerd…
+   *[other] { $count } programma-updates worden geïnstalleerd…
+}
+updates-installed = { $name } is bijgewerkt naar { $version }.
+updates-failed = Kon { $name } niet bijwerken: { $error }
+updates-none = Geen updates om te installeren.
+updates-release-page-opened = De releasepagina is geopend in de browser.
+updates-apply-failed = Kon de update niet installeren: { $error }

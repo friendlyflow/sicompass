@@ -15,7 +15,6 @@ use sicompass::dev_plugins;
 use sicompass::render;
 use sicompass::start_menu;
 use std::process;
-use std::sync::{Arc, Mutex};
 use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 
 /// GitHub owner/repo for the self-update check. Derived from the
@@ -77,33 +76,28 @@ fn main() {
     // `--check` exit above so the diagnostic stays a pure read.
     start_menu::spawn_registration();
 
-    // ---- Background self-update check ------------------------------------
-    // Spawn before AppState::new() so the check runs concurrently with
-    // window/Vulkan setup. The status Arc is wired into AppRenderer below.
-    // Anything that fails (no network, no release) is logged and swallowed —
-    // startup never blocks. Plugins are updated from the Store instead.
     // The renderer has no HTTP client of its own, so give it ours before any
     // `<link>` can be followed. See `boot::register_http_client`.
     boot::register_http_client();
 
-    let auto_update_enabled = read_auto_update_check_setting();
-    let update_state = if auto_update_enabled {
-        let state = Arc::new(Mutex::new(sicompass_updater::UpdateStatus::default()));
-        let state_for_thread = Arc::clone(&state);
-        let app_version = sicompass_updater::parse_version(env!("CARGO_PKG_VERSION"))
-            .unwrap_or_else(|_| semver::Version::new(0, 0, 0));
+    // ---- Background update check -----------------------------------------
+    // The app's own update and the plugins', in one message (`updates`).
+    // Spawned before the window so the check runs concurrently with window
+    // and Vulkan setup. Anything that fails (no network, no release) is
+    // logged and swallowed: startup never blocks.
+    let update_state = read_auto_update_check_setting().then(|| {
+        let state = sicompass::updates::SharedUpdates::default();
+        let state_for_thread = std::sync::Arc::clone(&state);
+        let app_checker = sicompass::updates::app_updates_itself().then(|| {
+            let app_version = sicompass_updater::parse_version(env!("CARGO_PKG_VERSION"))
+                .unwrap_or_else(|_| semver::Version::new(0, 0, 0));
+            sicompass_updater::UpdateChecker::new(app_version, GITHUB_OWNER, GITHUB_REPO)
+        });
         let _ = std::thread::Builder::new()
             .name("sicompass-updater".into())
-            .spawn(move || {
-                let checker =
-                    sicompass_updater::UpdateChecker::new(app_version, GITHUB_OWNER, GITHUB_REPO);
-                let result = checker.check_and_stage();
-                *state_for_thread.lock().unwrap() = result;
-            });
-        Some(state)
-    } else {
-        None
-    };
+            .spawn(move || sicompass::updates::check(&state_for_thread, app_checker));
+        state
+    });
 
     let hooks = boot::ProgramsHooks {
         update_state,

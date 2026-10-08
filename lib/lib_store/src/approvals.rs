@@ -27,6 +27,18 @@ pub fn read(settings: &Path) -> HashMap<String, String> {
         .unwrap_or_default()
 }
 
+/// Whether the user approved this version of an installed plugin: the line
+/// recorded for it in `settings` is the one its manifest asks for now. A
+/// plugin that needs no approval is approved, and with no settings file
+/// nothing else is.
+pub fn is_approved(settings: Option<&Path>, m: &PluginManifest) -> bool {
+    if !sicompass_sdk::plugin_abi::needs_approval(m) {
+        return true;
+    }
+    let want = sicompass_sdk::plugin_abi::approval_fingerprint(m);
+    settings.is_some_and(|p| read(p).get(&m.name) == Some(&want))
+}
+
 /// Record that the user approved `m` as it is: by pressing Install, Update or
 /// approve, for whatever the manifest asks, so a later update asking for more
 /// is noticed.

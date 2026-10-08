@@ -40,7 +40,7 @@ settings-checkbox-maximized = maximized
 settings-checkbox-shoulder-surfing-protection = shoulder-surfing protection (blank screen)
 settings-checkbox-screen-reader = screen reader
 settings-screen-reader-failed = Could not start the screen reader: { $error }
-settings-checkbox-auto-update-check = check for app updates on startup
+settings-checkbox-auto-update-check = check for updates on startup
 settings-onboarding-body = Use Up and Down to move through the list. Press Home twice to reach the root and see all your available programs. Right opens an item that shows a plus sign (+), Left goes to the parent, Enter checks a checkbox, Escape escapes.
 settings-radio-font-scale = font scale
 settings-radio-sort-order = sort order
@@ -52,3 +52,24 @@ settings-sortOrder-option-chronologically = chronologically
 # Error messages
 settings-error-malformed-undo-payload = settings: malformed undo payload
 settings-error-malformed-redo-payload = settings: malformed redo payload
+
+# Updates ready to install (the header message and Ctrl+U)
+updates-ready = Updates ready: { $list } (Ctrl+U to install)
+updates-app = sicompass { $version }
+updates-programs = { $count ->
+    [one] 1 program
+   *[other] { $count } programs
+}
+updates-need-approval = { $count ->
+    [one] 1 program update asks for more access: approve it in the store
+   *[other] { $count } program updates ask for more access: approve them in the store
+}
+updates-installing = { $count ->
+    [one] Installing 1 program update…
+   *[other] Installing { $count } program updates…
+}
+updates-installed = { $name } is updated to { $version }.
+updates-failed = Could not update { $name }: { $error }
+updates-none = No updates to install.
+updates-release-page-opened = Opened the release page in the browser.
+updates-apply-failed = Could not install the update: { $error }

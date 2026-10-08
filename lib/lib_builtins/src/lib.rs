@@ -29,6 +29,29 @@ pub fn register_all() {
     });
 }
 
+/// The plugin updates waiting for this computer, for the app's update message
+/// (the app may not reach the Store crate itself). See
+/// `sicompass_store::updates`.
+pub mod plugin_updates {
+    pub use sicompass_store::updates::PendingUpdate;
+    use sicompass_store::updates::{self, Sources};
+
+    /// Every installed plugin with a newer release. Downloads: call it off the
+    /// UI thread.
+    pub fn check() -> Vec<PendingUpdate> {
+        Sources::here()
+            .map(|s| updates::check(&s))
+            .unwrap_or_default()
+    }
+
+    /// Install one, recording its approval. Refused when it asks for more
+    /// access. Downloads: call it off the UI thread.
+    pub fn install(update: &PendingUpdate) -> Result<String, String> {
+        let sources = Sources::here().ok_or("no plugins folder on this system")?;
+        updates::install(&sources, update)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

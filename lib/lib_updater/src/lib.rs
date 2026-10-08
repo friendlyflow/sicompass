@@ -10,7 +10,9 @@
 //! files (preserves WiX upgrade-guid + Programs & Features tracking).
 //!
 //! Plugins are updated by the Store (`lib_store`), in the signed release
-//! format, including plugins installed by hand with an `updateUrl`.
+//! format, including plugins installed by hand with an `updateUrl`. The app
+//! names both kinds in one message and installs them with Ctrl+U (the app
+//! crate's `updates` module).
 
 use std::path::PathBuf;
 

@@ -34,6 +34,7 @@ pub mod install;
 pub mod payments;
 pub mod source;
 pub mod tiers;
+pub mod updates;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -392,13 +393,7 @@ impl StoreProvider {
     /// Store installed is approved by that install. One copied in by hand is
     /// not, until the user presses approve.
     fn approved(&self, m: &sicompass_sdk::plugin_manifest::PluginManifest) -> bool {
-        if !sicompass_sdk::plugin_abi::needs_approval(m) {
-            return true;
-        }
-        let want = sicompass_sdk::plugin_abi::approval_fingerprint(m);
-        self.tiers
-            .settings_path()
-            .is_some_and(|p| approvals::read(p).get(&m.name) == Some(&want))
+        approvals::is_approved(self.tiers.settings_path(), m)
     }
 
     /// Where approvals are recorded, or why there is nowhere.
@@ -509,12 +504,8 @@ impl StoreProvider {
             // Recorded here, not when the result is picked up: the plugin may
             // run as soon as it is approved, whether or not the Store is still
             // being ticked (a tab parked, a superkey closed).
-            let result = install::install(&fetch, &source, &shown, &plugins_dir).and_then(|m| {
-                settings
-                    .and_then(|path| approvals::record(&path, &m))
-                    .map_err(|e| format!("installed, but the approval could not be saved: {e}"))?;
-                Ok(m.version.unwrap_or_default())
-            });
+            let result =
+                install::install_and_approve(&fetch, &source, &shown, &plugins_dir, settings);
             let _ = tx.send(Done::Installed {
                 name,
                 update,

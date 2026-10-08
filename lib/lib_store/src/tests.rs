@@ -1595,3 +1595,131 @@ fn only_a_plain_name_s_data_folder_is_ever_moved_to_the_trash() {
     store.on_button_press("trashdata:../outside");
     assert!(outside.is_dir(), "a path, not a plugin name, was trashed");
 }
+
+// ---- Updates found without opening the Store (`updates`) ---------------------
+
+impl Harness {
+    /// Where `h`'s Store looks, for [`updates`].
+    fn sources(&self, server: &Server, keys: &Keys) -> updates::Sources {
+        updates::Sources {
+            fetch: http::http_fetch(),
+            store_url: format!("{}/store/", server.uri()),
+            releases_url: server.uri(),
+            trusted: vec![keys.store_public.clone()],
+            plugins_dir: self.plugins.path().to_path_buf(),
+            system_plugin_dirs: Vec::new(),
+            settings: Some(self.settings()),
+        }
+    }
+}
+
+/// `demo` 1.0.0 installed from the Store, asking for `permissions`, then
+/// 1.1.0 asking for `next` on the server.
+fn installed_then_released(server: &Server, keys: &Keys, permissions: &str, next: &str) -> Harness {
+    server.serve_store(keys, &keys.store_secret, &[]);
+    server.serve_release(&release(keys, "1.0.0", permissions));
+    let mut h = harness(server, keys);
+    h.open_programs();
+    h.press("install:demo");
+    assert_eq!(h.installed_version().as_deref(), Some("1.0.0"));
+    server.reset();
+    server.serve_store(keys, &keys.store_secret, &[]);
+    server.serve_release(&release(keys, "1.1.0", next));
+    h
+}
+
+#[test]
+fn an_update_is_found_without_the_store_and_installed_with_its_approval() {
+    let (server, keys) = (Server::start(), keys());
+    let hosts = r#""allowedHosts": ["example.com"]"#;
+    let h = installed_then_released(&server, &keys, hosts, hosts);
+    let sources = h.sources(&server, &keys);
+
+    let pending = updates::check(&sources);
+    assert_eq!(pending.len(), 1, "{pending:?}");
+    let u = &pending[0];
+    assert_eq!(
+        (u.name.as_str(), u.from.as_str(), u.to.as_str()),
+        ("demo", "1.0.0", "1.1.0")
+    );
+    assert!(!u.needs_approval, "{u:?}");
+
+    assert_eq!(updates::install(&sources, u).as_deref(), Ok("1.1.0"));
+    assert_eq!(h.installed_version().as_deref(), Some("1.1.0"));
+    let m = install::installed(h.plugins.path())
+        .remove("demo")
+        .unwrap()
+        .manifest;
+    assert_eq!(
+        h.approvals().get("demo"),
+        Some(&sicompass_sdk::plugin_abi::approval_fingerprint(&m))
+    );
+    h.assert_staging_clean();
+    assert!(updates::check(&sources).is_empty());
+}
+
+#[test]
+fn an_update_asking_for_more_access_is_found_but_left_to_the_store() {
+    let (server, keys) = (Server::start(), keys());
+    let h = installed_then_released(
+        &server,
+        &keys,
+        r#""allowedHosts": ["example.com"]"#,
+        r#""allowedHosts": ["example.com", "second.example"]"#,
+    );
+    let sources = h.sources(&server, &keys);
+
+    let pending = updates::check(&sources);
+    assert_eq!(pending.len(), 1, "{pending:?}");
+    assert!(pending[0].needs_approval, "{pending:?}");
+    let err = updates::install(&sources, &pending[0]).unwrap_err();
+    assert!(err.contains("store"), "{err}");
+    assert_eq!(h.installed_version().as_deref(), Some("1.0.0"));
+}
+
+#[test]
+fn an_update_of_a_plugin_never_approved_is_left_to_the_store() {
+    let (server, keys) = (Server::start(), keys());
+    let hosts = r#""allowedHosts": ["example.com"]"#;
+    let h = installed_then_released(&server, &keys, hosts, hosts);
+    // As if copied in by hand: on disk, never approved.
+    std::fs::write(h.settings(), "{}").unwrap();
+
+    let pending = updates::check(&h.sources(&server, &keys));
+    assert_eq!(pending.len(), 1, "{pending:?}");
+    assert!(pending[0].needs_approval, "{pending:?}");
+}
+
+#[test]
+fn no_update_is_found_when_the_release_is_not_newer_or_needs_a_newer_sicompass() {
+    let (server, keys) = (Server::start(), keys());
+    let h = installed_then_released(&server, &keys, "", "");
+    let sources = h.sources(&server, &keys);
+
+    server.reset();
+    server.serve_store(&keys, &keys.store_secret, &[]);
+    server.serve_release(&release(&keys, "1.0.0", ""));
+    assert!(updates::check(&sources).is_empty());
+
+    server.reset();
+    server.serve_store(&keys, &keys.store_secret, &[]);
+    server.serve_release(&release_with(
+        &keys,
+        &plugin_json("1.1.0", "", "99.0.0"),
+        None,
+    ));
+    assert!(updates::check(&sources).is_empty());
+}
+
+#[test]
+fn a_plugin_the_configuration_provides_is_never_an_update() {
+    let (server, keys) = (Server::start(), keys());
+    server.serve_store(&keys, &keys.store_secret, &[]);
+    server.serve_release(&release(&keys, "1.1.0", ""));
+    let mut h = harness(&server, &keys);
+    let system = provide_by_system(&mut h, &plugin_json("1.0.0", "", "0.1.0"));
+
+    let mut sources = h.sources(&server, &keys);
+    sources.system_plugin_dirs = vec![system.path().to_owned()];
+    assert!(updates::check(&sources).is_empty());
+}

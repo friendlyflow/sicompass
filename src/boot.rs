@@ -24,9 +24,9 @@ use sicompass_ui::registry::HostHooks;
 /// for it.
 #[derive(Default)]
 pub struct ProgramsHooks {
-    /// Latest snapshot from the background `sicompass-updater` thread. `None`
-    /// when the check is disabled or has not run yet.
-    pub update_state: Option<Arc<Mutex<sicompass_updater::UpdateStatus>>>,
+    /// What the startup update check found, the app's and the plugins'
+    /// ([`crate::updates`]). `None` when the check is disabled.
+    pub update_state: Option<crate::updates::SharedUpdates>,
     /// The session's screen reader, started by the `screenReader` setting.
     /// Shared with the startup drain in [`app_state`]; the last clone is the
     /// renderer's, so it is dropped with the window, and dropping it stops Orca.
@@ -75,11 +75,11 @@ impl HostHooks for ProgramsHooks {
     }
 
     fn process_update_events(&self, renderer: &mut AppRenderer) {
-        crate::programs::process_update_events(renderer, self.update_state.as_ref());
+        crate::updates::process_update_events(renderer, self.update_state.as_ref());
     }
 
     fn handle_apply_app_update(&self, renderer: &mut AppRenderer) {
-        crate::programs::handle_apply_app_update(renderer, self.update_state.as_ref());
+        crate::updates::handle_apply_updates(renderer, self.update_state.as_ref());
     }
 
     fn build_content_set(

@@ -554,7 +554,11 @@ Store
   settings**, and shows it in the root list. No restart, unlike today.
 - **Updates** move here from `lib_updater`, which keeps only the app's own
   update. Store plugins update through their `release.json`. A plugin copied in
-  by hand with an `updateUrl` uses the same format.
+  by hand with an `updateUrl` uses the same format. The app also checks at
+  startup (`lib_store::updates`, reached through `sicompass_builtins::plugin_updates`),
+  names the plugin updates beside its own in one message, and Ctrl+U installs
+  every one that asks for nothing the user has not approved, the way Update in
+  the Store does. One that asks for more is left to the Store.
 - **The tier pages move here from Settings**, with the licence redeem and the
   store URL. They became `lib_store`'s `payments` module in Step 7, and
   `lib_settings` stopped depending on them.

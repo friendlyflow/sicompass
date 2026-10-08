@@ -99,7 +99,7 @@ impl Source {
         format!("{}{file}", self.folder)
     }
 
-    fn is_revoked(&self, archive_sha256: &str) -> bool {
+    pub fn is_revoked(&self, archive_sha256: &str) -> bool {
         self.revoked
             .iter()
             .any(|r| r.eq_ignore_ascii_case(archive_sha256))
@@ -285,6 +285,23 @@ pub fn install(
     // Whatever happened, nothing is left behind in staging.
     let _ = remove_if_present(&staged);
     result
+}
+
+/// [`install`], then record in `settings` that the user approved what was
+/// installed: pressing Update (or Ctrl+U for an update asking for nothing new)
+/// is the approval. Returns the installed version.
+pub fn install_and_approve(
+    fetch: &Fetch,
+    source: &Source,
+    shown: &ReleaseInfo,
+    plugins_dir: &Path,
+    settings: Result<PathBuf, String>,
+) -> Result<String, String> {
+    let m = install(fetch, source, shown, plugins_dir)?;
+    settings
+        .and_then(|path| crate::approvals::record(&path, &m))
+        .map_err(|e| format!("installed, but the approval could not be saved: {e}"))?;
+    Ok(m.version.unwrap_or_default())
 }
 
 fn stage_and_swap(

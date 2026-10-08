@@ -63,7 +63,7 @@ tutorial-sc-files = Files, undo, and save
 tutorial-sc-file-undo = Ctrl+Z: undo. Ctrl+Shift+Z: redo. Each tab keeps its own timeline.
 tutorial-sc-file-clipboard = Ctrl+C: copy. Ctrl+X: cut. Ctrl+V: paste. Ctrl+Shift+C: copy the value behind the item, such as a link's address, instead of its label. Delete or Ctrl+D: delete the selected item.
 tutorial-sc-file-save = Ctrl+S: save. Ctrl+Shift+S: save as. Ctrl+O: open a saved configuration file. Saving and opening a file need the file browser, from the Store.
-tutorial-sc-file-update = Ctrl+U: apply a staged app update.
+tutorial-sc-file-update = Ctrl+U: install the updates that are ready, the app's and the programs'.
 
 # ---------------------------------------------------------------------------
 # 3. How it works (the mental model, lean)
@@ -114,7 +114,7 @@ tutorial-cfg-file = All configuration lives in one file, ~/.config/sicompass/set
 tutorial-cfg-logs = Sicompass writes a daily log file, sicompass.log, to a platform directory: ~/.local/state/sicompass/ on Linux, ~/Library/Logs/sicompass/ on macOS, and %LOCALAPPDATA%\sicompass\ on Windows. Set the RUST_LOG environment variable to also print logs to the terminal. Logs help when you report a problem.
 tutorial-cfg-settings = The Settings program edits everything live: color scheme, display scaling, and a shoulder-surfing blank that hides the screen while the screen reader keeps working. Each program brings its own values too, such as URL history under web browser, which sets how many addresses are remembered. In a desicompass session, color scheme, language and the accessibility settings, the screen reader among them, are in the superkey's Settings instead, shared with the login screen.
 tutorial-cfg-saveload = Some programs support their own config files. Ctrl+S saves, Ctrl+Shift+S saves under a new name, and Ctrl+O opens a saved file.
-tutorial-cfg-updates = Sicompass checks for updates at launch. When one is staged, press Ctrl+U to apply it. Plugins update the same way, verified by SHA-256 and an optional ed25519 signature.
+tutorial-cfg-updates = Sicompass checks for updates of itself and of your programs at launch, and says at the top which are ready. Press Ctrl+U to install them. A program update that asks for more access waits for you in the store, where you see what it asks for. Program updates are verified by their signature and SHA-256.
 
 # ---------------------------------------------------------------------------
 # 7. Extending Sicompass (pointer to the real docs)
