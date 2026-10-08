@@ -15,10 +15,10 @@ projectmanagement-empty-cards = no cards yet, press ctrl+a to add one
 # hard reason it must never be the bare word "meta": the app skips `pop_path`
 # when leaving an Obj keyed exactly "meta", which would leave the provider's
 # path one level deeper than the cursor.
-projectmanagement-list-meta = list meta:
+projectmanagement-header = header:
 projectmanagement-sha256 = sha256: { $hash }
-projectmanagement-error-meta-undeletable = the list meta row belongs to the list and cannot be deleted
-projectmanagement-error-meta-readonly = the list meta row cannot be edited
+projectmanagement-error-header-undeletable = the header row belongs to the list and cannot be deleted
+projectmanagement-error-header-readonly = the header row cannot be edited
 
 # The name a column or card gets when it is created but never typed into.
 
@@ -86,7 +86,7 @@ projectmanagement-error-cloud-row-undeletable = the cloud sync row is not a colu
 projectmanagement-cmd-sync-now = sync with the cloud now
 projectmanagement-sync-pulled = changes from your other computers were added
 projectmanagement-sync-conflicts = changes from your other computers were added, { $count } edited on both, the latest edit was kept
-# The list meta's line about the cloud: whether this list is as it was at
+# The header's line about the cloud: whether this list is as it was at
 # the last sync.
 projectmanagement-sync-status-synced = cloud: in sync
 projectmanagement-sync-status-changed = cloud: changed since the last sync
@@ -94,5 +94,5 @@ projectmanagement-sync-status-new = cloud: not synced yet
 
 # The tutorial's paragraphs about this program, under its programs section:
 # <name>-tutorial, then <name>-tutorial-2 and so on, read until one is missing.
-projectmanagement-tutorial = Project management, from the Store: a kanban board. Press ctrl+a to add a column, Right to open it, and ctrl+a inside to add a card. A column holds cards and nothing deeper, so a card is the last level. The first row of each list is its list meta, with the list's hash and, with cloud sync on, whether it changed since the last sync.
+projectmanagement-tutorial = Project management, from the Store: a kanban board. Press ctrl+a to add a column, Right to open it, and ctrl+a inside to add a card. A column holds cards and nothing deeper, so a card is the last level. The first row of each list is its header, with the list's hash and, with cloud sync on, whether it changed since the last sync.
 projectmanagement-tutorial-2 = d: open the board itself, with the columns side by side. The cursor sits on a card, and the one card it is on is the only thing highlighted. Left and Right move between columns, Up and Down through the cards in one. i and a edit the card, o and shift+o open a new one below or above, ctrl+d deletes, and ctrl+x, ctrl+c and ctrl+v cut, copy and paste. An empty column shows one slot you can stand on to add its first card. Columns themselves are managed in the list. Escape goes back.

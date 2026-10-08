@@ -18523,7 +18523,7 @@ fn pasting_a_note_onto_another_does_not_destroy_it() {
 }
 
 #[test]
-fn the_list_meta_row_cannot_be_deleted() {
+fn the_header_row_cannot_be_deleted() {
     let (mut r, _tmp) = harness_with_notes();
     press_right(&mut r);
     // A note with children, so it can be entered.
@@ -18532,7 +18532,7 @@ fn the_list_meta_row_cannot_be_deleted() {
     press_enter(&mut r);
     sicompass::list::create_list_current_layer(&mut r);
 
-    // Move into it; the meta row is the first thing there.
+    // Move into it; the header row is the first thing there.
     let idx = r
         .total_list
         .iter()
@@ -18545,9 +18545,9 @@ fn the_list_meta_row_cannot_be_deleted() {
     assert!(
         before
             .first()
-            .map(|l| l.contains("list meta"))
+            .map(|l| l.contains("header:"))
             .unwrap_or(false),
-        "meta row leads the level: {before:?}"
+        "header row leads the level: {before:?}"
     );
 
     r.current_id.set_last(0);
@@ -18563,9 +18563,9 @@ fn the_list_meta_row_cannot_be_deleted() {
     assert!(
         screen(&r)
             .first()
-            .map(|l| l.contains("list meta"))
+            .map(|l| l.contains("header:"))
             .unwrap_or(false),
-        "and the meta row is still there: {:?}",
+        "and the header row is still there: {:?}",
         screen(&r)
     );
 }
@@ -18618,7 +18618,7 @@ fn ctrl_d_in_the_file_browser_still_deletes_the_file() {
 /// Put the cursor on the row whose label contains `needle`.
 ///
 /// By label rather than by index on purpose: every list opens with its
-/// `list meta:` header, so index 0 is never the first note, and a test that
+/// `header:` row, so index 0 is never the first note, and a test that
 /// counted rows would silently start asserting about the header.
 fn focus_row(r: &mut AppRenderer, needle: &str) {
     let idx = r
@@ -18630,11 +18630,11 @@ fn focus_row(r: &mut AppRenderer, needle: &str) {
     r.list_index = idx;
 }
 
-/// The note rows on screen, without the `list meta:` header.
+/// The note rows on screen, without the `header:` row.
 fn notes_on_screen(r: &AppRenderer) -> Vec<String> {
     screen(r)
         .into_iter()
-        .filter(|l| !l.contains("list meta"))
+        .filter(|l| !l.contains("header:"))
         .collect()
 }
 
@@ -18886,9 +18886,9 @@ fn load_active_tab_restores_a_notes_cursor_inside_a_sublayer() {
     assert_eq!(focused_row(&r), "-i eggs", "{:?}", screen(&r));
 }
 
-/// The sha256 the `list meta:` row of the current level is showing.
+/// The sha256 the `header:` row of the current level is showing.
 fn shown_hash(r: &mut AppRenderer) -> String {
-    focus_row(r, "list meta");
+    focus_row(r, "header:");
     press_right(r);
     sicompass::list::create_list_current_layer(r);
     let hash = screen(r)

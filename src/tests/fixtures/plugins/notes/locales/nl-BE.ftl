@@ -2,7 +2,7 @@
 
 notes-display-name = notes
 
-notes-list-meta = lijstinfo:
+notes-header = kop:
 
 notes-visibility = zichtbaarheid
 notes-visibility-private = privé
@@ -21,8 +21,8 @@ notes-cmd-duplicate = dupliceren
 # The settings checkbox that turns on mirroring the notes to the server.
 notes-checkbox-cloud-backup = cloudsynchronisatie inschakelen
 
-notes-error-meta-undeletable = de lijstinfo hoort bij de lijst en kan niet verwijderd worden
-notes-error-meta-readonly = de lijstinfo kan niet bewerkt worden, wijzig de zichtbaarheid erbinnen
+notes-error-header-undeletable = de kop hoort bij de lijst en kan niet verwijderd worden
+notes-error-header-readonly = de kop kan niet bewerkt worden, wijzig de zichtbaarheid erbinnen
 notes-error-unreadable = je notities konden niet gelezen worden, er is niets opgeslagen, de bestanden op schijf zijn ongewijzigd
 notes-error-save = je notities konden niet opgeslagen worden
 
@@ -44,4 +44,4 @@ notes-sync-status-synced = cloud: gesynchroniseerd
 notes-sync-status-changed = cloud: gewijzigd sinds de laatste synchronisatie
 notes-sync-status-new = cloud: nog niet gesynchroniseerd
 
-notes-tutorial = Notities, uit de store: druk op ctrl+a om een notitie te schrijven, Rechts om ze te openen en opnieuw ctrl+a erin om een regel toe te voegen. Notities kunnen zo diep genest worden als u wilt en elke wijziging staat op de undo-tijdlijn. De eerste rij van een notitie is de lijstinfo, waar u instelt of de notitie privé of openbaar is.
+notes-tutorial = Notities, uit de store: druk op ctrl+a om een notitie te schrijven, Rechts om ze te openen en opnieuw ctrl+a erin om een regel toe te voegen. Notities kunnen zo diep genest worden als u wilt en elke wijziging staat op de undo-tijdlijn. De eerste rij van een notitie is de kop, waar u instelt of de notitie privé of openbaar is.

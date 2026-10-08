@@ -114,7 +114,7 @@ refuse".
 
 ## Notes
 
-Every list opens with a `list meta:` row carrying that list's SHA-256, the root
+Every list opens with a `header:` row carrying that list's SHA-256, the root
 included — so the first row of the notes provider is the tree's root hash, and a
 glance at it says whether anything anywhere below has changed. The hashes are
 recomputed from the tree on demand, never cached, so any text change, insert,
@@ -139,8 +139,9 @@ Not reversible, and worth stating:
 
 - A note deleted **outside** the app. Undo restores the app's tree and writes it
   back, so the file returns only if the tree still held it.
-- A `.listmeta` rewritten by another process, or by a future sync. The provider
-  reconciles the directory against its tree on every save; it does not merge.
+- A `.header` (`.listmeta` in a store saved before the rename) rewritten by
+  another process, or by a sync. The provider reconciles the directory against
+  its tree on every save; it does not merge.
 - Reading the store can fail (a note that is not valid UTF-8, a permission
   error). That is **not** treated as an empty tree: nothing is written at all
   until the store can be read, because reconciling against a tree that failed to

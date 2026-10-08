@@ -903,8 +903,8 @@ The server takes the same crate by git: it checks the hashes of every upload
 from a syncing client, refuses one whose `base` is stale with its head (409),
 names the objects an upload changed, and answers `GET /plugins/{p}/head`
 (hash and last change, no files) for the clients' minute-by-minute poll. Each
-list in both plugins opens with a `list meta:` row showing its hash and
-whether it changed since the last sync. Nothing changed in the app.
+list in both plugins opens with a `header:` row (first called `list meta:`)
+showing its hash and whether it changed since the last sync. Nothing changed in the app.
 
 ## 14. Decisions on the former open questions (2026-09-24)
 

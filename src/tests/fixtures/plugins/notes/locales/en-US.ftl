@@ -10,7 +10,7 @@ notes-display-name = notes
 # purpose, and for one hard reason it must never be the bare word "meta": the
 # app skips `pop_path` when leaving an Obj keyed exactly "meta", which would
 # leave the provider's path one level deeper than the cursor.
-notes-list-meta = list meta:
+notes-header = header:
 
 notes-visibility = visibility
 notes-visibility-private = private
@@ -33,8 +33,8 @@ notes-cmd-duplicate = duplicate
 # The settings checkbox that turns on syncing the notes through the server.
 notes-checkbox-cloud-backup = enable cloud sync
 
-notes-error-meta-undeletable = the list meta row belongs to the list and cannot be deleted
-notes-error-meta-readonly = the list meta row cannot be edited, change visibility from inside it
+notes-error-header-undeletable = the header row belongs to the list and cannot be deleted
+notes-error-header-readonly = the header row cannot be edited, change visibility from inside it
 notes-error-unreadable = your notes could not be read, so nothing has been saved, the files on disk are untouched
 notes-error-save = your notes could not be saved
 
@@ -55,7 +55,7 @@ notes-error-cloud-row-undeletable = the cloud sync row is not a note, turn cloud
 notes-cmd-sync-now = sync with the cloud now
 notes-sync-pulled = changes from your other computers were added
 notes-sync-conflicts = changes from your other computers were added, { $count } edited on both, the latest edit was kept
-# The list meta's line about the cloud: whether this list is as it was at
+# The header's line about the cloud: whether this list is as it was at
 # the last sync.
 notes-sync-status-synced = cloud: in sync
 notes-sync-status-changed = cloud: changed since the last sync
@@ -63,4 +63,4 @@ notes-sync-status-new = cloud: not synced yet
 
 # The tutorial's paragraphs about this program, under its programs section:
 # <name>-tutorial, then <name>-tutorial-2 and so on, read until one is missing.
-notes-tutorial = Notes, from the Store: press ctrl+a to write a note, Right to open it, and ctrl+a again inside it to add a line. Notes nest as deep as you like, and every change is on the undo timeline. The first row of a note is its list meta, where you set whether the note is private or public.
+notes-tutorial = Notes, from the Store: press ctrl+a to write a note, Right to open it, and ctrl+a again inside it to add a line. Notes nest as deep as you like, and every change is on the undo timeline. The first row of a note is its header, where you set whether the note is private or public.

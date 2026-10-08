@@ -8,10 +8,10 @@ projectmanagement-display-name = projectbeheer
 projectmanagement-empty-columns = nog geen kolommen, druk ctrl+a om er een toe te voegen
 projectmanagement-empty-cards = nog geen kaarten, druk ctrl+a om er een toe te voegen
 
-projectmanagement-list-meta = lijstinfo:
+projectmanagement-header = kop:
 projectmanagement-sha256 = sha256: { $hash }
-projectmanagement-error-meta-undeletable = de lijstinfo hoort bij de lijst en kan niet verwijderd worden
-projectmanagement-error-meta-readonly = de lijstinfo kan niet bewerkt worden
+projectmanagement-error-header-undeletable = de kop hoort bij de lijst en kan niet verwijderd worden
+projectmanagement-error-header-readonly = de kop kan niet bewerkt worden
 
 projectmanagement-cmd-move-up = omhoog verplaatsen
 projectmanagement-cmd-move-down = omlaag verplaatsen
@@ -74,5 +74,5 @@ projectmanagement-sync-status-synced = cloud: gesynchroniseerd
 projectmanagement-sync-status-changed = cloud: gewijzigd sinds de laatste synchronisatie
 projectmanagement-sync-status-new = cloud: nog niet gesynchroniseerd
 
-projectmanagement-tutorial = Projectbeheer, uit de store: een kanbanbord. Druk op ctrl+a om een kolom toe te voegen, Rechts om ze te openen en ctrl+a erin om een kaart toe te voegen. Een kolom bevat kaarten en niets dieper, dus een kaart is het laatste niveau. De eerste rij van elke lijst is de lijstinfo, met de hash van de lijst en, met cloudsynchronisatie aan, of ze gewijzigd is sinds de laatste synchronisatie.
+projectmanagement-tutorial = Projectbeheer, uit de store: een kanbanbord. Druk op ctrl+a om een kolom toe te voegen, Rechts om ze te openen en ctrl+a erin om een kaart toe te voegen. Een kolom bevat kaarten en niets dieper, dus een kaart is het laatste niveau. De eerste rij van elke lijst is de kop, met de hash van de lijst en, met cloudsynchronisatie aan, of ze gewijzigd is sinds de laatste synchronisatie.
 projectmanagement-tutorial-2 = d: open het bord zelf, met de kolommen naast elkaar. De cursor staat op een kaart, en enkel die kaart licht op. Links en Rechts gaan tussen kolommen, Omhoog en Omlaag door de kaarten van een kolom. i en a bewerken de kaart, o en shift+o openen een nieuwe eronder of erboven, ctrl+d verwijdert, en ctrl+x, ctrl+c en ctrl+v knippen, kopiëren en plakken. Een lege kolom toont een plek waar u kan staan om de eerste kaart toe te voegen. De kolommen zelf beheert u in de lijst. Escape gaat terug.

@@ -2,7 +2,7 @@
 
 notes-display-name = notes
 
-notes-list-meta = Listeninfo:
+notes-header = Kopfzeile:
 
 notes-visibility = Sichtbarkeit
 notes-visibility-private = privat
@@ -21,8 +21,8 @@ notes-cmd-duplicate = duplizieren
 # The settings checkbox that turns on mirroring the notes to the server.
 notes-checkbox-cloud-backup = Cloud-Synchronisierung aktivieren
 
-notes-error-meta-undeletable = die Listeninfo gehört zur Liste und kann nicht gelöscht werden
-notes-error-meta-readonly = die Listeninfo kann nicht bearbeitet werden, ändern Sie die Sichtbarkeit darin
+notes-error-header-undeletable = die Kopfzeile gehört zur Liste und kann nicht gelöscht werden
+notes-error-header-readonly = die Kopfzeile kann nicht bearbeitet werden, ändern Sie die Sichtbarkeit darin
 notes-error-unreadable = Ihre Notizen konnten nicht gelesen werden, es wurde nichts gespeichert, die Dateien auf der Festplatte sind unverändert
 notes-error-save = Ihre Notizen konnten nicht gespeichert werden
 
@@ -44,4 +44,4 @@ notes-sync-status-synced = Cloud: synchronisiert
 notes-sync-status-changed = Cloud: seit der letzten Synchronisierung geändert
 notes-sync-status-new = Cloud: noch nicht synchronisiert
 
-notes-tutorial = Notizen, aus dem Store: drücken Sie Strg+A, um eine Notiz zu schreiben, Rechts, um sie zu öffnen, und Strg+A erneut darin, um eine Zeile hinzuzufügen. Notizen lassen sich beliebig tief verschachteln und jede Änderung steht auf der Undo-Zeitleiste. Die erste Zeile einer Notiz ist ihre Listeninfo, wo Sie festlegen, ob die Notiz privat oder öffentlich ist.
+notes-tutorial = Notizen, aus dem Store: drücken Sie Strg+A, um eine Notiz zu schreiben, Rechts, um sie zu öffnen, und Strg+A erneut darin, um eine Zeile hinzuzufügen. Notizen lassen sich beliebig tief verschachteln und jede Änderung steht auf der Undo-Zeitleiste. Die erste Zeile einer Notiz ist ihre Kopfzeile, wo Sie festlegen, ob die Notiz privat oder öffentlich ist.

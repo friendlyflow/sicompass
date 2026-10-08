@@ -8,10 +8,10 @@ projectmanagement-display-name = gestion de projet
 projectmanagement-empty-columns = aucune colonne pour l'instant, appuyez sur ctrl+a pour en ajouter une
 projectmanagement-empty-cards = aucune carte pour l'instant, appuyez sur ctrl+a pour en ajouter une
 
-projectmanagement-list-meta = info de liste :
+projectmanagement-header = en-tête :
 projectmanagement-sha256 = sha256 : { $hash }
-projectmanagement-error-meta-undeletable = l'info de liste appartient à la liste et ne peut pas être supprimée
-projectmanagement-error-meta-readonly = l'info de liste ne peut pas être modifiée
+projectmanagement-error-header-undeletable = l'en-tête appartient à la liste et ne peut pas être supprimé
+projectmanagement-error-header-readonly = l'en-tête ne peut pas être modifié
 
 projectmanagement-cmd-move-up = déplacer vers le haut
 projectmanagement-cmd-move-down = déplacer vers le bas
@@ -74,5 +74,5 @@ projectmanagement-sync-status-synced = cloud : synchronisé
 projectmanagement-sync-status-changed = cloud : modifié depuis la dernière synchronisation
 projectmanagement-sync-status-new = cloud : pas encore synchronisé
 
-projectmanagement-tutorial = Gestion de projet, depuis le store : un tableau kanban. Appuyez sur ctrl+a pour ajouter une colonne, Droite pour l'ouvrir, et ctrl+a à l'intérieur pour ajouter une carte. Une colonne contient des cartes et rien de plus profond, donc une carte est le dernier niveau. La première ligne de chaque liste est son info de liste, avec le hash de la liste et, avec la synchronisation cloud active, si elle a changé depuis la dernière synchronisation.
+projectmanagement-tutorial = Gestion de projet, depuis le store : un tableau kanban. Appuyez sur ctrl+a pour ajouter une colonne, Droite pour l'ouvrir, et ctrl+a à l'intérieur pour ajouter une carte. Une colonne contient des cartes et rien de plus profond, donc une carte est le dernier niveau. La première ligne de chaque liste est son en-tête, avec le hash de la liste et, avec la synchronisation cloud active, si elle a changé depuis la dernière synchronisation.
 projectmanagement-tutorial-2 = d : ouvrez le tableau lui-même, avec les colonnes côte à côte. Le curseur se pose sur une carte, et seule cette carte est mise en évidence. Gauche et Droite passent d'une colonne à l'autre, Haut et Bas parcourent les cartes d'une colonne. i et a modifient la carte, o et maj+o en ouvrent une nouvelle en dessous ou au dessus, ctrl+d supprime, et ctrl+x, ctrl+c et ctrl+v coupent, copient et collent. Une colonne vide montre un emplacement où vous poser pour ajouter sa première carte. Les colonnes elles-mêmes se gèrent dans la liste. Échap revient en arrière.

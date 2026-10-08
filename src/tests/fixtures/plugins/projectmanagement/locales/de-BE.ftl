@@ -8,10 +8,10 @@ projectmanagement-display-name = projektverwaltung
 projectmanagement-empty-columns = noch keine spalten, drücken sie strg+a um eine hinzuzufügen
 projectmanagement-empty-cards = noch keine karten, drücken sie strg+a um eine hinzuzufügen
 
-projectmanagement-list-meta = Listeninfo:
+projectmanagement-header = Kopfzeile:
 projectmanagement-sha256 = sha256: { $hash }
-projectmanagement-error-meta-undeletable = die Listeninfo gehört zur Liste und kann nicht gelöscht werden
-projectmanagement-error-meta-readonly = die Listeninfo kann nicht bearbeitet werden
+projectmanagement-error-header-undeletable = die Kopfzeile gehört zur Liste und kann nicht gelöscht werden
+projectmanagement-error-header-readonly = die Kopfzeile kann nicht bearbeitet werden
 
 projectmanagement-cmd-move-up = nach oben verschieben
 projectmanagement-cmd-move-down = nach unten verschieben
@@ -74,5 +74,5 @@ projectmanagement-sync-status-synced = Cloud: synchronisiert
 projectmanagement-sync-status-changed = Cloud: seit der letzten Synchronisierung geändert
 projectmanagement-sync-status-new = Cloud: noch nicht synchronisiert
 
-projectmanagement-tutorial = Projektverwaltung, aus dem Store: ein Kanban-Board. Drücken Sie Strg+A, um eine Spalte hinzuzufügen, Rechts, um sie zu öffnen, und Strg+A darin, um eine Karte hinzuzufügen. Eine Spalte enthält Karten und nichts Tieferes, eine Karte ist also die letzte Ebene. Die erste Zeile jeder Liste ist ihre Listeninfo, mit dem Hash der Liste und, bei aktiver Cloud-Synchronisierung, ob sie sich seit der letzten Synchronisierung geändert hat.
+projectmanagement-tutorial = Projektverwaltung, aus dem Store: ein Kanban-Board. Drücken Sie Strg+A, um eine Spalte hinzuzufügen, Rechts, um sie zu öffnen, und Strg+A darin, um eine Karte hinzuzufügen. Eine Spalte enthält Karten und nichts Tieferes, eine Karte ist also die letzte Ebene. Die erste Zeile jeder Liste ist ihre Kopfzeile, mit dem Hash der Liste und, bei aktiver Cloud-Synchronisierung, ob sie sich seit der letzten Synchronisierung geändert hat.
 projectmanagement-tutorial-2 = d: öffnen Sie das Board selbst, mit den Spalten nebeneinander. Der Cursor steht auf einer Karte, und nur diese Karte ist hervorgehoben. Links und Rechts wechseln zwischen Spalten, Hoch und Runter gehen durch die Karten einer Spalte. i und a bearbeiten die Karte, o und Umschalt+o öffnen eine neue darunter oder darüber, Strg+D löscht, und Strg+X, Strg+C und Strg+V schneiden aus, kopieren und fügen ein. Eine leere Spalte zeigt einen Platz, auf den Sie sich stellen können, um ihre erste Karte hinzuzufügen. Die Spalten selbst verwalten Sie in der Liste. Escape geht zurück.
