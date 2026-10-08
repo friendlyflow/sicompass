@@ -249,7 +249,8 @@ group holding the greeter and the users.
 - sicompass is the session's only owner of Orca. The superkey writes the
   `screenReader` switch; sicompass starts and stops the screen reader.
 - The tutorial and the Store are the superkey's in a session too: sections of
-  the superkey's list (Super+T, and Super+S, twice quickly for its settings),
+  the superkey's list (Super+T, and Super+S twice quickly, Super+S alone
+  being its settings),
   and sicompass does not load them (`programs::SESSION_OWNED_PROGRAMS`).
 - The superkey's Store tells sicompass nothing. The Store records approvals
   in `settings.json` and trashes data folders itself, in whichever process
