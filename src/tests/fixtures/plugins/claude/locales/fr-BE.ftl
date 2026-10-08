@@ -15,10 +15,9 @@ claude-command-skills = compétences
 claude-command-sessions = sessions
 claude-command-delete-session = supprimer la session
 
-# La liste des sessions : un bouton pour en démarrer une, la ligne que ce bouton
-# ouvre pour la première question, et le libellé d'une session sans titre.
+# La liste des sessions : un bouton pour en démarrer une, et le libellé d'une
+# session sans titre.
 claude-new-session = nouvelle session
-claude-prompt-label = Prompt :
 claude-untitled-session = session sans titre
 
 # Supprimer une session. La confirmation nomme la session après la question.

@@ -12398,7 +12398,62 @@ fn claude_left_out_of_a_session_lands_on_that_session() {
 }
 
 #[test]
-fn claude_new_session_opens_a_prompt_and_enter_jumps_into_the_session() {
+fn claude_new_session_opens_an_empty_session_typing_on_its_prompt() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    std::fs::create_dir(root.join("workspace")).unwrap();
+    let _sessions = fake_claude_sessions(&root, &[("s1", "An earlier session")]);
+
+    ensure_builtins();
+    let mut renderer = app_renderer();
+    register_claude_rooted_at(&mut renderer, &root);
+    press_right(&mut renderer);
+    press_colon(&mut renderer);
+    assert_eq!(
+        labels(&renderer),
+        vec!["-b new session", "+ An earlier session"]
+    );
+
+    // Enter on the button swaps the list for an empty session and lands typing
+    // on its prompt row, the same row every session has.
+    press_enter(&mut renderer);
+    assert_eq!(renderer.coordinate, Coordinate::Insert);
+    assert_eq!(
+        renderer.previous_coordinate,
+        Coordinate::SessionFirstCommand,
+        "Escape lands in the session",
+    );
+    assert_eq!(
+        renderer.current_id.last(),
+        Some(renderer.total_list.len() - 1),
+        "on the last row: labels {:?}",
+        labels(&renderer),
+    );
+    assert!(
+        renderer.total_list.last().unwrap().label.starts_with("-i "),
+        "labels: {:?}",
+        labels(&renderer),
+    );
+    assert!(
+        !labels(&renderer)
+            .iter()
+            .any(|l| l.contains("An earlier session")),
+        "nothing of the list is left: {:?}",
+        labels(&renderer),
+    );
+    assert_eq!(
+        renderer.providers[0].process_id(),
+        None,
+        "no process until the first prompt",
+    );
+    assert_eq!(renderer.session_view_parent_label, None);
+}
+
+#[test]
+fn claude_an_empty_session_list_does_not_hand_colon_a_palette() {
+    // With no past sessions the list is the `new session` button alone. The
+    // view sentinels are filtered out of the insert palette, so `:` here must
+    // not open a one-item palette offering "session list".
     let tmp = TempDir::new().unwrap();
     let root = tmp.path().canonicalize().unwrap();
     std::fs::create_dir(root.join("workspace")).unwrap();
@@ -12410,56 +12465,6 @@ fn claude_new_session_opens_a_prompt_and_enter_jumps_into_the_session() {
     press_right(&mut renderer);
     press_colon(&mut renderer);
     assert_eq!(labels(&renderer), vec!["-b new session"]);
-
-    // Enter on the button opens a row to type into, and lands in it.
-    press_enter(&mut renderer);
-    assert_eq!(renderer.coordinate, Coordinate::Insert);
-    assert_eq!(
-        renderer.current_id.last(),
-        Some(1),
-        "directly under the button"
-    );
-    assert_eq!(
-        renderer.total_list[1].label, "-i Prompt: ",
-        "the label reads as a prompt, with a space before what you type",
-    );
-
-    type_text(&mut renderer, "what does this crate do?");
-    press_enter(&mut renderer);
-
-    // The spawn fails here (the binary cannot exist), but the swap is what this
-    // pins: the transcript replaced the list and the cursor is on the slot.
-    assert_eq!(renderer.coordinate, Coordinate::SessionFirstCommand);
-    assert!(
-        renderer.total_list.last().unwrap().label.starts_with("-i "),
-        "labels: {:?}",
-        labels(&renderer),
-    );
-    assert_eq!(
-        renderer.session_view_parent_label.as_deref(),
-        Some("what does this crate do?"),
-        "the line above names the session by the prompt that started it",
-    );
-}
-
-#[test]
-fn claude_an_empty_session_list_does_not_hand_colon_a_palette() {
-    // With no past sessions, the new-session row is the level's *last* row and
-    // looks exactly like a live prompt to the insert-palette shape test. Without
-    // the view sentinels being filtered out, `:` would open a one-item palette
-    // offering "session list" here.
-    let tmp = TempDir::new().unwrap();
-    let root = tmp.path().canonicalize().unwrap();
-    std::fs::create_dir(root.join("workspace")).unwrap();
-    let _sessions = fake_claude_sessions(&root, &[]);
-
-    ensure_builtins();
-    let mut renderer = app_renderer();
-    register_claude_rooted_at(&mut renderer, &root);
-    press_right(&mut renderer);
-    press_colon(&mut renderer);
-    press_enter(&mut renderer);
-    press_escape(&mut renderer);
 
     press_colon(&mut renderer);
 
@@ -12702,6 +12707,38 @@ fn claude_double_home_in_the_session_says_escape_first_instead_of_freezing() {
         renderer.error_message.contains("Escape"),
         "got {:?}",
         renderer.error_message
+    );
+}
+
+#[test]
+fn claude_new_session_ctrl_colon_lists_the_projects_skills() {
+    // A new session's first prompt is typed where every later one is, so the
+    // skills are there for it too.
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    project_skill(&root, "review", "---\ndescription: Review the diff\n---\n");
+    let _sessions = fake_claude_sessions(&root, &[("s1", "An earlier session")]);
+
+    ensure_builtins();
+    let mut renderer = app_renderer();
+    register_claude_rooted_at(&mut renderer, &root);
+    press_right(&mut renderer);
+    press_colon(&mut renderer);
+    press_enter(&mut renderer);
+    type_text(&mut renderer, "please ");
+
+    press_ctrl_shift(&mut renderer, Keycode::Semicolon);
+    assert_eq!(renderer.coordinate, Coordinate::SecondCommand);
+    assert_eq!(
+        labels(&renderer),
+        vec!["review - Review the diff".to_string()]
+    );
+
+    press_enter(&mut renderer);
+    assert_eq!(renderer.coordinate, Coordinate::Insert);
+    assert_eq!(
+        renderer.input_buffer, "please /review",
+        "spliced at the caret"
     );
 }
 

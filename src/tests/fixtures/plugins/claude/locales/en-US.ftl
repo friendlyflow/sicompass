@@ -16,10 +16,9 @@ claude-command-skills = skills
 claude-command-sessions = sessions
 claude-command-delete-session = delete session
 
-# The session list: a button to start one, the row that button opens for the
-# prompt, and the label for a session Claude has not titled yet.
+# The session list: a button to start one, and the label for a session Claude
+# has not titled yet.
 claude-new-session = new session
-claude-prompt-label = Prompt:
 claude-untitled-session = untitled session
 
 # Deleting a session. The confirmation names the session after the question, so

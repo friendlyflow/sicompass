@@ -615,8 +615,8 @@ dependencies = [
 
 [[package]]
 name = "claude-plugin"
-version = "0.2.0"
-source = "git+https://github.com/friendlyflow/claude-plugin-sicompass?rev=02f1419afc66747eb76a2dfff0d146e632ca9e26#02f1419afc66747eb76a2dfff0d146e632ca9e26"
+version = "0.3.0"
+source = "git+https://github.com/friendlyflow/claude-plugin-sicompass?rev=9c47271e142a52250efa1ffb999dc1bac4233dd8#9c47271e142a52250efa1ffb999dc1bac4233dd8"
 dependencies = [
  "natord",
  "serde",
@@ -1120,7 +1120,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3089,7 +3089,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3393,7 +3393,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3452,7 +3452,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3962,7 +3962,7 @@ dependencies = [
 [[package]]
 name = "sicompass-ui"
 version = "0.2.0"
-source = "git+https://github.com/friendlyflow/sicompass-ui?rev=768cf65293f1b36ab2d636e8d84deb937dddc8ac#768cf65293f1b36ab2d636e8d84deb937dddc8ac"
+source = "git+https://github.com/friendlyflow/sicompass-ui?rev=e7e03c6d0f22685259f2b1c0ba00330f7a633544#e7e03c6d0f22685259f2b1c0ba00330f7a633544"
 dependencies = [
  "accesskit",
  "accesskit_macos",
@@ -4211,7 +4211,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5007,7 +5007,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
