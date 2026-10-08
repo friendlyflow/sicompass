@@ -379,8 +379,8 @@ sicompass-sdk = { workspace = true, features = ["package", "ipc", "plugin"] }
 # The plugins tests/integration.rs runs, each built into a program by its
 # `examples/plugin_<name>.rs`. Pinned by rev to the commit whose `plugin.json` and
 # `locales/` are in tests/fixtures/plugins/<name>; move both together.
-notes-plugin = { git = "https://github.com/friendlyflow/notes-plugin-sicompass", rev = "698b783b8585af50323a6ae459b7b22f45e669b2" }
-projectmanagement-plugin = { git = "https://github.com/friendlyflow/projectmanagement-plugin-sicompass", rev = "afc4f02470dd5a649e429add53d77b0ef9bff9bd" }
+notes-plugin = { git = "https://github.com/friendlyflow/notes-plugin-sicompass", rev = "5e962a47d73db2446f94a5f31bbdb727febc73d8" }
+projectmanagement-plugin = { git = "https://github.com/friendlyflow/projectmanagement-plugin-sicompass", rev = "4d16b4f08d197f4543631cf15b298158ee08f44a" }
 filebrowser-plugin = { git = "https://github.com/friendlyflow/filebrowser-plugin-sicompass", rev = "7eb3988741d26d1428f036fd431edc30f2dcfa98" }
 texteditor-plugin = { git = "https://github.com/friendlyflow/texteditor-plugin-sicompass", rev = "443265a4a256583b0541acade8cabb9f752fbca4" }
 gitclient-plugin = { git = "https://github.com/friendlyflow/gitclient-plugin-sicompass", rev = "21f65890fea2c1ce1730a101af9f1e62944db4bf" }

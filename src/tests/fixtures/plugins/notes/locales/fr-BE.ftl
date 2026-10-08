@@ -2,7 +2,7 @@
 
 notes-display-name = notes
 
-notes-header = en-tête :
+notes-header = en-tête
 
 notes-visibility = visibilité
 notes-visibility-private = privé

@@ -2,7 +2,7 @@
 
 notes-display-name = notes
 
-notes-header = kop:
+notes-header = kop
 
 notes-visibility = zichtbaarheid
 notes-visibility-private = privé

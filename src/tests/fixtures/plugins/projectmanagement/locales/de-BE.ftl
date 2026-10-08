@@ -8,7 +8,7 @@ projectmanagement-display-name = projektverwaltung
 projectmanagement-empty-columns = noch keine spalten, drücken sie strg+a um eine hinzuzufügen
 projectmanagement-empty-cards = noch keine karten, drücken sie strg+a um eine hinzuzufügen
 
-projectmanagement-header = Kopfzeile:
+projectmanagement-header = Kopfzeile
 projectmanagement-sha256 = sha256: { $hash }
 projectmanagement-error-header-undeletable = die Kopfzeile gehört zur Liste und kann nicht gelöscht werden
 projectmanagement-error-header-readonly = die Kopfzeile kann nicht bearbeitet werden

@@ -2,7 +2,7 @@
 
 notes-display-name = notes
 
-notes-header = Kopfzeile:
+notes-header = Kopfzeile
 
 notes-visibility = Sichtbarkeit
 notes-visibility-private = privat

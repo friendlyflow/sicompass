@@ -8,7 +8,7 @@ projectmanagement-display-name = projectbeheer
 projectmanagement-empty-columns = nog geen kolommen, druk ctrl+a om er een toe te voegen
 projectmanagement-empty-cards = nog geen kaarten, druk ctrl+a om er een toe te voegen
 
-projectmanagement-header = kop:
+projectmanagement-header = kop
 projectmanagement-sha256 = sha256: { $hash }
 projectmanagement-error-header-undeletable = de kop hoort bij de lijst en kan niet verwijderd worden
 projectmanagement-error-header-readonly = de kop kan niet bewerkt worden

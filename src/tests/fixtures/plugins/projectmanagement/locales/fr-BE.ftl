@@ -8,7 +8,7 @@ projectmanagement-display-name = gestion de projet
 projectmanagement-empty-columns = aucune colonne pour l'instant, appuyez sur ctrl+a pour en ajouter une
 projectmanagement-empty-cards = aucune carte pour l'instant, appuyez sur ctrl+a pour en ajouter une
 
-projectmanagement-header = en-tête :
+projectmanagement-header = en-tête
 projectmanagement-sha256 = sha256 : { $hash }
 projectmanagement-error-header-undeletable = l'en-tête appartient à la liste et ne peut pas être supprimé
 projectmanagement-error-header-readonly = l'en-tête ne peut pas être modifié

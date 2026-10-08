@@ -114,7 +114,7 @@ refuse".
 
 ## Notes
 
-Every list opens with a `header:` row carrying that list's SHA-256, the root
+Every list opens with a `header` row carrying that list's SHA-256, the root
 included — so the first row of the notes provider is the tree's root hash, and a
 glance at it says whether anything anywhere below has changed. The hashes are
 recomputed from the tree on demand, never cached, so any text change, insert,

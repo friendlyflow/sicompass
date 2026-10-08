@@ -15,7 +15,7 @@ projectmanagement-empty-cards = no cards yet, press ctrl+a to add one
 # hard reason it must never be the bare word "meta": the app skips `pop_path`
 # when leaving an Obj keyed exactly "meta", which would leave the provider's
 # path one level deeper than the cursor.
-projectmanagement-header = header:
+projectmanagement-header = header
 projectmanagement-sha256 = sha256: { $hash }
 projectmanagement-error-header-undeletable = the header row belongs to the list and cannot be deleted
 projectmanagement-error-header-readonly = the header row cannot be edited

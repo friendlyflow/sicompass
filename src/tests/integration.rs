@@ -18522,7 +18522,7 @@ fn the_header_row_cannot_be_deleted() {
     assert!(
         before
             .first()
-            .map(|l| l.contains("header:"))
+            .map(|l| l.contains("header"))
             .unwrap_or(false),
         "header row leads the level: {before:?}"
     );
@@ -18540,7 +18540,7 @@ fn the_header_row_cannot_be_deleted() {
     assert!(
         screen(&r)
             .first()
-            .map(|l| l.contains("header:"))
+            .map(|l| l.contains("header"))
             .unwrap_or(false),
         "and the header row is still there: {:?}",
         screen(&r)
@@ -18595,7 +18595,7 @@ fn ctrl_d_in_the_file_browser_still_deletes_the_file() {
 /// Put the cursor on the row whose label contains `needle`.
 ///
 /// By label rather than by index on purpose: every list opens with its
-/// `header:` row, so index 0 is never the first note, and a test that
+/// `header` row, so index 0 is never the first note, and a test that
 /// counted rows would silently start asserting about the header.
 fn focus_row(r: &mut AppRenderer, needle: &str) {
     let idx = r
@@ -18607,11 +18607,11 @@ fn focus_row(r: &mut AppRenderer, needle: &str) {
     r.list_index = idx;
 }
 
-/// The note rows on screen, without the `header:` row.
+/// The note rows on screen, without the `header` row.
 fn notes_on_screen(r: &AppRenderer) -> Vec<String> {
     screen(r)
         .into_iter()
-        .filter(|l| !l.contains("header:"))
+        .filter(|l| !l.contains("header"))
         .collect()
 }
 
@@ -18863,9 +18863,9 @@ fn load_active_tab_restores_a_notes_cursor_inside_a_sublayer() {
     assert_eq!(focused_row(&r), "-i eggs", "{:?}", screen(&r));
 }
 
-/// The sha256 the `header:` row of the current level is showing.
+/// The sha256 the `header` row of the current level is showing.
 fn shown_hash(r: &mut AppRenderer) -> String {
-    focus_row(r, "header:");
+    focus_row(r, "header");
     press_right(r);
     sicompass::list::create_list_current_layer(r);
     let hash = screen(r)

@@ -10,7 +10,7 @@ notes-display-name = notes
 # purpose, and for one hard reason it must never be the bare word "meta": the
 # app skips `pop_path` when leaving an Obj keyed exactly "meta", which would
 # leave the provider's path one level deeper than the cursor.
-notes-header = header:
+notes-header = header
 
 notes-visibility = visibility
 notes-visibility-private = private

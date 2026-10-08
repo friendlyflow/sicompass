@@ -2362,8 +2362,8 @@ checksum = "0676bb32a98c1a483ce53e500a81ad9c3d5b3f7c920c28c24e9cb0980d0b5bc8"
 
 [[package]]
 name = "notes-plugin"
-version = "0.4.1"
-source = "git+https://github.com/friendlyflow/notes-plugin-sicompass?rev=698b783b8585af50323a6ae459b7b22f45e669b2#698b783b8585af50323a6ae459b7b22f45e669b2"
+version = "0.4.2"
+source = "git+https://github.com/friendlyflow/notes-plugin-sicompass?rev=5e962a47d73db2446f94a5f31bbdb727febc73d8#5e962a47d73db2446f94a5f31bbdb727febc73d8"
 dependencies = [
  "serde",
  "serde_json",
@@ -2965,8 +2965,8 @@ dependencies = [
 
 [[package]]
 name = "projectmanagement-plugin"
-version = "0.4.1"
-source = "git+https://github.com/friendlyflow/projectmanagement-plugin-sicompass?rev=afc4f02470dd5a649e429add53d77b0ef9bff9bd#afc4f02470dd5a649e429add53d77b0ef9bff9bd"
+version = "0.4.2"
+source = "git+https://github.com/friendlyflow/projectmanagement-plugin-sicompass?rev=4d16b4f08d197f4543631cf15b298158ee08f44a#4d16b4f08d197f4543631cf15b298158ee08f44a"
 dependencies = [
  "serde",
  "serde_json",
