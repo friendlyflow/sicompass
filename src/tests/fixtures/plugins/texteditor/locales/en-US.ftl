@@ -8,6 +8,15 @@ texteditor-error-undo-insert-line-write-failed = undo insert line: failed to wri
 texteditor-error-redo-delete-line-write-failed = redo delete line: failed to write file
 texteditor-error-redo-insert-line-write-failed = redo insert line: failed to write file
 texteditor-error-redo-delete-trash-failed = redo delete: trash failed: { $err }
+texteditor-error-create-file = could not create { $name }: { $err }
+texteditor-error-create-directory = could not create folder { $name }: { $err }
+texteditor-error-delete = could not delete { $name }: { $err }
+texteditor-error-rename = could not rename { $old } to { $new }: { $err }
+texteditor-error-save = could not save { $name }: { $err }
+texteditor-error-add-here = cannot add to { $path }: { $err }
+texteditor-error-change-here = cannot change { $path }: { $err }
+# The { $err } of the messages above when the system refused for lack of rights.
+texteditor-error-reason-permission-denied = permission denied
 
 texteditor-description = Edit any text file as a list of its lines, with indentation and sections as levels, and every change undoable.
 texteditor-setting-path = text editor path

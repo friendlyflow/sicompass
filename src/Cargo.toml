@@ -382,7 +382,7 @@ sicompass-sdk = { workspace = true, features = ["package", "ipc", "plugin"] }
 notes-plugin = { git = "https://github.com/friendlyflow/notes-plugin-sicompass", rev = "5e962a47d73db2446f94a5f31bbdb727febc73d8" }
 projectmanagement-plugin = { git = "https://github.com/friendlyflow/projectmanagement-plugin-sicompass", rev = "4d16b4f08d197f4543631cf15b298158ee08f44a" }
 filebrowser-plugin = { git = "https://github.com/friendlyflow/filebrowser-plugin-sicompass", rev = "76aa13b61344a0d424439d2a3e2e453c0669215a" }
-texteditor-plugin = { git = "https://github.com/friendlyflow/texteditor-plugin-sicompass", rev = "443265a4a256583b0541acade8cabb9f752fbca4" }
+texteditor-plugin = { git = "https://github.com/friendlyflow/texteditor-plugin-sicompass", rev = "4ba644e52cd23dabab45c225406e7db347ee7efa" }
 gitclient-plugin = { git = "https://github.com/friendlyflow/gitclient-plugin-sicompass", rev = "21f65890fea2c1ce1730a101af9f1e62944db4bf" }
 claude-plugin = { git = "https://github.com/friendlyflow/claude-plugin-sicompass", rev = "02f1419afc66747eb76a2dfff0d146e632ca9e26" }
 terminal-plugin = { git = "https://github.com/friendlyflow/terminal-plugin-sicompass", rev = "35f42663b67df8e5d10ec5cf2484eed48b2861f9" }

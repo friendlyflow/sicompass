@@ -3252,6 +3252,86 @@ fn filebrowser_delete_in_a_read_only_folder_says_why() {
     assert!(renderer.total_list[0].label.contains("kept.txt"));
 }
 
+/// The text editor in a folder the user may not write to: adding is refused
+/// at once with the plugin's reason, and a delete says why it failed.
+#[cfg(unix)]
+#[test]
+fn texteditor_in_a_read_only_folder_says_why() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path();
+    let Some(_folders) = ReadOnlyFolders::new(root) else {
+        return;
+    };
+    let mut r = setup_texteditor(&root.join("locked"));
+    press_right(&mut r);
+    cursor_to_label(&mut r, "kept.txt");
+
+    press_ctrl(&mut r, Keycode::A);
+    let err = r.error_message.clone();
+    assert!(
+        err.starts_with("cannot add to ") && err.ends_with("locked: permission denied"),
+        "{err:?}"
+    );
+    assert_eq!(r.coordinate, sicompass::app_state::Coordinate::General);
+    assert_eq!(r.total_list.len(), 1, "no row was opened");
+
+    press(&mut r, Keycode::Delete);
+    assert_eq!(
+        r.error_message,
+        "could not delete kept.txt: permission denied"
+    );
+    assert!(root.join("locked/kept.txt").exists());
+}
+
+/// A file the user may not write to: adding a line is refused at once, and
+/// an edited line that cannot be saved says why on Enter, the file unchanged.
+#[cfg(unix)]
+#[test]
+fn texteditor_in_a_read_only_file_says_why() {
+    use std::os::unix::fs::PermissionsExt;
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path();
+    let Some(_folders) = ReadOnlyFolders::new(root) else {
+        return;
+    };
+    let file = root.join("locked/kept.txt");
+    std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o444)).unwrap();
+    let mut r = setup_texteditor(&root.join("locked"));
+    press_right(&mut r);
+    cursor_to_label(&mut r, "kept.txt");
+    press_right(&mut r);
+
+    press_ctrl(&mut r, Keycode::A);
+    let err = r.error_message.clone();
+    assert!(
+        err.starts_with("cannot change ") && err.ends_with("kept.txt: permission denied"),
+        "{err:?}"
+    );
+    assert_eq!(r.coordinate, sicompass::app_state::Coordinate::General);
+
+    press(&mut r, Keycode::I);
+    type_text(&mut r, "y");
+    press_enter(&mut r);
+    let err = r.error_message.clone();
+    assert!(
+        err.starts_with("could not save ") && err.ends_with("kept.txt: permission denied"),
+        "{err:?}"
+    );
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "x");
+    assert_eq!(
+        r.coordinate,
+        sicompass::app_state::Coordinate::Insert,
+        "the edit stays open with what was typed"
+    );
+    press_escape(&mut r);
+    assert_eq!(r.coordinate, sicompass::app_state::Coordinate::General);
+    let line = &r.total_list[r.list_index].label;
+    assert!(
+        line.ends_with('x') && !line.contains("xy") && !line.contains("yx"),
+        "{line:?}"
+    );
+}
+
 /// Ctrl+A after creating a file (prefixed insert mode) must not panic.
 /// Regression: after refresh, current_id could be out-of-bounds → insert at invalid index.
 #[test]
