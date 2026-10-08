@@ -1,5 +1,6 @@
-//! `ProcessProvider` against real plugin processes: `examples/process_fixture.rs`
-//! and `examples/process_fixture_future.rs`, which `cargo test` builds.
+//! `ProcessProvider` against real plugin processes: `examples/process_fixture.rs`,
+//! `examples/process_fixture_future.rs` and `examples/process_fixture_old.rs`,
+//! which `cargo test` builds.
 //!
 //! Each test installs the fixture into a plugin directory of its own (its
 //! executable, `plugin.json`, `locales/`) and drives it through the `Provider`
@@ -294,6 +295,32 @@ fn a_plugin_from_a_newer_protocol_is_refused_with_a_reason() {
     let err = open_in(dir.path(), grants(None)).err().expect("refused");
     assert!(err.contains("protocol 99.0"), "{err}");
     assert!(err.contains("update it from the Store"), "{err}");
+}
+
+/// A plugin that speaks 1.1 is asked whether a row can be added, and its
+/// answer is the provider's.
+#[test]
+fn a_current_plugin_is_asked_whether_a_row_can_be_added() {
+    let dir = install("process_fixture");
+    let mut p = open_in(dir.path(), grants(None)).unwrap();
+    assert_eq!(p.cannot_add_here(), None);
+    p.set_current_path("/full");
+    assert_eq!(
+        p.cannot_add_here().as_deref(),
+        Some("nothing fits in /full")
+    );
+    assert!(!p.is_poisoned());
+}
+
+/// A 1.0 plugin cannot read that question and would exit on it, so it is
+/// never asked: the user may try, and the create says why on Enter.
+#[test]
+fn a_plugin_from_before_1_1_is_not_asked_and_keeps_running() {
+    let dir = install("process_fixture_old");
+    let mut p = open_in(dir.path(), grants(None)).unwrap();
+    assert_eq!(p.cannot_add_here(), None);
+    p.tick();
+    assert!(!p.is_poisoned(), "{:?}", p.take_error());
 }
 
 #[test]

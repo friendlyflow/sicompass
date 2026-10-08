@@ -167,8 +167,11 @@ is `src/plugin_host/`. Follow
   They win over the user's copy, run without approval and the Store leaves them
   alone. A **debug build** sets it itself when it is unset
   (`dev_plugins`): every sibling `<x>-plugin-sicompass` with a
-  `target/debug/<x>-plugin` is linked into `target/dev-plugins/`, so
-  `cargo build` in a plugin and here is all it takes to run both.
+  `target/debug/<x>-plugin` is linked into `target/dev-plugins/`. A debug
+  `cargo build` here also runs `cargo build` in every sibling checkout
+  (`src/build.rs`, only when one's sources changed, and a checkout that does
+  not build fails the build), so `cargo build` here is all it takes to run
+  both. `SICOMPASS_PLUGIN_PATH= cargo build` skips the plugins, and
   `SICOMPASS_PLUGIN_PATH= target/debug/sicompass` runs the Store's copies. Discovery goes through the SDK's `installed_plugins::discover_all`
   everywhere, never `plugins_dir()` alone.
 - WASM components (0.2) are gone: `"type": "wasm"`, or no `type`, is refused

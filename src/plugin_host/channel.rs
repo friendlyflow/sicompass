@@ -72,6 +72,8 @@ pub struct Channel {
     deadline: Mutex<Option<Duration>>,
     pid: u32,
     name: String,
+    /// The protocol its hello named, which says what it can be asked.
+    protocol: std::sync::OnceLock<String>,
 }
 
 impl Channel {
@@ -189,6 +191,7 @@ impl Channel {
             deadline: Mutex::new(None),
             pid,
             name: name.to_owned(),
+            protocol: std::sync::OnceLock::new(),
         };
         me.await_hello()?;
         Ok(me)
@@ -197,7 +200,10 @@ impl Channel {
     fn await_hello(&self) -> Result<(), String> {
         let rx = self.incoming.lock().map_err(|e| e.to_string())?;
         match rx.recv_timeout(HELLO_DEADLINE) {
-            Ok(Incoming::Hello { protocol }) if protocol_compatible(&protocol) => Ok(()),
+            Ok(Incoming::Hello { protocol }) if protocol_compatible(&protocol) => {
+                let _ = self.protocol.set(protocol);
+                Ok(())
+            }
             Ok(Incoming::Hello { protocol }) => Err(format!(
                 "it speaks plugin protocol {protocol}, and this sicompass speaks {}; \
                  update it from the Store",
@@ -286,6 +292,14 @@ impl Channel {
     /// The plugin process's own id.
     pub fn pid(&self) -> u32 {
         self.pid
+    }
+
+    /// Whether the plugin understands what protocol `since` added. An older
+    /// one cannot read such a request and would exit on it.
+    pub fn speaks(&self, since: &str) -> bool {
+        self.protocol
+            .get()
+            .is_some_and(|p| sicompass_sdk::plugin_abi::protocol_has(p, since))
     }
 }
 

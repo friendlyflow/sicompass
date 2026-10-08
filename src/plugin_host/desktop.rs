@@ -90,13 +90,31 @@ fn os_trash_delete(path: &Path) -> Result<(), String> {
     use trash::macos::{DeleteMethod, TrashContextExtMacos};
     let mut ctx = trash::TrashContext::default();
     ctx.set_delete_method(DeleteMethod::NsFileManager);
-    ctx.delete(path).map_err(|e| e.to_string())
+    ctx.delete(path).map_err(trash_error)
 }
 
 /// See the macOS variant above; everywhere else the crate default is fine.
 #[cfg(not(target_os = "macos"))]
 fn os_trash_delete(path: &Path) -> Result<(), String> {
-    trash::delete(path).map_err(|e| e.to_string())
+    trash::delete(path).map_err(trash_error)
+}
+
+/// The trash's refusal as the system put it ("Permission denied (os error
+/// 13)"), which the plugin turns into words for the user. The crate's own
+/// `Display` is its `Debug` dump, which would be read out as is.
+fn trash_error(e: trash::Error) -> String {
+    match e {
+        #[cfg(all(
+            unix,
+            not(target_os = "macos"),
+            not(target_os = "ios"),
+            not(target_os = "android")
+        ))]
+        trash::Error::FileSystem { source, .. } => source.to_string(),
+        trash::Error::Os { code, description } => format!("{description} (os error {code})"),
+        trash::Error::Unknown { description } => description,
+        other => other.to_string(),
+    }
 }
 
 /// Undo [`trash_delete`] for `original`.

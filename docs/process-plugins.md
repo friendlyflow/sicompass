@@ -60,11 +60,12 @@ Each message is a little-endian `u32` byte count, then the message in postcard
 carries an id and its reply names it.
 
 1. The plugin speaks first: `Hello { protocol, name }`. The app refuses a plugin
-   whose protocol major differs from its own (`PROTOCOL_VERSION`, now `1.0`) and
-   says "update it from the Store".
+   whose protocol major differs from its own (`PROTOCOL_VERSION`, now `1.1`) and
+   says "update it from the Store". It keeps the version the plugin named
+   (`Channel::speaks`).
 2. The app calls with `Call { id, request }`. There is one `Request` per thing a
    provider does, the same set the WIT `provider` interface had, plus
-   `LocaleChanged`. The plugin answers with `Reply { id, response, moved_to }`.
+   `LocaleChanged` and (1.1) `CannotAddHere`. The plugin answers with `Reply { id, response, moved_to }`.
    `moved_to` is where the plugin is now, when the call moved it (a command, an
    edit, a shell's `cd`), so `current_path` never needs a call.
 3. The plugin asks with `HostCall { id, request }` for what only the app knows, and
@@ -73,8 +74,11 @@ carries an id and its reply names it.
 
 FFON still travels as bytes in the SDK's binary codec, because it is a tree.
 
-A minor bump adds requests at the end. A peer that does not know one answers
-`Unsupported`, and the app treats that like the trait's default.
+A minor bump adds requests at the end. A peer that does not know one cannot
+read it: postcard fails on the unknown variant, and a plugin's runtime takes
+the channel for broken and exits. So the app sends a request only to a plugin
+whose hello names the minor that added it, and treats an older plugin like the
+trait's default (`CannotAddHere` is `None` for a 1.0 plugin).
 
 ### What a plugin asks the app
 
@@ -182,9 +186,12 @@ app edit.
 A debug build of the app (`target/debug/sicompass`) does the same for itself
 when the variable is unset (`src/dev_plugins.rs`): it links every sibling
 checkout `../<x>-plugin-sicompass` that has a `target/debug/<x>-plugin` into
-`target/dev-plugins/` and points the variable there, so a plugin edit needs
-only `cargo build` in its repo. A checkout without a debug build keeps the
-Store's copy, and setting the variable, even to nothing, turns this off.
+`target/dev-plugins/` and points the variable there. A debug `cargo build` of
+the app runs `cargo build` in each of those checkouts too (`src/build.rs`,
+only when a checkout's sources changed), so a plugin edit needs only
+`cargo build` in sicompass, and a checkout that does not build fails it. A
+checkout without a debug build keeps the Store's copy, and setting the
+variable, even to nothing, turns this off, at build time as at run time.
 
 - **Precedence.** These folders are read first and one plugin is kept per name
   (`installed_plugins::discover_all` in the SDK), so a plugin here replaces the

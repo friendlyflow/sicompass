@@ -2,12 +2,12 @@
 //!
 //! sicompass is worked on beside its plugins, each a sibling checkout
 //! (`../notes-plugin-sicompass`, `../projectmanagement-plugin-sicompass`, ...).
-//! A plugin is a program of its own, so building the app does not rebuild one,
-//! and the app would otherwise run the copy the Store installed. Instead, at
-//! start-up a debug build links every sibling `<x>-plugin-sicompass` that has a
-//! `target/debug/<x>-plugin` into `target/dev-plugins/<name>/` and points
-//! `SICOMPASS_PLUGIN_PATH` there, the variable the desicompass dev session uses
-//! for the same thing. `cargo build` in a plugin repo, then in this one, and
+//! A plugin is a program of its own, and the app would otherwise run the copy
+//! the Store installed. Instead, at start-up a debug build links every sibling
+//! `<x>-plugin-sicompass` that has a `target/debug/<x>-plugin` into
+//! `target/dev-plugins/<name>/` and points `SICOMPASS_PLUGIN_PATH` there, the
+//! variable the desicompass dev session uses for the same thing. A debug
+//! `cargo build` here builds those checkouts first (`build.rs`), so after it
 //! `target/debug/sicompass` runs both as they are on disk.
 //!
 //! A plugin found there replaces the Store's copy of the same name and runs

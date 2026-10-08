@@ -3062,6 +3062,196 @@ fn filebrowser_i_placeholder_creates_subdirectory() {
     );
 }
 
+/// Folders under `root` the user cannot write to, as `/etc` is for a user
+/// without sudo: `locked` holds `kept.txt`, `empty` holds nothing. `None` when
+/// the user can write there anyway (root), where there is nothing to show.
+#[cfg(unix)]
+struct ReadOnlyFolders(Vec<std::path::PathBuf>);
+
+#[cfg(unix)]
+impl ReadOnlyFolders {
+    fn new(root: &Path) -> Option<Self> {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::create_dir(root.join("locked")).unwrap();
+        std::fs::write(root.join("locked/kept.txt"), "x").unwrap();
+        std::fs::create_dir(root.join("empty")).unwrap();
+        let dirs = ReadOnlyFolders(vec![root.join("locked"), root.join("empty")]);
+        for d in &dirs.0 {
+            std::fs::set_permissions(d, std::fs::Permissions::from_mode(0o555)).unwrap();
+        }
+        if std::fs::write(root.join("empty/probe"), "").is_ok() {
+            return None;
+        }
+        Some(dirs)
+    }
+
+    /// Take the user's rights to `dir` away too, until the test ends.
+    fn lock(&mut self, dir: &Path) {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o555)).unwrap();
+        self.0.push(dir.to_path_buf());
+    }
+}
+
+#[cfg(unix)]
+impl Drop for ReadOnlyFolders {
+    fn drop(&mut self) {
+        use std::os::unix::fs::PermissionsExt;
+        for d in &self.0 {
+            let _ = std::fs::set_permissions(d, std::fs::Permissions::from_mode(0o755));
+        }
+    }
+}
+
+/// A file browser on `root`, its folder `name` entered.
+#[cfg(unix)]
+fn filebrowser_in(root: &Path, name: &str) -> AppRenderer {
+    let mut renderer = app_renderer();
+    register(&mut renderer, fs_plugin("filebrowser"));
+    renderer.providers[0].set_current_path(root.to_str().unwrap());
+    {
+        let children = renderer.providers[0].fetch();
+        let display_name = renderer.providers[0].display_name().to_owned();
+        let mut root_elem = FfonElement::new_obj(&display_name);
+        for child in children {
+            root_elem.as_obj_mut().unwrap().push(child);
+        }
+        renderer.ffon[0] = root_elem;
+    }
+    sicompass::list::create_list_current_layer(&mut renderer);
+    press_right(&mut renderer);
+    let idx = renderer
+        .total_list
+        .iter()
+        .position(|i| i.label.contains(name))
+        .unwrap();
+    let cur = renderer.list_index;
+    for _ in 0..(idx.abs_diff(cur)) {
+        if idx > cur {
+            press_down(&mut renderer);
+        } else {
+            press_up(&mut renderer);
+        }
+    }
+    press_right(&mut renderer);
+    renderer
+}
+
+/// Where the user may not write (a folder that needs sudo), a key that opens
+/// a row to type into says so at once, before a name is typed: `i` on the `i`
+/// row of an empty folder, and Ctrl+A on a file. The plugin's reason reaches
+/// the header, which is what the screen reader reads, and nothing is opened.
+#[cfg(unix)]
+#[test]
+fn filebrowser_adding_in_a_read_only_folder_is_refused_at_once() {
+    ensure_builtins();
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path();
+    let Some(_folders) = ReadOnlyFolders::new(root) else {
+        return;
+    };
+    let refused = |r: &AppRenderer, folder: &str| {
+        let err = &r.error_message;
+        assert!(
+            err.starts_with("cannot add to ")
+                && err.ends_with(&format!("{folder}: permission denied")),
+            "{err:?}"
+        );
+        assert_eq!(r.coordinate, sicompass::app_state::Coordinate::General);
+        assert!(!r.placeholder_insert_mode);
+    };
+
+    let mut renderer = filebrowser_in(root, "empty");
+    assert_eq!(&renderer.total_list[0].label, "i");
+    press(&mut renderer, Keycode::I);
+    refused(&renderer, "empty");
+    assert_eq!(renderer.total_list.len(), 1);
+
+    let mut renderer = filebrowser_in(root, "locked");
+    press_ctrl(&mut renderer, Keycode::A);
+    refused(&renderer, "locked");
+    assert_eq!(renderer.total_list.len(), 1, "no row was opened");
+}
+
+/// A folder that stops being writable while a name is typed: the create is
+/// refused on Enter instead, with the reason, and the list does not show a
+/// file that is not there. The edit stays open, and Escape cancels it.
+#[cfg(unix)]
+#[test]
+fn filebrowser_create_refused_on_enter_says_why() {
+    ensure_builtins();
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path();
+    let Some(mut folders) = ReadOnlyFolders::new(root) else {
+        return;
+    };
+    std::fs::create_dir(root.join("later")).unwrap();
+    std::fs::write(root.join("later/kept.txt"), "x").unwrap();
+    let mut renderer = filebrowser_in(root, "later");
+
+    press_ctrl(&mut renderer, Keycode::A);
+    folders.lock(&root.join("later"));
+    type_text(&mut renderer, "notes.txt");
+    press_enter(&mut renderer);
+
+    assert_eq!(
+        renderer.error_message,
+        "could not create notes.txt: permission denied"
+    );
+    assert!(!root.join("later/notes.txt").exists());
+    assert_eq!(
+        renderer.coordinate,
+        sicompass::app_state::Coordinate::Insert,
+        "the edit stays open with what was typed"
+    );
+    press_escape(&mut renderer);
+    assert_eq!(
+        renderer.coordinate,
+        sicompass::app_state::Coordinate::General
+    );
+    assert!(
+        renderer
+            .total_list
+            .iter()
+            .all(|i| !i.label.contains("notes.txt")),
+        "no file that was never created: {:?}",
+        renderer.total_list
+    );
+
+    // A folder the same way, typed `name:`.
+    press_ctrl(&mut renderer, Keycode::A);
+    let refused_at_once = renderer.error_message.starts_with("cannot add to ");
+    assert!(
+        refused_at_once,
+        "now read-only: {:?}",
+        renderer.error_message
+    );
+}
+
+/// A delete where the user may not write is refused out loud, and the file is
+/// still listed.
+#[cfg(unix)]
+#[test]
+fn filebrowser_delete_in_a_read_only_folder_says_why() {
+    ensure_builtins();
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path();
+    let Some(_folders) = ReadOnlyFolders::new(root) else {
+        return;
+    };
+    let mut renderer = filebrowser_in(root, "locked");
+    assert!(renderer.total_list[0].label.contains("kept.txt"));
+
+    press(&mut renderer, Keycode::Delete);
+
+    assert_eq!(
+        renderer.error_message,
+        "could not delete kept.txt: permission denied"
+    );
+    assert!(root.join("locked/kept.txt").exists());
+    assert!(renderer.total_list[0].label.contains("kept.txt"));
+}
+
 /// Ctrl+A after creating a file (prefixed insert mode) must not panic.
 /// Regression: after refresh, current_id could be out-of-bounds → insert at invalid index.
 #[test]

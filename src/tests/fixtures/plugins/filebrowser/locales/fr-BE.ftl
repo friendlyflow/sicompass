@@ -6,6 +6,13 @@ filebrowser-display-name = navigateur de fichiers
 filebrowser-error-redo-delete-trash-failed = refaire la suppression : corbeille échouée : { $err }
 filebrowser-error-open-with-not-file = ouvrir avec : sélectionnez un fichier, pas un dossier
 filebrowser-error-open-with-no-filename = ouvrir avec : impossible d'extraire le nom du fichier
+filebrowser-error-create-file = impossible de créer { $name } : { $err }
+filebrowser-error-create-directory = impossible de créer le dossier { $name } : { $err }
+filebrowser-error-delete = impossible de supprimer { $name } : { $err }
+filebrowser-error-rename = impossible de renommer { $old } en { $new } : { $err }
+filebrowser-error-copy = impossible de coller { $name } : { $err }
+filebrowser-error-add-here = impossible d'ajouter dans { $dir } : { $err }
+filebrowser-error-reason-permission-denied = permission refusée
 
 filebrowser-description = Vos fichiers et dossiers comme une liste de listes : parcourir, renommer, créer, copier, déplacer et supprimer, le tout annulable.
 filebrowser-radio-sort-order = ordre de tri

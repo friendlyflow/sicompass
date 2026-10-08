@@ -321,6 +321,18 @@ impl ProcessProvider {
         }
     }
 
+    /// A change to the user's things (create, rename, delete, paste). On a
+    /// refusal the plugin's reason is fetched at once, because the app reads
+    /// `take_error` straight after: in a folder that needs sudo, that reason is
+    /// all the user is told.
+    fn req_change(&mut self, what: &str, request: Request) -> bool {
+        let done = self.req_bool(what, request);
+        if !done {
+            self.repoll();
+        }
+        done
+    }
+
     fn req_unit(&mut self, what: &str, request: Request) {
         match self.req(what, request) {
             Ok(Response::Unit) | Err(_) => {}
@@ -748,7 +760,7 @@ impl Provider for ProcessProvider {
     // ---- Editing and file operations ---------------------------------------
 
     fn commit_edit(&mut self, old: &str, new: &str) -> bool {
-        self.req_bool(
+        self.req_change(
             "commit-edit",
             Request::CommitEdit {
                 old: old.to_owned(),
@@ -758,18 +770,34 @@ impl Provider for ProcessProvider {
     }
 
     fn create_directory(&mut self, name: &str) -> bool {
-        self.req_bool(
+        self.req_change(
             "create-directory",
             Request::CreateDirectory(name.to_owned()),
         )
     }
 
     fn create_file(&mut self, name: &str) -> bool {
-        self.req_bool("create-file", Request::CreateFile(name.to_owned()))
+        self.req_change("create-file", Request::CreateFile(name.to_owned()))
     }
 
     fn delete_item(&mut self, name: &str) -> bool {
-        self.req_bool("delete-item", Request::DeleteItem(name.to_owned()))
+        self.req_change("delete-item", Request::DeleteItem(name.to_owned()))
+    }
+
+    /// Asked only of a plugin that speaks 1.1: an older one could not read
+    /// the request, and lets the user try (and be refused on Enter) as before.
+    fn cannot_add_here(&mut self) -> Option<String> {
+        if !self.channel.speaks("1.1") {
+            return None;
+        }
+        match self.req("cannot-add-here", Request::CannotAddHere) {
+            Ok(Response::OptStr(why)) => why,
+            Ok(Response::Unsupported) | Err(_) => None,
+            Ok(other) => {
+                self.wrong_answer("cannot-add-here", &other);
+                None
+            }
+        }
     }
 
     fn copy_item(
@@ -779,7 +807,7 @@ impl Provider for ProcessProvider {
         dest_dir: &str,
         dest_name: &str,
     ) -> bool {
-        self.req_bool(
+        self.req_change(
             "copy-item",
             Request::CopyItem {
                 src_dir: src_dir.to_owned(),

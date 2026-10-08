@@ -119,6 +119,9 @@ impl Plugin for Fixture {
         true
     }
 
+    fn cannot_add_here(&mut self) -> Option<String> {
+        (self.path == "/full").then(|| "nothing fits in /full".to_owned())
+    }
     fn take_timeline_entries(&mut self) -> Vec<ProviderOp> {
         std::mem::take(&mut self.ops)
     }
