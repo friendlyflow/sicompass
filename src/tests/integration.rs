@@ -3137,6 +3137,48 @@ fn filebrowser_in(root: &Path, name: &str) -> AppRenderer {
     renderer
 }
 
+/// Scroll mode lists the folders below the cursor that the user has not
+/// opened: the file browser hands each folder over empty and fills it on
+/// Right, so S fetches them first. The plugin is left where the user is.
+#[cfg(unix)]
+#[test]
+fn filebrowser_scroll_mode_lists_unopened_subfolders() {
+    ensure_builtins();
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path();
+    std::fs::create_dir_all(root.join("top/notes/old")).unwrap();
+    std::fs::write(root.join("top/notes/today.txt"), "").unwrap();
+    std::fs::write(root.join("top/notes/old/last-year.txt"), "").unwrap();
+    let mut renderer = filebrowser_in(root, "top");
+    let path_before = renderer.providers[0].current_path().to_owned();
+    assert!(
+        !renderer
+            .total_list
+            .iter()
+            .any(|i| i.label.contains("today")),
+        "sanity: nothing below the folder is shown yet"
+    );
+
+    press(&mut renderer, Keycode::S);
+
+    assert_eq!(
+        renderer.coordinate,
+        sicompass::app_state::Coordinate::Scroll
+    );
+    for name in ["notes", "old", "today.txt", "last-year.txt"] {
+        assert!(
+            renderer.total_list.iter().any(|i| i.label.contains(name)),
+            "{name} missing from {:?}",
+            renderer
+                .total_list
+                .iter()
+                .map(|i| &i.label)
+                .collect::<Vec<_>>()
+        );
+    }
+    assert_eq!(renderer.providers[0].current_path(), path_before);
+}
+
 /// Where the user may not write (a folder that needs sudo), a key that opens
 /// a row to type into says so at once, before a name is typed: `i` on the `i`
 /// row of an empty folder, and Ctrl+A on a file. The plugin's reason reaches

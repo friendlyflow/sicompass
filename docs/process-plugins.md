@@ -60,12 +60,12 @@ Each message is a little-endian `u32` byte count, then the message in postcard
 carries an id and its reply names it.
 
 1. The plugin speaks first: `Hello { protocol, name }`. The app refuses a plugin
-   whose protocol major differs from its own (`PROTOCOL_VERSION`, now `1.1`) and
+   whose protocol major differs from its own (`PROTOCOL_VERSION`, now `1.2`) and
    says "update it from the Store". It keeps the version the plugin named
    (`Channel::speaks`).
 2. The app calls with `Call { id, request }`. There is one `Request` per thing a
    provider does, the same set the WIT `provider` interface had, plus
-   `LocaleChanged` and (1.1) `CannotAddHere`. The plugin answers with `Reply { id, response, moved_to }`.
+   `LocaleChanged`, (1.1) `CannotAddHere` and (1.2) `AllowsScrollPrefetch`. The plugin answers with `Reply { id, response, moved_to }`.
    `moved_to` is where the plugin is now, when the call moved it (a command, an
    edit, a shell's `cd`), so `current_path` never needs a call.
 3. The plugin asks with `HostCall { id, request }` for what only the app knows, and
@@ -78,7 +78,11 @@ A minor bump adds requests at the end. A peer that does not know one cannot
 read it: postcard fails on the unknown variant, and a plugin's runtime takes
 the channel for broken and exits. So the app sends a request only to a plugin
 whose hello names the minor that added it, and treats an older plugin like the
-trait's default (`CannotAddHere` is `None` for a 1.0 plugin).
+trait's default (`CannotAddHere` is `None` for a 1.0 plugin). The exception
+is a default only safe for a plugin that could have said no:
+`AllowsScrollPrefetch` is `true` in the trait and `false` for a plugin older
+than 1.2, because scroll mode (`S`) then calls `fetch` for levels the user has
+not opened, and a plugin whose fetch marks mail read must be able to refuse.
 
 ### What a plugin asks the app
 

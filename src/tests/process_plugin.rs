@@ -323,6 +323,27 @@ fn a_plugin_from_before_1_1_is_not_asked_and_keeps_running() {
     assert!(!p.is_poisoned(), "{:?}", p.take_error());
 }
 
+/// A plugin that speaks 1.2 says whether scroll mode may fetch ahead, and
+/// one that keeps the SDK's default lets it.
+#[test]
+fn a_current_plugin_is_asked_whether_scroll_mode_may_fetch_ahead() {
+    let dir = install("process_fixture");
+    let p = open_in(dir.path(), grants(None)).unwrap();
+    assert!(p.allows_scroll_prefetch());
+    assert!(!p.is_poisoned());
+}
+
+/// A plugin from before 1.2 is never asked, and could not have said no, so
+/// scroll mode fetches nothing ahead from it.
+#[test]
+fn a_plugin_from_before_1_2_is_not_asked_and_is_not_fetched_ahead() {
+    let dir = install("process_fixture_old");
+    let mut p = open_in(dir.path(), grants(None)).unwrap();
+    assert!(!p.allows_scroll_prefetch());
+    p.tick();
+    assert!(!p.is_poisoned(), "{:?}", p.take_error());
+}
+
 #[test]
 fn a_missing_executable_is_an_error_not_a_panic() {
     let dir = tempfile::tempdir().unwrap();

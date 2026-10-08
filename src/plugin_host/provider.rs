@@ -79,6 +79,9 @@ pub struct ProcessProvider {
     renders: Arc<Renders>,
     /// The app's language when the plugin last heard of it.
     locale: String,
+    /// The plugin's answer to `AllowsScrollPrefetch`, asked once after
+    /// `describe`.
+    scroll_prefetch: bool,
 }
 
 /// The executable for `entry_path` on this platform.
@@ -157,6 +160,7 @@ impl ProcessProvider {
             renders_pages: false,
             renders,
             locale: sicompass_sdk::localize::current_locale(),
+            scroll_prefetch: false,
         };
 
         // `init` before `describe`, so a plugin can compute its display name.
@@ -183,6 +187,7 @@ impl ProcessProvider {
         };
         me.descriptor = descriptor;
         me.dashboard_image = dashboard_image;
+        me.scroll_prefetch = me.ask_scroll_prefetch();
         // Where `init` put it: the path the app records before the first poll
         // has to be the real one, or undoing the first navigation goes to `/`.
         me.take_moved_to();
@@ -308,6 +313,16 @@ impl ProcessProvider {
         let r = self.call(what, request);
         self.take_moved_to();
         r
+    }
+
+    /// Whether scroll mode may fetch levels the user has not opened.
+    ///
+    /// `false` for a plugin older than 1.2, unlike the trait's `true`: such a
+    /// plugin could not have said no, and the one that must (email, whose
+    /// fetch marks a message read) is among them until it is rebuilt.
+    fn ask_scroll_prefetch(&mut self) -> bool {
+        self.channel.speaks("1.2")
+            && self.req_bool("allows-scroll-prefetch", Request::AllowsScrollPrefetch)
     }
 
     fn req_bool(&mut self, what: &str, request: Request) -> bool {
@@ -798,6 +813,11 @@ impl Provider for ProcessProvider {
                 None
             }
         }
+    }
+
+    /// The answer `open` cached.
+    fn allows_scroll_prefetch(&self) -> bool {
+        self.scroll_prefetch
     }
 
     fn copy_item(

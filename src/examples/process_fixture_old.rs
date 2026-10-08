@@ -25,6 +25,7 @@ fn main() {
             }),
             Request::Poll => Response::Poll(PollResult::default()),
             Request::CannotAddHere => return,
+            Request::AllowsScrollPrefetch => return,
             _ => Response::Unit,
         };
         let reply = Message::Reply {

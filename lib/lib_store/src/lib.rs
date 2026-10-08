@@ -1098,6 +1098,13 @@ impl Provider for StoreProvider {
         self.current_path = path.to_owned();
     }
 
+    /// The programs list and the tier pages load on a thread and come back as
+    /// a "loading" row first. Fetched ahead of time, that row would be what
+    /// scroll mode keeps.
+    fn allows_scroll_prefetch(&self) -> bool {
+        false
+    }
+
     fn on_button_press(&mut self, function_name: &str) {
         if self.tiers.on_button_press(function_name).is_some() {
             self.refresh = true;
