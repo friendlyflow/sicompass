@@ -115,7 +115,9 @@ impl Services {
                     .flatten(),
             ),
             HostRequest::OpenUrl(url) => R::Done(desktop::open_url(&url)),
-            HostRequest::OpenPath(path) => R::Done(real_path(&path).and_then(|p| desktop::open_path(&p))),
+            HostRequest::OpenPath(path) => {
+                R::Done(real_path(&path).and_then(|p| desktop::open_path(&p)))
+            }
             HostRequest::Applications => R::Applications(
                 desktop::applications()
                     .into_iter()
@@ -132,10 +134,12 @@ impl Services {
             HostRequest::OauthRedirect {
                 auth_url,
                 timeout_secs,
-            } => R::Oauth(
-                desktop::sign_in(&auth_url, timeout_secs, &self.closed)
-                    .map(|(redirect_uri, query)| OauthReply { redirect_uri, query }),
-            ),
+            } => R::Oauth(desktop::sign_in(&auth_url, timeout_secs, &self.closed).map(
+                |(redirect_uri, query)| OauthReply {
+                    redirect_uri,
+                    query,
+                },
+            )),
             HostRequest::Rendered { url, page } => {
                 let asked = self
                     .renders
@@ -260,7 +264,8 @@ mod tests {
     #[test]
     fn a_page_is_taken_only_when_it_was_asked_for() {
         let s = services(None);
-        let page = sicompass_sdk::ffon::serialize_binary(&[sicompass_sdk::FfonElement::new_str("p")]);
+        let page =
+            sicompass_sdk::ffon::serialize_binary(&[sicompass_sdk::FfonElement::new_str("p")]);
         let rendered = |url: &str| HostRequest::Rendered {
             url: url.into(),
             page: page.clone(),

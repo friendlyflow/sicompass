@@ -33,8 +33,14 @@ const LOG_TAIL: usize = 20;
 
 /// What the reader hands the waiting caller.
 enum Incoming {
-    Hello { protocol: String },
-    Reply { id: u64, response: Response, moved_to: Option<String> },
+    Hello {
+        protocol: String,
+    },
+    Reply {
+        id: u64,
+        response: Response,
+        moved_to: Option<String>,
+    },
     /// The channel ended: the plugin exited, crashed or sent garbage.
     Closed(String),
 }
@@ -91,8 +97,8 @@ impl Channel {
             const CREATE_NO_WINDOW: u32 = 0x0800_0000;
             cmd.creation_flags(CREATE_NO_WINDOW);
         }
-        let mut child = spawn_retrying(&mut cmd)
-            .map_err(|e| format!("cannot start {}: {e}", exe.display()))?;
+        let mut child =
+            spawn_retrying(&mut cmd).map_err(|e| format!("cannot start {}: {e}", exe.display()))?;
         let pid = child.id();
         let stdin = child.stdin.take().ok_or("no stdin")?;
         let mut stdout = child.stdout.take().ok_or("no stdout")?;

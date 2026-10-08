@@ -93,7 +93,12 @@ struct ProcessRelease {
     archives: Vec<(String, Vec<u8>)>,
 }
 
-fn process_release(keys: &Keys, version: &str, permissions: &str, targets: &[&str]) -> ProcessRelease {
+fn process_release(
+    keys: &Keys,
+    version: &str,
+    permissions: &str,
+    targets: &[&str],
+) -> ProcessRelease {
     let manifest = format!(
         r#"{{ "name": "demo", "displayName": "demo", "type": "process", "entry": "plugin",
              "version": "{version}", "permissions": {{ {permissions} }} }}"#
@@ -204,7 +209,10 @@ impl Server {
         let at = |file: &str| format!("{folder}{file}");
         self.serve(&at(RELEASE_FILE), r.json.clone());
         self.serve(&at(SIGNATURE_FILE), r.sig.clone().into_bytes());
-        self.serve(&at(&package::archive_file(this_target())), r.archive.clone());
+        self.serve(
+            &at(&package::archive_file(this_target())),
+            r.archive.clone(),
+        );
     }
 }
 
@@ -374,7 +382,10 @@ fn a_listed_plugin_installs_after_its_access_is_shown() {
         h.plugins
             .path()
             .join("demo")
-            .join(sicompass_sdk::plugin_abi::executable_name("plugin", this_target()))
+            .join(sicompass_sdk::plugin_abi::executable_name(
+                "plugin",
+                this_target()
+            ))
             .is_file()
     );
     assert_eq!(h.fired(), vec![(PLUGIN_INSTALLED.into(), "demo".into())]);
@@ -1315,7 +1326,10 @@ fn a_plugin_process_says_it_runs_as_a_program_and_installs_runnable() {
         .plugins
         .path()
         .join("demo")
-        .join(sicompass_sdk::plugin_abi::executable_name("plugin", this_target()));
+        .join(sicompass_sdk::plugin_abi::executable_name(
+            "plugin",
+            this_target(),
+        ));
     assert_eq!(
         std::fs::read(&exe).unwrap(),
         format!("a build for {}", this_target()).into_bytes()
@@ -1371,7 +1385,10 @@ fn a_wasm_plugin_from_before_is_replaced_by_its_program() {
 
     h.open_programs();
     let entry = h.entry();
-    assert!(has(&entry, &localize::t("store-access-program")), "{entry:?}");
+    assert!(
+        has(&entry, &localize::t("store-access-program")),
+        "{entry:?}"
+    );
     assert!(has(&entry, "<button>install:demo</button>"), "{entry:?}");
     h.press("install:demo");
     assert_eq!(h.installed_version().as_deref(), Some("2.0.0"));
@@ -1411,7 +1428,10 @@ fn a_plugin_copied_in_by_hand_waits_for_the_users_approval() {
     let entry = h.entry();
     assert!(has(&entry, &localize::t("store-not-approved")), "{entry:?}");
     // What it is and what it declares, before the user says yes.
-    assert!(has(&entry, &localize::t("store-access-program")), "{entry:?}");
+    assert!(
+        has(&entry, &localize::t("store-access-program")),
+        "{entry:?}"
+    );
     assert!(
         has(&entry, &t_with("store-access-programs", &[("list", "git")])),
         "{entry:?}"
@@ -1431,7 +1451,11 @@ fn a_plugin_copied_in_by_hand_waits_for_the_users_approval() {
         &h,
         &plugin_json_with("1.0.1", r#""process": ["git", "ssh"]"#, "0.1.0", ""),
     );
-    assert!(has(&h.entry(), "<button>approve:demo</button>"), "{:?}", h.entry());
+    assert!(
+        has(&h.entry(), "<button>approve:demo</button>"),
+        "{:?}",
+        h.entry()
+    );
 }
 
 /// `demo` in a folder this computer's configuration provides, with `h`'s Store

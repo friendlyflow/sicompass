@@ -143,7 +143,13 @@ fn fetch_line(seq: usize, m: &Message) -> String {
 
 /// `a:b`, `a:*`, `a` → the inclusive range, `*` being `max`.
 fn range(spec: &str, max: u32) -> (u32, u32) {
-    let num = |s: &str| if s == "*" { max } else { s.parse().unwrap_or(0) };
+    let num = |s: &str| {
+        if s == "*" {
+            max
+        } else {
+            s.parse().unwrap_or(0)
+        }
+    };
     match spec.split_once(':') {
         Some((a, b)) => (num(a), num(b)),
         None => (num(spec), num(spec)),
@@ -177,7 +183,10 @@ fn serve(stream: TcpStream, state: &Mutex<State>, stop: &AtomicBool) {
             send(&mut w, &format!("{tag} OK CAPABILITY completed\r\n"));
         } else if upper.starts_with("LIST") {
             send(&mut w, "* LIST (\\HasNoChildren) \"/\" \"INBOX\"\r\n");
-            send(&mut w, "* LIST (\\HasNoChildren \\Trash) \"/\" \"[Gmail]/Trash\"\r\n");
+            send(
+                &mut w,
+                "* LIST (\\HasNoChildren \\Trash) \"/\" \"[Gmail]/Trash\"\r\n",
+            );
             send(&mut w, &format!("{tag} OK LIST completed\r\n"));
         } else if upper.starts_with("SELECT") || upper.starts_with("EXAMINE") {
             selected = words.get(1).unwrap_or(&"").trim_matches('"').to_owned();
@@ -189,7 +198,10 @@ fn serve(stream: TcpStream, state: &Mutex<State>, stop: &AtomicBool) {
             send(&mut w, "* FLAGS (\\Seen \\Flagged \\Deleted)\r\n");
             send(&mut w, &format!("* {exists} EXISTS\r\n"));
             send(&mut w, "* OK [UIDVALIDITY 7] UIDs valid\r\n");
-            send(&mut w, &format!("{tag} OK [READ-WRITE] SELECT completed\r\n"));
+            send(
+                &mut w,
+                &format!("{tag} OK [READ-WRITE] SELECT completed\r\n"),
+            );
         } else if upper.starts_with("UID FETCH") || upper.starts_with("FETCH") {
             let by_uid = upper.starts_with("UID");
             let spec = words.get(if by_uid { 2 } else { 1 }).unwrap_or(&"");
@@ -257,7 +269,9 @@ fn idle(
 ) -> bool {
     let _ = w.write_all(b"+ idling\r\n");
     let mut told = state.lock().unwrap().inbox.len();
-    let _ = r.get_ref().set_read_timeout(Some(Duration::from_millis(50)));
+    let _ = r
+        .get_ref()
+        .set_read_timeout(Some(Duration::from_millis(50)));
     let mut buf = Vec::new();
     let done = loop {
         if stop.load(Ordering::Relaxed) {

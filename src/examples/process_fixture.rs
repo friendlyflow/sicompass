@@ -3,7 +3,7 @@
 
 use sicompass_sdk::FfonElement;
 use sicompass_sdk::plugin::{
-    self, Descriptor, DashboardKind, Frame, Key, Plugin, PollResult, ProviderOp, host, license,
+    self, DashboardKind, Descriptor, Frame, Key, Plugin, PollResult, ProviderOp, host, license,
 };
 
 struct Fixture {
@@ -46,11 +46,16 @@ impl Plugin for Fixture {
     fn fetch(&mut self) -> Vec<FfonElement> {
         vec![
             FfonElement::new_str(host::translate("fixture-hello")),
-            FfonElement::new_str(format!("greeting: {}", self.greeting.as_deref().unwrap_or("-"))),
+            FfonElement::new_str(format!(
+                "greeting: {}",
+                self.greeting.as_deref().unwrap_or("-")
+            )),
             FfonElement::new_str(format!("note: {}", self.note)),
             FfonElement::new_str(format!(
                 "storage: {}",
-                plugin::storage_dir().map(|d| d.display().to_string()).unwrap_or_default()
+                plugin::storage_dir()
+                    .map(|d| d.display().to_string())
+                    .unwrap_or_default()
             )),
         ]
     }

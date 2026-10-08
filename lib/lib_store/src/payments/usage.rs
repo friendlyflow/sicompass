@@ -89,8 +89,8 @@ pub fn fetch(server: &str, token: &str) -> Result<Usage, String> {
             body.to_owned()
         });
     }
-    let reply: serde_json::Value =
-        serde_json::from_str(&body).map_err(|e| format!("Server returned an invalid reply: {e}"))?;
+    let reply: serde_json::Value = serde_json::from_str(&body)
+        .map_err(|e| format!("Server returned an invalid reply: {e}"))?;
     record_from(&reply).ok_or_else(|| "The server's reply has no usage".to_owned())
 }
 
@@ -192,7 +192,11 @@ mod tests {
     #[test]
     fn a_refusal_is_passed_on_and_nothing_is_asked_without_a_token() {
         let (_rt, server) = usage_server(401, serde_json::json!("That token is not known"));
-        assert!(fetch(&server.uri(), "tok-42").unwrap_err().contains("token"));
+        assert!(
+            fetch(&server.uri(), "tok-42")
+                .unwrap_err()
+                .contains("token")
+        );
         assert!(fetch(&server.uri(), "").is_err());
     }
 

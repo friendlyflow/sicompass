@@ -205,7 +205,12 @@ fn the_store_installs_a_plugin_into_the_running_app_and_removes_it() {
         &download(SIGNATURE_FILE),
         release_sig.into_bytes(),
     );
-    serve(&rt, &server, &download(&package::archive_file(target)), archive);
+    serve(
+        &rt,
+        &server,
+        &download(&package::archive_file(target)),
+        archive,
+    );
 
     // ---- The app, with its Store pointed at that server ----
     let mut renderer = AppRenderer::new();
@@ -247,7 +252,12 @@ fn the_store_installs_a_plugin_into_the_running_app_and_removes_it() {
     settle(&mut renderer, idx);
     programs::apply_pending_settings(&mut renderer, &queue, false);
 
-    assert!(plugins_dir.join("fixture").join(sicompass_sdk::plugin_abi::executable_name("plugin", target)).is_file());
+    assert!(
+        plugins_dir
+            .join("fixture")
+            .join(sicompass_sdk::plugin_abi::executable_name("plugin", target))
+            .is_file()
+    );
     assert!(loaded(&renderer, "fixture"), "installed but not loaded");
     assert!(in_parked(&renderer, "fixture"), "not in the other tab");
     let cfg = settings_json();
@@ -298,7 +308,10 @@ fn the_store_installs_a_plugin_into_the_running_app_and_removes_it() {
     programs::apply_pending_settings(&mut renderer, &queue, false);
 
     assert!(!plugins_dir.join("fixture").exists());
-    assert!(!loaded(&renderer, "fixture"), "uninstalled but still loaded");
+    assert!(
+        !loaded(&renderer, "fixture"),
+        "uninstalled but still loaded"
+    );
     assert!(!in_parked(&renderer, "fixture"), "still in the other tab");
     let cfg = settings_json();
     assert!(cfg["pluginApprovals"].get("fixture").is_none(), "{cfg}");
@@ -337,10 +350,15 @@ fn the_store_installs_a_plugin_into_the_running_app_and_removes_it() {
         .filter_map(|e| e.as_str().map(str::to_owned))
         .collect();
     assert!(
-        entry.iter().any(|l| l.contains("<button>approve:fixture</button>")),
+        entry
+            .iter()
+            .any(|l| l.contains("<button>approve:fixture</button>")),
         "{entry:?}"
     );
-    assert!(!loaded(&renderer, "fixture"), "not running before the approval");
+    assert!(
+        !loaded(&renderer, "fixture"),
+        "not running before the approval"
+    );
     // Nor at the next start: an unapproved plugin is not in the root list, and
     // has no settings section either.
     let mut restarted = AppRenderer::new();

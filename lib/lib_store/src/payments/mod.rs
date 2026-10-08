@@ -48,10 +48,14 @@ pub const SUPPORT_SLUG: &str = "support-license";
 pub fn register_translations() {
     static ONCE: OnceLock<()> = OnceLock::new();
     ONCE.get_or_init(|| {
-        let _ = localize::register_bundle("en-US", include_str!("../../locales/payments/en-US.ftl"));
-        let _ = localize::register_bundle("nl-BE", include_str!("../../locales/payments/nl-BE.ftl"));
-        let _ = localize::register_bundle("fr-BE", include_str!("../../locales/payments/fr-BE.ftl"));
-        let _ = localize::register_bundle("de-BE", include_str!("../../locales/payments/de-BE.ftl"));
+        let _ =
+            localize::register_bundle("en-US", include_str!("../../locales/payments/en-US.ftl"));
+        let _ =
+            localize::register_bundle("nl-BE", include_str!("../../locales/payments/nl-BE.ftl"));
+        let _ =
+            localize::register_bundle("fr-BE", include_str!("../../locales/payments/fr-BE.ftl"));
+        let _ =
+            localize::register_bundle("de-BE", include_str!("../../locales/payments/de-BE.ftl"));
     });
 }
 

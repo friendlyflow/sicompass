@@ -402,13 +402,11 @@ fn installed_program_leaves(plugins_dir: &PluginDirs) -> Vec<String> {
             // A refused locale file just leaves its ids unresolved, so the
             // plugin falls through to being left out.
             sicompass_sdk::installed_plugins::register_locales(&name, &dir);
-            let display_name = localize::try_t(&format!("{name}-display-name"))
-                .unwrap_or(manifest.display_name);
+            let display_name =
+                localize::try_t(&format!("{name}-display-name")).unwrap_or(manifest.display_name);
             let mut leaves: Vec<String> = localize::try_t(&format!("{name}-tutorial"))
                 .into_iter()
-                .chain(
-                    (2..).map_while(|n| localize::try_t(&format!("{name}-tutorial-{n}"))),
-                )
+                .chain((2..).map_while(|n| localize::try_t(&format!("{name}-tutorial-{n}"))))
                 .collect();
             if leaves.is_empty() {
                 let description = localize::try_t(&format!("{name}-description"))?;
@@ -421,7 +419,10 @@ fn installed_program_leaves(plugins_dir: &PluginDirs) -> Vec<String> {
         return vec![translate_node_string("tutorial-prog-none")];
     }
     programs.sort();
-    programs.into_iter().flat_map(|(_, leaves)| leaves).collect()
+    programs
+        .into_iter()
+        .flat_map(|(_, leaves)| leaves)
+        .collect()
 }
 
 /// Where the installed plugins are: the folders this computer's configuration
@@ -600,8 +601,7 @@ impl Provider for TutorialProvider {
             return false;
         }
         self.programs_checked = Some(Instant::now());
-        self.programs_built_from.as_ref()
-            != Some(&plugins_fingerprint(&self.plugins_dir))
+        self.programs_built_from.as_ref() != Some(&plugins_fingerprint(&self.plugins_dir))
     }
 
     fn push_path(&mut self, segment: &str) {
@@ -979,7 +979,10 @@ mod tests {
             .unwrap_or_else(|| panic!("no first leaf in {leaves:?}"));
         assert_eq!(leaves[first + 1], "b: the second leaf");
         assert_eq!(leaves[first + 2], "the third leaf");
-        assert!(!leaves.iter().any(|l| l.contains("Not shown")), "{leaves:?}");
+        assert!(
+            !leaves.iter().any(|l| l.contains("Not shown")),
+            "{leaves:?}"
+        );
     }
 
     #[test]
@@ -1017,7 +1020,9 @@ mod tests {
         );
         let leaves = programs(root.path());
         assert!(
-            !leaves.iter().any(|l| l.contains("mute") || l.contains("Spoof")),
+            !leaves
+                .iter()
+                .any(|l| l.contains("mute") || l.contains("Spoof")),
             "{leaves:?}"
         );
         assert!(
@@ -1086,7 +1091,12 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let mut p = TutorialProvider::with_plugins_dir(Some(root.path().to_owned()));
         p.fetch();
-        install(root.path(), "tutfake-elsewhere", "fake", "tutfake-elsewhere-tutorial = x\n");
+        install(
+            root.path(),
+            "tutfake-elsewhere",
+            "fake",
+            "tutfake-elsewhere-tutorial = x\n",
+        );
         // The root and the playground hold what the user ticked and typed.
         for path in ["/", "/Interactive playground"] {
             p.set_current_path(path);
@@ -1143,11 +1153,11 @@ mod tests {
             let mut p = TutorialProvider::with_plugins_dir(dir);
             p.push_path("The programs");
             let text = joined(&p.fetch());
+            assert!(text.contains("No programs installed yet"), "got:\n{text}");
             assert!(
-                text.contains("No programs installed yet"),
+                text.contains("Store:") && text.contains("Settings:"),
                 "got:\n{text}"
             );
-            assert!(text.contains("Store:") && text.contains("Settings:"), "got:\n{text}");
         }
     }
 

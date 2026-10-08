@@ -162,7 +162,8 @@ fn await_redirect(
                 let n = stream.read(&mut buf).unwrap_or(0);
                 let request = String::from_utf8_lossy(&buf[..n]);
                 let Some(query) = request_query(&request) else {
-                    let _ = stream.write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n");
+                    let _ =
+                        stream.write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n");
                     continue;
                 };
                 let failed = query.split('&').any(|kv| kv.starts_with("error="));
@@ -370,7 +371,11 @@ mod tests {
         let cancel = std::sync::Arc::new(AtomicBool::new(false));
         let flag = cancel.clone();
         let waiter = std::thread::spawn(move || {
-            sign_in("https://auth.example.org/o?r={redirect-uri}&z=signin2", 600, &flag)
+            sign_in(
+                "https://auth.example.org/o?r={redirect-uri}&z=signin2",
+                600,
+                &flag,
+            )
         });
         opened_sign_in("z=signin2");
         cancel.store(true, Ordering::Release);
@@ -410,7 +415,10 @@ mod tests {
         std::os::unix::fs::symlink(root.join("docs"), root.join("link")).unwrap();
 
         trash(&root.join("link")).unwrap();
-        assert!(std::fs::symlink_metadata(root.join("link")).is_err(), "the link is gone");
+        assert!(
+            std::fs::symlink_metadata(root.join("link")).is_err(),
+            "the link is gone"
+        );
         assert_eq!(
             std::fs::read_to_string(root.join("docs/a.txt")).unwrap(),
             "keep me",
@@ -418,7 +426,10 @@ mod tests {
         );
         assert!(trash(&root.join("nothing")).is_err());
         restore(&root.join("link")).unwrap();
-        assert!(std::fs::symlink_metadata(root.join("link")).is_ok(), "and it comes back");
+        assert!(
+            std::fs::symlink_metadata(root.join("link")).is_ok(),
+            "and it comes back"
+        );
     }
 
     #[test]

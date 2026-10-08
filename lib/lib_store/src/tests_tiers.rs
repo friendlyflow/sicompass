@@ -223,18 +223,14 @@ fn a_radio_selection_on_a_page_is_kept() {
     t.at(&page);
     t.settle();
 
-    t.store
-        .on_radio_change("monthly or yearly", "per month");
+    t.store.on_radio_change("monthly or yearly", "per month");
     let items = t.at(&page);
     let FfonElement::Obj(radio) = &items[2] else {
         panic!("{items:?}")
     };
     assert_eq!(
         radio.children.iter().map(key).collect::<Vec<_>>(),
-        vec![
-            "<checked>per month".to_owned(),
-            "per year".to_owned()
-        ]
+        vec!["<checked>per month".to_owned(), "per year".to_owned()]
     );
 }
 

@@ -979,7 +979,11 @@ fn button(action: &str, name: &str, label: String) -> FfonElement {
 /// A plugin process leads with what matters most: it is a program with the
 /// user's rights, so the lines after it are what it declares, not limits.
 fn access_lines(release: &ReleaseInfo) -> Vec<String> {
-    access_lines_of(release.is_process(), &release.allowed_hosts, &release.permissions)
+    access_lines_of(
+        release.is_process(),
+        &release.allowed_hosts,
+        &release.permissions,
+    )
 }
 
 /// [`access_lines`] from its parts, for a plugin on disk with no release.

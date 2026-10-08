@@ -567,7 +567,11 @@ fn to_sdk_frame(f: ipc::Frame) -> Option<DashboardFrame> {
             rows: s.rows.min(f.rows - s.row),
         })
     });
-    let half_gap_rows = f.half_gap_rows.into_iter().filter(|r| *r < f.rows).collect();
+    let half_gap_rows = f
+        .half_gap_rows
+        .into_iter()
+        .filter(|r| *r < f.rows)
+        .collect();
     Some(DashboardFrame {
         cols: f.cols,
         rows: f.rows,
@@ -754,7 +758,10 @@ impl Provider for ProcessProvider {
     }
 
     fn create_directory(&mut self, name: &str) -> bool {
-        self.req_bool("create-directory", Request::CreateDirectory(name.to_owned()))
+        self.req_bool(
+            "create-directory",
+            Request::CreateDirectory(name.to_owned()),
+        )
     }
 
     fn create_file(&mut self, name: &str) -> bool {
@@ -765,7 +772,13 @@ impl Provider for ProcessProvider {
         self.req_bool("delete-item", Request::DeleteItem(name.to_owned()))
     }
 
-    fn copy_item(&mut self, src_dir: &str, src_name: &str, dest_dir: &str, dest_name: &str) -> bool {
+    fn copy_item(
+        &mut self,
+        src_dir: &str,
+        src_name: &str,
+        dest_dir: &str,
+        dest_name: &str,
+    ) -> bool {
         self.req_bool(
             "copy-item",
             Request::CopyItem {
@@ -833,7 +846,10 @@ impl Provider for ProcessProvider {
     }
 
     fn command_list_items(&self, cmd: &str) -> Vec<ListItem> {
-        match self.call("command-list-items", Request::CommandListItems(cmd.to_owned())) {
+        match self.call(
+            "command-list-items",
+            Request::CommandListItems(cmd.to_owned()),
+        ) {
             Ok(Response::ListItems(items)) => items
                 .into_iter()
                 .map(|i| ListItem {
@@ -885,7 +901,10 @@ impl Provider for ProcessProvider {
     }
 
     fn on_button_press(&mut self, function_name: &str) {
-        self.req_unit("on-button-press", Request::OnButtonPress(function_name.to_owned()));
+        self.req_unit(
+            "on-button-press",
+            Request::OnButtonPress(function_name.to_owned()),
+        );
     }
 
     fn on_checkbox_change(&mut self, label: &str, checked: bool) {
@@ -927,8 +946,7 @@ impl Provider for ProcessProvider {
                 .map(|op| TimelineEntry::ProviderOp {
                     provider_idx: 0,
                     command: op.command,
-                    payload: first_element(&op.payload)
-                        .unwrap_or_else(|| FfonElement::new_str("")),
+                    payload: first_element(&op.payload).unwrap_or_else(|| FfonElement::new_str("")),
                     label: op.label,
                 })
                 .collect(),
@@ -1178,7 +1196,10 @@ mod tests {
             label: "greet world".to_owned(),
         };
         let op = to_ipc_op(&entry).unwrap();
-        assert_eq!(first_element(&op.payload), Some(FfonElement::new_str("world")));
+        assert_eq!(
+            first_element(&op.payload),
+            Some(FfonElement::new_str("world"))
+        );
         let fs = TimelineEntry::FsOp {
             provider_idx: 0,
             id: sicompass_sdk::IdArray::new(),

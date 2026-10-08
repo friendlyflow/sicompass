@@ -109,7 +109,6 @@ pub fn register_plugin_assets(plugin_name: &str, plugin_dir: &Path) {
     );
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -258,6 +257,8 @@ mod tests {
             Some(&b"hello"[..])
         );
         // And the resolver is confined, not merely a path join.
-        assert!(sicompass_sdk::assets::resolve("asset:__plugin_asset_test/../plugin.json").is_none());
+        assert!(
+            sicompass_sdk::assets::resolve("asset:__plugin_asset_test/../plugin.json").is_none()
+        );
     }
 }

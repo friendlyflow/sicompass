@@ -8,7 +8,6 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
-
 /// Version of the `sicompass-sdk` crate this build links against, resolved from
 /// the workspace `Cargo.lock` by [`build.rs`](../build.rs).
 ///
@@ -1117,7 +1116,6 @@ impl Provider for SettingsProvider {
     fn set_external_setting_keys(&mut self, keys: &[&str]) {
         self.external_keys = keys.iter().map(|k| (*k).to_owned()).collect();
     }
-
 
     fn set_apply_callback(&mut self, cb: Box<dyn Fn(&str, &str) + Send + 'static>) {
         self.apply_fn = Some(cb);
@@ -2392,7 +2390,13 @@ mod tests {
             .collect();
         assert_eq!(
             keys,
-            vec!["sicompass", "chat client", "email client", "tutorial", "web browser"]
+            vec![
+                "sicompass",
+                "chat client",
+                "email client",
+                "tutorial",
+                "web browser"
+            ]
         );
     }
 
@@ -2444,7 +2448,10 @@ mod tests {
         let root: serde_json::Value = serde_json::from_str(&data).unwrap();
         assert_eq!(root["sicompass"]["colorScheme"].as_str(), Some("light"));
         // The seed must not have replaced the existing file.
-        assert_eq!(root, serde_json::json!({"sicompass":{"colorScheme":"light"}}));
+        assert_eq!(
+            root,
+            serde_json::json!({"sicompass":{"colorScheme":"light"}})
+        );
     }
 
     #[test]

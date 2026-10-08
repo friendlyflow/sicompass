@@ -75,7 +75,8 @@ impl sicompass::registry::HostHooks for TestHooks {
                     sicompass::registry::init_provider_root(plugin, &mut renderer.error_message);
                 (vec![p], vec![root])
             } else {
-                self.0.build_content_set(renderer, std::slice::from_ref(name))
+                self.0
+                    .build_content_set(renderer, std::slice::from_ref(name))
             };
             providers.append(&mut p);
             roots.append(&mut f);
@@ -147,10 +148,7 @@ impl Harness {
         let mut renderer = app_renderer();
 
         // File browser rooted at temp dir (set path AFTER init which resets to "/")
-        register(
-            &mut renderer,
-            fs_plugin("filebrowser"),
-        );
+        register(&mut renderer, fs_plugin("filebrowser"));
         renderer.providers[0].set_current_path(root.to_str().unwrap());
         // Re-fetch now that the path is correct
         {
@@ -191,10 +189,7 @@ impl Harness {
         let mut renderer = app_renderer();
 
         // Filebrowser: init resets path to "/", so set path after init
-        register(
-            &mut renderer,
-            fs_plugin("filebrowser"),
-        );
+        register(&mut renderer, fs_plugin("filebrowser"));
         renderer.providers[0].set_current_path(root.to_str().unwrap());
         {
             let children = renderer.providers[0].fetch();
@@ -312,10 +307,7 @@ fn press_up(r: &mut AppRenderer) {
 /// the provider root's own listing at that same depth. Returns the id of the
 /// live input slot, which is where the cursor is left.
 fn register_terminal_in_shell(renderer: &mut AppRenderer) -> sicompass_sdk::ffon::IdArray {
-    register(
-        renderer,
-        fs_plugin("terminal"),
-    );
+    register(renderer, fs_plugin("terminal"));
     sicompass::list::create_list_current_layer(renderer);
     press_right(renderer);
     sicompass::handlers::handle_colon(renderer);
@@ -2220,19 +2212,30 @@ fn enter_in_editor_general_appends() {
 #[test]
 #[ignore]
 fn the_browser_plugin_loads_a_page_in_a_real_chrome() {
-    let url = serve_html("<!DOCTYPE html><html><body><h1>Hello from real Chrome</h1></body></html>");
+    let url =
+        serve_html("<!DOCTYPE html><html><body><h1>Hello from real Chrome</h1></body></html>");
     let tmp = TempDir::new().unwrap();
     let mut p = plugin_provider_with("webbrowser", Some(tmp.path()), Vec::new());
     p.fetch();
     assert!(p.commit_edit("", &url));
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
     while !p.tick() {
-        assert!(std::time::Instant::now() < deadline, "the page never landed");
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the page never landed"
+        );
         std::thread::sleep(std::time::Duration::from_millis(20));
     }
     let rows = format!("{:?}", p.fetch());
-    assert!(rows.contains("Hello from real Chrome"), "{rows} {:?}", p.take_error());
-    assert!(tmp.path().join("chrome/profile").is_dir(), "the profile is in storage");
+    assert!(
+        rows.contains("Hello from real Chrome"),
+        "{rows} {:?}",
+        p.take_error()
+    );
+    assert!(
+        tmp.path().join("chrome/profile").is_dir(),
+        "the profile is in storage"
+    );
     p.cleanup();
     drop(p);
 }
@@ -2253,7 +2256,8 @@ fn the_browser_plugin_without_chrome_says_it_is_missing() {
     let rows = format!("{:?}", p.fetch());
     assert!(rows.contains("was not found"), "{rows}");
     assert!(
-        p.take_error().is_some_and(|e| e.contains("Error launching browser")),
+        p.take_error()
+            .is_some_and(|e| e.contains("Error launching browser")),
         "and on the status line"
     );
 }
@@ -2322,7 +2326,11 @@ fn a_followed_link_to_a_web_page_is_rendered_by_the_browser_plugin() {
             })
             .unwrap_or_default()
     };
-    assert_eq!(link_children(&h.renderer), ["Loading…"], "waiting for the browser");
+    assert_eq!(
+        link_children(&h.renderer),
+        ["Loading…"],
+        "waiting for the browser"
+    );
     let expected = fake_chrome::page_text(&url);
     frames_until(h.r(), "the linked page renders", |r| {
         link_children(r).iter().any(|c| *c == expected)
@@ -2665,10 +2673,7 @@ fn navigate_right_empty_dir_shows_placeholder() {
     std::fs::create_dir(root.join("emptydir")).unwrap();
 
     let mut renderer = app_renderer();
-    register(
-        &mut renderer,
-        fs_plugin("filebrowser"),
-    );
+    register(&mut renderer, fs_plugin("filebrowser"));
     renderer.providers[0].set_current_path(root.to_str().unwrap());
     {
         let children = renderer.providers[0].fetch();
@@ -2733,10 +2738,7 @@ fn navigate_right_updates_parent_key() {
     std::fs::write(root.join("subdir/file.txt"), "").unwrap();
 
     let mut renderer = app_renderer();
-    register(
-        &mut renderer,
-        fs_plugin("filebrowser"),
-    );
+    register(&mut renderer, fs_plugin("filebrowser"));
     renderer.providers[0].set_current_path(root.to_str().unwrap());
     {
         let children = renderer.providers[0].fetch();
@@ -2814,10 +2816,7 @@ fn delete_last_item_leaves_placeholder() {
     std::fs::write(root.join("mydir/only.txt"), "").unwrap();
 
     let mut renderer = app_renderer();
-    register(
-        &mut renderer,
-        fs_plugin("filebrowser"),
-    );
+    register(&mut renderer, fs_plugin("filebrowser"));
     renderer.providers[0].set_current_path(root.to_str().unwrap());
     {
         let children = renderer.providers[0].fetch();
@@ -2881,10 +2880,7 @@ fn create_file_on_placeholder_replaces_in_place() {
     std::fs::create_dir(root.join("emptydir")).unwrap();
 
     let mut renderer = app_renderer();
-    register(
-        &mut renderer,
-        fs_plugin("filebrowser"),
-    );
+    register(&mut renderer, fs_plugin("filebrowser"));
     renderer.providers[0].set_current_path(root.to_str().unwrap());
     {
         let children = renderer.providers[0].fetch();
@@ -2959,10 +2955,7 @@ fn filebrowser_i_placeholder_creates_file() {
     std::fs::create_dir(root.join("emptydir")).unwrap();
 
     let mut renderer = app_renderer();
-    register(
-        &mut renderer,
-        fs_plugin("filebrowser"),
-    );
+    register(&mut renderer, fs_plugin("filebrowser"));
     renderer.providers[0].set_current_path(root.to_str().unwrap());
     {
         let children = renderer.providers[0].fetch();
@@ -3024,10 +3017,7 @@ fn filebrowser_i_placeholder_creates_subdirectory() {
     std::fs::create_dir(root.join("emptydir")).unwrap();
 
     let mut renderer = app_renderer();
-    register(
-        &mut renderer,
-        fs_plugin("filebrowser"),
-    );
+    register(&mut renderer, fs_plugin("filebrowser"));
     renderer.providers[0].set_current_path(root.to_str().unwrap());
     {
         let children = renderer.providers[0].fetch();
@@ -3087,10 +3077,7 @@ fn ctrl_a_after_prefixed_creation_no_panic() {
         tmp,
         settings_tmp,
     };
-    register(
-        h.r(),
-        fs_plugin("filebrowser"),
-    );
+    register(h.r(), fs_plugin("filebrowser"));
     h.renderer.providers[0].set_current_path(root.to_str().unwrap());
     {
         let children = h.renderer.providers[0].fetch();
@@ -3477,8 +3464,14 @@ fn filebrowser_properties_show_permissions_and_owner_through_the_host() {
             FfonElement::Obj(o) => o.key.clone(),
         })
         .collect();
-    let file = rows.iter().find(|r| r.contains("a.txt")).expect("a.txt listed");
-    let dir = rows.iter().find(|r| r.contains(">sub<")).expect("sub listed");
+    let file = rows
+        .iter()
+        .find(|r| r.contains("a.txt"))
+        .expect("a.txt listed");
+    let dir = rows
+        .iter()
+        .find(|r| r.contains(">sub<"))
+        .expect("sub listed");
     assert!(file.starts_with("-rw-r----- "), "{file}");
     assert!(dir.starts_with("drwx"), "{dir}");
     let me = std::env::var("USER").unwrap_or_default();
@@ -4638,10 +4631,7 @@ fn harness_with_config_provider() -> (AppRenderer, TempDir) {
 
     // Filebrowser at index 1
     let root = tmp.path().to_str().unwrap().to_owned();
-    register(
-        &mut renderer,
-        fs_plugin("filebrowser"),
-    );
+    register(&mut renderer, fs_plugin("filebrowser"));
     renderer.providers[1].set_current_path(&root);
     {
         let children = renderer.providers[1].fetch();
@@ -6313,10 +6303,7 @@ fn navigate_into_empty_compose_body_shows_i_placeholder() {
     let mut renderer = app_renderer();
     // Use register_no_init to avoid loading real OAuth config from disk,
     // which would cause fetch() to return "Loading…" on machines with an expired token.
-    register_no_init(
-        &mut renderer,
-        email_plugin(),
-    );
+    register_no_init(&mut renderer, email_plugin());
 
     // Set provider path to compose root so is_in_email_compose_body returns true
     // after we push "Body: [text]".
@@ -6380,10 +6367,7 @@ fn delete_last_compose_body_element_keeps_i_placeholder() {
     use sicompass_sdk::ffon::{FfonElement, IdArray};
 
     let mut renderer = app_renderer();
-    register_no_init(
-        &mut renderer,
-        email_plugin(),
-    );
+    register_no_init(&mut renderer, email_plugin());
 
     // Prime provider internal body state via the trait API:
     //   set_current_path so is_in_email_compose_body() returns true,
@@ -6441,10 +6425,7 @@ fn delete_body_element_str_with_obj_sibling_integration() {
     use sicompass_sdk::ffon::IdArray;
 
     let mut renderer = app_renderer();
-    register_no_init(
-        &mut renderer,
-        email_plugin(),
-    );
+    register_no_init(&mut renderer, email_plugin());
 
     // Build a body with [Str("abc"), Obj{key:"myobj:"}, Str("def")].
     renderer.providers[0].set_current_path("compose/Body: [ffon]");
@@ -6504,10 +6485,7 @@ fn delete_body_element_str_with_obj_sibling_integration() {
 fn is_in_email_compose_body_true_for_reply_from_message() {
     ensure_builtins();
     let mut renderer = app_renderer();
-    register_no_init(
-        &mut renderer,
-        email_plugin(),
-    );
+    register_no_init(&mut renderer, email_plugin());
 
     // Simulate a reply entered from /INBOX/msg — compose root is at segs[2].
     renderer.providers[0].set_current_path("INBOX/Hello — alice@example.com/reply/Body: [text]");
@@ -6530,10 +6508,7 @@ fn navigate_into_reply_from_message_body_shows_i_placeholder() {
     use sicompass_sdk::ffon::{FfonElement, FfonObject, IdArray};
 
     let mut renderer = app_renderer();
-    register_no_init(
-        &mut renderer,
-        email_plugin(),
-    );
+    register_no_init(&mut renderer, email_plugin());
 
     // Simulate the path produced when reply is entered from /INBOX/msg.
     renderer.providers[0].set_current_path("INBOX/Hello — alice@example.com/reply");
@@ -6591,10 +6566,7 @@ fn navigate_into_nested_body_obj_shows_i_placeholder() {
     use sicompass_sdk::ffon::{FfonElement, FfonObject, IdArray};
 
     let mut renderer = app_renderer();
-    register_no_init(
-        &mut renderer,
-        email_plugin(),
-    );
+    register_no_init(&mut renderer, email_plugin());
 
     // Path is inside the body so that push_path (called by navigate_right_raw) appends
     // to the correct base path when navigating into `foo:`.
@@ -6657,10 +6629,7 @@ fn navigate_into_nested_body_obj_shows_i_placeholder() {
 fn commit_in_nested_compose_body_creates_child_there() {
     ensure_builtins();
     let mut renderer = app_renderer();
-    register_no_init(
-        &mut renderer,
-        email_plugin(),
-    );
+    register_no_init(&mut renderer, email_plugin());
 
     // Step 1: create `foo:` at the top level of the body.
     renderer.providers[0].push_path("compose");
@@ -6704,10 +6673,7 @@ fn commit_in_nested_compose_body_creates_child_there() {
 fn commit_trailing_colon_in_nested_body_creates_obj_with_i_placeholder() {
     ensure_builtins();
     let mut renderer = app_renderer();
-    register_no_init(
-        &mut renderer,
-        email_plugin(),
-    );
+    register_no_init(&mut renderer, email_plugin());
 
     // Create `foo:` at top level, then `baz:` inside `foo:`.
     renderer.providers[0].push_path("compose");
@@ -6756,10 +6722,7 @@ fn editing_leaf_in_nested_compose_body_does_not_empty_list() {
     use sicompass_sdk::ffon::{FfonElement, FfonObject, IdArray};
 
     let mut renderer = app_renderer();
-    register_no_init(
-        &mut renderer,
-        email_plugin(),
-    );
+    register_no_init(&mut renderer, email_plugin());
 
     // Step 1: build draft.body via the provider API so that fetch_subtree_children
     // can return the correct children for the nested path.
@@ -6872,7 +6835,9 @@ fn email_plugin_in_inbox(
 ) -> (Box<dyn Provider>, fake_imap::FakeImap, Vec<FfonElement>) {
     let server = fake_imap::FakeImap::start(&[("Alpha", "alice@x.com"), ("Beta", "bob@x.com")]);
     let mut p = email_plugin_on(&server, &tmp.path().join("emailclient"));
-    wait_for_rows(&mut p, "the folder list", |r| r.iter().any(|k| k == "INBOX"));
+    wait_for_rows(&mut p, "the folder list", |r| {
+        r.iter().any(|k| k == "INBOX")
+    });
     p.set_current_path("INBOX");
     let messages = wait_for_rows(&mut p, "INBOX", |r| r.iter().any(|k| k.contains("Beta")));
     (p, server, messages)
@@ -7086,7 +7051,11 @@ fn email_plugin_hears_new_mail_through_its_idle_task() {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
     while !server.commands().iter().any(|c| c.ends_with("IDLE")) {
         p.tick();
-        assert!(std::time::Instant::now() < deadline, "{:?}", server.commands());
+        assert!(
+            std::time::Instant::now() < deadline,
+            "{:?}",
+            server.commands()
+        );
         std::thread::sleep(std::time::Duration::from_millis(20));
     }
     server.deliver("Gamma", "carol@x.com");
@@ -8169,7 +8138,6 @@ fn chatclient_plugin_opens_on_its_sign_in_form() {
 /// update the draft when navigating to those field segments.
 #[test]
 fn email_compose_cc_bcc_fields_appear_and_commit() {
-
     let mut p = email_plugin();
     p.push_path("compose");
     let items = p.fetch();
@@ -8372,10 +8340,7 @@ fn harness_with_text_editor() -> (AppRenderer, TempDir) {
     let mut renderer = app_renderer();
 
     // Filebrowser at "/" so it doesn't depend on a real directory.
-    register(
-        &mut renderer,
-        fs_plugin("filebrowser"),
-    );
+    register(&mut renderer, fs_plugin("filebrowser"));
     renderer.providers[0].set_current_path("/");
     {
         let children = renderer.providers[0].fetch();
@@ -11159,10 +11124,7 @@ fn ctrl_c_in_interactive_dashboard_does_not_exit() {
 /// Register a terminal whose browse view is re-rooted at `path`, so the listing
 /// is a known set of directories instead of whatever `/` happens to hold.
 fn register_terminal_rooted_at(renderer: &mut AppRenderer, path: &std::path::Path) {
-    register(
-        renderer,
-        fs_plugin("terminal"),
-    );
+    register(renderer, fs_plugin("terminal"));
     renderer.providers[0].set_current_path(path.to_str().unwrap());
     let children = renderer.providers[0].fetch();
     renderer.ffon[0].as_obj_mut().unwrap().children = children;
@@ -11290,10 +11252,7 @@ fn restart_terminal(renderer: &AppRenderer) -> AppRenderer {
         renderer.providers[0].current_path(),
     );
     let mut restarted = app_renderer();
-    register(
-        &mut restarted,
-        fs_plugin("terminal"),
-    );
+    register(&mut restarted, fs_plugin("terminal"));
     if nav.on_path {
         restarted.rebuild_on_path(&nav.path, nav.current_id);
     } else {
@@ -11664,10 +11623,7 @@ fn colon_still_opens_the_command_palette_for_other_providers() {
     // The terminal branch in `handle_colon` must not leak to anyone else.
     ensure_builtins();
     let mut renderer = app_renderer();
-    register(
-        &mut renderer,
-        fs_plugin("filebrowser"),
-    );
+    register(&mut renderer, fs_plugin("filebrowser"));
     sicompass::list::create_list_current_layer(&mut renderer);
     press_right(&mut renderer);
 
@@ -17425,10 +17381,7 @@ fn the_file_browser_palette_still_says_command_mode() {
     // prompt — which used to send `:` to the insert palette instead of here.
     ensure_builtins();
     let mut renderer = app_renderer();
-    register(
-        &mut renderer,
-        fs_plugin("filebrowser"),
-    );
+    register(&mut renderer, fs_plugin("filebrowser"));
     sicompass::list::create_list_current_layer(&mut renderer);
     press_right(&mut renderer);
 
@@ -17815,12 +17768,21 @@ fn gitclient_staging_goes_through_git_and_ctrl_z_takes_it_back() {
     press_colon(&mut renderer);
     focus_command(&mut renderer, "stage");
     press_enter(&mut renderer);
-    assert_eq!(staged_files(&root), "tracked.txt", "{}", renderer.error_message);
+    assert_eq!(
+        staged_files(&root),
+        "tracked.txt",
+        "{}",
+        renderer.error_message
+    );
 
     press_ctrl(&mut renderer, Keycode::Z);
     assert_eq!(staged_files(&root), "", "ctrl+z unstaged it");
     press_ctrl_shift(&mut renderer, Keycode::Z);
-    assert_eq!(staged_files(&root), "tracked.txt", "and redo staged it again");
+    assert_eq!(
+        staged_files(&root),
+        "tracked.txt",
+        "and redo staged it again"
+    );
 }
 
 #[test]
@@ -18319,18 +18281,19 @@ fn frames_until(r: &mut AppRenderer, what: &str, done: impl Fn(&AppRenderer) -> 
         if done(r) {
             return;
         }
-        assert!(std::time::Instant::now() < deadline, "{what}: did not happen in 20 s");
+        assert!(
+            std::time::Instant::now() < deadline,
+            "{what}: did not happen in 20 s"
+        );
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
 }
 
 /// Whether the browser at `wb_idx` is still loading a page.
 fn browser_loading(r: &AppRenderer, wb_idx: usize) -> bool {
-    r.ffon[wb_idx].as_obj().is_some_and(|o| {
-        o.children
-            .iter()
-            .any(|c| c.as_str() == Some("Loading…"))
-    })
+    r.ffon[wb_idx]
+        .as_obj()
+        .is_some_and(|o| o.children.iter().any(|c| c.as_str() == Some("Loading…")))
 }
 
 /// Let a page the browser at `wb_idx` is loading land, as the app would.
@@ -18350,11 +18313,21 @@ fn plugin_program(name: &str) -> std::path::PathBuf {
     let exe = std::env::current_exe().unwrap();
     let profile = exe.parent().unwrap().parent().unwrap();
     let entry = profile.join("examples").join(format!("plugin_{name}"));
-    let built = std::path::PathBuf::from(format!("{}{}", entry.display(), std::env::consts::EXE_SUFFIX));
+    let built = std::path::PathBuf::from(format!(
+        "{}{}",
+        entry.display(),
+        std::env::consts::EXE_SUFFIX
+    ));
     if !built.exists() {
         let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".into());
         let ok = std::process::Command::new(cargo)
-            .args(["build", "-p", "sicompass", "--example", &format!("plugin_{name}")])
+            .args([
+                "build",
+                "-p",
+                "sicompass",
+                "--example",
+                &format!("plugin_{name}"),
+            ])
             .status()
             .unwrap()
             .success();
@@ -18378,7 +18351,11 @@ fn plugin_provider_granted(name: &str, storage: Option<&Path>, env: Env) -> Box<
         storage_dir: storage.map(Path::to_path_buf),
         settings: manifest["settings"]
             .as_array()
-            .map(|a| a.iter().filter_map(|s| s["key"].as_str().map(str::to_owned)).collect())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|s| s["key"].as_str().map(str::to_owned))
+                    .collect()
+            })
             .unwrap_or_default(),
         service_tier: manifest["service"]["tier"].as_str().map(str::to_owned),
         renders_pages: manifest["rendersPages"].as_bool().unwrap_or(false),
@@ -19981,7 +19958,6 @@ fn archiving_from_the_list_keeps_the_user_in_general_mode() {
     );
 }
 
-
 /// A folder other programs keep changing (a download folder, `/tmp`) still
 /// lists whole in the sandboxed file browser. The host reads a folder up front
 /// and an entry removed meanwhile becomes an error in the listing; `std` inside
@@ -20020,5 +19996,8 @@ fn a_listing_survives_its_neighbours_vanishing() {
     }
     stop.store(true, std::sync::atomic::Ordering::Relaxed);
     churn.join().unwrap();
-    assert_eq!(misses, 0, "`mine` went missing from {misses} of 300 listings");
+    assert_eq!(
+        misses, 0,
+        "`mine` went missing from {misses} of 300 listings"
+    );
 }

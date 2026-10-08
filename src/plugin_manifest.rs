@@ -168,7 +168,10 @@ pub fn expand_home(value: &str) -> String {
     };
     match sicompass_sdk::platform::home_dir() {
         Some(h) if rest.is_empty() => h.to_string_lossy().into_owned(),
-        Some(h) => h.join(rest.trim_start_matches('/')).to_string_lossy().into_owned(),
+        Some(h) => h
+            .join(rest.trim_start_matches('/'))
+            .to_string_lossy()
+            .into_owned(),
         None => value.to_owned(),
     }
 }
@@ -246,7 +249,10 @@ fn from_discovered(
             }),
             Err(e) => {
                 // `parse_manifest` names a retired plugin type itself.
-                eprintln!("sicompass: ignoring {}: {e}", dir.join("plugin.json").display());
+                eprintln!(
+                    "sicompass: ignoring {}: {e}",
+                    dir.join("plugin.json").display()
+                );
                 None
             }
         })
@@ -276,7 +282,10 @@ mod tests {
         assert_eq!(
             g.setting_defaults,
             vec![
-                ("textEditorPath".to_owned(), home.to_string_lossy().into_owned()),
+                (
+                    "textEditorPath".to_owned(),
+                    home.to_string_lossy().into_owned()
+                ),
                 // Only `~` and `~/…` mean the home: `~user` is left alone.
                 ("other".to_owned(), "~user".to_owned()),
             ]

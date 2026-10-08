@@ -460,8 +460,7 @@ fn apply_store_change(renderer: &mut AppRenderer, key: &str, name: &str) {
             if let Err(e) = crate::plugin_manifest::forget_store_install(name) {
                 complain(renderer, e);
             }
-            if let (Some(settings), Some(section)) = (renderer.providers.last_mut(), display_name)
-            {
+            if let (Some(settings), Some(section)) = (renderer.providers.last_mut(), display_name) {
                 settings.remove_settings_section(&section);
             }
         }
@@ -2348,14 +2347,23 @@ mod tests {
 
         migrate_builtin_data_to_plugins(&state, &config, &data);
 
-        assert_eq!(std::fs::read_to_string(data.join("terminal/history")).unwrap(), "ls\n");
+        assert_eq!(
+            std::fs::read_to_string(data.join("terminal/history")).unwrap(),
+            "ls\n"
+        );
         assert_eq!(
             std::fs::read_to_string(data.join("webbrowser/history")).unwrap(),
             "*https://kept.example\n",
             "bookmarks come along"
         );
-        assert!(data.join("webbrowser/chrome/profile/Default/Cookies").exists());
-        assert!(!state.join("webbrowser/history").exists(), "moved, not copied");
+        assert!(
+            data.join("webbrowser/chrome/profile/Default/Cookies")
+                .exists()
+        );
+        assert!(
+            !state.join("webbrowser/history").exists(),
+            "moved, not copied"
+        );
         assert!(!config.join("chrome-profile").exists());
     }
 
@@ -2374,8 +2382,14 @@ mod tests {
 
         migrate_builtin_data_to_plugins(&state, &config, &data);
 
-        assert_eq!(std::fs::read_to_string(data.join("webbrowser/history")).unwrap(), "new\n");
-        assert!(state.join("webbrowser/history").exists(), "left where it was");
+        assert_eq!(
+            std::fs::read_to_string(data.join("webbrowser/history")).unwrap(),
+            "new\n"
+        );
+        assert!(
+            state.join("webbrowser/history").exists(),
+            "left where it was"
+        );
     }
 
     // --- drop_program_switches ---
@@ -2609,7 +2623,10 @@ mod tests {
         let plugin = make_process_plugin("fixture");
         assert!(instantiate_user_plugin_approved(&plugin, &Default::default()).is_none());
         let mut other = std::collections::HashMap::new();
-        other.insert("fixture".to_owned(), "process;hosts=;filesystem=;process=git;sockets=".to_owned());
+        other.insert(
+            "fixture".to_owned(),
+            "process;hosts=;filesystem=;process=git;sockets=".to_owned(),
+        );
         assert!(
             instantiate_user_plugin_approved(&plugin, &other).is_none(),
             "an approval of other access is not this one"
@@ -2751,8 +2768,18 @@ mod tests {
         sicompass_sdk::register_builtin_manifest(
             sicompass_sdk::BuiltinManifest::new("configurabletest", "configurable test")
                 .with_settings(vec![
-                    sicompass_sdk::SettingDecl::text("configurable test", "server", "cfgTestServer", "a"),
-                    sicompass_sdk::SettingDecl::password("configurable test", "secret", "cfgTestSecret", ""),
+                    sicompass_sdk::SettingDecl::text(
+                        "configurable test",
+                        "server",
+                        "cfgTestServer",
+                        "a",
+                    ),
+                    sicompass_sdk::SettingDecl::password(
+                        "configurable test",
+                        "secret",
+                        "cfgTestSecret",
+                        "",
+                    ),
                 ]),
         );
         let ffon = settings_ffon_after_enable("configurable test");

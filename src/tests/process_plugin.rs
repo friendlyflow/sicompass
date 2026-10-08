@@ -8,8 +8,8 @@
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use sicompass::plugin_host::{ProcessProvider, Spec};
 use sicompass::plugin_host::Grants;
+use sicompass::plugin_host::{ProcessProvider, Spec};
 use sicompass_sdk::{DashboardKey, DashboardKeysym, FfonElement, Provider, TimelineEntry};
 
 /// `target/<profile>/examples/<name>`, building it when `cargo test --test
@@ -249,8 +249,14 @@ fn the_tab_switcher_sees_its_program_and_letting_go_stops_both() {
     assert!(alive(shell) && alive(plugin));
     // A tab closed without `cleanup`: the plugin cleans up on its own.
     drop(p);
-    assert!(gone_within(plugin, Duration::from_secs(5)), "the plugin exited");
-    assert!(gone_within(shell, Duration::from_secs(5)), "its child was stopped");
+    assert!(
+        gone_within(plugin, Duration::from_secs(5)),
+        "the plugin exited"
+    );
+    assert!(
+        gone_within(shell, Duration::from_secs(5)),
+        "its child was stopped"
+    );
 }
 
 #[test]
@@ -343,7 +349,12 @@ fn a_real_plugin_starts_fetches_and_stops() {
     println!("{} ({})", p.display_name(), p.name());
     let root = p.fetch();
     for e in &root {
-        println!("  {}", e.as_str().map(str::to_owned).unwrap_or_else(|| format!("{e:?}")));
+        println!(
+            "  {}",
+            e.as_str()
+                .map(str::to_owned)
+                .unwrap_or_else(|| format!("{e:?}"))
+        );
     }
     assert!(!root.is_empty(), "an empty root");
     p.tick();
