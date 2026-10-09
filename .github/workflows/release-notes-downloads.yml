@@ -81,6 +81,8 @@ jobs:
             row '\.deb$'                          'Debian, Ubuntu, Mint'
             row '\.rpm$'                          'Fedora, RHEL, openSUSE'
             row '\.AppImage$'                     'Any Linux, no root'
+            # Not an asset: the flake at this tag builds the same version.
+            printf '| Nix, NixOS | `nix run github:%s/%s` |\n' "$REPO" "$TAG"
             echo
             echo "### macOS: clear the quarantine flag before opening the .dmg"
             echo
