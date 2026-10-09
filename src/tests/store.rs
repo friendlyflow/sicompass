@@ -417,7 +417,9 @@ fn the_store_installs_a_plugin_into_the_running_app_and_removes_it() {
         Some(sicompass_sdk::plugin_abi::approval_fingerprint(&manifest).as_str()),
         "the other process's Store records the approval itself"
     );
-    // Not before the next check.
+    // Not before the next check. The install's own duration is the machine's,
+    // so the interval starts once it is done.
+    programs::mark_plugins_checked();
     programs::follow_plugins_folder(&mut renderer, false);
     assert!(!loaded(&renderer, "fixture"));
     next_check();

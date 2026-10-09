@@ -587,6 +587,18 @@ pub fn follow_plugins_folder(renderer: &mut AppRenderer, force: bool) {
     renderer.needs_redraw = true;
 }
 
+/// Start [`follow_plugins_folder`]'s interval now, as if it had just looked,
+/// without looking. For tests: how long an install in another process takes
+/// is up to the machine, so a test that checks a change waits for the next
+/// look restarts the clock here once the change is made.
+#[doc(hidden)]
+pub fn mark_plugins_checked() {
+    let mut follow = FOLLOW.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(f) = follow.as_mut() {
+        f.checked = Some(std::time::Instant::now());
+    }
+}
+
 /// Inject setting entries from a `BuiltinManifest` into the settings provider.
 /// Called from both the startup load loop and `enable_provider` so hot-enable
 /// registers identical settings to startup-enable.
