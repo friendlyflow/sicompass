@@ -13,7 +13,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.2.0"
+version = "0.2.1"
 edition = "2024"
 license = "GPL-3.0-only"
 
@@ -38,7 +38,7 @@ license = "GPL-3.0-only"
 # used unconditionally by lib_notes, lib_filebrowser and
 # lib_project_management — and the provider-scoped asset registry and
 # `read-asset` host import from 0.4.0, likewise required unconditionally.)
-sicompass-sdk = "0.9.5"
+sicompass-sdk = "0.9.6"
 sicompass-tutorial = { path = "lib/lib_tutorial" }
 sicompass-settings = { path = "lib/lib_settings" }
 sicompass-store = { path = "lib/lib_store" }
@@ -48,10 +48,7 @@ sicompass-updater = { path = "lib/lib_updater" }
 # (github:friendlyflow/sicompass-ui). Not on crates.io: pinned by git, to a `rev`
 # between releases and to `tag = "vX.Y.Z"` at a release. crane vendors it from
 # Cargo.lock like any git dependency, so there is no hash to maintain.
-# rev, not a tag: no v0.2.1 has been cut yet for the accessibility.rs /
-# late-registration additions this depends on. Move to a tag at the next
-# sicompass-ui release.
-sicompass-ui = { git = "https://github.com/friendlyflow/sicompass-ui", rev = "1447098b622c9df701d5c441553d2ad824be5e44" }
+sicompass-ui = { git = "https://github.com/friendlyflow/sicompass-ui", tag = "v0.2.1" }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
@@ -161,13 +158,6 @@ wiremock = "0.6"
 #
 # [patch."https://github.com/friendlyflow/sicompass-ui"]
 # sicompass-ui = { path = "../sicompass-ui" }
-
-# TEMPORARY, until sicompass-sdk 0.9.6 is on crates.io: the SDK commit with
-# plugin protocol 1.2 (`allows_scroll_prefetch`). By git rev so `nix build`
-# (and the desicompass dev session) can fetch it. Remove at the SDK release,
-# together with the matching patch in desicompass.
-[patch.crates-io]
-sicompass-sdk = { git = "https://github.com/friendlyflow/sicompass-plugin-sdk", rev = "27cdf66e5c2c42321417ec6a00c790ff70bbd821" }
 
 # Optimize heavy third-party deps even in debug builds — html5ever and the
 # TLS/HTTP stack are 10-50x slower without optimizations.

@@ -3,6 +3,52 @@
 cargo-dist parses this file and uses the matching version's section as the
 GitHub Release body, so entries here are what users read on the download page.
 
+## 0.2.1
+
+### Programs are programs of their own
+
+The programs you install from the Store used to be sandboxed WebAssembly
+components. They are now programs of their own, built for your computer:
+Sicompass starts one for each tab and talks to it. They start faster and can do
+more, and they run with your rights, like any program you install. That replaces
+the sandbox described under 0.2.0. The Store still says what each program does
+before you install it (which folders, which programs it starts, which servers it
+talks to), and installing it is your approval.
+
+Update your programs from the Store. A program from 0.2.0 does not start, and
+says so.
+
+- One message says when updates are ready, for Sicompass and for its programs.
+  Ctrl+U installs the program updates that ask for nothing new, and the Store
+  has the rest.
+- The Store shows the list it downloaded last at once and checks for updates
+  behind it, and fetches every program's release side by side.
+- A program copied into the programs folder by hand does not run until you
+  approve it in the Store.
+- Installed programs are always in the root list. Settings no longer has
+  "Available programs".
+- The tutorial's programs section lets each installed program describe itself,
+  and follows what you install while it is open.
+- When the file browser or the text editor refuses a change, you hear why, and
+  the edit stays open. A folder you cannot write to says so before you type a
+  name.
+- Claude's new session button opens an empty session, and you type the first
+  prompt on its own row, where Ctrl+: lists the skills.
+- Scroll mode also fetches the levels you have not opened yet, up to a limit. A
+  program can opt out where fetching has a cost, and the Store, email and remote
+  do.
+- The screen reader follows cursor moves, starts reading the focused row as soon
+  as it is ready, and hears password rows as password fields while you type.
+
+### In a desicompass session
+
+- Accessibility settings (screen reader, font size, colours, language) are
+  shared with the login screen and the superkey, and are changed there.
+- The tutorial and the Store are the superkey's. A program installed from there
+  starts in Sicompass too.
+- Sicompass does not check for its own updates in a session, or when it was
+  installed with Nix.
+
 ## 0.2.0
 
 ### Programs come from the Store
