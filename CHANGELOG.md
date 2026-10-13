@@ -3,6 +3,11 @@
 cargo-dist parses this file and uses the matching version's section as the
 GitHub Release body, so entries here are what users read on the download page.
 
+## 0.2.2
+
+- File Browser and Web Browser are updated (0.3.2). On Windows, a path you open or delete keeps its drive letter, and a Chrome left running on the Web Browser's profile is ended, so the browser starts again.
+- Built against Sicompass SDK 0.9.7.
+
 ## 0.2.1
 
 ### Programs are programs of their own

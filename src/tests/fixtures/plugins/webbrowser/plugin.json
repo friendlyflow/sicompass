@@ -3,7 +3,7 @@
   "displayName": "web browser",
   "type": "process",
   "entry": "plugin",
-  "version": "0.2.0",
+  "version": "0.3.2",
   "minAppVersion": "0.2.0",
   "description": "webbrowser-description",
   "rendersPages": true,

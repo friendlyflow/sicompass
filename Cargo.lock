@@ -1189,8 +1189,8 @@ checksum = "64cd1e32ddd350061ae6edb1b082d7c54915b5c672c389143b9a63403a109f24"
 
 [[package]]
 name = "filebrowser-plugin"
-version = "0.3.0"
-source = "git+https://github.com/friendlyflow/filebrowser-plugin-sicompass?rev=76aa13b61344a0d424439d2a3e2e453c0669215a#76aa13b61344a0d424439d2a3e2e453c0669215a"
+version = "0.3.2"
+source = "git+https://github.com/friendlyflow/filebrowser-plugin-sicompass?rev=a75157ffcece039462d3c755828b65620299824c#a75157ffcece039462d3c755828b65620299824c"
 dependencies = [
  "base64 0.22.1",
  "libc",
@@ -3822,7 +3822,7 @@ checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
 
 [[package]]
 name = "sicompass"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "accesskit",
  "accesskit_macos",
@@ -3874,7 +3874,7 @@ dependencies = [
 
 [[package]]
 name = "sicompass-builtins"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "sicompass-sdk",
  "sicompass-settings",
@@ -3884,9 +3884,9 @@ dependencies = [
 
 [[package]]
 name = "sicompass-sdk"
-version = "0.9.6"
+version = "0.9.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "59086593cca37b8fa9b8dde83412dcffa942cb17e41d63bf9b41aa64d513fec0"
+checksum = "6b2b9c4c4ad66f10ee7291b9b4a22126f3a139ebcb7bb7542a404d610e68c285"
 dependencies = [
  "async-trait",
  "base64 0.23.1",
@@ -3915,7 +3915,7 @@ dependencies = [
 
 [[package]]
 name = "sicompass-settings"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "async-trait",
  "serde",
@@ -3926,7 +3926,7 @@ dependencies = [
 
 [[package]]
 name = "sicompass-store"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "base64 0.23.1",
  "ed25519-dalek",
@@ -3953,7 +3953,7 @@ dependencies = [
 
 [[package]]
 name = "sicompass-tutorial"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "serde_json",
  "sicompass-sdk",
@@ -3992,7 +3992,7 @@ dependencies = [
 
 [[package]]
 name = "sicompass-updater"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "reqwest",
  "semver",
@@ -4942,8 +4942,8 @@ dependencies = [
 
 [[package]]
 name = "webbrowser-plugin"
-version = "0.2.0"
-source = "git+https://github.com/friendlyflow/webbrowser-plugin-sicompass?rev=a54967bdeb5528e7a07f31754b0d593e3389d338#a54967bdeb5528e7a07f31754b0d593e3389d338"
+version = "0.3.2"
+source = "git+https://github.com/friendlyflow/webbrowser-plugin-sicompass?rev=85aa070d490d5836573a4d1c016fad6020f62c53#85aa070d490d5836573a4d1c016fad6020f62c53"
 dependencies = [
  "libc",
  "scraper",
