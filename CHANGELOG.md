@@ -3,6 +3,12 @@
 cargo-dist parses this file and uses the matching version's section as the
 GitHub Release body, so entries here are what users read on the download page.
 
+## 0.2.3
+
+- The "enable cloud sync" checkbox of a plugin shows only while you hold the plugin's service, such as Sicompass Cloud. Paying turns it on for every installed plugin the service covers, and for the ones you install later while you still pay. You can turn it off again per plugin. When the subscription ends the checkbox disappears and your data stays where it is. The Sicompass Cloud and Commercial pages in Store, tiers say which plugins paying turns on.
+- A renewed subscription now reaches the app by itself. It asks the server for the renewed certificate when yours is about to expire, at most once an hour, so a monthly subscription no longer looks expired after a month.
+- Built against Sicompass SDK 0.9.8.
+
 ## 0.2.2
 
 - File Browser and Web Browser are updated (0.3.2). On Windows, a path you open or delete keeps its drive letter, and a Chrome left running on the Web Browser's profile is ended, so the browser starts again.
