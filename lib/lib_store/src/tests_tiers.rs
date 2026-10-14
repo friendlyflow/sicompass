@@ -271,6 +271,134 @@ fn redeem_tokens_route_to_their_own_settings() {
     );
 }
 
+// ---- What paying turns on --------------------------------------------------------
+
+/// A plugins folder holding notes and project management (each with a cloud
+/// switch) and one plugin with no service.
+fn plugins_using_cloud() -> tempfile::TempDir {
+    let dir = tempfile::tempdir().unwrap();
+    for (name, display, service) in [
+        (
+            "notes",
+            "notes",
+            r#", "service": { "tier": "friendlyflow/cloud", "switch": "notesCloudBackup" }"#,
+        ),
+        (
+            "projectmanagement",
+            "project management",
+            r#", "service": { "tier": "friendlyflow/cloud", "switch": "kanbanCloudBackup" }"#,
+        ),
+        ("plain", "plain", ""),
+    ] {
+        let p = dir.path().join(name);
+        std::fs::create_dir_all(&p).unwrap();
+        std::fs::write(
+            p.join("plugin.json"),
+            format!(
+                r#"{{ "name": "{name}", "displayName": "{display}", "type": "process",
+                     "entry": "plugin" {service} }}"#
+            ),
+        )
+        .unwrap();
+    }
+    dir
+}
+
+fn store_with_plugins(url: &str, plugins: &tempfile::TempDir) -> T {
+    let mut t = store(url);
+    let store = std::mem::take(&mut t.store);
+    t.store = store.with_plugins_dir(plugins.path().to_path_buf());
+    t
+}
+
+#[test]
+fn the_cloud_pages_say_what_paying_turns_on_just_above_the_payment_button() {
+    let (rt, server) = mock_server();
+    serve_json(&rt, &server, "/cloud", cloud_page());
+    serve_json(
+        &rt,
+        &server,
+        "/commercial",
+        serde_json::json!(["<button>checkout:commercial</button>for payment"]),
+    );
+    serve_json(
+        &rt,
+        &server,
+        "/support",
+        serde_json::json!(["<button>checkout:support-annual</button>for payment"]),
+    );
+    let plugins = plugins_using_cloud();
+    let mut t = store_with_plugins(&server.uri(), &plugins);
+
+    for (title, button) in [
+        ("store-tier-cloud", "<button>checkout:cloud</button>for payment"),
+        (
+            "store-tier-commercial",
+            "<button>checkout:commercial</button>for payment",
+        ),
+    ] {
+        let page = format!("{}/{}", t.tiers_path(), localize::t(title));
+        t.at(&page);
+        t.settle();
+        let keys: Vec<String> = t.at(&page).iter().map(key).collect();
+        let at = keys.iter().position(|k| k == button).expect("the button");
+        let line = &keys[at - 1];
+        assert!(
+            line.contains("notes") && line.contains("project management"),
+            "{keys:?}"
+        );
+        assert!(!line.contains("plain"), "{line}");
+    }
+
+    let page = format!("{}/{}", t.tiers_path(), localize::t("store-tier-support"));
+    t.at(&page);
+    t.settle();
+    assert_eq!(
+        t.at(&page).iter().map(key).collect::<Vec<_>>(),
+        ["<button>checkout:support-annual</button>for payment"],
+        "support pays for no service"
+    );
+}
+
+#[test]
+fn with_no_plugin_using_it_the_page_says_later_installs_get_it() {
+    let (rt, server) = mock_server();
+    serve_json(&rt, &server, "/cloud", cloud_page());
+    let empty = tempfile::tempdir().unwrap();
+    let mut t = store_with_plugins(&server.uri(), &empty);
+    let page = format!("{}/{}", t.tiers_path(), localize::t("store-tier-cloud"));
+    t.at(&page);
+    t.settle();
+    let keys: Vec<String> = t.at(&page).iter().map(key).collect();
+    assert!(
+        keys.contains(&localize::t("store-tier-turns-on-later")),
+        "{keys:?}"
+    );
+}
+
+#[test]
+fn a_redeem_that_fails_turns_nothing_on() {
+    let (rt, server) = mock_server();
+    // Not signed by our key: rejected.
+    serve_json(&rt, &server, "/license/tok-c", sample_cert_json());
+    let plugins = plugins_using_cloud();
+    let mut t = store_with_plugins(&server.uri(), &plugins);
+
+    t.store.set_current_path(&format!(
+        "{}/{}/License redeem token",
+        t.tiers_path(),
+        localize::t("store-tier-cloud")
+    ));
+    assert!(t.store.commit_edit("", "tok-c"));
+
+    assert!(t.store.take_error().is_some());
+    assert_eq!(t.store.take_announcement(), None);
+    let text = std::fs::read_to_string(t.settings.path().join("settings.json")).unwrap();
+    let v: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert!(v.get("notes").is_none(), "{v}");
+    assert!(v.get("project management").is_none(), "{v}");
+}
+
 // ---- The pages ----------------------------------------------------------------
 
 #[test]

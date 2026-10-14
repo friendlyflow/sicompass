@@ -289,7 +289,9 @@ pub fn install(
 
 /// [`install`], then record in `settings` that the user approved what was
 /// installed: pressing Update (or Ctrl+U for an update asking for nothing new)
-/// is the approval. Returns the installed version.
+/// is the approval. A new install of a plugin whose service the user already
+/// pays for has its service switch ticked, as paying would have; an update
+/// keeps the user's choice. Returns the installed version.
 pub fn install_and_approve(
     fetch: &Fetch,
     source: &Source,
@@ -297,10 +299,14 @@ pub fn install_and_approve(
     plugins_dir: &Path,
     settings: Result<PathBuf, String>,
 ) -> Result<String, String> {
+    let new = !installed(plugins_dir).contains_key(&source.name);
     let m = install(fetch, source, shown, plugins_dir)?;
-    settings
-        .and_then(|path| crate::approvals::record(&path, &m))
+    let path = settings
+        .and_then(|path| crate::approvals::record(&path, &m).map(|()| path))
         .map_err(|e| format!("installed, but the approval could not be saved: {e}"))?;
+    if new && let Err(e) = crate::service_switches::tick_if_held(&path, &m) {
+        eprintln!("sicompass: store: could not turn on {}'s service: {e}", m.name);
+    }
     Ok(m.version.unwrap_or_default())
 }
 

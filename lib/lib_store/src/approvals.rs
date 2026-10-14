@@ -59,7 +59,7 @@ pub fn forget(settings: &Path, name: &str) -> Result<(), String> {
     })
 }
 
-fn object_at<'a>(root: &'a mut Map<String, Value>, key: &str) -> &'a mut Map<String, Value> {
+pub(crate) fn object_at<'a>(root: &'a mut Map<String, Value>, key: &str) -> &'a mut Map<String, Value> {
     let slot = root
         .entry(key.to_owned())
         .or_insert_with(|| Value::Object(Default::default()));
@@ -72,7 +72,7 @@ fn object_at<'a>(root: &'a mut Map<String, Value>, key: &str) -> &'a mut Map<Str
 /// Read-modify-write `settings.json`, the way the settings provider does: a
 /// file that exists but does not parse is left alone (another process may be
 /// half-way through writing it), never rebuilt from nothing.
-fn edit(path: &Path, f: impl FnOnce(&mut Map<String, Value>)) -> Result<(), String> {
+pub(crate) fn edit(path: &Path, f: impl FnOnce(&mut Map<String, Value>)) -> Result<(), String> {
     let mut root = match std::fs::read_to_string(path) {
         Ok(text) => match serde_json::from_str::<Value>(&text) {
             Ok(Value::Object(m)) => m,

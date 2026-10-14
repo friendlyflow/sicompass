@@ -102,6 +102,10 @@ pub struct SettingsProvider {
     /// desicompass session these are the accessibility settings, which the
     /// superkey and the login screen change.
     external_keys: HashSet<String>,
+    /// Settings whose rows are not shown for now (`set_hidden_setting_keys`),
+    /// though they are still ours: they keep their value and are replayed at
+    /// startup. A plugin's service switch, while its tier is not held.
+    hidden_keys: HashSet<String>,
 }
 
 impl SettingsProvider {
@@ -120,6 +124,7 @@ impl SettingsProvider {
             section_versions: HashMap::new(),
             first_run: false,
             external_keys: HashSet::new(),
+            hidden_keys: HashSet::new(),
         }
     }
 
@@ -139,6 +144,7 @@ impl SettingsProvider {
             section_versions: HashMap::new(),
             first_run: false,
             external_keys: HashSet::new(),
+            hidden_keys: HashSet::new(),
         }
     }
 
@@ -536,6 +542,12 @@ impl SettingsProvider {
         if label == key { name.to_owned() } else { label }
     }
 
+    /// Whether `key` has a row on this page: neither someone else's setting
+    /// nor hidden for now.
+    fn shows(&self, key: &str) -> bool {
+        !self.external_keys.contains(key) && !self.hidden_keys.contains(key)
+    }
+
     fn populate_section(&mut self, section_name: &str) -> FfonElement {
         let mut obj = FfonElement::new_obj(Self::localize_section_name(section_name));
         let o = obj.as_obj_mut().unwrap();
@@ -554,7 +566,7 @@ impl SettingsProvider {
         let mut checkboxes: Vec<(&CheckboxEntry, String)> = self
             .checkbox_entries
             .iter()
-            .filter(|e| e.section == section_name)
+            .filter(|e| e.section == section_name && self.shows(&e.config_key))
             .map(|e| (e, localize::t(&e.label)))
             .collect();
         checkboxes.sort_by(|(_, a), (_, b)| a.to_ascii_lowercase().cmp(&b.to_ascii_lowercase()));
@@ -572,7 +584,7 @@ impl SettingsProvider {
         // string itself (existing callers passing English literals still
         // render identically).
         for e in &self.radio_entries {
-            if e.section == section_name {
+            if e.section == section_name && self.shows(&e.config_key) {
                 let mut radio =
                     FfonElement::new_obj(format!("<radio>{}", localize::t(&e.radio_key)));
                 let ro = radio.as_obj_mut().unwrap();
@@ -591,7 +603,7 @@ impl SettingsProvider {
 
         // Text entries
         for e in &self.text_entries {
-            if e.section == section_name {
+            if e.section == section_name && self.shows(&e.config_key) {
                 o.push(FfonElement::Str(format!(
                     "{}: {}",
                     localize::t(&e.label),
@@ -650,7 +662,7 @@ impl Provider for SettingsProvider {
         let onboarding = localize::t("settings-onboarding-body");
         entries.push((onboarding.clone(), FfonElement::Str(onboarding)));
 
-        if !self.external_keys.contains("colorScheme") {
+        if self.shows("colorScheme") {
             let title = localize::t("settings-radio-color-scheme");
             let mut radio = FfonElement::new_obj(format!("<radio>{title}"));
             let ro = radio.as_obj_mut().unwrap();
@@ -669,7 +681,7 @@ impl Provider for SettingsProvider {
             entries.push((title, radio));
         }
         for e in &self.checkbox_entries {
-            if e.section == "sicompass" && !self.external_keys.contains(&e.config_key) {
+            if e.section == "sicompass" && self.shows(&e.config_key) {
                 let tag = if e.checked {
                     "<checkbox checked>"
                 } else {
@@ -685,7 +697,7 @@ impl Provider for SettingsProvider {
         for e in &self.radio_entries {
             if e.section == "sicompass"
                 && e.config_key != "colorScheme"
-                && !self.external_keys.contains(&e.config_key)
+                && self.shows(&e.config_key)
             {
                 let title = localize::t(&e.radio_key);
                 let mut radio = FfonElement::new_obj(format!("<radio>{title}"));
@@ -703,7 +715,7 @@ impl Provider for SettingsProvider {
             }
         }
         for e in &self.text_entries {
-            if e.section == "sicompass" && !self.external_keys.contains(&e.config_key) {
+            if e.section == "sicompass" && self.shows(&e.config_key) {
                 entries.push((
                     localize::t(&e.label),
                     FfonElement::Str(format!(
@@ -1115,6 +1127,31 @@ impl Provider for SettingsProvider {
 
     fn set_external_setting_keys(&mut self, keys: &[&str]) {
         self.external_keys = keys.iter().map(|k| (*k).to_owned()).collect();
+    }
+
+    fn set_hidden_setting_keys(&mut self, keys: &[&str]) {
+        self.hidden_keys = keys.iter().map(|k| (*k).to_owned()).collect();
+    }
+
+    /// A setting changed elsewhere (another process wrote `settings.json`, or
+    /// the app followed the shared accessibility object): the row shows the
+    /// new value. Nothing is written or fired, since whoever changed it did
+    /// that. A change this provider made itself finds the row already there.
+    fn on_setting_change(&mut self, key: &str, value: &str) {
+        if key == "colorScheme" && matches!(value, "dark" | "light") {
+            self.color_scheme = value.to_owned();
+        }
+        for e in self.checkbox_entries.iter_mut().filter(|e| e.config_key == key) {
+            e.checked = value == "true";
+        }
+        for e in self.radio_entries.iter_mut().filter(|e| e.config_key == key) {
+            if e.options.iter().any(|o| o == value) {
+                e.current_value = value.to_owned();
+            }
+        }
+        for e in self.text_entries.iter_mut().filter(|e| e.config_key == key) {
+            e.current_value = value.to_owned();
+        }
     }
 
     fn set_apply_callback(&mut self, cb: Box<dyn Fn(&str, &str) + Send + 'static>) {
@@ -2708,6 +2745,50 @@ mod tests {
         p.init();
         assert!(log.lock().unwrap().iter().any(|(k, _)| k == "colorScheme"));
         assert!(format!("{:?}", p.fetch()).contains("<radio>"));
+    }
+
+    #[test]
+    fn a_hidden_setting_has_no_row_but_keeps_its_value_and_is_replayed() {
+        let (mut p, log) = with_callback();
+        p.add_checkbox("notes", "enable cloud sync", "notesCloudBackup", true);
+        p.add_checkbox("notes", "other switch", "notesOther", false);
+        p.add_checkbox("sicompass", "auto update", "autoUpdateCheck", true);
+        p.set_hidden_setting_keys(&["notesCloudBackup", "autoUpdateCheck"]);
+        p.init();
+        let fired: Vec<String> = log.lock().unwrap().iter().map(|(k, _)| k.clone()).collect();
+        assert!(fired.iter().any(|k| k == "notesCloudBackup"), "{fired:?}");
+        assert!(fired.iter().any(|k| k == "autoUpdateCheck"), "{fired:?}");
+        let rows = format!("{:?}", p.fetch());
+        assert!(!rows.contains("enable cloud sync"), "{rows}");
+        assert!(!rows.contains("auto update"), "{rows}");
+        assert!(rows.contains("other switch"), "{rows}");
+
+        p.set_hidden_setting_keys(&[]);
+        let rows = format!("{:?}", p.fetch());
+        assert!(rows.contains("<checkbox checked>enable cloud sync"), "{rows}");
+        assert!(rows.contains("auto update"), "{rows}");
+    }
+
+    #[test]
+    fn a_change_made_elsewhere_shows_on_its_row_without_a_write() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        let (p, log) = with_callback();
+        let mut p = p.with_config_path(path.clone());
+        p.add_checkbox("notes", "enable cloud sync", "notesCloudBackup", false);
+        p.add_radio("sicompass", "sort", "sortOrder", &["name", "date"], "name");
+        p.add_text("sicompass", "folder", "saveFolder", "a");
+
+        p.on_setting_change("notesCloudBackup", "true");
+        p.on_setting_change("sortOrder", "date");
+        p.on_setting_change("sortOrder", "not an option");
+        p.on_setting_change("saveFolder", "b");
+
+        assert!(p.checkbox_entries[0].checked);
+        assert_eq!(p.radio_entries[0].current_value, "date");
+        assert_eq!(p.text_entries[0].current_value, "b");
+        assert!(!path.exists(), "nothing written");
+        assert!(log.lock().unwrap().is_empty(), "nothing fired");
     }
 }
 

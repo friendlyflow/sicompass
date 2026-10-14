@@ -67,3 +67,7 @@ store-tier-status-expired = vor { $days } Tagen abgelaufen
 store-label-server-url = Store-Server-URL
 store-loading-page = Diese Seite wird vom Store-Server geladen. Drücken Sie gleich noch einmal Links und Rechts.
 store-tier-page-failed = Diese Seite konnte nicht vom Store-Server geladen werden: { $err }
+# Auf den Seiten Sicompass Cloud und Commercial, und nach einer Zahlung.
+store-tier-turns-on = Bezahlen aktiviert die Cloud-Synchronisierung für { $plugins } und für die Plugins, die Sie später installieren und die sie nutzen.
+store-tier-turns-on-later = Bezahlen aktiviert die Cloud-Synchronisierung für die Plugins, die Sie installieren und die sie nutzen.
+store-tier-turned-on = Die Cloud-Synchronisierung ist für { $plugins } aktiviert.

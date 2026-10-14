@@ -32,6 +32,7 @@ pub mod data_trash;
 pub mod http;
 pub mod install;
 pub mod payments;
+pub mod service_switches;
 pub mod source;
 pub mod tiers;
 pub mod updates;
@@ -346,6 +347,14 @@ impl StoreProvider {
         self
     }
 
+    /// Another plugins folder, and none provided by the configuration
+    /// (tests that need installed plugins but no store server).
+    pub fn with_plugins_dir(mut self, dir: PathBuf) -> Self {
+        self.plugins_dir = Some(dir);
+        self.system_plugin_dirs = Vec::new();
+        self
+    }
+
     /// The plugin folders this computer's configuration provides (tests).
     pub fn with_system_plugin_dirs(mut self, dirs: Vec<PathBuf>) -> Self {
         self.system_plugin_dirs = dirs;
@@ -365,6 +374,10 @@ impl StoreProvider {
 
     fn installed(&self) -> BTreeMap<String, Installed> {
         install::installed_everywhere(&self.system_plugin_dirs, self.plugins_dir.as_deref())
+    }
+
+    fn installed_manifests(&self) -> Vec<sicompass_sdk::plugin_manifest::PluginManifest> {
+        self.installed().into_values().map(|i| i.manifest).collect()
     }
 
     /// Whether this computer's configuration provides `name`, which the Store
@@ -1113,7 +1126,10 @@ impl Provider for StoreProvider {
         let segments: Vec<String> = self.segments().into_iter().map(str::to_owned).collect();
         match segments.as_slice() {
             [] => self.root(),
-            [first, rest @ ..] if Self::is_tiers(first) => self.tiers.fetch_at(rest),
+            [first, rest @ ..] if Self::is_tiers(first) => {
+                self.tiers.set_plugins(self.installed_manifests());
+                self.tiers.fetch_at(rest)
+            }
             [_programs] => self.programs(),
             [_programs, entry] => {
                 // The entry's key carries its state after the name, which changes
@@ -1224,7 +1240,9 @@ impl Provider for StoreProvider {
     }
 
     fn take_announcement(&mut self) -> Option<String> {
-        self.announcement.take()
+        self.announcement
+            .take()
+            .or_else(|| self.tiers.take_announcement())
     }
 
     fn take_error(&mut self) -> Option<String> {
@@ -1245,6 +1263,7 @@ impl Provider for StoreProvider {
         if !Self::is_tiers(first) || segments.len() < 2 {
             return false;
         }
+        self.tiers.set_plugins(self.installed_manifests());
         let handled = self.tiers.commit(label, new);
         self.announce_tier_settings();
         handled
@@ -1280,6 +1299,9 @@ pub fn license_standing(tier_id: &str) -> sicompass_sdk::license::Standing {
     let Some(issuer) = issuer else {
         return Standing::MISSING;
     };
+    // A renewal reaches the client only when it asks; this is where it is
+    // asked how the user stands, so it asks from here (at most once an hour).
+    crate::payments::refresh::refresh_if_due();
     let (status, days) = match cert::tier_status(tier_id, &issuer) {
         cert::TierStatus::Active { renews_in_days, .. } => (LicenseStatus::Active, renews_in_days),
         cert::TierStatus::Grace { days_left, .. } => (LicenseStatus::Grace, days_left),

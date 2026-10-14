@@ -918,6 +918,22 @@ names the objects an upload changed, and answers `GET /plugins/{p}/head`
 list in both plugins opens with a `header` row (first called `list meta:`)
 showing its hash and whether it changed since the last sync. Nothing changed in the app.
 
+**Step 13, the service switch (2026-10-14):** a plugin's "enable cloud sync"
+checkbox is no longer a switch that cannot work. `plugin.json` names it as its
+service's `switch` (`"service": { "tier": ..., "switch": "notesCloudBackup" }`),
+and the app shows that row only while the user holds the tier, active or in its
+grace period (`programs::follow_services`, which hides it through
+`Provider::set_hidden_setting_keys`). The Store ticks it in `settings.json` when
+the user pays (a redeem whose certificate is on), for every installed plugin the
+tier pays for, and when it installs such a plugin while the tier is held
+(`sicompass_store::service_switches`). The Sicompass Cloud and Commercial pages
+say so just above the payment button. A renewal never ticks it, and nothing
+unticks it: after expiry the row goes and the value stays. The app follows the
+file, so a payment made in the superkey's Store reaches it the same way. The
+client also fetches a renewed certificate now (`payments::refresh`), at most
+once an hour when one expires within three days, since a renewal is re-issued
+under the same token and nothing else would bring it in.
+
 ## 14. Decisions on the former open questions (2026-09-24)
 
 1. **Store key custody:** a key file on the maintainer's machine, outside

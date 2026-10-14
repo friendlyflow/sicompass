@@ -98,6 +98,12 @@ not opened, and a plugin whose fetch marks mail read must be able to refuse.
 
 Everything else is the plugin's own business: files, programs, sockets, HTTP.
 
+A plugin with a paid service can name the checkbox that switches it on as the
+service's `switch` (`"service": { "tier": "friendlyflow/cloud", "switch":
+"notesCloudBackup" }`). The app then shows that row only while the user holds
+the tier, and the Store ticks it when the user pays. The plugin hears it like
+any of its settings, through `OnSettingChange`.
+
 ## Starting and stopping
 
 `Channel::spawn` starts `<plugin dir>/<entry><EXE_SUFFIX>` in its own directory,

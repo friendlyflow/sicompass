@@ -67,3 +67,7 @@ store-tier-status-expired = { $days } dagen geleden verlopen
 store-label-server-url = storeserver-URL
 store-loading-page = Deze pagina wordt van de storeserver geladen. Druk zo meteen opnieuw op Links en Rechts.
 store-tier-page-failed = Deze pagina kon niet van de storeserver geladen worden: { $err }
+# Op de pagina's Sicompass Cloud en Commercial, en na een betaling.
+store-tier-turns-on = Betalen zet cloudsynchronisatie aan voor { $plugins }, en voor de plugins die je later installeert en die het gebruiken.
+store-tier-turns-on-later = Betalen zet cloudsynchronisatie aan voor de plugins die je installeert en die het gebruiken.
+store-tier-turned-on = Cloudsynchronisatie staat aan voor { $plugins }.

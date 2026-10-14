@@ -447,6 +447,178 @@ fn seed_plugins_follow(discovered: &[DiscoveredPlugin]) {
     });
 }
 
+// ---------------------------------------------------------------------------
+// Service switches
+// ---------------------------------------------------------------------------
+
+/// A plugin's service switch (`service.switch` in its `plugin.json`, "enable
+/// cloud sync"): its settings section, its key, and the tier it needs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ServiceSwitch {
+    section: String,
+    key: String,
+    tier: String,
+}
+
+fn service_switches(plugins: &[DiscoveredPlugin]) -> Vec<ServiceSwitch> {
+    plugins
+        .iter()
+        .filter_map(|p| {
+            let service = p.manifest.service.as_ref()?;
+            Some(ServiceSwitch {
+                section: p.manifest.display_name.clone(),
+                key: service.switch.clone()?,
+                tier: service.tier.clone(),
+            })
+        })
+        .collect()
+}
+
+/// The switches to hide (the user does not hold their tier: neither active nor
+/// in its grace period) and each switch's value in `settings.json`.
+fn services_now(
+    switches: &[ServiceSwitch],
+) -> (Vec<String>, std::collections::HashMap<String, String>) {
+    use sicompass_sdk::license::LicenseStatus;
+    let mut hidden = Vec::new();
+    let mut values = std::collections::HashMap::new();
+    for s in switches {
+        let held = matches!(
+            sicompass_sdk::license::standing(&s.tier).status,
+            LicenseStatus::Active | LicenseStatus::Grace
+        );
+        if !held {
+            hidden.push(s.key.clone());
+        }
+        if let Some(v) = crate::plugin_host::services::read_plugin_setting(&s.section, &s.key) {
+            values.insert(s.key.clone(), v);
+        }
+    }
+    hidden.sort();
+    (hidden, values)
+}
+
+/// What [`follow_services`] looks at: `settings.json` and the license
+/// certificates, by modification time, and the minute, so an expiry is
+/// noticed without either changing.
+type ServicesStamp = (FolderStamp, u64);
+
+fn services_stamp() -> ServicesStamp {
+    let modified = |p: &Path| std::fs::metadata(p).and_then(|m| m.modified()).ok();
+    let mut files: FolderStamp = sicompass_sdk::platform::provider_config_dir()
+        .and_then(|d| std::fs::read_dir(d).ok())
+        .into_iter()
+        .flat_map(|entries| entries.flatten())
+        .map(|e| e.path())
+        .filter(|p| {
+            p.file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.contains("license"))
+        })
+        .map(|p| {
+            let t = modified(&p);
+            (p, t)
+        })
+        .collect();
+    files.sort();
+    if let Some(config) = sicompass_sdk::platform::main_config_path() {
+        let t = modified(&config);
+        files.push((config, t));
+    }
+    let minute = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs() / 60);
+    (files, minute)
+}
+
+/// What [`follow_services`] last saw and did.
+struct ServicesFollow {
+    checked: Option<std::time::Instant>,
+    stamp: ServicesStamp,
+    hidden: Vec<String>,
+    values: std::collections::HashMap<String, String>,
+}
+
+/// `None` until the startup load seeds it ([`seed_services_follow`]).
+static SERVICES: Mutex<Option<ServicesFollow>> = Mutex::new(None);
+
+/// At the startup load: hide the switches whose tier the user does not hold,
+/// before the settings page is first drawn, and remember what was seen.
+fn seed_services_follow(settings: &mut dyn Provider, discovered: &[DiscoveredPlugin]) {
+    let (hidden, values) = services_now(&service_switches(discovered));
+    settings.set_hidden_setting_keys(&hidden.iter().map(String::as_str).collect::<Vec<_>>());
+    *SERVICES.lock().unwrap_or_else(|e| e.into_inner()) = Some(ServicesFollow {
+        checked: Some(std::time::Instant::now()),
+        stamp: services_stamp(),
+        hidden,
+        values,
+    });
+}
+
+/// Follow the plugins' service switches. Each is shown on the settings page
+/// only while the user holds its tier, and its value is what `settings.json`
+/// says: the Store ticks it there when the user pays, in this process or, in
+/// a desicompass session, in the superkey (`sicompass_store::service_switches`).
+/// A value changed there reaches the plugin and the row the way a settings
+/// change does ([`apply_setting`]).
+///
+/// Called every frame. It looks once a second, or at once when `force` is
+/// set, and further only when [`services_stamp`] changed.
+pub fn follow_services(renderer: &mut AppRenderer, force: bool) {
+    let mut follow = SERVICES.lock().unwrap_or_else(|e| e.into_inner());
+    // Not seeded: this renderer did not load the plugins (a test's).
+    let Some(f) = follow.as_mut() else {
+        return;
+    };
+    if !force
+        && f.checked
+            .is_some_and(|t| t.elapsed() < PLUGINS_CHECK_INTERVAL)
+    {
+        return;
+    }
+    f.checked = Some(std::time::Instant::now());
+    let stamp = services_stamp();
+    if !force && stamp == f.stamp {
+        return;
+    }
+    f.stamp = stamp;
+    let plugins = user_plugin_cache().lock().unwrap().clone();
+    let (hidden, values) = services_now(&service_switches(&plugins));
+    let mut changed: Vec<(String, String)> = values
+        .iter()
+        .filter(|(k, v)| f.values.get(*k) != Some(*v))
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect();
+    changed.sort();
+    let hidden_changed = hidden != f.hidden;
+    f.hidden = hidden.clone();
+    f.values = values;
+    drop(follow);
+
+    if !hidden_changed && changed.is_empty() {
+        return;
+    }
+    for (key, value) in &changed {
+        eprintln!("sicompass: service switch {key}: {value}");
+        apply_setting(renderer, key, value, false);
+    }
+    if hidden_changed {
+        eprintln!("sicompass: service switches hidden: {hidden:?}");
+        let keys: Vec<&str> = hidden.iter().map(String::as_str).collect();
+        for p in renderer.providers.iter_mut() {
+            p.set_hidden_setting_keys(&keys);
+        }
+        for tab in &mut renderer.tabs {
+            for p in tab.providers.iter_mut() {
+                p.set_hidden_setting_keys(&keys);
+            }
+        }
+    }
+    rebuild_settings_ffon(renderer);
+    sicompass_ui::list::create_list_current_layer(renderer);
+    renderer.needs_redraw = true;
+}
+
 /// What to do about one plugin after the folders changed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum PluginChange {
@@ -585,6 +757,9 @@ pub fn follow_plugins_folder(renderer: &mut AppRenderer, force: bool) {
     rebuild_settings_ffon(renderer);
     sicompass_ui::list::create_list_current_layer(renderer);
     renderer.needs_redraw = true;
+    // A plugin just loaded has its switch's row: hide it now if its tier is
+    // not held, rather than at the next look.
+    follow_services(renderer, true);
 }
 
 /// Start [`follow_plugins_folder`]'s interval now, as if it had just looked,
@@ -820,6 +995,9 @@ fn load_user_plugins(renderer: &mut AppRenderer, mut settings: Option<&mut dyn P
                 s.set_section_version(&m.display_name, &v);
             }
         }
+    }
+    if let Some(s) = settings {
+        seed_services_follow(s, &discovered);
     }
 }
 
@@ -1856,6 +2034,10 @@ fn apply_setting(renderer: &mut AppRenderer, key: &str, value: &str, skip_enable
         "saveFolder" => {
             renderer.save_folder_path = value.to_owned();
         }
+        // The Store redeemed a token here: it saved the certificate and
+        // ticked the service switches the payment turned on. Show them now
+        // rather than at the next look.
+        "licenseRedeemToken" if !skip_enable => follow_services(renderer, true),
         "language" => {
             // Switch the active locale on every t() / t_args() call from now
             // on, then (a) re-key every provider's root Obj so the root

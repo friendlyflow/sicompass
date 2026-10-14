@@ -120,7 +120,7 @@ tier (`license::standing`), and the redeem token, only for the tier its
 `plugin.json` names as `service` (`license::token`, gated by
 `Grants::service_tier`).
 
-Three things are easy to get wrong here:
+Four things are easy to get wrong here:
 
 - **The paywall is on the service, never on the data.** `payments/cert.rs`
   says verification is display-only, and that stays true: a plugin shows and
@@ -134,6 +134,13 @@ Three things are easy to get wrong here:
 - **Tier pages are served from the Store's own tree**, not grafted into
   another provider, so a refresh after redeeming keeps the page (and the typed
   token) where it was.
+- **A service switch shows only while its tier is held.** The checkbox a
+  plugin names as `service.switch` ("enable cloud sync") is hidden until the
+  user pays (`programs::follow_services`). The Store ticks it in
+  `settings.json` at a redeem and at an install while the tier is held
+  (`sicompass_store::service_switches`), never at a renewal, and nothing
+  unticks it. The app follows the file, because in a session the Store runs in
+  the superkey.
 
 The sync is two-way. Every object in a store has a Merkle hash
 (`sicompass_sync::merkle`, a wire format both plugins and the server share), so

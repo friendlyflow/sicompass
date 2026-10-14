@@ -24,6 +24,7 @@ pub mod cert;
 pub mod checkout;
 pub mod config;
 pub mod entitlement;
+pub mod refresh;
 pub mod tier_input;
 pub mod usage;
 
@@ -69,6 +70,23 @@ pub fn redeem_license(store_url: &str, token: &str, slug: &str) -> Result<(), St
     if store_url.is_empty() || token.is_empty() {
         return Ok(());
     }
+    let certificate = fetch_certificate(store_url, token)?;
+    match cert::verify(&certificate) {
+        cert::LicenseStatus::Invalid(why) => Err(format!("License certificate rejected: {why}")),
+        _ => {
+            if !cert::save(slug, &certificate) {
+                Err("Could not save the license file".to_owned())
+            } else {
+                Ok(())
+            }
+        }
+    }
+}
+
+/// The certificate the server holds for `token` now, unverified. A renewal
+/// re-issues it under the same token, so this is also how a renewal reaches
+/// the client ([`refresh`]).
+fn fetch_certificate(store_url: &str, token: &str) -> Result<cert::Certificate, String> {
     let url = format!("{}/license/{}", store_url.trim_end_matches('/'), token);
 
     let client = reqwest::blocking::Client::builder()
@@ -93,17 +111,5 @@ pub fn redeem_license(store_url: &str, token: &str, slug: &str) -> Result<(), St
         .text()
         .map_err(|e| format!("Could not read the server reply: {e}"))?;
 
-    let certificate: cert::Certificate = serde_json::from_str(&body)
-        .map_err(|e| format!("Server returned an invalid certificate: {e}"))?;
-
-    match cert::verify(&certificate) {
-        cert::LicenseStatus::Invalid(why) => Err(format!("License certificate rejected: {why}")),
-        _ => {
-            if !cert::save(slug, &certificate) {
-                Err("Could not save the license file".to_owned())
-            } else {
-                Ok(())
-            }
-        }
-    }
+    serde_json::from_str(&body).map_err(|e| format!("Server returned an invalid certificate: {e}"))
 }

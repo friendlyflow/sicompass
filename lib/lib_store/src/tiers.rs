@@ -23,8 +23,10 @@ use std::sync::mpsc;
 
 use crate::payments::cert::{self, TierStatus, tier};
 use crate::payments::tier_input::TierSession;
+use crate::service_switches;
 use sicompass_sdk::ffon::FfonElement;
 use sicompass_sdk::localize;
+use sicompass_sdk::plugin_manifest::PluginManifest;
 use sicompass_sdk::tags;
 
 use crate::http::Fetch;
@@ -63,6 +65,11 @@ pub struct Tiers {
     usage_asked: bool,
     /// Keys the app should hear about through the apply callback.
     changed: Vec<(String, String)>,
+    /// The installed plugins, set by the Store before a commit or a fetch:
+    /// the ones whose service switch paying ticks, and the page names.
+    plugins: Vec<PluginManifest>,
+    /// What a payment turned on, said once.
+    announcement: Option<String>,
 }
 
 impl Tiers {
@@ -77,7 +84,18 @@ impl Tiers {
             usage_loading: None,
             usage_asked: false,
             changed: Vec::new(),
+            plugins: Vec::new(),
+            announcement: None,
         }
+    }
+
+    /// The installed plugins, as the Store finds them now.
+    pub fn set_plugins(&mut self, plugins: Vec<PluginManifest>) {
+        self.plugins = plugins;
+    }
+
+    pub fn take_announcement(&mut self) -> Option<String> {
+        self.announcement.take()
     }
 
     /// `settings.json`, which the Store also reads to see which programs the
@@ -196,6 +214,19 @@ impl Tiers {
             return vec![FfonElement::new_str(localize::t("store-loading-page"))];
         };
         let mut level = children.clone();
+        // Said just before the payment button, where the user decides.
+        if rest.is_empty()
+            && let Some(line) = self.turns_on_line(page)
+        {
+            let at = level
+                .iter()
+                .position(|e| match e {
+                    FfonElement::Str(s) => s.starts_with("<button>checkout:"),
+                    FfonElement::Obj(o) => o.key.starts_with("<button>checkout:"),
+                })
+                .unwrap_or(level.len());
+            level.insert(at, FfonElement::new_str(line));
+        }
         for segment in rest {
             let next = level.into_iter().find_map(|e| match e {
                 FfonElement::Obj(o) if tags::strip_display(&o.key) == segment.as_str() => {
@@ -209,6 +240,47 @@ impl Tiers {
             }
         }
         level
+    }
+
+    /// On a page whose tier pays for a service: what paying turns on, before
+    /// the user pays (just above the payment button). The plugins installed now are named; later installs get
+    /// it too (`service_switches::tick_if_held`).
+    fn turns_on_line(&self, page: &str) -> Option<String> {
+        let tier_id = PAGES.iter().find(|(id, _, _)| *id == page)?.2?;
+        if !cert::tier_includes(tier_id, tier::CLOUD) {
+            return None;
+        }
+        let names: Vec<String> = service_switches::covered(tier_id, &self.plugins)
+            .iter()
+            .map(|m| m.display_name.clone())
+            .collect();
+        Some(if names.is_empty() {
+            localize::t("store-tier-turns-on-later")
+        } else {
+            let mut a = localize::Args::new();
+            a.set("plugins", names.join(", "));
+            localize::t_args("store-tier-turns-on", &a)
+        })
+    }
+
+    /// A Sicompass Cloud (or Commercial) token was redeemed: tick the
+    /// service switch of every installed plugin the certificate pays for, and
+    /// say which. Nothing for a certificate that is not on.
+    fn after_payment(&mut self) {
+        let Some(held) =
+            cert::load(crate::payments::CLOUD_SLUG).and_then(|c| service_switches::paid_tier(&c))
+        else {
+            return;
+        };
+        let Some(path) = &self.settings_path else {
+            return;
+        };
+        let names = service_switches::tick_covered(path, &held, &self.plugins);
+        if !names.is_empty() {
+            let mut a = localize::Args::new();
+            a.set("plugins", names.join(", "));
+            self.announcement = Some(localize::t_args("store-tier-turned-on", &a));
+        }
     }
 
     fn start_loading(&mut self, page: &'static str) {
@@ -330,8 +402,12 @@ impl Tiers {
         let Some(result) = self.session.commit_input(label, value) else {
             return false;
         };
-        if let Err(e) = result {
-            self.error = Some(e);
+        match result {
+            Err(e) => self.error = Some(e),
+            Ok(()) if label == "License redeem token" && !value.trim().is_empty() => {
+                self.after_payment()
+            }
+            Ok(()) => {}
         }
         // Kept even when redeeming failed, as Settings did: the user may be
         // offline, and the token is also the cloud-backup credential.
