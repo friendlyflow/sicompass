@@ -32,6 +32,7 @@ pub mod data_trash;
 pub mod http;
 pub mod install;
 pub mod payments;
+pub mod publish;
 pub mod service_switches;
 pub mod source;
 pub mod tiers;
@@ -251,6 +252,8 @@ pub struct StoreProvider {
     refresh: bool,
     /// Store > tiers.
     tiers: tiers::Tiers,
+    /// Store > publish.
+    publish: publish::Publish,
 }
 
 impl Default for StoreProvider {
@@ -290,6 +293,7 @@ impl StoreProvider {
             announcement: None,
             refresh: false,
             tiers: tiers::Tiers::new(http::http_fetch()),
+            publish: publish::Publish::new(http::http_fetch()),
         }
     }
 
@@ -311,6 +315,7 @@ impl StoreProvider {
         self.system_plugin_dirs = Vec::new();
         self.cache_dir = None;
         self.tiers = tiers::Tiers::new(self.fetch.clone());
+        self.publish = publish::Publish::new(self.fetch.clone());
         self
     }
 
@@ -324,6 +329,22 @@ impl StoreProvider {
     /// The tiers section, for tests.
     pub fn tiers_mut(&mut self) -> &mut tiers::Tiers {
         &mut self.tiers
+    }
+
+    /// The publish section, for tests.
+    pub fn publish_mut(&mut self) -> &mut publish::Publish {
+        &mut self.publish
+    }
+
+    /// Replace the publish section (tests: another tier, token and GitHub).
+    pub fn with_publish(mut self, publish: publish::Publish) -> Self {
+        self.publish = publish;
+        self
+    }
+
+    /// Whether `segment` (the first one of a path) is the publish section.
+    fn is_publish(segment: &str) -> bool {
+        segment == localize::t("store-publish")
     }
 
     /// Whether `segment` (the first one of a path) is the tiers section.
@@ -775,6 +796,7 @@ impl StoreProvider {
         }
         out.push(FfonElement::new_obj(localize::t("store-programs")));
         out.push(FfonElement::new_obj(localize::t("store-tiers")));
+        out.push(FfonElement::new_obj(localize::t("store-publish")));
         out
     }
 
@@ -868,6 +890,15 @@ impl StoreProvider {
             }
             None => localize::t("store-state-not-installed"),
         };
+        // Said in the list line itself, so a screen reader hears it without
+        // opening the entry.
+        if offer.entry.as_ref().is_some_and(|e| e.frozen.is_some()) {
+            return format!(
+                "{}, {state}, {}",
+                offer.name,
+                localize::t("store-state-frozen")
+            );
+        }
         format!("{}, {state}", offer.name)
     }
 
@@ -970,8 +1001,14 @@ impl StoreProvider {
                 return out;
             }
         };
+        // A frozen entry's release is no longer the latest one.
+        let frozen = offer.entry.as_ref().is_some_and(|e| e.frozen.is_some());
         out.push(line(
-            "store-version",
+            if frozen {
+                "store-version-frozen"
+            } else {
+                "store-version"
+            },
             &[("version", release.version.clone())],
         ));
         out.extend(access_lines(release).into_iter().map(FfonElement::new_str));
@@ -987,6 +1024,9 @@ impl StoreProvider {
         }
         if offer.entry.as_ref().is_some_and(|e| e.paid_features) {
             out.push(line("store-paid-features", &[]));
+        }
+        if frozen {
+            out.push(line("store-frozen", &[]));
         }
 
         // Withdrawn by the hash of the archive this computer would install.
@@ -1130,6 +1170,18 @@ impl Provider for StoreProvider {
                 self.tiers.set_plugins(self.installed_manifests());
                 self.tiers.fetch_at(rest)
             }
+            [first, rest @ ..] if Self::is_publish(first) => {
+                // Whether a submission is listed is read from the store list.
+                if self.loaded.is_none() && !rest.is_empty() {
+                    self.start_load();
+                }
+                let listed = self
+                    .loaded
+                    .as_ref()
+                    .and_then(|l| l.as_ref().ok())
+                    .map(|l| &l.store);
+                self.publish.fetch_at(rest, self.tiers.store_url(), listed)
+            }
             [_programs] => self.programs(),
             [_programs, entry] => {
                 // The entry's key carries its state after the name, which changes
@@ -1178,7 +1230,12 @@ impl Provider for StoreProvider {
     }
 
     fn on_button_press(&mut self, function_name: &str) {
-        if self.tiers.on_button_press(function_name).is_some() {
+        if self.tiers.on_button_press(function_name).is_some()
+            || self
+                .publish
+                .on_button_press(function_name, self.tiers.store_url())
+                .is_some()
+        {
             self.refresh = true;
             return;
         }
@@ -1198,7 +1255,9 @@ impl Provider for StoreProvider {
     }
 
     fn tick(&mut self) -> bool {
-        if self.tiers.tick() {
+        let tiers = self.tiers.tick();
+        let publish = self.publish.tick();
+        if tiers || publish {
             self.refresh = true;
             return true;
         }
@@ -1246,20 +1305,26 @@ impl Provider for StoreProvider {
     }
 
     fn take_error(&mut self) -> Option<String> {
-        self.tiers.take_error()
+        self.tiers
+            .take_error()
+            .or_else(|| self.publish.take_error())
     }
 
     fn on_radio_change(&mut self, group: &str, value: &str) {
         self.tiers.on_radio_change(group, value);
     }
 
-    /// Only the tiers section has inputs: the server URL and the ones on the
-    /// tier pages. The app pushes the input's label as the last segment.
+    /// Only the tiers and publish sections have inputs: the server URL and
+    /// the ones on the tier pages, and the publish form. The app pushes the
+    /// input's label as the last segment.
     fn commit_edit(&mut self, _old: &str, new: &str) -> bool {
         let segments: Vec<String> = self.segments().into_iter().map(str::to_owned).collect();
         let (Some(first), Some(label)) = (segments.first(), segments.last()) else {
             return false;
         };
+        if segments.len() >= 2 && Self::is_publish(first) {
+            return self.publish.commit(label, new);
+        }
         if !Self::is_tiers(first) || segments.len() < 2 {
             return false;
         }
@@ -1356,5 +1421,7 @@ pub fn register() {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_publish;
 #[cfg(test)]
 mod tests_tiers;

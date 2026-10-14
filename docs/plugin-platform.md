@@ -83,6 +83,13 @@ Decided with the maintainer on 2026-09-24.
   one a third party runs its own checkout and signs its own certificates. Our
   server acting as their issuer (a marketplace with Stripe Connect) is a later,
   server-only change.
+- **Listing a third party's plugin needs Sicompass Cloud or Sicompass
+  Commercial** (decided 2026-10-14), for free and proprietary plugins alike.
+  The paywall is on the listing, never on the user: installing from the Store
+  stays free. When the developer's tier lapses, the entry is **frozen**: it
+  stays listed and installable at the last release made while the tier was
+  active, and offers nothing newer. Running a plugin outside the Store is
+  never gated (see §8, "Developer onboarding").
 
 ## 2. Guest toolchain
 
@@ -481,7 +488,9 @@ are kept in `~/.config/sicompass/plugin-keys/` and set as repo secrets with
   "plugins": [
     { "name": "notes", "repo": "friendlyflow/notes-plugin-sicompass",
       "pubkey": "<ed25519 pub>", "category": "productivity",
-      "service": "friendlyflow/cloud", "paidFeatures": false }
+      "service": "friendlyflow/cloud", "paidFeatures": false },
+    { "name": "acme", "repo": "acme-dev/acme-plugin-sicompass",
+      "pubkey": "<ed25519 pub>", "paidFeatures": true, "frozen": "v1.4.0" }
   ]
 }
 ```
@@ -490,7 +499,15 @@ are kept in `~/.config/sicompass/plugin-keys/` and set as repo secrets with
   "Sicompass Commercial" are translated, and renaming is a string change.
 - The store holds **no versions**. The Store reads `release.json` from each
   repo's latest release, so releasing a plugin never needs a sicompass commit. It
-  changes only when a plugin, a key or a tier is added.
+  changes only when a plugin, a key or a tier is added, or an entry is frozen.
+- **`frozen`** is the one version the list may hold: the release tag a third
+  party's entry stays at while its developer's tier has lapsed. The Store
+  fetches `releases/download/<tag>/` instead of `releases/latest/download/`,
+  so it installs that release, updates an older install up to it, never
+  downgrades a newer one, and says "updates paused" in the entry's list line.
+  sicompass before 0.2.4 ignores the field and keeps offering the latest
+  release. Bumping the store `version` instead would have made those clients
+  refuse the whole list.
 - It is signed with a **friendlyflow store key**, whose public half is compiled
   into `lib_store`. A `/store` skill adds an entry and re-signs. A pull request
   can therefore propose an entry but cannot make the app trust it.
@@ -518,6 +535,43 @@ are kept in `~/.config/sicompass/plugin-keys/` and set as repo secrets with
   checked against their signatures like any download, while it fetches fresh
   ones. Offline, the kept list wins over the compiled one. An install always
   downloads the release again.
+
+### Developer onboarding
+
+1. **Submit.** The developer opens Store > publish in the app. It says what
+   listing needs and where they stand with it, and with Sicompass Cloud or
+   Commercial it offers a form: plugin name, repository (`owner/name`) and
+   the public key from `sicompass-plugin keygen`. The form is checked with
+   the same rules `store-sign` uses (`sicompass_sdk::store::check_entry_fields`)
+   and sent to the license server, `POST /developer/plugins`, with the
+   developer's redeem token. The server refuses it without Cloud or
+   Commercial, and refuses a name another developer holds.
+2. **Tell the maintainer.** The server opens a GitHub issue in
+   `friendlyflow/sicompass`, `Store submission: <name>`, labelled
+   `store-submission`, with the review checklist. GitHub notifies the
+   maintainer. The issue holds the name, the repo and the key, never who the
+   developer is. A changed resubmission comments on it. When GitHub cannot be
+   reached the submission is kept and the issue opened later.
+3. **Review and list.** `/store onboard <name>` checks the submission is
+   active, goes through the checklist, adds the entry, signs and pushes, and
+   closes the issue. `/store decline <name> <reason>` closes it with the
+   reason instead.
+4. **Follow it.** Store > publish lists the developer's submissions
+   (`GET /developer/mine`): *listed* and *listed, updates paused* are read
+   from the store list, *not accepted* from the issue being closed without a
+   listing, and otherwise *waiting for review*, each with a button that opens
+   the review.
+5. **Lapse and renewal.** `GET /developer/listing` is public and holds no
+   personal data: each submission's repo, key, issue and whether its
+   developer's tier is `active` or `lapsed` (with `lapsedAt`, expiry plus the
+   14 days of grace, or the cancellation). `/store freeze-check` freezes a
+   lapsed entry at the newest release published before `lapsedAt`, and
+   unfreezes it after a renewal, commenting on the issue both times.
+
+The server never writes or signs the store list, so every listing and every
+freeze stays a reviewed change signed with the store key. Nothing gates a
+plugin outside the Store: one copied into the plugins folder, or provided by
+`SICOMPASS_PLUGIN_PATH`, runs as it always did.
 
 ## 9. lib_store
 

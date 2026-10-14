@@ -54,16 +54,13 @@ pub struct Source {
 }
 
 impl Source {
-    /// A plugin the store list offers: its GitHub repo's latest release, signed
-    /// by the key the (signed) list names.
+    /// A plugin the store list offers: its GitHub repo's latest release (or
+    /// the release a frozen entry stays at), signed by the key the (signed)
+    /// list names.
     pub fn listed(entry: &StoreEntry, releases_url: &str) -> Self {
         Source {
             name: entry.name.clone(),
-            folder: format!(
-                "{}/{}/releases/latest/download/",
-                releases_url.trim_end_matches('/'),
-                entry.repo
-            ),
+            folder: entry.release_folder(releases_url.trim_end_matches('/')),
             pubkey: entry.pubkey.clone(),
             revoked: entry.revoked.clone(),
             by_hand: false,
@@ -305,7 +302,10 @@ pub fn install_and_approve(
         .and_then(|path| crate::approvals::record(&path, &m).map(|()| path))
         .map_err(|e| format!("installed, but the approval could not be saved: {e}"))?;
     if new && let Err(e) = crate::service_switches::tick_if_held(&path, &m) {
-        eprintln!("sicompass: store: could not turn on {}'s service: {e}", m.name);
+        eprintln!(
+            "sicompass: store: could not turn on {}'s service: {e}",
+            m.name
+        );
     }
     Ok(m.version.unwrap_or_default())
 }
@@ -418,15 +418,24 @@ mod tests {
         let entry = StoreEntry {
             name: "notes".into(),
             repo: "friendlyflow/notes-plugin-sicompass".into(),
-            pubkey: String::new(),
-            category: None,
-            service: None,
-            paid_features: false,
-            revoked: Vec::new(),
+            ..Default::default()
         };
         assert_eq!(
             Source::listed(&entry, RELEASES_URL).url(RELEASE_FILE),
             entry.release_url(RELEASE_FILE)
+        );
+        let frozen = StoreEntry {
+            frozen: Some("v1.4.0".into()),
+            ..entry
+        };
+        assert_eq!(
+            Source::listed(&frozen, RELEASES_URL).url(RELEASE_FILE),
+            frozen.release_url(RELEASE_FILE)
+        );
+        assert!(
+            frozen
+                .release_url(RELEASE_FILE)
+                .contains("/releases/download/v1.4.0/")
         );
     }
 

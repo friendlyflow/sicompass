@@ -175,7 +175,16 @@ impl Server {
 
     /// A store list offering `demo`, signed by `signer`.
     fn serve_store(&self, keys: &Keys, signer: &str, revoked: &[&str]) {
-        let store = serde_json::json!({
+        self.serve_store_with(keys, signer, revoked, None);
+    }
+
+    /// A store list offering `demo` frozen at release `tag`.
+    fn serve_frozen_store(&self, keys: &Keys, tag: &str) {
+        self.serve_store_with(keys, &keys.store_secret, &[], Some(tag));
+    }
+
+    fn serve_store_with(&self, keys: &Keys, signer: &str, revoked: &[&str], frozen: Option<&str>) {
+        let mut store = serde_json::json!({
             "version": 1,
             "tiers": {},
             "plugins": [{
@@ -186,6 +195,9 @@ impl Server {
                 "revoked": revoked,
             }]
         });
+        if let Some(tag) = frozen {
+            store["plugins"][0]["frozen"] = serde_json::json!(tag);
+        }
         let json = serde_json::to_vec_pretty(&store).unwrap();
         let sig = package::sign(&json, signer).unwrap();
         self.serve("/store/store.json", json);
@@ -616,6 +628,101 @@ fn a_revoked_release_cannot_be_installed() {
     assert_eq!(h.installed_version(), None);
 }
 
+/// The release a frozen entry stays at, under its tag's folder.
+fn serve_tagged(server: &Server, tag: &str, r: &Release) {
+    server.serve_release_at(&format!("/{REPO}/releases/download/{tag}/"), r);
+}
+
+#[test]
+fn a_frozen_plugin_installs_its_frozen_release_and_says_why() {
+    let (server, keys) = (Server::start(), keys());
+    server.serve_frozen_store(&keys, "v1.0.0");
+    serve_tagged(&server, "v1.0.0", &release(&keys, "1.0.0", ""));
+    // Released after the developer's tier lapsed: never offered.
+    server.serve_release(&release(&keys, "2.0.0", ""));
+    let mut h = harness(&server, &keys);
+
+    let list = h.open_programs();
+    let paused = localize::t("store-state-frozen");
+    assert!(
+        has(
+            &list,
+            &format!(
+                "demo, {}, {paused}",
+                localize::t("store-state-not-installed")
+            )
+        ),
+        "{list:?}"
+    );
+    let entry = h.entry();
+    assert!(
+        has(
+            &entry,
+            &t_with("store-version-frozen", &[("version", "1.0.0")])
+        ),
+        "{entry:?}"
+    );
+    assert!(
+        !has(&entry, &t_with("store-version", &[("version", "1.0.0")])),
+        "{entry:?}"
+    );
+    assert!(!has(&entry, "2.0.0"), "{entry:?}");
+    assert!(has(&entry, &localize::t("store-frozen")), "{entry:?}");
+    assert!(has(&entry, "<button>install:demo"), "{entry:?}");
+
+    h.press("install:demo");
+    assert_eq!(h.installed_version().as_deref(), Some("1.0.0"));
+    let list = h.open_programs();
+    assert!(has(&list, &paused), "{list:?}");
+    let entry = h.entry();
+    assert!(!has(&entry, "<button>update:"), "{entry:?}");
+    assert!(has(&entry, "<button>uninstall:demo"), "{entry:?}");
+    h.assert_staging_clean();
+}
+
+#[test]
+fn a_frozen_plugin_updates_an_older_install_to_its_release_and_no_further() {
+    let (server, keys) = (Server::start(), keys());
+    let h = installed_then_released(&server, &keys, "", "");
+    server.reset();
+    server.serve_frozen_store(&keys, "v1.1.0");
+    serve_tagged(&server, "v1.1.0", &release(&keys, "1.1.0", ""));
+    server.serve_release(&release(&keys, "1.2.0", ""));
+    let sources = h.sources(&server, &keys);
+
+    let pending = updates::check(&sources);
+    assert_eq!(pending.len(), 1, "{pending:?}");
+    assert_eq!(pending[0].to, "1.1.0");
+    assert_eq!(
+        updates::install(&sources, &pending[0]).as_deref(),
+        Ok("1.1.0")
+    );
+    // 1.2.0 is the latest release, but not the frozen one.
+    assert!(updates::check(&sources).is_empty());
+    h.assert_staging_clean();
+}
+
+#[test]
+fn a_newer_install_than_the_frozen_release_is_left_alone() {
+    let (server, keys) = (Server::start(), keys());
+    server.serve_frozen_store(&keys, "v1.0.0");
+    serve_tagged(&server, "v1.0.0", &release(&keys, "1.0.0", ""));
+    let mut h = harness(&server, &keys);
+    let dir = h.plugins.path().join("demo");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("plugin.json"), plugin_json("1.5.0", "", "0.1.0")).unwrap();
+
+    let list = h.open_programs();
+    assert!(has(&list, &localize::t("store-state-frozen")), "{list:?}");
+    let entry = h.entry();
+    assert!(has(&entry, &localize::t("store-frozen")), "{entry:?}");
+    assert!(!has(&entry, "<button>update:"), "{entry:?}");
+    assert!(!has(&entry, "<button>install:"), "{entry:?}");
+    assert!(has(&entry, "<button>uninstall:demo"), "{entry:?}");
+    assert!(updates::check(&h.sources(&server, &keys)).is_empty());
+    assert_eq!(h.installed_version().as_deref(), Some("1.5.0"));
+}
+
 #[test]
 fn an_older_release_never_replaces_a_newer_install() {
     let (server, keys) = (Server::start(), keys());
@@ -707,7 +814,11 @@ fn the_root_does_not_touch_the_network() {
     let root = lines(h.store.fetch());
     assert_eq!(
         root,
-        vec![localize::t("store-programs"), localize::t("store-tiers")]
+        vec![
+            localize::t("store-programs"),
+            localize::t("store-tiers"),
+            localize::t("store-publish")
+        ]
     );
     assert!(!h.store.is_working());
     let received = server.rt.block_on(server.server.received_requests());
@@ -728,7 +839,11 @@ fn the_root_points_out_programs_whose_data_is_here_without_the_network() {
     assert!(root[0].contains("notes"), "{root:?}");
     assert_eq!(
         root[1..],
-        [localize::t("store-programs"), localize::t("store-tiers")]
+        [
+            localize::t("store-programs"),
+            localize::t("store-tiers"),
+            localize::t("store-publish")
+        ]
     );
     // Only the one with data: project management was never used here.
     assert!(!root[0].contains("projectmanagement"), "{root:?}");
@@ -764,7 +879,11 @@ fn an_empty_data_folder_is_not_pointed_out() {
     let root = lines(h.store.fetch());
     assert_eq!(
         root,
-        vec![localize::t("store-programs"), localize::t("store-tiers")]
+        vec![
+            localize::t("store-programs"),
+            localize::t("store-tiers"),
+            localize::t("store-publish")
+        ]
     );
 }
 
@@ -800,7 +919,11 @@ fn a_program_whose_data_is_here_says_so_until_it_is_installed() {
     h.store.set_current_path("/");
     assert_eq!(
         lines(h.store.fetch()),
-        vec![localize::t("store-programs"), localize::t("store-tiers")]
+        vec![
+            localize::t("store-programs"),
+            localize::t("store-tiers"),
+            localize::t("store-publish")
+        ]
     );
 }
 
