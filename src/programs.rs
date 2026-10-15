@@ -432,6 +432,8 @@ struct Follow {
     checked: Option<std::time::Instant>,
     stamp: FolderStamp,
     known: Vec<DiscoveredPlugin>,
+    /// Plugins whose unload [`hold_vanished`] held back on the last look.
+    held: Vec<String>,
 }
 
 /// `None` until the startup load seeds it ([`seed_plugins_follow`]).
@@ -444,6 +446,7 @@ fn seed_plugins_follow(discovered: &[DiscoveredPlugin]) {
         checked: Some(std::time::Instant::now()),
         stamp: folder_stamp(),
         known: discovered.to_vec(),
+        held: Vec::new(),
     });
 }
 
@@ -691,6 +694,105 @@ fn plugin_changes(
     changes
 }
 
+/// Hold back, for one look, the unload of a plugin that is gone from the list
+/// while its folder is still there. Returns the changes to make now and the
+/// plugins held.
+///
+/// A plugin drops out of the list whenever its `plugin.json` cannot be read,
+/// and that happens for a moment while something rewrites it: git, Dropbox, an
+/// editor, or a version bump in a checkout a debug build links to. The plugin
+/// was then unloaded and loaded again a second later, which restarts its
+/// program at its root: the text editor jumped to "/" in the middle of work.
+/// One removed for good loses its folder (the Store's uninstall), and goes at
+/// once. One still unreadable on the next look goes then (`held` names it).
+fn hold_vanished(
+    changes: Vec<PluginChange>,
+    before: &[DiscoveredPlugin],
+    now: &[DiscoveredPlugin],
+    held: &[String],
+    exists: &dyn Fn(&Path) -> bool,
+) -> (Vec<PluginChange>, Vec<DiscoveredPlugin>) {
+    let mut keep = Vec::new();
+    let mut hold = Vec::new();
+    for change in changes {
+        if let PluginChange::Unload(name) = &change {
+            let vanished = !now.iter().any(|n| &n.manifest.name == name);
+            if vanished && !held.contains(name) {
+                if let Some(p) = before.iter().find(|b| &b.manifest.name == name) {
+                    if exists(&p.dir) {
+                        hold.push(p.clone());
+                        continue;
+                    }
+                }
+            }
+        }
+        keep.push(change);
+    }
+    (keep, hold)
+}
+
+/// Where a tab's cursor was in a program about to be reloaded: `tab` is
+/// `None` for the active tab.
+struct Place {
+    tab: Option<usize>,
+    path: String,
+    id: sicompass_sdk::ffon::IdArray,
+}
+
+/// Every tab whose cursor is in the program `name`.
+fn places_in(renderer: &AppRenderer, name: &str) -> Vec<Place> {
+    let at = |providers: &[Box<dyn Provider>], id: &sicompass_sdk::ffon::IdArray| {
+        let idx = id.get(0)?;
+        let p = providers.get(idx)?;
+        name_matches_provider(name, p.name()).then(|| p.current_path().to_owned())
+    };
+    let mut places = Vec::new();
+    if let Some(path) = at(&renderer.providers, &renderer.current_id) {
+        places.push(Place {
+            tab: None,
+            path,
+            id: renderer.current_id.clone(),
+        });
+    }
+    for (i, tab) in renderer.tabs.iter().enumerate() {
+        if i == renderer.active_tab {
+            continue;
+        }
+        if let Some(path) = at(&tab.providers, &tab.current_id) {
+            places.push(Place {
+                tab: Some(i),
+                path,
+                id: tab.current_id.clone(),
+            });
+        }
+    }
+    places
+}
+
+/// Walk the reloaded program `name` back down to each of its `places`. Its new
+/// instance starts at its root, and without this the tab stayed there (and the
+/// next key press saved it there).
+fn return_to_places(renderer: &mut AppRenderer, name: &str, places: Vec<Place>) {
+    for place in places {
+        let providers = match place.tab {
+            None => &renderer.providers,
+            Some(i) => &renderer.tabs[i].providers,
+        };
+        let Some(idx) = providers
+            .iter()
+            .position(|p| name_matches_provider(name, p.name()))
+        else {
+            continue;
+        };
+        let mut id = place.id;
+        id.set(0, idx);
+        match place.tab {
+            None => renderer.rebuild_and_clamp(&place.path, id),
+            Some(i) => renderer.rebuild_parked_tab(i, &place.path, id),
+        }
+    }
+}
+
 /// Follow the plugin folders and the approvals, whoever changed them: this
 /// app's Store, another sicompass, the desicompass superkey (which shows the
 /// Store in a session), or the user by hand. A plugin installed and approved
@@ -721,6 +823,7 @@ pub fn follow_plugins_folder(renderer: &mut AppRenderer, force: bool) {
     let now = discover_user_plugins();
     let approvals = crate::plugin_manifest::read_approvals();
     let before = std::mem::replace(&mut f.known, now.clone());
+    let held_before = std::mem::take(&mut f.held);
     drop(follow);
 
     let changes = {
@@ -732,10 +835,28 @@ pub fn follow_plugins_folder(renderer: &mut AppRenderer, force: bool) {
         };
         plugin_changes(&before, &now, &approvals, &loaded)
     };
+    let (changes, held) = hold_vanished(changes, &before, &now, &held_before, &|d| d.exists());
+    if !held.is_empty() {
+        let mut follow = FOLLOW.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(f) = follow.as_mut() {
+            // Still known, so the next look compares with them, and that look
+            // happens whether or not anything else changes on disk.
+            f.held = held.iter().map(|p| p.manifest.name.clone()).collect();
+            f.known.extend(held);
+            f.stamp.clear();
+        }
+    }
     if changes.is_empty() {
         *user_plugin_cache().lock().unwrap() = now;
         return;
     }
+    let places: Vec<(String, Vec<Place>)> = changes
+        .iter()
+        .filter_map(|c| match c {
+            PluginChange::Reload(name) => Some((name.clone(), places_in(renderer, name))),
+            _ => None,
+        })
+        .collect();
     // Unload under the old manifests, so the right settings section goes.
     for change in &changes {
         if let PluginChange::Unload(name) | PluginChange::Reload(name) = change {
@@ -753,6 +874,9 @@ pub fn follow_plugins_folder(renderer: &mut AppRenderer, force: bool) {
             enable_provider(renderer, name);
             propagate_enable_to_parked_tabs(renderer, name);
         }
+    }
+    for (name, places) in places {
+        return_to_places(renderer, &name, places);
     }
     rebuild_settings_ffon(renderer);
     sicompass_ui::list::create_list_current_layer(renderer);
@@ -1473,6 +1597,16 @@ pub fn apply_tabs_section(
                     for n in ids {
                         id.push(n.as_u64()? as usize);
                     }
+                    // The program by name, where this build has it now. A
+                    // plugin that failed to start, or one added before it,
+                    // moves every saved position after it. Absent in configs
+                    // written by older builds, which keep the saved position.
+                    if let Some(name) = obj.get("program").and_then(|v| v.as_str()) {
+                        let now = r.providers.iter().position(|p| p.name() == name)?;
+                        if id.depth() > 0 {
+                            id.set(0, now);
+                        }
+                    }
                     match id.get(0) {
                         Some(pi) if pi < provider_count && id.depth() > 0 => {
                             Some((id, path, on_path))
@@ -1827,11 +1961,20 @@ pub fn disable_provider(renderer: &mut AppRenderer, name: &str) {
     }
     rebuild_settings_ffon(renderer);
 
-    // Clamp root navigation index
+    // Keep the cursor on the program it was in, as
+    // `propagate_disable_to_parked_tabs` does for the other tabs. Only
+    // clamping left it one program too far whenever an earlier one went, and
+    // inside the next program's tree when its own went; the insert of a
+    // reloaded program then added one more.
     let max_root = renderer.ffon.len().saturating_sub(1);
     if let Some(root_idx) = renderer.current_id.get(0) {
-        if root_idx > max_root {
-            renderer.current_id.set(0, max_root);
+        if root_idx == idx {
+            let mut id = sicompass_sdk::ffon::IdArray::new();
+            id.push(idx.min(max_root));
+            renderer.current_id = id;
+            renderer.list_index = idx.min(max_root);
+        } else if root_idx > idx {
+            renderer.current_id.set(0, root_idx - 1);
         }
     }
 }
@@ -2359,6 +2502,276 @@ mod tests {
         assert_eq!(r.providers.len(), 2);
         assert_eq!(r.providers[0].name(), "a");
         assert_eq!(r.providers[1].name(), "c");
+    }
+
+    fn ids(v: &[usize]) -> IdArray {
+        let mut id = IdArray::new();
+        for &n in v {
+            id.push(n);
+        }
+        id
+    }
+
+    /// A program before the one the cursor is in goes: the cursor stays in
+    /// its program, deep path and all.
+    #[test]
+    fn disabling_an_earlier_program_keeps_the_cursor_in_its_program() {
+        let mut r = AppRenderer::new();
+        for n in ["a", "b", "c", "settings"] {
+            register_provider(&mut r, Box::new(MockProv::new(n)));
+        }
+        r.current_id = ids(&[2, 4, 1]);
+        disable_provider(&mut r, "a");
+        assert_eq!(r.current_id.as_slice(), &[1, 4, 1]);
+        assert_eq!(r.providers[1].name(), "c");
+    }
+
+    /// The program the cursor is in goes: the cursor goes back to the program
+    /// list, rather than into the next program's tree at the old depth.
+    #[test]
+    fn disabling_the_cursors_program_puts_it_on_the_program_list() {
+        let mut r = AppRenderer::new();
+        for n in ["a", "b", "c", "settings"] {
+            register_provider(&mut r, Box::new(MockProv::new(n)));
+        }
+        r.current_id = ids(&[1, 4, 1]);
+        disable_provider(&mut r, "b");
+        assert_eq!(r.current_id.as_slice(), &[1]);
+        assert_eq!(r.list_index, 1);
+    }
+
+    /// Folders under a real directory, as the text editor lists them: one Obj
+    /// per subfolder, sorted, its path the filesystem path.
+    struct MockFs {
+        path: String,
+    }
+    impl MockFs {
+        fn at(root: &Path) -> Self {
+            MockFs {
+                path: root.to_string_lossy().into_owned(),
+            }
+        }
+    }
+    impl Provider for MockFs {
+        fn name(&self) -> &str {
+            "editor"
+        }
+        fn fetch(&mut self) -> Vec<FfonElement> {
+            let mut names: Vec<String> = std::fs::read_dir(&self.path)
+                .map(|it| {
+                    it.flatten()
+                        .filter(|e| e.path().is_dir())
+                        .map(|e| e.file_name().to_string_lossy().into_owned())
+                        .collect()
+                })
+                .unwrap_or_default();
+            names.sort();
+            names.iter().map(|n| FfonElement::new_obj(n)).collect()
+        }
+        fn current_path(&self) -> &str {
+            &self.path
+        }
+        fn set_current_path(&mut self, path: &str) {
+            self.path = path.to_owned();
+        }
+        fn push_path(&mut self, segment: &str) {
+            let mut p = PathBuf::from(&self.path);
+            p.push(segment);
+            self.path = p.to_string_lossy().into_owned();
+        }
+        fn pop_path(&mut self) {
+            let mut p = PathBuf::from(&self.path);
+            p.pop();
+            self.path = p.to_string_lossy().into_owned();
+        }
+        fn path_is_filesystem(&self) -> bool {
+            true
+        }
+    }
+
+    /// A plugin reloaded while the cursor is deep inside it (an update, or its
+    /// `plugin.json` rewritten in a checkout a debug build links). The new
+    /// instance starts at its root; the tab must come back where it was, not
+    /// at the root ("/" for the text editor) and not in the next program.
+    #[test]
+    fn a_reloaded_program_comes_back_where_the_cursor_was() {
+        let tmp = tempfile::tempdir().unwrap();
+        for d in ["a/x/deep", "b/y", "c/z/inner"] {
+            std::fs::create_dir_all(tmp.path().join(d)).unwrap();
+        }
+        let mut r = AppRenderer::new();
+        register_provider(&mut r, Box::new(MockProv::new("alpha")));
+        register_provider(&mut r, Box::new(MockFs::at(tmp.path())));
+        register_provider(&mut r, Box::new(MockProv::new("zulu")));
+        register_provider(&mut r, Box::new(MockProv::new("settings")));
+        let path = tmp.path().join("c").join("z");
+        let path = path.to_string_lossy().into_owned();
+        // In `c/z`, on `inner`: [editor, c, z, inner].
+        r.rebuild_and_clamp(&path, ids(&[1, 2, 0, 0]));
+        assert_eq!(r.current_id.as_slice(), &[1, 2, 0, 0]);
+        assert_eq!(r.providers[1].current_path(), path);
+
+        let places = places_in(&r, "editor");
+        disable_provider(&mut r, "editor");
+        insert_provider_alphabetically(&mut r, Box::new(MockFs::at(tmp.path())), None, None);
+        return_to_places(&mut r, "editor", places);
+
+        assert_eq!(r.current_id.as_slice(), &[1, 2, 0, 0]);
+        assert_eq!(r.providers[1].name(), "editor");
+        assert_eq!(r.providers[1].current_path(), path);
+    }
+
+    /// A folder gained an entry before one on the saved path between two runs
+    /// (a new dot-folder in the home folder, a new checkout beside the
+    /// project). The saved row numbers all point one row too early below it;
+    /// the restore must still find each folder by name and land in it, not
+    /// pop back to that folder or to "/".
+    #[test]
+    fn a_restore_finds_each_folder_by_name_when_rows_moved() {
+        let tmp = tempfile::tempdir().unwrap();
+        for d in ["a", "c/z/inner"] {
+            std::fs::create_dir_all(tmp.path().join(d)).unwrap();
+        }
+        let path = tmp.path().join("c").join("z");
+        let path = path.to_string_lossy().into_owned();
+        // Saved in `c/z`, on `inner`, while `c` was the second folder.
+        let saved = ids(&[0, 1, 0, 0]);
+        std::fs::create_dir_all(tmp.path().join("b")).unwrap();
+
+        let mut r = AppRenderer::new();
+        register_provider(&mut r, Box::new(MockFs::at(tmp.path())));
+        register_provider(&mut r, Box::new(MockProv::new("settings")));
+        r.rebuild_and_clamp(&path, saved);
+
+        assert_eq!(r.current_id.as_slice(), &[0, 2, 0, 0]);
+        assert_eq!(r.providers[0].current_path(), path);
+    }
+
+    /// A tab saved with a cursor deeper than its path, as the reload bug left
+    /// them: the editor restarted at "/" under a deep cursor, and walking back
+    /// down to the folder repeated the levels above it in the saved id. The
+    /// path is the truth, for a provider whose path segments are its levels.
+    /// The restore popped one path segment per extra saved level, which left
+    /// the editor's path folders above where the cursor showed it, and every
+    /// folder entered after that listed a different folder.
+    #[test]
+    fn a_cursor_saved_deeper_than_its_path_is_restored_at_the_path() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join("c/z/inner")).unwrap();
+        let path = tmp.path().join("c").join("z");
+        let path = path.to_string_lossy().into_owned();
+        let below = tmp.path().components().count() - 1;
+        // `c/z` is two levels below the root, but the saved id has three more.
+        let mut saved = vec![0];
+        saved.extend(std::iter::repeat_n(0, below));
+        saved.extend([0, 0, 5, 5, 5, 0]);
+
+        let mut r = AppRenderer::new();
+        register_provider(&mut r, Box::new(MockFs::at(Path::new("/"))));
+        register_provider(&mut r, Box::new(MockProv::new("settings")));
+        r.rebuild_and_clamp(&path, ids(&saved));
+
+        assert_eq!(r.providers[0].current_path(), path, "path and cursor apart");
+        assert_eq!(
+            r.current_id.depth(),
+            2 + below + 2,
+            "the cursor is in `c/z`, on `inner`"
+        );
+    }
+
+    /// [`a_reloaded_program_comes_back_where_the_cursor_was`] for a tab in the
+    /// background, whose tree is not rebuilt when it is switched to.
+    #[test]
+    fn a_reloaded_program_comes_back_where_a_background_tab_was() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join("c/z/inner")).unwrap();
+        let path = tmp.path().join("c").join("z");
+        let path = path.to_string_lossy().into_owned();
+        let fresh = |r: &mut AppRenderer| {
+            init_provider_root(Box::new(MockFs::at(tmp.path())), &mut r.error_message)
+        };
+
+        let mut r = AppRenderer::new();
+        register_provider(&mut r, Box::new(MockProv::new("alpha")));
+        register_provider(&mut r, Box::new(MockFs::at(tmp.path())));
+        register_provider(&mut r, Box::new(MockProv::new("settings")));
+        // A second tab, parked in `c/z` on `inner`.
+        let (p, root) = fresh(&mut r);
+        let mut tab = sicompass_ui::app_state::TabSnapshot::nav_only(ids(&[1, 0, 0, 0]), String::new());
+        tab.providers = vec![Box::new(MockProv::new("alpha")), p];
+        tab.ffon = vec![FfonElement::new_obj("alpha"), root];
+        r.tabs.push(tab);
+        r.rebuild_parked_tab(1, &path, ids(&[1, 0, 0, 0]));
+        assert_eq!(r.tabs[1].provider_path, path);
+
+        let places = places_in(&r, "editor");
+        assert_eq!(places.len(), 1, "only the background tab is in it");
+        // The reload, as `propagate_*_to_parked_tabs` do it: a new instance at
+        // its root in the same slot.
+        let (p, root) = fresh(&mut r);
+        r.tabs[1].providers[1] = p;
+        r.tabs[1].ffon[1] = root;
+        return_to_places(&mut r, "editor", places);
+
+        assert_eq!(r.tabs[1].current_id.as_slice(), &[1, 0, 0, 0]);
+        assert_eq!(r.tabs[1].provider_path, path);
+        assert_eq!(r.tabs[1].providers[1].current_path(), path);
+        r.switch_to_tab(1);
+        assert!(
+            sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &r.current_id)
+                .is_some_and(|s| !s.is_empty()),
+            "the cursor points into a tree that is there"
+        );
+    }
+
+    /// What the follower finds for `name` when its folder exists or not.
+    fn vanished(held: &[&str], folder_there: bool) -> (Vec<PluginChange>, Vec<String>) {
+        let demo = on_disk("demo", "1.0.0");
+        let held: Vec<String> = held.iter().map(|s| s.to_string()).collect();
+        let (changes, kept) = hold_vanished(
+            vec![PluginChange::Unload("demo".into())],
+            &[demo],
+            &[],
+            &held,
+            &|_| folder_there,
+        );
+        (changes, kept.into_iter().map(|p| p.manifest.name).collect())
+    }
+
+    /// A `plugin.json` being rewritten cannot be read for a moment, and the
+    /// plugin drops out of the list. That must not restart its program.
+    #[test]
+    fn a_plugin_gone_while_its_folder_is_there_waits_one_look() {
+        assert_eq!(vanished(&[], true), (vec![], vec!["demo".to_owned()]));
+        // Still gone at the next look: it goes.
+        assert_eq!(
+            vanished(&["demo"], true),
+            (vec![PluginChange::Unload("demo".into())], vec![])
+        );
+    }
+
+    /// The Store's uninstall removes the folder, and that unload is not held.
+    #[test]
+    fn a_plugin_whose_folder_is_gone_is_unloaded_at_once() {
+        assert_eq!(
+            vanished(&[], false),
+            (vec![PluginChange::Unload("demo".into())], vec![])
+        );
+    }
+
+    /// An unapproved plugin is still in the list, so it goes at once too.
+    #[test]
+    fn a_plugin_no_longer_approved_is_not_held() {
+        let demo = on_disk("demo", "1.0.0");
+        let (changes, held) = hold_vanished(
+            vec![PluginChange::Unload("demo".into())],
+            std::slice::from_ref(&demo),
+            std::slice::from_ref(&demo),
+            &[],
+            &|_| true,
+        );
+        assert_eq!(changes, vec![PluginChange::Unload("demo".into())]);
+        assert!(held.is_empty());
     }
 
     // --- sort_providers_alphabetically ---

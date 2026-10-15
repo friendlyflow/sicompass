@@ -65,8 +65,8 @@ fn built_checkouts_are_laid_out_as_installs_and_the_rest_left_to_the_store() {
     );
 }
 
-/// The folder is rebuilt at every start, so a checkout that is gone, or whose
-/// build was cleaned, stops replacing the Store's copy.
+/// The folder is brought up to date at every start, so a checkout that is
+/// gone, or whose build was cleaned, stops replacing the Store's copy.
 #[test]
 fn a_cleaned_checkout_drops_out_at_the_next_start() {
     let tmp = tempfile::tempdir().unwrap();
@@ -85,4 +85,30 @@ fn a_cleaned_checkout_drops_out_at_the_next_start() {
             .is_file(),
         "rebuilding the folder never touches a checkout"
     );
+}
+
+/// A second debug build starting must not make the plugins vanish from under
+/// one already running: that one follows the folder every second, and
+/// restarted each plugin it saw go (the text editor jumped back to "/").
+/// What is already right is left exactly as it is.
+#[cfg(unix)]
+#[test]
+fn linking_again_leaves_the_links_that_are_right_alone() {
+    use std::os::unix::fs::MetadataExt;
+    let tmp = tempfile::tempdir().unwrap();
+    let siblings = tmp.path().join("projects");
+    checkout(&siblings, "notes", "notes", true);
+    let out = tmp.path().join("dev-plugins");
+    link_checkouts(&siblings, &out).unwrap();
+    let manifest = out.join("notes").join("plugin.json");
+    let inode = |p: &Path| p.symlink_metadata().unwrap().ino();
+    let (dir_before, manifest_before) = (inode(&out.join("notes")), inode(&manifest));
+    // Something that does not belong there, as an older layout would leave.
+    std::fs::write(out.join("notes").join("stale"), "x").unwrap();
+
+    assert_eq!(link_checkouts(&siblings, &out).unwrap(), vec!["notes"]);
+    assert_eq!(inode(&out.join("notes")), dir_before, "the folder was remade");
+    assert_eq!(inode(&manifest), manifest_before, "the link was remade");
+    assert!(!out.join("notes").join("stale").exists());
+    assert!(manifest.is_file());
 }

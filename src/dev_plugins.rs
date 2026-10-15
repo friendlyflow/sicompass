@@ -22,13 +22,16 @@ use std::path::{Path, PathBuf};
 pub const CHECKOUT_SUFFIX: &str = "-plugin-sicompass";
 
 /// Link each checkout in `siblings` that has a debug build into `out`, one
-/// folder per plugin, laid out as the Store lays out an install. `out` is
-/// rebuilt from scratch. Returns the plugin names, sorted.
+/// folder per plugin, laid out as the Store lays out an install. Returns the
+/// plugin names, sorted.
+///
+/// Only what differs is touched: a link already pointing where it should is
+/// left alone, a missing one is made, and anything else goes. `out` used to
+/// be removed and rebuilt, and a sicompass already running from it follows
+/// that folder every second: when another debug build started, it saw its
+/// plugins vanish, unloaded them and loaded them again, which restarted each
+/// at its root (the text editor jumped to "/" in the middle of work).
 pub fn link_checkouts(siblings: &Path, out: &Path) -> std::io::Result<Vec<String>> {
-    if out.exists() {
-        // Links only: removing them leaves the checkouts alone.
-        std::fs::remove_dir_all(out)?;
-    }
     std::fs::create_dir_all(out)?;
     let target = sicompass_sdk::plugin_abi::plugin_target()
         .ok_or_else(|| std::io::Error::other("no plugin target for this platform"))?;
@@ -56,19 +59,64 @@ pub fn link_checkouts(siblings: &Path, out: &Path) -> std::io::Result<Vec<String
         };
         let dir = out.join(&name);
         std::fs::create_dir_all(&dir)?;
-        link(&manifest, &dir.join("plugin.json"))?;
+        let mut links = vec![(manifest, "plugin.json".to_owned())];
         let locales = checkout.join("locales");
         if locales.is_dir() {
-            link(&locales, &dir.join("locales"))?;
+            links.push((locales, "locales".to_owned()));
         }
-        link(
-            &program,
-            &dir.join(sicompass_sdk::plugin_abi::executable_name(&entry, target)),
-        )?;
+        links.push((
+            program,
+            sicompass_sdk::plugin_abi::executable_name(&entry, target),
+        ));
+        for entry in std::fs::read_dir(&dir)? {
+            let entry = entry?;
+            if !links.iter().any(|(_, n)| entry.file_name() == n.as_str()) {
+                remove(&entry.path())?;
+            }
+        }
+        for (from, n) in &links {
+            let to = dir.join(n);
+            if !links_to(&to, from) {
+                if to.symlink_metadata().is_ok() {
+                    remove(&to)?;
+                }
+                link(from, &to)?;
+            }
+        }
         names.push(name);
+    }
+    // Folders of checkouts that no longer have a debug build, or are gone.
+    for entry in std::fs::read_dir(out)? {
+        let entry = entry?;
+        if !names.iter().any(|n| entry.file_name() == n.as_str()) {
+            remove(&entry.path())?;
+        }
     }
     names.sort();
     Ok(names)
+}
+
+/// Remove a link, a file, or a folder of them. Never follows a link, so the
+/// checkouts are left alone.
+fn remove(path: &Path) -> std::io::Result<()> {
+    if path.symlink_metadata()?.is_dir() {
+        std::fs::remove_dir_all(path)
+    } else {
+        std::fs::remove_file(path)
+    }
+}
+
+/// Whether `to` is already a link to `from`.
+#[cfg(unix)]
+fn links_to(to: &Path, from: &Path) -> bool {
+    std::fs::read_link(to).is_ok_and(|t| t == from)
+}
+
+/// Copies cannot be told from stale ones cheaply, so they are always made
+/// again (see [`link`]).
+#[cfg(not(unix))]
+fn links_to(_to: &Path, _from: &Path) -> bool {
+    false
 }
 
 /// `plugin.json`'s `name` and `entry`.

@@ -10680,6 +10680,40 @@ fn apply_tabs_section_keeps_tab_timelines_parallel_to_tabs() {
     let _ = h.renderer.active_timeline_mut();
 }
 
+/// `id[0]` is where the program sat in the list when the tab was saved, and
+/// that moves whenever a program before it is added or fails to start. The
+/// saved name wins over the saved position; a config from an older build,
+/// with no name, keeps the position; a program that is gone drops its tab.
+#[test]
+fn apply_tabs_section_finds_the_program_by_name() {
+    let mut h = Harness::new();
+    let fb = h.provider_idx("filebrowser").unwrap();
+    let other = if fb == 0 { 1 } else { 0 };
+    let tabs_json = format!(
+        r#"[{{"id":[{other}],"path":"/","program":"filebrowser"}},{{"id":[{fb}],"path":"/"}},{{"id":[{fb}],"path":"/","program":"no such program"}}]"#,
+    );
+    let mut sec = serde_json::Map::new();
+    sec.insert("tabs".to_owned(), serde_json::Value::String(tabs_json));
+    sec.insert(
+        "activeTab".to_owned(),
+        serde_json::Value::String("0".to_owned()),
+    );
+
+    sicompass::programs::apply_tabs_section(h.r(), &sec);
+
+    assert_eq!(
+        h.renderer.tabs.len(),
+        2,
+        "the tab of a program that is gone is dropped"
+    );
+    assert_eq!(h.renderer.current_id.get(0), Some(fb), "found by name");
+    assert_eq!(
+        h.renderer.tabs[1].current_id.get(0),
+        Some(fb),
+        "no name: the saved position"
+    );
+}
+
 /// Regression: after restart, a tab snapshot may reference a cursor index
 /// past the end of the provider's current FFON tree — terminal scrollback,
 /// chat backlog and similar ephemeral content shrink across sessions. The
