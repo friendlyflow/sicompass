@@ -199,9 +199,8 @@ opens in its own tab.
   every changed file, and Right on a file reads its diff line by line. Fetch,
   pull, push, stage, branch, merge, rebase and stash are colon commands, and
   staging and committing undo with ctrl+z.
-- **Text Editor** opens a file as a tree of its lines. Python indentation and
-  braces in C-family, Rust, Go, JavaScript and TypeScript files become tree
-  levels, so you walk a function the way you walk a folder.
+- **Text Editor** opens a file as a list of its lines, each shown as it is in
+  the file, indentation included. A `.ff` file opens as its tree of nodes.
 - **Project Management** is the kanban board described just above.
 - **Claude** starts a Claude Code session in the folder you stand in. Answers
   arrive as a tree of messages, tool calls and results, and a second colon
