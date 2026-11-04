@@ -158,6 +158,8 @@ the icon.
 - **Cross-platform**: packaged for Windows, macOS, and Linux, with paths, shells, and PTYs routed through platform helpers
 - **High-performance rendering**: Vulkan graphics with a FreeType2 glyph atlas
 - **Extensible**: plugins, installed and updated from the built-in Store without a restart
+- **Pictures and video in the list**: grids of pictures, and video that plays inside the window with sound, never handed to another app
+- **Your own look**: every list can be styled with real CSS and HTML names, a subset drawn by Sicompass itself, and a `user.css` styles them all ([docs/styling.md](docs/styling.md))
 
 ## Built-in providers
 

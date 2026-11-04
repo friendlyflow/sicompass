@@ -244,3 +244,14 @@ A real plugin, from an unpacked release or a checkout with its executable copied
 SICOMPASS_TEST_PLUGIN=<plugin dir> cargo test -p sicompass --test process_plugin \
   -- --ignored a_real_plugin --nocapture
 ```
+
+## Markup: real HTML and CSS in rows
+
+A plugin may put HTML tags and `<style>` rows in its FFON by adding `"markup": true` to
+`plugin.json`. That makes every outside string it sends its own to escape. See
+[styling.md](styling.md), and `../photoalbum-plugin-sicompass` for a worked example. The field
+needs a release tool that knows it: an older `SDK_TAG` drops it from `release.json`.
+
+A plugin whose folder is read on its own thread reports the result from `poll` with **both**
+`redraw` and `needs_refresh`. The app only looks at a tick that says `redraw`, so with
+`needs_refresh` alone the list stays as it was.

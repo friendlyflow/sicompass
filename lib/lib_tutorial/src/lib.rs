@@ -184,6 +184,7 @@ static SECTIONS: &[Node] = &[
                     Leaf("tutorial-sc-gen-updown"),
                     Leaf("tutorial-sc-gen-rightleft"),
                     Leaf("tutorial-sc-gen-enter"),
+                    Leaf("tutorial-sc-gen-navigate"),
                     Leaf("tutorial-sc-gen-escape"),
                     Leaf("tutorial-sc-gen-page"),
                     Leaf("tutorial-sc-gen-f5"),
