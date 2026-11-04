@@ -48,6 +48,10 @@
         in
         {
           default = pkgs.mkShell {
+            # Sets LIBCLANG_PATH and the include flags that bindgen needs, for the
+            # FFmpeg bindings. A setup hook, so it belongs here and not in buildInputs.
+            nativeBuildInputs = [ pkgs.rustPlatform.bindgenHook ];
+
             buildInputs = with pkgs; [
               # Rust toolchain
               cargo
@@ -73,6 +77,14 @@
               freetype
               libwebp
               curl
+
+              # Video. The app links FFmpeg to decode what a <video> row holds, and
+              # the Rust bindings (ffmpeg-sys-next) generate themselves with bindgen,
+              # which needs libclang: `rustPlatform.bindgenHook` below sets that up.
+              # The headless build has every decoder and no display libraries. Its
+              # `.dev` output carries the pkg-config files the bindings look for.
+              ffmpeg-headless
+              ffmpeg-headless.dev
 
               # cmake: several -sys crates drive a CMake build. sdl3-sys needs
               # it for the `bundled-sdl3` feature (which compiles the vendored
@@ -179,6 +191,7 @@
 
               # SDL3 pkg-config / link path (needed by sdl3-rs / cargo build)
               export PKG_CONFIG_PATH="${sdl3}/lib/pkgconfig:$PKG_CONFIG_PATH";
+              export PKG_CONFIG_PATH="${ffmpeg-headless.dev}/lib/pkgconfig:$PKG_CONFIG_PATH";
               export VULKAN_SDK="${vulkan-headers}";
             ''
             + lib.optionalString stdenv.hostPlatform.isLinux ''
@@ -498,7 +511,9 @@
             pname = "sicompass";
 
             # Only the app crate. The lib_* crates come in transitively.
-            cargoExtraArgs = "--locked -p sicompass";
+            # `video` links FFmpeg, which is a buildInput below, so the Nix package
+            # plays <video>. The release archives do not yet: see docs/video.md.
+            cargoExtraArgs = "--locked -p sicompass --features video";
 
             nativeBuildInputs = with pkgs; [
               pkg-config
@@ -521,6 +536,9 @@
               freetype
               libwebp
               curl
+              # The `video` feature's FFmpeg. The headless build has every decoder and
+              # no display libraries.
+              ffmpeg-headless
             ] ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [
               # openssl-sys is in the graph on Linux only (lettre and
               # async-native-tls). macOS uses Security.framework.

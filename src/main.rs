@@ -35,6 +35,10 @@ fn main() {
     // Must happen before load_programs() so create_provider_by_name() resolves them.
     sicompass_builtins::register_all();
 
+    // Video, if this build has it. After the providers, before the window.
+    #[cfg(feature = "video")]
+    sicompass::video_ffmpeg::register();
+
     // No working-directory fixup here, and no resource-root probe: shaders, fonts
     // and every provider asset are compiled into the binary, so there is no runtime
     // resource tree to find. `register_all()` above is what publishes the assets,

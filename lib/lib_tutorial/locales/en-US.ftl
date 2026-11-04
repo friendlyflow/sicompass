@@ -141,6 +141,11 @@ tutorial-grid-photos = <div class="photos"><img src="asset:tutorial/photo-1.jpg"
 tutorial-grid-keys = Press i to enter navigate mode on that row. Left and Right go from picture to picture, and Up and Down go to the row of pictures above or below. Press Enter or d to see the one you are on at full size, then Escape to come back.
 tutorial-grid-css = The rule for .photos says display: grid, grid-template-columns: repeat(3, 1fr), gap: 15px. This is a grid of three equal columns, with a gap between them. The pictures are made square with aspect-ratio and object-fit.
 tutorial-grid-more = The same works with display flex, for pictures side by side that wrap. Your own albums can use any of this.
+tutorial-play-video = Video
+tutorial-video-intro = Videos play inside Sicompass, like pictures. The row below holds a short clip with sound. Move down to it, and your screen reader says there is one video.
+tutorial-video-clip = <video src="asset:tutorial/clip.mp4">Test clip</video>
+tutorial-video-keys = Press Enter or d to play it. Space pauses and plays again, and Escape goes back. If it has ended, Space plays it again. A row can hold several videos and pictures, and Left and Right move between them while one is open.
+tutorial-video-more = A version of Sicompass built without video support says so when you press Enter, and the picture of the video stays in the row.
 tutorial-play-scroll = Scroll mode flattens this list and its sublists into one reading view. Press S, then use PgUp, PgDown, Home, and End on the long passage below.
 tutorial-play-lorem = __LOREM_IPSUM__
 

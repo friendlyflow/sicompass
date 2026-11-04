@@ -120,6 +120,11 @@ tutorial-grid-photos = <div class="photos"><img src="asset:tutorial/photo-1.jpg"
 tutorial-grid-keys = Appuyez sur i pour entrer en mode navigation sur cette ligne. Gauche et Droite passent d'une image à l'autre, et Haut et Bas vont à la rangée d'images au-dessus ou en dessous. Appuyez sur Entrée ou d pour voir en grand celle où vous êtes, puis sur Échap pour revenir.
 tutorial-grid-css = La règle pour .photos dit display: grid, grid-template-columns: repeat(3, 1fr), gap: 15px. C'est une grille de trois colonnes égales, avec un espace entre elles. Les images sont rendues carrées avec aspect-ratio et object-fit.
 tutorial-grid-more = La même chose marche avec display flex, pour des images côte à côte qui passent à la ligne. Vos propres albums peuvent tout utiliser.
+tutorial-play-video = Vidéo
+tutorial-video-intro = Les vidéos se lisent dans Sicompass, comme les images. La ligne ci-dessous contient un court extrait avec du son. Descendez jusqu'à elle, et votre lecteur d'écran dit qu'il y a une vidéo.
+tutorial-video-clip = <video src="asset:tutorial/clip.mp4">Extrait de test</video>
+tutorial-video-keys = Appuyez sur Entrée ou d pour le lire. Espace met en pause et reprend, et Échap revient en arrière. S'il est terminé, Espace le relance. Une ligne peut contenir plusieurs vidéos et images, et Gauche et Droite passent de l'une à l'autre quand une est ouverte.
+tutorial-video-more = Une version de Sicompass sans prise en charge de la vidéo le dit quand vous appuyez sur Entrée, et l'image de la vidéo reste dans la ligne.
 tutorial-play-scroll = Le mode défilement aplatit cette liste et ses sous-listes en une seule vue de lecture. Appuyez sur S, puis utilisez PgUp, PgDown, Home et End sur le long passage ci-dessous.
 tutorial-play-lorem = __LOREM_IPSUM__
 tutorial-sec-config = Paramètres et configuration

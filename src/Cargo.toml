@@ -305,6 +305,13 @@ assets = [
 # build.
 bundled-sdl3 = ["sdl3/build-from-source-static"]
 
+# Play <video> rows, by linking FFmpeg (ffmpeg-next, which needs the FFmpeg libraries
+# and libclang to build). Off by default: the release pipelines do not have them yet, so
+# a build without it shows a video's poster and says it cannot be played. The Nix dev
+# shell and package provide FFmpeg, so `nix develop -c cargo build --features video`
+# works there.
+video = ["dep:ffmpeg-next"]
+
 [dependencies]
 # `package`: the Store's pre-install audit hook (register_component_auditor).
 sicompass-sdk = { workspace = true, features = ["package", "ipc"] }
@@ -312,6 +319,7 @@ async-trait = { workspace = true }
 sicompass-builtins = { workspace = true }
 sicompass-updater = { workspace = true }
 sicompass-ui = { workspace = true }
+ffmpeg-next = { version = "9", optional = true, default-features = false, features = ["codec", "format", "software-scaling", "software-resampling"] }
 
 serde = { workspace = true }
 serde_json = { workspace = true }

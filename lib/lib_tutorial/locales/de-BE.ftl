@@ -120,6 +120,11 @@ tutorial-grid-photos = <div class="photos"><img src="asset:tutorial/photo-1.jpg"
 tutorial-grid-keys = Drücke i, um den Navigationsmodus auf dieser Zeile zu starten. Links und Rechts gehen von Bild zu Bild, und Hoch und Runter gehen zur Bilderreihe darüber oder darunter. Drücke Enter oder d, um das aktuelle Bild groß zu sehen, und dann Escape, um zurückzukommen.
 tutorial-grid-css = Die Regel für .photos sagt display: grid, grid-template-columns: repeat(3, 1fr), gap: 15px. Das ist ein Raster aus drei gleich breiten Spalten, mit Abstand dazwischen. Die Bilder werden mit aspect-ratio und object-fit quadratisch gemacht.
 tutorial-grid-more = Dasselbe funktioniert mit display flex, für Bilder nebeneinander, die umbrechen. Deine eigenen Alben können all das nutzen.
+tutorial-play-video = Video
+tutorial-video-intro = Videos spielen in Sicompass, wie Bilder. Die Zeile unten enthält einen kurzen Ausschnitt mit Ton. Gehe nach unten dorthin, und dein Bildschirmleser sagt, dass es ein Video gibt.
+tutorial-video-clip = <video src="asset:tutorial/clip.mp4">Testausschnitt</video>
+tutorial-video-keys = Drücke Enter oder d zum Abspielen. Leertaste pausiert und spielt weiter, und Escape geht zurück. Wenn es zu Ende ist, spielt die Leertaste es erneut ab. Eine Zeile kann mehrere Videos und Bilder enthalten, und Links und Rechts wechseln dazwischen, solange eines offen ist.
+tutorial-video-more = Eine Version von Sicompass ohne Videounterstützung sagt das, wenn du Enter drückst, und das Bild des Videos bleibt in der Zeile.
 tutorial-play-scroll = Der Scroll-Modus ebnet diese Liste und ihre Unterlisten zu einer einzigen Leseansicht. Drücken Sie S, verwenden Sie dann Bild auf, Bild ab, Pos1 und Ende auf der langen Passage darunter.
 tutorial-play-lorem = __LOREM_IPSUM__
 tutorial-sec-config = Einstellungen und Konfiguration

@@ -121,6 +121,11 @@ tutorial-grid-photos = <div class="photos"><img src="asset:tutorial/photo-1.jpg"
 tutorial-grid-keys = Druk op i om de navigatiemodus op die rij te starten. Links en Rechts gaan van afbeelding naar afbeelding, en Omhoog en Omlaag gaan naar de rij afbeeldingen erboven of eronder. Druk op Enter of d om de afbeelding waar je op staat op volledige grootte te zien, en dan op Escape om terug te komen.
 tutorial-grid-css = De regel voor .photos zegt display: grid, grid-template-columns: repeat(3, 1fr), gap: 15px. Dit is een raster van drie gelijke kolommen, met ruimte ertussen. De afbeeldingen worden vierkant gemaakt met aspect-ratio en object-fit.
 tutorial-grid-more = Hetzelfde werkt met display flex, voor afbeeldingen naast elkaar die doorlopen op een volgende regel. Je eigen albums kunnen dit allemaal gebruiken.
+tutorial-play-video = Video
+tutorial-video-intro = Video's spelen binnen Sicompass, zoals afbeeldingen. De rij hieronder bevat een kort fragment met geluid. Ga omlaag naar de rij, en je schermlezer zegt dat er een video is.
+tutorial-video-clip = <video src="asset:tutorial/clip.mp4">Testfragment</video>
+tutorial-video-keys = Druk op Enter of d om het af te spelen. Spatie pauzeert en speelt weer verder, en Escape gaat terug. Als het afgelopen is, speelt Spatie het opnieuw af. Een rij kan meerdere video's en afbeeldingen bevatten, en Links en Rechts gaan ertussen terwijl er een open is.
+tutorial-video-more = Een versie van Sicompass zonder videoondersteuning zegt dat als je op Enter drukt, en het beeld van de video blijft in de rij.
 tutorial-play-scroll = Scrolmodus maakt deze lijst en haar sublijsten plat tot één leesweergave. Druk op S en gebruik dan PgUp, PgDown, Home en End op de lange passage hieronder.
 tutorial-play-lorem = __LOREM_IPSUM__
 tutorial-sec-config = Instellingen en configuratie

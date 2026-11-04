@@ -25,6 +25,7 @@ const FFON_JSON: &[u8] = include_bytes!("../assets/ffon.json");
 const TEXTURE_URI: &str = "asset:tutorial/texture.jpg";
 const FFON_URI: &str = "asset:tutorial/ffon.json";
 const SITE_JSON: &[u8] = include_bytes!("../assets/site.json");
+const CLIP_MP4: &[u8] = include_bytes!("../assets/clip.mp4");
 const PHOTOS: [&[u8]; 6] = [
     include_bytes!("../assets/photo-1.jpg"),
     include_bytes!("../assets/photo-2.jpg"),
@@ -377,6 +378,15 @@ static SECTIONS: &[Node] = &[
                     Leaf("tutorial-grid-keys"),
                     Leaf("tutorial-grid-css"),
                     Leaf("tutorial-grid-more"),
+                ],
+            },
+            Branch {
+                key: "tutorial-play-video",
+                children: &[
+                    Leaf("tutorial-video-intro"),
+                    Leaf("tutorial-video-clip"),
+                    Leaf("tutorial-video-keys"),
+                    Leaf("tutorial-video-more"),
                 ],
             },
             Leaf("tutorial-play-scroll"),
@@ -1344,6 +1354,32 @@ mod tests {
         }
     }
 
+    /// The video is one row with one video in it, from the tutorial's own assets.
+    #[test]
+    fn test_the_video_row_holds_one_video_from_an_asset() {
+        let mut p = provider();
+        p.push_path("Interactive playground");
+        let section = section_keys(&p.fetch())
+            .into_iter()
+            .find(|k| k.starts_with("Video"))
+            .expect("a video section");
+        p.push_path(&section);
+        let elems = p.fetch();
+        let row = elems
+            .iter()
+            .filter_map(|e| e.as_str())
+            .find(|r| r.contains("<video"))
+            .expect("the video row");
+        let counts = sicompass_sdk::markup::target_counts(row);
+        assert_eq!((counts.videos, counts.total()), (1, 1), "{row}");
+        let target = &sicompass_sdk::markup::targets(row)[0];
+        assert!(
+            sicompass_sdk::assets::resolve(&target.value).is_some(),
+            "{}",
+            target.value
+        );
+    }
+
     /// The site is an FFON document, with a stylesheet of its own.
     #[test]
     fn test_the_small_site_is_ffon_with_a_stylesheet() {
@@ -1534,6 +1570,7 @@ pub fn register() {
     sicompass_sdk::assets::register_bytes("tutorial", "texture.jpg", TEXTURE_JPG);
     sicompass_sdk::assets::register_bytes("tutorial", "ffon.json", FFON_JSON);
     sicompass_sdk::assets::register_bytes("tutorial", "site.json", SITE_JSON);
+    sicompass_sdk::assets::register_bytes("tutorial", "clip.mp4", CLIP_MP4);
     for (n, bytes) in PHOTOS.iter().enumerate() {
         sicompass_sdk::assets::register_bytes("tutorial", &format!("photo-{}.jpg", n + 1), bytes);
     }
