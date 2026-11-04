@@ -27,7 +27,7 @@ tutorial-sec-shortcuts = Shortcuts at a glance
 tutorial-sc-intro = Every key, grouped by the mode it works in. Each line leads with the key so it is the first thing spoken. You are in general mode unless you are editing text or inside a prompt.
 tutorial-sc-general = General mode
 tutorial-sc-gen-updown = Up and Down: move the selection within the current list.
-tutorial-sc-gen-rightleft = Right: step into the selected item. Left: step back out to the parent.
+tutorial-sc-gen-rightleft = Right: step into a row with a right arrow. Left: step back out to the parent, the name with the left arrow.
 tutorial-sc-gen-enter = Enter: activate the selected item, toggle a checkbox, follow a link, show a picture big, or play a video. In the big view, Enter pauses and resumes a video.
 tutorial-sc-gen-navigate = i or a on a row with links, pictures, buttons or videos: navigate mode, at the first or the last of them. Left and Right move between them, Up and Down move a line, Escape leaves.
 tutorial-sc-gen-escape = Escape: leave the current mode and return to general mode.
@@ -92,6 +92,7 @@ tutorial-prog-settings = Settings: always the last item at the root. It configur
 # ---------------------------------------------------------------------------
 tutorial-sec-playground = Interactive playground
 tutorial-play-intro = A hands-on playground for the interactive element types Sicompass supports. Try each one as you go.
+tutorial-play-marks = A right arrow at the start of a row means there is more inside, and your screen reader says arrow right. A dash means there is nothing inside, and it says dash. A left arrow before the name of the parent means Left goes back, and it says arrow left.
 tutorial-play-checkbox = <checkbox checked>Checkboxes toggle with Enter (this one starts checked)
 tutorial-play-button = Buttons run an action with Enter, try this one: <button>demo</button>activate me
 tutorial-play-button-pressed = You activated the demo button. This one does nothing, it is here so you can practice.

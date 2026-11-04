@@ -270,6 +270,7 @@ static SECTIONS: &[Node] = &[
         key: "tutorial-sec-playground",
         children: &[
             Leaf("tutorial-play-intro"),
+            Leaf("tutorial-play-marks"),
             Leaf("tutorial-play-checkbox"),
             Leaf("tutorial-play-button"),
             Leaf("tutorial-play-input"),
@@ -1374,6 +1375,23 @@ mod tests {
             assert!(
                 sicompass_sdk::assets::resolve(&format!("asset:tutorial/photo-{n}.jpg")).is_some()
             );
+        }
+    }
+
+    /// The marks at the start of a row are drawn as icons, so the tutorial says what they
+    /// are and what the screen reader calls them.
+    #[test]
+    fn test_the_playground_explains_the_marks_and_what_is_said() {
+        let mut p = provider();
+        p.push_path("Interactive playground");
+        let elems = p.fetch();
+        let marks = elems
+            .iter()
+            .filter_map(|e| e.as_str())
+            .find(|r| r.contains("arrow right"))
+            .expect("a row about the marks");
+        for said in ["arrow right", "dash", "arrow left"] {
+            assert!(marks.contains(said), "{marks}");
         }
     }
 
