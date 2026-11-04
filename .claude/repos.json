@@ -85,6 +85,16 @@
       "name": "webbrowser-plugin-sicompass",
       "path": "../webbrowser-plugin-sicompass",
       "kind": "plugin"
+    },
+    {
+      "name": "photoalbum-plugin-sicompass",
+      "path": "../photoalbum-plugin-sicompass",
+      "kind": "plugin"
+    },
+    {
+      "name": "videostore-plugin-sicompass",
+      "path": "../videostore-plugin-sicompass",
+      "kind": "plugin"
     }
   ]
 }

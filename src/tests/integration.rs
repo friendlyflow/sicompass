@@ -20389,3 +20389,218 @@ fn a_listing_survives_its_neighbours_vanishing() {
         "`mine` went missing from {misses} of 300 listings"
     );
 }
+
+// ---- The photo album and the video store: real plugin programs -----------------------
+
+/// A folder of files with nothing in them but a name, gone when the test ends.
+fn media_folder(names: &[&str]) -> tempfile::TempDir {
+    let dir = tempfile::tempdir().unwrap();
+    for name in names {
+        let path = dir.path().join(name);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, b"x").unwrap();
+    }
+    dir
+}
+
+/// The app with one media plugin in it, started as the app starts it, reading `folder`.
+fn media_app(name: &str, folder_key: &str, folder: &Path) -> AppRenderer {
+    ensure_builtins();
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/plugins")
+        .join(name);
+    let manifest: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(dir.join("plugin.json")).unwrap()).unwrap();
+    assert_eq!(manifest["markup"], true, "{name} must ask for markup");
+    let grants = sicompass::plugin_host::Grants {
+        settings: vec![folder_key.to_owned(), "sortOrder".to_owned()],
+        setting_defaults: vec![(folder_key.to_owned(), folder.to_string_lossy().into_owned())],
+        ..Default::default()
+    };
+    let provider = sicompass::plugin_host::ProcessProvider::open(sicompass::plugin_host::Spec {
+        entry_path: &plugin_program(name),
+        plugin_name: name,
+        settings_section: manifest["displayName"].as_str().unwrap(),
+        plugin_dir: &dir,
+        markup: true,
+        grants,
+        env: Vec::new(),
+    })
+    .unwrap();
+    let mut r = app_renderer();
+    register(&mut r, Box::new(provider));
+    r.current_id = IdArray::new();
+    r.current_id.push(0);
+    sicompass::list::create_list_current_layer(&mut r);
+    r
+}
+
+/// Wait until a folder has been read: the plugin reads it on a thread of its own, and
+/// says so at the next poll.
+fn wait_for_grid(r: &mut AppRenderer, shows: &str) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    loop {
+        // What the frame loop does: a tick that says something changed rebuilds the level.
+        let (changed, _) = sicompass::events::run_provider_ticks(r);
+        if changed {
+            sicompass::provider::refresh_current_directory(r);
+            sicompass::list::create_list_current_layer(r);
+            r.sync_list_index_from_current_id();
+        }
+        if screen(r).iter().any(|row| row.contains(shows)) {
+            return;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "{shows:?} never appeared: {:?}",
+            screen(r)
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+}
+
+/// Up and Down to the row that shows `shows`.
+fn go_to_row(r: &mut AppRenderer, shows: &str) {
+    for _ in 0..r.total_list.len() {
+        press(r, Keycode::Up);
+    }
+    for _ in 0..r.total_list.len() {
+        if r.total_list
+            .get(r.list_index)
+            .is_some_and(|row| row.label.contains(shows))
+        {
+            return;
+        }
+        press(r, Keycode::Down);
+    }
+    panic!("no row shows {shows:?}: {:?}", screen(r));
+}
+
+#[test]
+fn the_photo_album_shows_a_folder_as_one_grid_row_with_targets() {
+    let dir = media_folder(&[
+        "b.jpg",
+        "a.png",
+        "clip.mp4",
+        "notes.txt",
+        "Summer/beach.jpg",
+    ]);
+    let mut r = media_app("photoalbum", "photoFolder", dir.path());
+    press(&mut r, Keycode::Right);
+    wait_for_grid(&mut r, "a.png");
+
+    // Two rows: the folder and the grid. The stylesheet is not a row, and the file the
+    // album skips is nowhere.
+    let rows = screen(&r);
+    assert_eq!(rows.len(), 2, "{rows:?}");
+    assert!(
+        rows.iter().all(|row| !row.contains("grid-template")),
+        "{rows:?}"
+    );
+    assert!(
+        rows.iter().all(|row| !row.contains("notes.txt")),
+        "{rows:?}"
+    );
+
+    go_to_row(&mut r, "a.png");
+    press(&mut r, Keycode::I);
+    assert_eq!(r.coordinate, Coordinate::Navigate);
+    assert_eq!(r.nav_targets.len(), 3);
+    assert_eq!(r.nav_index, 0);
+    press(&mut r, Keycode::Right);
+    assert_eq!(r.nav_index, 1);
+
+    // Enter on a picture opens it big, from the real path.
+    press(&mut r, Keycode::Return);
+    assert_eq!(r.coordinate, Coordinate::Dashboard);
+    assert_eq!(
+        Path::new(&r.dashboard_image_path),
+        dir.path().join("b.jpg"),
+        "the big view shows the file itself"
+    );
+    press(&mut r, Keycode::Escape);
+    assert_eq!(r.coordinate, Coordinate::Navigate);
+    assert_eq!(r.nav_index, 1, "Escape comes back to the same picture");
+}
+
+/// Asking for markup makes the file names the plugin's to escape, and this is the real
+/// program, through the real host, into the real list.
+#[test]
+fn a_file_called_like_a_tag_stays_a_file_in_the_album() {
+    let dir = media_folder(&["<b>x.jpg", "<video src=y>.jpg"]);
+    let mut r = media_app("photoalbum", "photoFolder", dir.path());
+    press(&mut r, Keycode::Right);
+    wait_for_grid(&mut r, "x.jpg");
+    go_to_row(&mut r, "x.jpg");
+    press(&mut r, Keycode::I);
+    assert_eq!(r.nav_targets.len(), 2, "{:?}", screen(&r));
+    let paths: Vec<std::path::PathBuf> = r
+        .nav_targets
+        .iter()
+        .map(|t| std::path::PathBuf::from(&t.value))
+        .collect();
+    assert!(paths.iter().all(|p| p.is_file()), "{paths:?}");
+    press(&mut r, Keycode::Return);
+    assert_eq!(
+        Path::new(&r.dashboard_image_path),
+        dir.path().join("<b>x.jpg")
+    );
+}
+
+#[test]
+fn the_album_goes_into_a_subfolder_and_back() {
+    let dir = media_folder(&["top.jpg", "Summer/beach.jpg"]);
+    std::fs::create_dir_all(dir.path().join("Empty")).unwrap();
+    let mut r = media_app("photoalbum", "photoFolder", dir.path());
+    press(&mut r, Keycode::Right);
+    wait_for_grid(&mut r, "top.jpg");
+
+    go_to_row(&mut r, "Summer");
+    press(&mut r, Keycode::Right);
+    wait_for_grid(&mut r, "beach.jpg");
+    assert!(screen(&r).iter().all(|row| !row.contains("top.jpg")));
+
+    press(&mut r, Keycode::Left);
+    wait_for_grid(&mut r, "top.jpg");
+
+    // An empty folder is a line that says so, not nothing.
+    go_to_row(&mut r, "Empty");
+    press(&mut r, Keycode::Right);
+    wait_for_grid(&mut r, "No pictures or videos");
+}
+
+#[test]
+fn the_video_store_lists_only_videos_and_enter_plays_and_pauses() {
+    sicompass::video_ffmpeg::register();
+    let dir = media_folder(&["b.mp4", "a.webm", "photo.jpg"]);
+    let mut r = media_app("videostore", "videoFolder", dir.path());
+    press(&mut r, Keycode::Right);
+    wait_for_grid(&mut r, "a.webm");
+    assert!(screen(&r).iter().all(|row| !row.contains("photo.jpg")));
+
+    go_to_row(&mut r, "a.webm");
+    press(&mut r, Keycode::I);
+    assert_eq!(r.nav_targets.len(), 2);
+    press(&mut r, Keycode::Right);
+
+    // The first Enter opens and plays it, the next one pauses, and Space does nothing.
+    let path = dir.path().join("b.mp4").to_string_lossy().into_owned();
+    press(&mut r, Keycode::Return);
+    assert_eq!(r.coordinate, Coordinate::Dashboard);
+    assert_eq!(
+        r.video_request,
+        Some(sicompass_ui::video::Request::Open(path))
+    );
+    r.video_request = None;
+    press(&mut r, Keycode::Space);
+    assert_eq!(r.video_request, None);
+    press(&mut r, Keycode::Return);
+    assert_eq!(
+        r.video_request,
+        Some(sicompass_ui::video::Request::TogglePause)
+    );
+
+    press(&mut r, Keycode::Escape);
+    assert_eq!(r.video_request, Some(sicompass_ui::video::Request::Stop));
+    assert_eq!(r.coordinate, Coordinate::Navigate);
+}

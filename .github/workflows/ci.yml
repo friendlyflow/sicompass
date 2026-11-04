@@ -53,12 +53,6 @@ jobs:
             full: false
             subset: true
             triple: aarch64-apple-darwin
-          - name: macos x86_64
-            os: macos-15-intel
-            flags: ""
-            full: false
-            subset: true
-            triple: x86_64-apple-darwin
           - name: windows x86_64
             os: windows-2022
             flags: ""

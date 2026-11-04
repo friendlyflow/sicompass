@@ -21,7 +21,6 @@ binary, so there is nothing to install alongside it.
 | --- | --- |
 | Windows | [sicompass-x86_64-pc-windows-msvc.msi](https://github.com/friendlyflow/sicompass/releases/latest/download/sicompass-x86_64-pc-windows-msvc.msi) |
 | macOS, Apple Silicon | [sicompass-aarch64-apple-darwin.dmg](https://github.com/friendlyflow/sicompass/releases/latest/download/sicompass-aarch64-apple-darwin.dmg) |
-| macOS, Intel | [sicompass-x86_64-apple-darwin.dmg](https://github.com/friendlyflow/sicompass/releases/latest/download/sicompass-x86_64-apple-darwin.dmg) |
 | Debian, Ubuntu, Mint | [sicompass_0.2.3_amd64.deb](https://github.com/friendlyflow/sicompass/releases/latest/download/sicompass_0.2.3_amd64.deb) |
 | Fedora, RHEL, openSUSE | [sicompass-0.2.3-1.x86_64.rpm](https://github.com/friendlyflow/sicompass/releases/latest/download/sicompass-0.2.3-1.x86_64.rpm) |
 | Any Linux, no root | [sicompass_0.2.3_x86_64.AppImage](https://github.com/friendlyflow/sicompass/releases/latest/download/sicompass_0.2.3_x86_64.AppImage) |
@@ -30,8 +29,7 @@ binary, so there is nothing to install alongside it.
 Portable archives, if you would rather unpack a binary yourself:
 [Windows .zip](https://github.com/friendlyflow/sicompass/releases/latest/download/sicompass-x86_64-pc-windows-msvc.zip),
 [Linux .tar.xz](https://github.com/friendlyflow/sicompass/releases/latest/download/sicompass-x86_64-unknown-linux-gnu.tar.xz),
-[macOS Apple Silicon .tar.xz](https://github.com/friendlyflow/sicompass/releases/latest/download/sicompass-aarch64-apple-darwin.tar.xz),
-[macOS Intel .tar.xz](https://github.com/friendlyflow/sicompass/releases/latest/download/sicompass-x86_64-apple-darwin.tar.xz).
+[macOS Apple Silicon .tar.xz](https://github.com/friendlyflow/sicompass/releases/latest/download/sicompass-aarch64-apple-darwin.tar.xz).
 Older versions and the `SHA256SUMS` files are on the
 [Releases page](https://github.com/friendlyflow/sicompass/releases).
 
@@ -50,7 +48,7 @@ the `.dmg` **before** opening it, in Terminal:
 xattr -dr com.apple.quarantine ~/Downloads/sicompass-aarch64-apple-darwin.dmg
 ```
 
-Use the `x86_64` file name instead if you are on an Intel Mac. Then open the
+Then open the
 `.dmg` and drag sicompass to your Applications folder. It bundles MoltenVK, so
 there is nothing else to install, and it starts normally from then on.
 

@@ -16,7 +16,7 @@ applies unchanged.
 Cut a new sicompass release.
 
 Pushing a `vX.Y.Z` tag is the only trigger: `release-on-tag.yml` bridges the tag
-push to the cargo-dist `release.yml`, which builds all four targets and calls
+push to the cargo-dist `release.yml`, which builds all three targets and calls
 `native-packages.yml` for the `.deb`, `.rpm`, AppImage, `.app` and `.dmg`.
 There is no manual GitHub-UI step.
 
@@ -156,6 +156,6 @@ every command with `cd PROJECT_ROOT &&` (the actual absolute project root).**
   `/release <repo>`, because they pin it. A new sicompass tag leaves desicompass
   behind until its pins and its `sicompass (>= X)` floor move. See "The session
   repos" in `docs/releasing.md`. Say so in the report at step 10.
-- A release should carry roughly 25 assets across the four targets. If it has
+- A release should carry roughly 20 assets across the three targets. If it has
   only the Windows ones, `custom-native-packages` failed inside the Release run
   and its logs are in the same run.

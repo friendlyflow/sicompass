@@ -2849,6 +2849,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "photoalbum-plugin"
+version = "0.1.0"
+source = "git+https://github.com/friendlyflow/photoalbum-plugin-sicompass?rev=5da606f226d9746ae7660914f3a340ad432ea435#5da606f226d9746ae7660914f3a340ad432ea435"
+dependencies = [
+ "sicompass-sdk",
+]
+
+[[package]]
 name = "pin-project-lite"
 version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3917,6 +3925,7 @@ dependencies = [
  "mockall",
  "notes-plugin",
  "nucleo-matcher",
+ "photoalbum-plugin",
  "projectmanagement-plugin",
  "reqwest",
  "sdl3",
@@ -3940,6 +3949,7 @@ dependencies = [
  "tracing-subscriber",
  "trash",
  "unicode-normalization",
+ "videostore-plugin",
  "webbrowser-plugin",
  "whatlang",
  "windows",
@@ -4916,6 +4926,14 @@ name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
+
+[[package]]
+name = "videostore-plugin"
+version = "0.1.0"
+source = "git+https://github.com/friendlyflow/videostore-plugin-sicompass?rev=d4a48b77676e76fd65a89547730a30863e596199#d4a48b77676e76fd65a89547730a30863e596199"
+dependencies = [
+ "sicompass-sdk",
+]
 
 [[package]]
 name = "vte"

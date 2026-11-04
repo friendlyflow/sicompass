@@ -1,0 +1,28 @@
+{
+  "name": "videostore",
+  "displayName": "video store",
+  "type": "process",
+  "entry": "plugin",
+  "version": "0.1.0",
+  "minAppVersion": "0.2.3",
+  "description": "videostore-description",
+  "markup": true,
+  "settings": [
+    {
+      "type": "text",
+      "label": "video folder (video store)",
+      "key": "videoFolder",
+      "default": "Videos"
+    },
+    {
+      "type": "radio",
+      "label": "videostore-radio-sort-order",
+      "key": "sortOrder",
+      "options": ["alphanumerically", "chronologically"],
+      "default": "alphanumerically"
+    }
+  ],
+  "permissions": {
+    "filesystem": ["/"]
+  }
+}

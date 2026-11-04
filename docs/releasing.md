@@ -8,12 +8,12 @@ One GitHub Release carrying:
 
 | Artifact | Built by | For |
 | --- | --- | --- |
-| `sicompass-<triple>.tar.xz` / `.zip` | cargo-dist | portable archives, all four targets |
+| `sicompass-<triple>.tar.xz` / `.zip` | cargo-dist | portable archives, all three targets |
 | `sicompass-x86_64-pc-windows-msvc.msi` | cargo-dist | Windows installer, Start Menu entry |
 | `sicompass_<version>_amd64.deb` | cargo-packager | Debian, Ubuntu, Mint |
 | `sicompass-<version>-1.x86_64.rpm` | cargo-generate-rpm | Fedora, RHEL, openSUSE |
 | `sicompass_<version>_x86_64.AppImage` | cargo-packager | any Linux distribution |
-| `sicompass-<triple>.dmg` | cargo-packager | macOS, both architectures |
+| `sicompass-<triple>.dmg` | cargo-packager | macOS, Apple Silicon |
 | `sha256.sum`, `SHA256SUMS-*.txt` | both | verification |
 | `source.tar.gz` | cargo-dist | source |
 
@@ -134,7 +134,7 @@ Since nothing runs on commit, all of this is manual.
 4. Run **CI** by hand (Actions -> CI -> Run workflow). It covers Linux, macOS
    and Windows, and includes a `dist generate --check`.
 5. Run **Licenses** by hand if dependencies changed. `about.toml` covers all
-   four target triples, so a dependency added on any one platform can move
+   three target triples, so a dependency added on any one platform can move
    `THIRD-PARTY-LICENSES.html`.
 6. Confirm `[patch.crates-io]` in the root `Cargo.toml` is still commented out.
    It is exactly the kind of thing that gets uncommented while debugging.

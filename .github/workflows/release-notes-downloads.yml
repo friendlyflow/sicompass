@@ -77,7 +77,6 @@ jobs:
             echo "| --- | --- |"
             row '\.msi$'                          'Windows'
             row '^sicompass-aarch64-apple-darwin\.dmg$' 'macOS, Apple Silicon'
-            row '^sicompass-x86_64-apple-darwin\.dmg$'  'macOS, Intel'
             row '\.deb$'                          'Debian, Ubuntu, Mint'
             row '\.rpm$'                          'Fedora, RHEL, openSUSE'
             row '\.AppImage$'                     'Any Linux, no root'
@@ -95,7 +94,7 @@ jobs:
             echo "xattr -dr com.apple.quarantine ~/Downloads/sicompass-aarch64-apple-darwin.dmg"
             echo '```'
             echo
-            echo "Use the \`x86_64\` file name on an Intel Mac. The order matters:"
+            echo "The order matters:"
             echo "macOS copies that flag onto whatever you drag out of the disk"
             echo "image, so clearing it first leaves nothing else to run. If you"
             echo "already dragged the app across, clear it there instead, with"
