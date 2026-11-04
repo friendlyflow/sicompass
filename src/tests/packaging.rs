@@ -383,6 +383,32 @@ fn shipped_font_licenses_match_the_linked_renderer() {
     );
 }
 
+/// FFmpeg is linked into the binary, so its license has to travel with it, and nothing
+/// but these lists puts it there.
+#[test]
+fn ffmpeg_license_is_in_the_packaging_lists_and_names_the_built_version() {
+    for list in ["dist-workspace.toml", "src/Cargo.toml", "flake.nix"] {
+        assert!(
+            read(list).contains("licenses/LICENSE-FFmpeg.txt"),
+            "{list} does not ship licenses/LICENSE-FFmpeg.txt"
+        );
+    }
+    let script = read("scripts/setup-ffmpeg.sh");
+    let version = script
+        .split("FFMPEG_VERSION:-")
+        .nth(1)
+        .and_then(|rest| rest.split('}').next())
+        .expect("the script pins a version");
+    assert!(
+        read("licenses/LICENSE-FFmpeg.txt").contains(&format!("FFmpeg {version},")),
+        "licenses/LICENSE-FFmpeg.txt does not name FFmpeg {version}"
+    );
+    assert!(
+        !script.contains("--enable-gpl") && !script.contains("--enable-nonfree"),
+        "a GPL or nonfree FFmpeg changes what the packages may say about it"
+    );
+}
+
 /// `scripts/gen-icons.sh` regenerates `assets/icons/*` here, but the window
 /// icon is embedded by the renderer, which keeps its own copy. A regenerated
 /// icon that never reached that copy would leave every window on the old one.

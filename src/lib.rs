@@ -26,8 +26,7 @@ pub mod programs;
 pub mod start_menu;
 /// The updates ready to install: the app's own and the plugins'.
 pub mod updates;
-// FFmpeg, linked in, to play <video> rows. Off unless built with `--features video`.
-#[cfg(feature = "video")]
+// FFmpeg, linked in, to play <video> rows.
 pub mod video_ffmpeg;
 
 // The renderer, re-exported so `tests/integration.rs` and the binary can reach

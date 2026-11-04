@@ -36,6 +36,9 @@ accepted = [
     "BSD-3-Clause",
     "ISC",
     "Zlib",
+    # ffmpeg-next and ffmpeg-sys-next, the Rust bindings. FFmpeg itself is LGPL and
+    # not a crate: its text is licenses/LICENSE-FFmpeg.txt.
+    "WTFPL",
     "0BSD",
     "BSL-1.0",
     "Unlicense",

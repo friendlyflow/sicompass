@@ -14,22 +14,33 @@ shows its first picture in the row.
   through `ffmpeg-next` and registers itself with `sicompass_ui::video::register_backend`.
   The login screen shares the renderer and registers nothing, so it links none of this.
 
-## The `video` feature
+## How FFmpeg gets into each build
 
-FFmpeg is linked only with `--features video`. It is **off by default**, because
-the release pipelines do not have the FFmpeg libraries or libclang (the bindings
-are generated with bindgen), and because a dynamic link would make the release
-archives depend on libraries the user may not have.
+Every build plays video. There is no switch. The only choice is how FFmpeg links:
 
-- **Nix:** the dev shell and the package provide FFmpeg and the bindgen hook, and the
-  package builds with the feature. `nix develop -c cargo build --features video`.
-- **A build without it** shows a video's poster or first picture, and says on Enter that
-  this version cannot play video. Nothing else changes.
-- **Before the release archives can have it**, three things have to be decided: how to
-  get FFmpeg onto the four CI runners (a system package, or `ffmpeg-next`'s `build`
-  feature, which compiles it); whether to link it statically so the archives stay
-  standalone; and what H.264 and HEVC decoding means for redistribution. `ffmpeg-next`
-  and `ffmpeg-sys-next` are under the WTFPL, which `about.toml` will have to accept too.
+- **Nix and development:** dynamically. The dev shell and the package provide FFmpeg and
+  libclang (the bindings are generated with bindgen), so a plain `cargo build` works.
+- **Release packages and CI:** statically, with the `bundled-ffmpeg` feature, so the one
+  standalone binary stays standalone and a user has nothing to install. Before cargo
+  runs, `scripts/setup-ffmpeg.sh` builds a decode-only FFmpeg from a pinned release, and
+  `scripts/setup-ffmpeg.ps1` takes vcpkg's static build on Windows. Both need `FFMPEG_DIR`
+  or `VCPKG_ROOT` in the environment they print, which `ci.yml`, `native-packages.yml` and
+  `parts/build-setup.yml` arrange.
+
+Moving FFmpeg's version means changing `FFMPEG_VERSION` in the script and the note at the
+top of `licenses/LICENSE-FFmpeg.txt`.
+
+## Licensing
+
+FFmpeg is LGPL 2.1 or later as built here: `--enable-gpl` and `--enable-nonfree` are never
+passed. Its text is `licenses/LICENSE-FFmpeg.txt`, in the same hand-kept lists as the font
+licenses. `cargo about` only sees the Rust bindings (`ffmpeg-next` and `ffmpeg-sys-next`,
+WTFPL).
+
+**Patents are a separate question from the licence.** The build decodes H.264 and HEVC, which
+are patent-encumbered in some countries. Whether that matters for distributing these
+packages has not been looked at by anyone qualified. Settle it before the first release that
+holds this, or switch those decoders off in the script with `--disable-decoder=`.
 
 ## Sound
 

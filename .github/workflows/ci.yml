@@ -104,11 +104,12 @@ jobs:
             libxtst-dev libxcb1-dev \
             libpulse-dev libasound2-dev libdbus-1-dev libatspi2.0-dev \
             libdrm-dev libgbm-dev libegl-dev libssl-dev \
-            libudev-dev
+            libudev-dev \
+            nasm clang libclang-dev
 
       - name: Install system dependencies (macOS)
         if: runner.os == 'macOS'
-        run: brew install cmake molten-vk
+        run: brew install cmake molten-vk nasm
 
       # Must come before any cargo invocation: freetype-sys resolves FreeType
       # in its build script, so PKG_CONFIG_PATH has to be set by then.
@@ -121,6 +122,30 @@ jobs:
         shell: pwsh
         run: ./scripts/setup-freetype.ps1
 
+      # FFmpeg is linked into the binary, as in the release (`bundled-ffmpeg`). Building
+      # it takes minutes on every runner, so the result is kept between runs. Before
+      # any cargo invocation: ffmpeg-sys-next finds it in its build script.
+      - uses: actions/cache@v4
+        if: runner.os != 'Windows'
+        with:
+          path: ~/.local/ffmpeg-*
+          key: ffmpeg-${{ matrix.name }}-${{ hashFiles('scripts/setup-ffmpeg.sh') }}
+
+      - uses: actions/cache@v4
+        if: runner.os == 'Windows'
+        with:
+          path: ~\AppData\Local\vcpkg\archives
+          key: ffmpeg-${{ matrix.name }}-${{ hashFiles('scripts/setup-ffmpeg.ps1') }}
+
+      - name: Provide FFmpeg (Linux and macOS)
+        if: runner.os != 'Windows'
+        run: ./scripts/setup-ffmpeg.sh >> "$GITHUB_ENV"
+
+      - name: Provide FFmpeg (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/setup-ffmpeg.ps1
+
       # The FreeType setup is part of the cache key on purpose. freetype-sys
       # only emits `rerun-if-env-changed=PKG_CONFIG_PATH` when it actually
       # takes the pkg-config path; a cached build that took the vendored
@@ -128,11 +153,11 @@ jobs:
       # artifact no matter what PKG_CONFIG_PATH later says.
       - uses: Swatinem/rust-cache@v2
         with:
-          key: ${{ matrix.name }}-ft${{ hashFiles('scripts/setup-freetype.sh', 'scripts/setup-freetype.ps1') }}
+          key: ${{ matrix.name }}-ff${{ hashFiles('scripts/setup-ffmpeg.sh', 'scripts/setup-ffmpeg.ps1') }}-ft${{ hashFiles('scripts/setup-freetype.sh', 'scripts/setup-freetype.ps1') }}
 
       - name: Test
         if: matrix.full
-        run: cargo test --workspace --features bundled-sdl3 ${{ matrix.flags }}
+        run: cargo test --workspace --features bundled-sdl3,bundled-ffmpeg ${{ matrix.flags }}
 
       # The deterministic, offline part of the suite: the embedded shader and
       # font checks, and the resource-root probe. Cheap, and worth running
@@ -143,7 +168,7 @@ jobs:
       # mapping.
       - name: Test (portable subset)
         if: matrix.subset
-        run: "cargo test -p sicompass --lib --features bundled-sdl3 -- shaders:: fonts:: resources::"
+        run: "cargo test -p sicompass --lib --features bundled-sdl3,bundled-ffmpeg -- shaders:: fonts:: resources::"
 
       # Where the build lands, so the checks below can find it. Writing to
       # $GITHUB_ENV has a different syntax per shell, so this is forced to
@@ -164,7 +189,7 @@ jobs:
       - name: Build (explicit --target)
         if: ${{ !matrix.full && matrix.triple != '' }}
         shell: bash
-        run: cargo build -p sicompass --release --features bundled-sdl3 --target "${{ matrix.triple }}"
+        run: cargo build -p sicompass --release --features bundled-sdl3,bundled-ffmpeg --target "${{ matrix.triple }}"
 
       # Deliberately NOT `shell: bash`, and this is the whole point of the
       # split. On Windows the default shell is PowerShell, and cargo has to
@@ -183,10 +208,10 @@ jobs:
       # affected — but do not merge these two steps back together.
       - name: Build (host target)
         if: ${{ !matrix.full && matrix.triple == '' }}
-        run: cargo build -p sicompass --release --features bundled-sdl3
+        run: cargo build -p sicompass --release --features bundled-sdl3,bundled-ffmpeg
 
       - name: Clippy
-        run: cargo clippy --workspace --all-targets --features bundled-sdl3 ${{ matrix.flags }}
+        run: cargo clippy --workspace --all-targets --features bundled-sdl3,bundled-ffmpeg ${{ matrix.flags }}
 
       # The shipped binary reporting on itself. This is the only emoji check
       # that can run on Windows at all, because `.cargo/config.toml` sets a

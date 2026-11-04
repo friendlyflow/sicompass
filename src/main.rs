@@ -35,8 +35,7 @@ fn main() {
     // Must happen before load_programs() so create_provider_by_name() resolves them.
     sicompass_builtins::register_all();
 
-    // Video, if this build has it. After the providers, before the window.
-    #[cfg(feature = "video")]
+    // Video. After the providers, before the window.
     sicompass::video_ffmpeg::register();
 
     // No working-directory fixup here, and no resource-root probe: shaders, fonts

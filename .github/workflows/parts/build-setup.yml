@@ -29,6 +29,18 @@
   shell: pwsh
   run: ./scripts/setup-freetype.ps1
 
+# FFmpeg is linked into the binary (`bundled-ffmpeg`), so it has to exist before cargo
+# runs too. See scripts/setup-ffmpeg.sh.
+- name: Provide FFmpeg (Linux and macOS)
+  if: runner.os != 'Windows'
+  shell: bash
+  run: ./scripts/setup-ffmpeg.sh >> "$GITHUB_ENV"
+
+- name: Provide FFmpeg (Windows)
+  if: runner.os == 'Windows'
+  shell: pwsh
+  run: ./scripts/setup-ffmpeg.ps1
+
 # macOS reaches its GPU through MoltenVK, which Homebrew installs outside
 # dyld's default search path on Apple Silicon.
 - name: Point ash at Homebrew MoltenVK

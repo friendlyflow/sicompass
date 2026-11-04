@@ -184,6 +184,15 @@ is `src/plugin_host/`. Follow
 - WASM components (0.2) are gone: `"type": "wasm"`, or no `type`, is refused
   with "update it from the Store".
 
+## Architecture: video
+
+A `<video>` row plays in the window, like a picture. The player is in the renderer
+(`sicompass-ui`'s `video.rs`) and has no decoder, so the greeter links none. The app
+registers FFmpeg (`src/video_ffmpeg.rs`, `sicompass_ui::video::register_backend`).
+Every build has it, there is no on/off feature. `bundled-ffmpeg` only says how it links:
+statically in CI and releases, from `scripts/setup-ffmpeg.sh` and `.ps1`, which run before
+cargo the way the FreeType scripts do. See [docs/video.md](docs/video.md).
+
 ## Architecture: text fields
 
 Every editable value is an `<input>`, edited by the app's shared Insert mode

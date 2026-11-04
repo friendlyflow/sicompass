@@ -58,7 +58,7 @@ out-dir = "../target/packages"
 
 # cargo-packager runs this itself, so `cargo packager` works standalone from a
 # clean checkout. In CI the build has already happened and this is a no-op.
-before-packaging-command = "cargo build --release --features bundled-sdl3 -p sicompass"
+before-packaging-command = "cargo build --release --features bundled-sdl3,bundled-ffmpeg -p sicompass"
 
 # Generated from assets/icons/sicompass.svg by scripts/gen-icons.sh. The PNGs
 # become /usr/share/icons/hicolor/<size>/apps/sicompass.png in the .deb and
@@ -90,6 +90,10 @@ main = true
 # The fonts are embedded in the binary, so their license texts have to travel
 # with it. This is a real obligation, not bookkeeping: cargo-about only sees
 # Rust crates and will never list them.
+[[package.metadata.packager.resources]]
+src = "../licenses/LICENSE-FFmpeg.txt"
+target = "licenses/LICENSE-FFmpeg.txt"
+
 [[package.metadata.packager.resources]]
 src = "../fonts/LICENSE-BootstrapIcons.txt"
 target = "licenses/LICENSE-BootstrapIcons.txt"
@@ -286,6 +290,7 @@ assets = [
     { source = "assets/icons/512x512.png", dest = "/usr/share/icons/hicolor/512x512/apps/sicompass.png", mode = "644" },
     { source = "LICENSE", dest = "/usr/share/doc/sicompass/LICENSE", mode = "644" },
     { source = "THIRD-PARTY-LICENSES.html", dest = "/usr/share/doc/sicompass/THIRD-PARTY-LICENSES.html", mode = "644" },
+    { source = "licenses/LICENSE-FFmpeg.txt", dest = "/usr/share/doc/sicompass/LICENSE-FFmpeg.txt", mode = "644" },
     { source = "fonts/LICENSE-BootstrapIcons.txt", dest = "/usr/share/doc/sicompass/LICENSE-BootstrapIcons.txt", mode = "644" },
     { source = "fonts/LICENSE-DejaVu.txt", dest = "/usr/share/doc/sicompass/LICENSE-DejaVu.txt", mode = "644" },
     { source = "fonts/LICENSE-NotoColorEmoji.txt", dest = "/usr/share/doc/sicompass/LICENSE-NotoColorEmoji.txt", mode = "644" },
@@ -305,12 +310,11 @@ assets = [
 # build.
 bundled-sdl3 = ["sdl3/build-from-source-static"]
 
-# Play <video> rows, by linking FFmpeg (ffmpeg-next, which needs the FFmpeg libraries
-# and libclang to build). Off by default: the release pipelines do not have them yet, so
-# a build without it shows a video's poster and says it cannot be played. The Nix dev
-# shell and package provide FFmpeg, so `nix develop -c cargo build --features video`
-# works there.
-video = ["dep:ffmpeg-next"]
+# Link FFmpeg statically, for the release packages, so a user has nothing to install.
+# Needs the decode-only build scripts/setup-ffmpeg.sh makes (vcpkg's on Windows). Without
+# this feature FFmpeg links dynamically, which is what the Nix shell and package do.
+# Video plays either way: this is only about how FFmpeg is linked.
+bundled-ffmpeg = ["ffmpeg-next/static"]
 
 [dependencies]
 # `package`: the Store's pre-install audit hook (register_component_auditor).
@@ -319,7 +323,7 @@ async-trait = { workspace = true }
 sicompass-builtins = { workspace = true }
 sicompass-updater = { workspace = true }
 sicompass-ui = { workspace = true }
-ffmpeg-next = { version = "9", optional = true, default-features = false, features = ["codec", "format", "software-scaling", "software-resampling"] }
+ffmpeg-next = { version = "9", default-features = false, features = ["codec", "format", "software-scaling", "software-resampling"] }
 
 serde = { workspace = true }
 serde_json = { workspace = true }

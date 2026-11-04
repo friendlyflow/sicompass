@@ -67,7 +67,10 @@ allow-dirty = ["msi"]
 # against the .a there rather than the .dylib. That last part is not a detail:
 # without it the binary hard-codes /opt/homebrew/opt/freetype/lib and cannot
 # start on a user's Mac, which is what happened to 0.1.10.
-features = ["bundled-sdl3"]
+#
+# `bundled-ffmpeg` does the same for video: scripts/setup-ffmpeg.sh and .ps1 provide a
+# static, decode-only, LGPL FFmpeg before cargo runs, and it is linked into the binary.
+features = ["bundled-sdl3", "bundled-ffmpeg"]
 
 # What travels next to the binary in the archives.
 #
@@ -95,6 +98,7 @@ include = [
     "fonts/LICENSE-BootstrapIcons.txt",
     "fonts/LICENSE-DejaVu.txt",
     "fonts/LICENSE-NotoColorEmoji.txt",
+    "licenses/LICENSE-FFmpeg.txt",
 ]
 
 # Steps injected into build-local-artifacts on every runner, before anything
@@ -133,6 +137,11 @@ pkg-config = '*'
 # since FreeType itself is linked statically.
 libpng-dev = '*'
 zlib1g-dev = '*'
+# nasm builds FFmpeg's fast decoders (scripts/setup-ffmpeg.sh), and ffmpeg-sys-next
+# generates its bindings with bindgen, which needs libclang.
+nasm = '*'
+clang = '*'
+libclang-dev = '*'
 # SDL probes for each of these at configure time and refuses to build without
 # at least one windowing backend.
 libx11-dev = '*'
@@ -164,6 +173,8 @@ libssl-dev = '*'
 
 [dist.dependencies.homebrew]
 cmake = '*'
+# FFmpeg's fast decoders. See scripts/setup-ffmpeg.sh.
+nasm = '*'
 # macOS has no system Vulkan. MoltenVK is what the app renders through, and
 # what the .dmg bundles.
 molten-vk = '*'

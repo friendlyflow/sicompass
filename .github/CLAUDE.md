@@ -144,6 +144,10 @@ and including 0.1.8, whose published binary read `shaders/*.spv` and
     needed for the `/MT` vs `/MD` CRT mismatch. **Do not reintroduce the
     from-source SDL step.** CI building something other than what the release
     builds is how the release broke in the first place.
+  - `scripts/setup-ffmpeg.sh` / `.ps1` also run before any cargo invocation, in the
+    same three places, and `--features bundled-ffmpeg` links the result in. The source
+    build takes minutes, so `ci.yml` caches it. Skip the script and the build stops with
+    "FFmpeg not found", which is a loud failure, unlike FreeType's.
   - `scripts/setup-freetype.sh` / `.ps1` run before any cargo invocation, in
     CI, in `native-packages.yml`, and in the release via `build-setup.yml`.
     They are not optional. freetype-sys links the system FreeType only when

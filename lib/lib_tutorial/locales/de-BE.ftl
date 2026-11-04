@@ -124,7 +124,6 @@ tutorial-play-video = Video
 tutorial-video-intro = Videos spielen in Sicompass, wie Bilder. Die Zeile unten enthält einen kurzen Ausschnitt mit Ton. Gehe nach unten dorthin, und dein Bildschirmleser sagt, dass es ein Video gibt.
 tutorial-video-clip = <video src="asset:tutorial/clip.mp4">Testausschnitt</video>
 tutorial-video-keys = Drücke Enter oder d zum Abspielen. Leertaste pausiert und spielt weiter, und Escape geht zurück. Wenn es zu Ende ist, spielt die Leertaste es erneut ab. Eine Zeile kann mehrere Videos und Bilder enthalten, und Links und Rechts wechseln dazwischen, solange eines offen ist.
-tutorial-video-more = Eine Version von Sicompass ohne Videounterstützung sagt das, wenn du Enter drückst, und das Bild des Videos bleibt in der Zeile.
 tutorial-play-scroll = Der Scroll-Modus ebnet diese Liste und ihre Unterlisten zu einer einzigen Leseansicht. Drücken Sie S, verwenden Sie dann Bild auf, Bild ab, Pos1 und Ende auf der langen Passage darunter.
 tutorial-play-lorem = __LOREM_IPSUM__
 tutorial-sec-config = Einstellungen und Konfiguration

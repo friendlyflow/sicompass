@@ -386,7 +386,6 @@ static SECTIONS: &[Node] = &[
                     Leaf("tutorial-video-intro"),
                     Leaf("tutorial-video-clip"),
                     Leaf("tutorial-video-keys"),
-                    Leaf("tutorial-video-more"),
                 ],
             },
             Leaf("tutorial-play-scroll"),

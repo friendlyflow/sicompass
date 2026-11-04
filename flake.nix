@@ -511,9 +511,7 @@
             pname = "sicompass";
 
             # Only the app crate. The lib_* crates come in transitively.
-            # `video` links FFmpeg, which is a buildInput below, so the Nix package
-            # plays <video>. The release archives do not yet: see docs/video.md.
-            cargoExtraArgs = "--locked -p sicompass --features video";
+            cargoExtraArgs = "--locked -p sicompass";
 
             nativeBuildInputs = with pkgs; [
               pkg-config
@@ -536,7 +534,7 @@
               freetype
               libwebp
               curl
-              # The `video` feature's FFmpeg. The headless build has every decoder and
+              # FFmpeg, for video. The headless build has every decoder and
               # no display libraries.
               ffmpeg-headless
             ] ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [
@@ -567,6 +565,8 @@
                 $out/share/doc/sicompass/LICENSE-DejaVu.txt
               install -Dm644 fonts/LICENSE-NotoColorEmoji.txt \
                 $out/share/doc/sicompass/LICENSE-NotoColorEmoji.txt
+              install -Dm644 licenses/LICENSE-FFmpeg.txt \
+                $out/share/doc/sicompass/LICENSE-FFmpeg.txt
               install -Dm644 THIRD-PARTY-LICENSES.html \
                 $out/share/doc/sicompass/THIRD-PARTY-LICENSES.html
             ''

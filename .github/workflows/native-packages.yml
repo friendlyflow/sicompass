@@ -69,6 +69,7 @@ jobs:
             libegl-dev libgbm-dev libdrm-dev \
             libpulse-dev libasound2-dev \
             libdbus-1-dev libatspi2.0-dev libssl-dev \
+            nasm clang libclang-dev \
             desktop-file-utils file
 
       # Before any cargo invocation. Without it the packaged binary falls back
@@ -76,9 +77,13 @@ jobs:
       - name: Provide a PNG-capable FreeType
         run: ./scripts/setup-freetype.sh >> "$GITHUB_ENV"
 
+      # Linked into the binary, so a user has nothing to install. See the script.
+      - name: Provide FFmpeg
+        run: ./scripts/setup-ffmpeg.sh >> "$GITHUB_ENV"
+
       - uses: Swatinem/rust-cache@v2
         with:
-          key: ft${{ hashFiles('scripts/setup-freetype.sh') }}
+          key: ff${{ hashFiles('scripts/setup-ffmpeg.sh') }}-ft${{ hashFiles('scripts/setup-freetype.sh') }}
 
       - name: Install packaging tools
         run: |
@@ -86,7 +91,7 @@ jobs:
           cargo install cargo-generate-rpm --locked --version "$CARGO_GENERATE_RPM_VERSION"
 
       - name: Build
-        run: cargo build --release --features bundled-sdl3 -p sicompass
+        run: cargo build --release --features bundled-sdl3,bundled-ffmpeg -p sicompass
 
       - name: Sanity check the binary before packaging it
         # Catches a binary that cannot find its own resources, or was built
@@ -171,14 +176,18 @@ jobs:
         # molten-vk is the Vulkan implementation on macOS. It is both a build
         # input (it gets bundled into the .app) and what makes the app able to
         # render at all.
-        run: brew install cmake molten-vk create-dmg
+        run: brew install cmake molten-vk create-dmg nasm
 
       - name: Provide a PNG-capable FreeType
         run: ./scripts/setup-freetype.sh >> "$GITHUB_ENV"
 
+      # Linked into the binary, so a user has nothing to install. See the script.
+      - name: Provide FFmpeg
+        run: ./scripts/setup-ffmpeg.sh >> "$GITHUB_ENV"
+
       - uses: Swatinem/rust-cache@v2
         with:
-          key: ft${{ hashFiles('scripts/setup-freetype.sh') }}
+          key: ff${{ hashFiles('scripts/setup-ffmpeg.sh') }}-ft${{ hashFiles('scripts/setup-freetype.sh') }}
 
       - name: Install cargo-packager
         run: cargo install cargo-packager --locked --version "$CARGO_PACKAGER_VERSION"
@@ -212,7 +221,7 @@ jobs:
             || { echo "::error::entitlements path was not made absolute"; exit 1; }
 
       - name: Build
-        run: cargo build --release --features bundled-sdl3 -p sicompass
+        run: cargo build --release --features bundled-sdl3,bundled-ffmpeg -p sicompass
 
       - name: Sanity check the binary before packaging it
         # The macOS half of the Linux step above, plus the one check that only

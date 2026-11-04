@@ -1,9 +1,5 @@
 //! The video backend: FFmpeg, linked in.
 //!
-//! Built only with the `video` feature, because it needs the FFmpeg libraries and the
-//! release pipelines do not have them yet. Without it a `<video>` shows its poster and
-//! says that this version cannot play it.
-//!
 //! The renderer (`sicompass_ui::video`) has the player, the clock and the audio output.
 //! This crate has the decoding: [`FfmpegBackend`] opens a file, and the stream it gives
 //! hands out pictures as RGBA and sound as stereo 48 kHz, in the order they were
