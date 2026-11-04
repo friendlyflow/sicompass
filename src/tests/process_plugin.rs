@@ -61,7 +61,6 @@ fn grants(storage: Option<&Path>) -> Grants {
         service_tier: Some("acme/pro".into()),
         storage_dir: storage.map(Path::to_path_buf),
         renders_pages: true,
-        ..Default::default()
     }
 }
 
@@ -384,7 +383,6 @@ fn a_real_plugin_starts_fetches_and_stops() {
         storage_dir: m.permissions.storage.then(|| data.path().join(&m.name)),
         service_tier: m.service.as_ref().map(|s| s.tier.clone()),
         renders_pages: m.renders_pages,
-        ..Default::default()
     };
     let mut p = ProcessProvider::open(Spec {
         entry_path: &dir.join(&m.entry),

@@ -976,7 +976,7 @@ fn webbrowser_url_bar_is_input() {
     // First element (index 0) should be the URL bar with <input> tag
     let wb_obj = h.renderer.ffon[wb_idx].as_obj().unwrap();
     assert!(
-        wb_obj.children.len() >= 1,
+        !wb_obj.children.is_empty(),
         "web browser should have url bar"
     );
 
@@ -2305,7 +2305,7 @@ fn a_followed_link_to_a_web_page_is_rendered_by_the_browser_plugin() {
         url_obj
             .as_obj_mut()
             .unwrap()
-            .push(FfonElement::new_obj(&format!("A page <link>{url}</link>")));
+            .push(FfonElement::new_obj(format!("A page <link>{url}</link>")));
         wb_obj.children[0] = url_obj;
     }
     sicompass::list::create_list_current_layer(h.r());
@@ -2335,7 +2335,7 @@ fn a_followed_link_to_a_web_page_is_rendered_by_the_browser_plugin() {
     );
     let expected = fake_chrome::page_text(&url);
     frames_until(h.r(), "the linked page renders", |r| {
-        link_children(r).iter().any(|c| *c == expected)
+        link_children(r).contains(&expected)
     });
     // The cursor, which stood on "Loading…", is on the page's first row.
     let label = h
@@ -5080,7 +5080,7 @@ fn open_flow_loads_json_file_into_source_provider() {
     );
 
     // The loaded FFON should have replaced the original "initial-item"
-    if let Some(FfonElement::Obj(root_obj)) = r.ffon.get(0) {
+    if let Some(FfonElement::Obj(root_obj)) = r.ffon.first() {
         let has_loaded = root_obj.children.iter().any(|c| match c {
             FfonElement::Obj(o) => o.key == "loaded-item",
             _ => false,
@@ -5956,7 +5956,7 @@ impl Provider for InMemoryFormProvider {
 fn root_child_keys(renderer: &AppRenderer) -> Vec<String> {
     renderer
         .ffon
-        .get(0)
+        .first()
         .and_then(|e| e.as_obj())
         .map(|o| {
             o.children
@@ -6098,7 +6098,7 @@ fn nested_added_nodes_survive_deep_navigation() {
     // Verify branch is still in the root.
     let branch_in_root = renderer
         .ffon
-        .get(0)
+        .first()
         .and_then(|e| e.as_obj())
         .map(|o| {
             o.children
@@ -6136,13 +6136,17 @@ fn nested_added_nodes_survive_deep_navigation() {
     );
 
     // The branch Obj must now contain a "leaf" child.
-    let branch_obj = renderer.ffon.get(0).and_then(|e| e.as_obj()).and_then(|o| {
-        o.children
-            .iter()
-            .filter_map(|c| c.as_obj())
-            .find(|o| sicompass_sdk::tags::strip_display(&o.key) == "branch")
-            .cloned()
-    });
+    let branch_obj = renderer
+        .ffon
+        .first()
+        .and_then(|e| e.as_obj())
+        .and_then(|o| {
+            o.children
+                .iter()
+                .filter_map(|c| c.as_obj())
+                .find(|o| sicompass_sdk::tags::strip_display(&o.key) == "branch")
+                .cloned()
+        });
     let leaf_in_branch = branch_obj
         .as_ref()
         .map(|b| {
@@ -6160,7 +6164,7 @@ fn nested_added_nodes_survive_deep_navigation() {
 
     let still_branch = renderer
         .ffon
-        .get(0)
+        .first()
         .and_then(|e| e.as_obj())
         .map(|o| {
             o.children
@@ -6180,7 +6184,7 @@ fn nested_added_nodes_survive_deep_navigation() {
     );
     let branch_still = renderer
         .ffon
-        .get(0)
+        .first()
         .and_then(|e| e.as_obj())
         .map(|o| {
             o.children
@@ -6200,7 +6204,7 @@ fn nested_added_nodes_survive_deep_navigation() {
     );
     let branch_d2 = renderer
         .ffon
-        .get(0)
+        .first()
         .and_then(|e| e.as_obj())
         .map(|o| {
             o.children
@@ -6224,7 +6228,7 @@ fn nested_added_nodes_survive_deep_navigation() {
     // ffon root still intact — branch is still there even from depth 1.
     let branch_d1 = renderer
         .ffon
-        .get(0)
+        .first()
         .and_then(|e| e.as_obj())
         .map(|o| {
             o.children
@@ -6422,7 +6426,7 @@ fn placeholder_commit_plain_text_becomes_string_element() {
     assert_eq!(r.coordinate, Coordinate::General);
     assert!(!r.placeholder_insert_mode);
     // Check the FFON: provider now has 3 children, one of which contains "myvalue"
-    if let Some(FfonElement::Obj(prov)) = r.ffon.get(0) {
+    if let Some(FfonElement::Obj(prov)) = r.ffon.first() {
         let has_value = prov.children.iter().any(|e| match e {
             FfonElement::Str(s) => s.contains("myvalue"),
             _ => false,
@@ -6445,7 +6449,7 @@ fn placeholder_commit_plus_prefix_becomes_obj_element() {
     press_enter(&mut r);
     assert_eq!(r.coordinate, Coordinate::General);
     assert!(!r.placeholder_insert_mode);
-    if let Some(FfonElement::Obj(prov)) = r.ffon.get(0) {
+    if let Some(FfonElement::Obj(prov)) = r.ffon.first() {
         let has_obj = prov
             .children
             .iter()
@@ -6467,7 +6471,7 @@ fn placeholder_commit_trailing_colon_becomes_obj_element() {
     type_text(&mut r, "section:");
     press_enter(&mut r);
     assert_eq!(r.coordinate, Coordinate::General);
-    if let Some(FfonElement::Obj(prov)) = r.ffon.get(0) {
+    if let Some(FfonElement::Obj(prov)) = r.ffon.first() {
         let has_obj = prov
             .children
             .iter()
@@ -6559,7 +6563,7 @@ fn handle_i_on_star_element_commit_plain_text_produces_str() {
     assert_eq!(r.coordinate, Coordinate::General);
     assert!(!r.placeholder_insert_mode);
     // The element should now contain "hello".
-    if let Some(FfonElement::Obj(prov)) = r.ffon.get(0) {
+    if let Some(FfonElement::Obj(prov)) = r.ffon.first() {
         let has_hello = prov.children.iter().any(|e| match e {
             FfonElement::Str(s) => s.contains("hello"),
             _ => false,
@@ -6581,7 +6585,7 @@ fn handle_i_on_star_element_commit_plus_prefix_produces_obj() {
     type_text(&mut r, "+ section");
     press_enter(&mut r);
     assert_eq!(r.coordinate, Coordinate::General);
-    if let Some(FfonElement::Obj(prov)) = r.ffon.get(0) {
+    if let Some(FfonElement::Obj(prov)) = r.ffon.first() {
         let has_obj = prov
             .children
             .iter()
@@ -7005,10 +7009,10 @@ fn commit_trailing_colon_in_nested_body_creates_obj_with_i_placeholder() {
     let baz = children
         .iter()
         .find_map(|c| {
-            if let FfonElement::Obj(o) = c {
-                if sicompass_sdk::tags::strip_display(&o.key) == "baz" {
-                    return Some(o);
-                }
+            if let FfonElement::Obj(o) = c
+                && sicompass_sdk::tags::strip_display(&o.key) == "baz"
+            {
+                return Some(o);
             }
             None
         })
@@ -7252,13 +7256,13 @@ fn ctrl_d_from_inside_message_shows_message_list_with_cursor_on_next() {
     assert!(
         !children
             .iter()
-            .any(|e| e.as_obj().map_or(false, |o| o.key.contains("Alpha"))),
+            .any(|e| e.as_obj().is_some_and(|o| o.key.contains("Alpha"))),
         "Alpha must be absent from the message list after deletion"
     );
     assert!(
         children
             .iter()
-            .any(|e| e.as_obj().map_or(false, |o| o.key.contains("Beta"))),
+            .any(|e| e.as_obj().is_some_and(|o| o.key.contains("Beta"))),
         "Beta must still be in the message list"
     );
 
@@ -8284,9 +8288,8 @@ fn webbrowser_form_html_produces_input_cells() {
     assert_eq!(form.key, "form_1");
 
     let has_email = form.children.iter().any(|e| {
-        e.as_str().map_or(false, |s| {
-            s.contains("<input>") && s.contains("Email address")
-        })
+        e.as_str()
+            .is_some_and(|s| s.contains("<input>") && s.contains("Email address"))
     });
     assert!(
         has_email,
@@ -8296,7 +8299,7 @@ fn webbrowser_form_html_produces_input_cells() {
 
     let has_submit = form.children.iter().any(|e| {
         e.as_str()
-            .map_or(false, |s| s.contains("<button>submit:form_1</button>"))
+            .is_some_and(|s| s.contains("<button>submit:form_1</button>"))
     });
     assert!(
         has_submit,
@@ -8337,7 +8340,7 @@ fn webbrowser_form_commit_returns_false_and_patches_cache() {
     let field = form
         .children
         .iter()
-        .find(|e| e.as_str().map_or(false, |s| s.contains("<input>")))
+        .find(|e| e.as_str().is_some_and(|s| s.contains("<input>")))
         .and_then(|e| e.as_str())
         .expect("editable field in form");
     assert!(
@@ -8458,13 +8461,13 @@ fn email_compose_cc_bcc_fields_appear_and_commit() {
     assert!(
         items
             .iter()
-            .any(|e| e.as_str().map_or(false, |s| s.starts_with("Cc:"))),
+            .any(|e| e.as_str().is_some_and(|s| s.starts_with("Cc:"))),
         "compose view must include Cc: field; got: {items:?}"
     );
     assert!(
         items
             .iter()
-            .any(|e| e.as_str().map_or(false, |s| s.starts_with("Bcc:"))),
+            .any(|e| e.as_str().is_some_and(|s| s.starts_with("Bcc:"))),
         "compose view must include Bcc: field; got: {items:?}"
     );
 
@@ -8480,7 +8483,7 @@ fn email_compose_cc_bcc_fields_appear_and_commit() {
     assert!(
         items2
             .iter()
-            .any(|e| e.as_str().map_or(false, |s| s.contains("cc@example.com"))),
+            .any(|e| e.as_str().is_some_and(|s| s.contains("cc@example.com"))),
         "compose view must reflect committed Cc value; got: {items2:?}"
     );
 
@@ -8494,7 +8497,7 @@ fn email_compose_cc_bcc_fields_appear_and_commit() {
     assert!(
         items3
             .iter()
-            .any(|e| e.as_str().map_or(false, |s| s.contains("bcc@example.com"))),
+            .any(|e| e.as_str().is_some_and(|s| s.contains("bcc@example.com"))),
         "compose view must reflect committed Bcc value; got: {items3:?}"
     );
 }
@@ -8514,7 +8517,7 @@ fn email_compose_commit_to_field_keeps_cursor_on_to() {
     let items = p.fetch();
     let to_idx = items
         .iter()
-        .position(|e| e.as_str().map_or(false, |s| s.starts_with("To:")))
+        .position(|e| e.as_str().is_some_and(|s| s.starts_with("To:")))
         .expect("compose view must have a To: field");
 
     renderer.ffon.push(FfonElement::Obj(FfonObject {
@@ -16534,7 +16537,7 @@ fn tutorial_placeholder_obj_commit_undo_restores_i_placeholder() {
     );
     let tail = renderer.active_timeline().entries.last().unwrap();
     assert!(
-        matches!(tail, TimelineEntry::TextChunk { after, .. } if after.as_obj().map_or(false, |o| o.key == "hello")),
+        matches!(tail, TimelineEntry::TextChunk { after, .. } if after.as_obj().is_some_and(|o| o.key == "hello")),
         "tail chunk's `after` must be rewritten to the final Obj, got: {tail:?}"
     );
 
@@ -16556,7 +16559,7 @@ fn tutorial_placeholder_obj_commit_undo_restores_i_placeholder() {
         .unwrap();
     let child = &parent.children[0];
     assert!(
-        child.as_obj().map_or(false, |o| o.key == "hello"),
+        child.as_obj().is_some_and(|o| o.key == "hello"),
         "redo must restore the typed Obj, got: {child:?}"
     );
 }
@@ -16580,8 +16583,7 @@ fn editing_obj_input_preserves_children() {
     assert!(
         parent
             .as_obj()
-            .map_or(false, |o| o.key.contains("+i input example")
-                && o.children.len() == 1),
+            .is_some_and(|o| o.key.contains("+i input example") && o.children.len() == 1),
         "parent must be the +i input example Obj with one I_PLACEHOLDER child, got: {parent:?}"
     );
 
@@ -16652,13 +16654,13 @@ fn tutorial_placeholder_typing_pause_splits_chunks() {
     assert!(
         parent.children[0]
             .as_obj()
-            .map_or(false, |o| o.key == "hello")
+            .is_some_and(|o| o.key == "hello")
     );
 
     // Tail chunk's `after` was rewritten to the Obj.
     let tail = renderer.active_timeline().entries.last().unwrap();
     assert!(
-        matches!(tail, TimelineEntry::TextChunk { after, .. } if after.as_obj().map_or(false, |o| o.key == "hello")),
+        matches!(tail, TimelineEntry::TextChunk { after, .. } if after.as_obj().is_some_and(|o| o.key == "hello")),
         "tail chunk's `after` must be the final Obj, got: {tail:?}"
     );
 
@@ -16882,7 +16884,7 @@ fn navigation_request_enters_content_when_background_load_lands() {
     );
     assert!(
         r.current_list_item()
-            .map_or(false, |it| it.label.contains("page body")),
+            .is_some_and(|it| it.label.contains("page body")),
         "cursor should be on the page body, got: {:?}",
         r.current_list_item().map(|it| it.label.clone())
     );

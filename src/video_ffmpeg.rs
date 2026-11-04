@@ -247,7 +247,9 @@ impl FfmpegStream {
             }
             let bytes = &out.data(0)[..out.samples() * AUDIO_CHANNELS as usize * 2];
             let samples: Vec<i16> = bytes
-                .chunks_exact(2)
+                .as_chunks::<2>()
+                .0
+                .iter()
                 .map(|b| i16::from_le_bytes([b[0], b[1]]))
                 .collect();
             let pts = decoded
@@ -363,10 +365,12 @@ mod tests {
         assert!(
             first
                 .rgba
-                .chunks_exact(4)
+                .as_chunks::<4>()
+                .0
+                .iter()
                 .any(|p| p[0] > 30 || p[1] > 30 || p[2] > 30)
         );
-        assert!(first.rgba.chunks_exact(4).all(|p| p[3] == 255));
+        assert!(first.rgba.as_chunks::<4>().0.iter().all(|p| p[3] == 255));
     }
 
     #[test]

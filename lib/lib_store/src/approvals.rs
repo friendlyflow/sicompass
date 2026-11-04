@@ -59,7 +59,10 @@ pub fn forget(settings: &Path, name: &str) -> Result<(), String> {
     })
 }
 
-pub(crate) fn object_at<'a>(root: &'a mut Map<String, Value>, key: &str) -> &'a mut Map<String, Value> {
+pub(crate) fn object_at<'a>(
+    root: &'a mut Map<String, Value>,
+    key: &str,
+) -> &'a mut Map<String, Value> {
     let slot = root
         .entry(key.to_owned())
         .or_insert_with(|| Value::Object(Default::default()));

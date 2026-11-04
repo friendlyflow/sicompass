@@ -783,6 +783,29 @@ impl Provider for TutorialProvider {
 }
 
 // ---------------------------------------------------------------------------
+// SDK registration
+// ---------------------------------------------------------------------------
+
+/// Register the tutorial with the SDK factory and manifest registries.
+pub fn register() {
+    // Publish the assets before the factory, so a provider built by the very next
+    // line already resolves. `register_bytes` overwrites, so calling this twice
+    // (which the tests do) is harmless.
+    sicompass_sdk::assets::register_bytes("tutorial", "texture.jpg", TEXTURE_JPG);
+    sicompass_sdk::assets::register_bytes("tutorial", "ffon.json", FFON_JSON);
+    sicompass_sdk::assets::register_bytes("tutorial", "site.json", SITE_JSON);
+    sicompass_sdk::assets::register_bytes("tutorial", "clip.mp4", CLIP_MP4);
+    for (n, bytes) in PHOTOS.iter().enumerate() {
+        sicompass_sdk::assets::register_bytes("tutorial", &format!("photo-{}.jpg", n + 1), bytes);
+    }
+
+    sicompass_sdk::register_provider_factory("tutorial", || Box::new(TutorialProvider::new()));
+    sicompass_sdk::register_builtin_manifest(
+        sicompass_sdk::BuiltinManifest::new("tutorial", "tutorial").enable_by_default(),
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -1555,27 +1578,4 @@ mod tests {
         assert_eq!(p.current_path(), "/");
         assert_eq!(section_keys(&p.fetch()).len(), 7);
     }
-}
-
-// ---------------------------------------------------------------------------
-// SDK registration
-// ---------------------------------------------------------------------------
-
-/// Register the tutorial with the SDK factory and manifest registries.
-pub fn register() {
-    // Publish the assets before the factory, so a provider built by the very next
-    // line already resolves. `register_bytes` overwrites, so calling this twice
-    // (which the tests do) is harmless.
-    sicompass_sdk::assets::register_bytes("tutorial", "texture.jpg", TEXTURE_JPG);
-    sicompass_sdk::assets::register_bytes("tutorial", "ffon.json", FFON_JSON);
-    sicompass_sdk::assets::register_bytes("tutorial", "site.json", SITE_JSON);
-    sicompass_sdk::assets::register_bytes("tutorial", "clip.mp4", CLIP_MP4);
-    for (n, bytes) in PHOTOS.iter().enumerate() {
-        sicompass_sdk::assets::register_bytes("tutorial", &format!("photo-{}.jpg", n + 1), bytes);
-    }
-
-    sicompass_sdk::register_provider_factory("tutorial", || Box::new(TutorialProvider::new()));
-    sicompass_sdk::register_builtin_manifest(
-        sicompass_sdk::BuiltinManifest::new("tutorial", "tutorial").enable_by_default(),
-    );
 }

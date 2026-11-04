@@ -48,6 +48,11 @@ pub const PAGES: [(&str, &str, Option<&str>); 4] = [
 fn url_label() -> String {
     localize::t("store-label-server-url")
 }
+/// A tier page on its way: which one, and where its rows will arrive.
+type PageLoad = (
+    &'static str,
+    mpsc::Receiver<Result<Vec<FfonElement>, String>>,
+);
 
 pub struct Tiers {
     session: TierSession,
@@ -55,10 +60,7 @@ pub struct Tiers {
     /// `settings.json`, where the server URL and the redeem tokens are kept.
     settings_path: Option<PathBuf>,
     pages: HashMap<&'static str, Vec<FfonElement>>,
-    loading: Option<(
-        &'static str,
-        mpsc::Receiver<Result<Vec<FfonElement>, String>>,
-    )>,
+    loading: Option<PageLoad>,
     error: Option<String>,
     /// `GET /usage` in flight; it answers whether a report arrived.
     usage_loading: Option<mpsc::Receiver<bool>>,

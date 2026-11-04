@@ -331,7 +331,10 @@ fn the_cloud_pages_say_what_paying_turns_on_just_above_the_payment_button() {
     let mut t = store_with_plugins(&server.uri(), &plugins);
 
     for (title, button) in [
-        ("store-tier-cloud", "<button>checkout:cloud</button>for payment"),
+        (
+            "store-tier-cloud",
+            "<button>checkout:cloud</button>for payment",
+        ),
         (
             "store-tier-commercial",
             "<button>checkout:commercial</button>for payment",

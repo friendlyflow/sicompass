@@ -158,10 +158,10 @@ pub fn download_to(
     if !resp.status().is_success() {
         return Err(format!("{url}: HTTP {}", resp.status()));
     }
-    if let Some(len) = resp.content_length() {
-        if len > MAX_INSTALLER_BYTES {
-            return Err(format!("{url}: installer too large ({len} bytes)"));
-        }
+    if let Some(len) = resp.content_length()
+        && len > MAX_INSTALLER_BYTES
+    {
+        return Err(format!("{url}: installer too large ({len} bytes)"));
     }
     let parent = dest
         .parent()

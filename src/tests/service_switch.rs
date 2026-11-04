@@ -175,13 +175,19 @@ fn a_service_switch_shows_while_the_tier_is_held_with_what_the_store_wrote() {
     tick_as_the_store_does();
     programs::follow_services(&mut renderer, true);
     let rows = settings_section(&renderer, "fixture demo");
-    assert!(rows.contains(&"<checkbox checked>sync".to_owned()), "{rows:?}");
+    assert!(
+        rows.contains(&"<checkbox checked>sync".to_owned()),
+        "{rows:?}"
+    );
 
     // ---- Grace still counts as paid ----
     set_standing(LicenseStatus::Grace);
     programs::follow_services(&mut renderer, true);
     let rows = settings_section(&renderer, "fixture demo");
-    assert!(rows.contains(&"<checkbox checked>sync".to_owned()), "{rows:?}");
+    assert!(
+        rows.contains(&"<checkbox checked>sync".to_owned()),
+        "{rows:?}"
+    );
 
     // ---- Expired: the switch goes, its value stays for a later payment ----
     set_standing(LicenseStatus::Expired);

@@ -74,10 +74,8 @@ fn sdk_version(lock: &str) -> Option<String> {
             in_sdk = false;
         } else if line == "name = \"sicompass-sdk\"" {
             in_sdk = true;
-        } else if in_sdk {
-            if let Some(rest) = line.strip_prefix("version = \"") {
-                return rest.strip_suffix('"').map(str::to_owned);
-            }
+        } else if in_sdk && let Some(rest) = line.strip_prefix("version = \"") {
+            return rest.strip_suffix('"').map(str::to_owned);
         }
     }
     None

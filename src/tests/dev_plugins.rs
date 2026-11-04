@@ -107,7 +107,11 @@ fn linking_again_leaves_the_links_that_are_right_alone() {
     std::fs::write(out.join("notes").join("stale"), "x").unwrap();
 
     assert_eq!(link_checkouts(&siblings, &out).unwrap(), vec!["notes"]);
-    assert_eq!(inode(&out.join("notes")), dir_before, "the folder was remade");
+    assert_eq!(
+        inode(&out.join("notes")),
+        dir_before,
+        "the folder was remade"
+    );
     assert_eq!(inode(&manifest), manifest_before, "the link was remade");
     assert!(!out.join("notes").join("stale").exists());
     assert!(manifest.is_file());

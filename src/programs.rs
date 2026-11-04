@@ -74,10 +74,10 @@ fn reinstantiate_provider(name: &str) -> Option<Box<dyn Provider>> {
             .find(|p| p.manifest.name == name || p.manifest.display_name == name)
             .cloned()
     };
-    if let Some(plugin) = cached {
-        if let Some(p) = instantiate_user_plugin(&plugin) {
-            return Some(p);
-        }
+    if let Some(plugin) = cached
+        && let Some(p) = instantiate_user_plugin(&plugin)
+    {
+        return Some(p);
     }
     None
 }
@@ -281,10 +281,10 @@ pub fn load_content_providers(renderer: &mut AppRenderer, mut settings: Option<&
         if let Some(p) = instantiate_builtin(&m.name) {
             register_provider(renderer, p);
         }
-        if let Some(s) = settings.as_deref_mut() {
-            if !m.settings.is_empty() {
-                inject_builtin_manifest_settings(s, &m);
-            }
+        if let Some(s) = settings.as_deref_mut()
+            && !m.settings.is_empty()
+        {
+            inject_builtin_manifest_settings(s, &m);
         }
     }
 
@@ -320,7 +320,7 @@ pub fn load_content_providers(renderer: &mut AppRenderer, mut settings: Option<&
     }
 
     // User-installed plugins.
-    load_user_plugins(renderer, settings.as_deref_mut());
+    load_user_plugins(renderer, settings);
 
     // Sort content providers alphabetically (settings is appended afterwards).
     sort_providers_alphabetically(renderer);
@@ -717,13 +717,13 @@ fn hold_vanished(
     for change in changes {
         if let PluginChange::Unload(name) = &change {
             let vanished = !now.iter().any(|n| &n.manifest.name == name);
-            if vanished && !held.contains(name) {
-                if let Some(p) = before.iter().find(|b| &b.manifest.name == name) {
-                    if exists(&p.dir) {
-                        hold.push(p.clone());
-                        continue;
-                    }
-                }
+            if vanished
+                && !held.contains(name)
+                && let Some(p) = before.iter().find(|b| &b.manifest.name == name)
+                && exists(&p.dir)
+            {
+                hold.push(p.clone());
+                continue;
             }
         }
         keep.push(change);
@@ -1440,10 +1440,10 @@ fn migrate_editor_to_text_editor(path: &Path) {
 
     // Move the "editor" section → "text editor", renaming "editorPath" inside.
     if let Some(mut section) = obj.remove("editor") {
-        if let Some(sec) = section.as_object_mut() {
-            if let Some(v) = sec.remove("editorPath") {
-                sec.entry("textEditorPath").or_insert(v);
-            }
+        if let Some(sec) = section.as_object_mut()
+            && let Some(v) = sec.remove("editorPath")
+        {
+            sec.entry("textEditorPath").or_insert(v);
         }
         // Merge into an existing "text editor" section rather than clobbering.
         match obj.get_mut("text editor").and_then(|v| v.as_object_mut()) {
@@ -1667,12 +1667,11 @@ pub fn apply_tabs_section(
 
         // Resolve the active tab and make its parked content the live set.
         let mut active = 0;
-        if let Some(active_str) = sec.get("activeTab").and_then(|v| v.as_str()) {
-            if let Ok(n) = active_str.parse::<usize>() {
-                if n < r.tabs.len() {
-                    active = n;
-                }
-            }
+        if let Some(active_str) = sec.get("activeTab").and_then(|v| v.as_str())
+            && let Ok(n) = active_str.parse::<usize>()
+            && n < r.tabs.len()
+        {
+            active = n;
         }
         r.active_tab = active;
         // Seed the MRU order to a default front-first sequence (no real visit
@@ -1793,23 +1792,23 @@ pub fn enable_provider(renderer: &mut AppRenderer, name: &str) {
             .find(|p| p.manifest.name == name || p.manifest.display_name == name)
             .cloned()
     };
-    if let Some(plugin) = cached {
-        if let Some(provider) = instantiate_user_plugin(&plugin) {
-            // The same settings entries a startup load injects
-            // (`load_user_plugins`); without them a plugin enabled at runtime
-            // had an empty settings section until the next restart.
-            let manifest = plugin.manifest.clone();
-            insert_provider_in_section(
-                renderer,
-                provider,
-                Some(Box::new(move |settings: &mut dyn Provider| {
-                    inject_plugin_settings(settings, &manifest);
-                })),
-                plugin.manifest.version.clone(),
-                Some(plugin.manifest.display_name.clone()),
-            );
-            return;
-        }
+    if let Some(plugin) = cached
+        && let Some(provider) = instantiate_user_plugin(&plugin)
+    {
+        // The same settings entries a startup load injects
+        // (`load_user_plugins`); without them a plugin enabled at runtime
+        // had an empty settings section until the next restart.
+        let manifest = plugin.manifest.clone();
+        insert_provider_in_section(
+            renderer,
+            provider,
+            Some(Box::new(move |settings: &mut dyn Provider| {
+                inject_plugin_settings(settings, &manifest);
+            })),
+            plugin.manifest.version.clone(),
+            Some(plugin.manifest.display_name.clone()),
+        );
+        return;
     }
 
     eprintln!("sicompass: cannot enable unknown provider '{name}'");
@@ -1917,10 +1916,10 @@ fn insert_provider_in_section(
     rebuild_settings_ffon(renderer);
 
     // Adjust root navigation index if it points at or after the insertion point.
-    if let Some(root_idx) = renderer.current_id.get(0) {
-        if root_idx >= insert_idx {
-            renderer.current_id.set(0, root_idx + 1);
-        }
+    if let Some(root_idx) = renderer.current_id.get(0)
+        && root_idx >= insert_idx
+    {
+        renderer.current_id.set(0, root_idx + 1);
     }
 }
 
@@ -2016,10 +2015,10 @@ fn propagate_enable_to_parked_tabs(renderer: &mut AppRenderer, name: &str) {
         tab.ffon.insert(insert_idx, root);
         tab.providers.insert(insert_idx, provider);
         // Keep the parked cursor on the same provider it pointed at.
-        if let Some(root_idx) = tab.current_id.get(0) {
-            if root_idx >= insert_idx {
-                tab.current_id.set(0, root_idx + 1);
-            }
+        if let Some(root_idx) = tab.current_id.get(0)
+            && root_idx >= insert_idx
+        {
+            tab.current_id.set(0, root_idx + 1);
         }
     }
 }
@@ -2567,7 +2566,7 @@ mod tests {
                 })
                 .unwrap_or_default();
             names.sort();
-            names.iter().map(|n| FfonElement::new_obj(n)).collect()
+            names.iter().map(FfonElement::new_obj).collect()
         }
         fn current_path(&self) -> &str {
             &self.path
@@ -3619,14 +3618,22 @@ mod tests {
     fn a_plugin_installed_elsewhere_loads_once_it_is_approved() {
         let demo = on_disk("demo", "1.0.0");
         assert_eq!(
-            changes_of(&[], &[demo.clone()], &[&demo], &[]),
+            changes_of(&[], std::slice::from_ref(&demo), &[&demo], &[]),
             vec![PluginChange::Load("demo".into())]
         );
         // On disk but not approved yet: it waits.
-        assert_eq!(changes_of(&[], &[demo.clone()], &[], &[]), vec![]);
+        assert_eq!(
+            changes_of(&[], std::slice::from_ref(&demo), &[], &[]),
+            vec![]
+        );
         // Approved later, with nothing new on disk.
         assert_eq!(
-            changes_of(&[demo.clone()], &[demo.clone()], &[&demo], &[]),
+            changes_of(
+                std::slice::from_ref(&demo),
+                std::slice::from_ref(&demo),
+                &[&demo],
+                &[]
+            ),
             vec![PluginChange::Load("demo".into())]
         );
     }
@@ -3645,11 +3652,16 @@ mod tests {
     fn a_plugin_removed_or_no_longer_approved_is_unloaded() {
         let demo = on_disk("demo", "1.0.0");
         assert_eq!(
-            changes_of(&[demo.clone()], &[], &[], &["demo"]),
+            changes_of(std::slice::from_ref(&demo), &[], &[], &["demo"]),
             vec![PluginChange::Unload("demo".into())]
         );
         assert_eq!(
-            changes_of(&[demo.clone()], &[demo.clone()], &[], &["demo"]),
+            changes_of(
+                std::slice::from_ref(&demo),
+                std::slice::from_ref(&demo),
+                &[],
+                &["demo"]
+            ),
             vec![PluginChange::Unload("demo".into())]
         );
     }
@@ -3659,11 +3671,21 @@ mod tests {
         let old = on_disk("demo", "1.0.0");
         let new = on_disk("demo", "1.1.0");
         assert_eq!(
-            changes_of(&[old.clone()], &[new.clone()], &[&new], &["demo"]),
+            changes_of(
+                std::slice::from_ref(&old),
+                std::slice::from_ref(&new),
+                &[&new],
+                &["demo"]
+            ),
             vec![PluginChange::Reload("demo".into())]
         );
         assert_eq!(
-            changes_of(&[new.clone()], &[new.clone()], &[&new], &["demo"]),
+            changes_of(
+                std::slice::from_ref(&new),
+                std::slice::from_ref(&new),
+                &[&new],
+                &["demo"]
+            ),
             vec![]
         );
     }
@@ -3672,7 +3694,10 @@ mod tests {
     fn a_plugin_named_like_a_built_in_is_never_touched() {
         sicompass_builtins::register_all();
         let store = on_disk(STORE, "1.0.0");
-        assert_eq!(changes_of(&[], &[store.clone()], &[&store], &[]), vec![]);
+        assert_eq!(
+            changes_of(&[], std::slice::from_ref(&store), &[&store], &[]),
+            vec![]
+        );
         assert_eq!(changes_of(&[store], &[], &[], &[STORE]), vec![]);
     }
 

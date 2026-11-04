@@ -54,7 +54,11 @@ pub fn renewal_from(
     current: &cert::Certificate,
     issuer: &str,
 ) -> Result<Option<cert::Certificate>, String> {
-    Ok(renewed(current, fetch_certificate(store_url, token)?, issuer))
+    Ok(renewed(
+        current,
+        fetch_certificate(store_url, token)?,
+        issuer,
+    ))
 }
 
 /// Fetch and keep a renewal of the certificate saved under `slug`, on this
@@ -117,8 +121,8 @@ mod tests {
 
     fn key() -> (SigningKey, String) {
         let signing = SigningKey::from_bytes(&[11u8; 32]);
-        let public = base64::engine::general_purpose::STANDARD
-            .encode(signing.verifying_key().to_bytes());
+        let public =
+            base64::engine::general_purpose::STANDARD.encode(signing.verifying_key().to_bytes());
         (signing, public)
     }
 
@@ -154,7 +158,10 @@ mod tests {
         let (s, public) = key();
         let current = signed(&s, 1_800_000_000);
         let later = signed(&s, 1_900_000_000);
-        assert_eq!(renewed(&current, later.clone(), &public), Some(later.clone()));
+        assert_eq!(
+            renewed(&current, later.clone(), &public),
+            Some(later.clone())
+        );
         assert_eq!(renewed(&current, signed(&s, 1_700_000_000), &public), None);
         assert_eq!(renewed(&current, current.clone(), &public), None);
         let (other, _) = (SigningKey::from_bytes(&[12u8; 32]), ());

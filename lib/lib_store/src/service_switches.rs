@@ -60,7 +60,10 @@ pub fn tick_covered<'a>(
         .filter(|m| match tick(settings, m) {
             Ok(ticked) => ticked,
             Err(e) => {
-                eprintln!("sicompass: store: could not turn on {}'s service: {e}", m.name);
+                eprintln!(
+                    "sicompass: store: could not turn on {}'s service: {e}",
+                    m.name
+                );
                 false
             }
         })
@@ -128,7 +131,10 @@ mod tests {
             cloud("notes", "notesCloudBackup"),
             cloud("project management", "kanbanCloudBackup"),
             // A service without a switch, another tier, and no service.
-            plugin("sync less", r#", "service": { "tier": "friendlyflow/cloud" }"#),
+            plugin(
+                "sync less",
+                r#", "service": { "tier": "friendlyflow/cloud" }"#,
+            ),
             plugin(
                 "acme",
                 r#", "service": { "tier": "acme/pro", "switch": "acmeOn" }"#,
@@ -142,7 +148,10 @@ mod tests {
         let v = read(&settings);
         assert_eq!(v["notes"]["notesCloudBackup"], Value::Bool(true));
         assert_eq!(v["notes"]["other"], 1, "the rest of the section is kept");
-        assert_eq!(v["project management"]["kanbanCloudBackup"], Value::Bool(true));
+        assert_eq!(
+            v["project management"]["kanbanCloudBackup"],
+            Value::Bool(true)
+        );
         assert_eq!(v["Store"]["licenseRedeemToken"], "t");
         assert!(v.get("acme").is_none());
         assert!(v.get("sync less").is_none());

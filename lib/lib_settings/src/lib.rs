@@ -108,6 +108,16 @@ pub struct SettingsProvider {
     hidden_keys: HashSet<String>,
 }
 
+/// One settings change, for the undo timeline.
+struct SettingsOp<'a> {
+    section: &'a str,
+    config_key: &'a str,
+    prev: &'a str,
+    new: &'a str,
+    kind: &'a str,
+    label: &'a str,
+}
+
 impl SettingsProvider {
     pub fn new(apply_fn: impl Fn(&str, &str) + Send + 'static) -> Self {
         register_translations();
@@ -193,12 +203,14 @@ impl SettingsProvider {
     fn push_settings_op(
         &mut self,
         command: &str,
-        section: &str,
-        config_key: &str,
-        prev: &str,
-        new: &str,
-        kind: &str,
-        label: &str,
+        SettingsOp {
+            section,
+            config_key,
+            prev,
+            new,
+            kind,
+            label,
+        }: SettingsOp,
     ) {
         let payload = Self::build_provider_op_payload(section, config_key, prev, new, kind);
         self.pending_timeline_entries
@@ -220,7 +232,7 @@ impl SettingsProvider {
     fn config_path(&self) -> Option<PathBuf> {
         self.config_path_override
             .clone()
-            .or_else(|| platform::main_config_path())
+            .or_else(platform::main_config_path)
     }
 
     /// True when `init()` ran against a missing settings.json (first launch).
@@ -353,46 +365,43 @@ impl SettingsProvider {
         };
 
         // color scheme
-        if let Some(Value::Object(sc)) = root.get("sicompass") {
-            if let Some(Value::String(cs)) = sc.get("colorScheme") {
-                if cs == "dark" || cs == "light" {
-                    self.color_scheme = cs.clone();
-                }
-            }
+        if let Some(Value::Object(sc)) = root.get("sicompass")
+            && let Some(Value::String(cs)) = sc.get("colorScheme")
+            && (cs == "dark" || cs == "light")
+        {
+            self.color_scheme = cs.clone();
         }
 
         // radio entries
         for e in &mut self.radio_entries {
-            if let Some(Value::Object(sec)) = root.get(&e.section) {
-                if let Some(Value::String(val)) = sec.get(&e.config_key) {
-                    if e.options.iter().any(|o| o == val) {
-                        e.current_value = val.clone();
-                    }
-                }
+            if let Some(Value::Object(sec)) = root.get(&e.section)
+                && let Some(Value::String(val)) = sec.get(&e.config_key)
+                && e.options.iter().any(|o| o == val)
+            {
+                e.current_value = val.clone();
             }
         }
 
         // text entries
         for e in &mut self.text_entries {
-            if let Some(Value::Object(sec)) = root.get(&e.section) {
-                if let Some(Value::String(val)) = sec.get(&e.config_key) {
-                    if !val.is_empty() {
-                        e.current_value = val.clone();
-                    }
-                }
+            if let Some(Value::Object(sec)) = root.get(&e.section)
+                && let Some(Value::String(val)) = sec.get(&e.config_key)
+                && !val.is_empty()
+            {
+                e.current_value = val.clone();
             }
         }
 
         // checkbox entries
         for e in &mut self.checkbox_entries {
-            if let Some(Value::Object(sec)) = root.get(&e.section) {
-                if let Some(val) = sec.get(&e.config_key) {
-                    e.checked = match val {
-                        Value::Bool(b) => *b,
-                        Value::String(s) => s == "true",
-                        _ => e.checked,
-                    };
-                }
+            if let Some(Value::Object(sec)) = root.get(&e.section)
+                && let Some(val) = sec.get(&e.config_key)
+            {
+                e.checked = match val {
+                    Value::Bool(b) => *b,
+                    Value::String(s) => s == "true",
+                    _ => e.checked,
+                };
             }
         }
     }
@@ -569,7 +578,7 @@ impl SettingsProvider {
             .filter(|e| e.section == section_name && self.shows(&e.config_key))
             .map(|e| (e, localize::t(&e.label)))
             .collect();
-        checkboxes.sort_by(|(_, a), (_, b)| a.to_ascii_lowercase().cmp(&b.to_ascii_lowercase()));
+        checkboxes.sort_by_key(|(_, a)| a.to_ascii_lowercase());
         for (e, displayed) in checkboxes {
             let tag = if e.checked {
                 "<checkbox checked>"
@@ -727,7 +736,7 @@ impl Provider for SettingsProvider {
             }
         }
 
-        entries.sort_by(|(a, _), (b, _)| a.to_ascii_lowercase().cmp(&b.to_ascii_lowercase()));
+        entries.sort_by_key(|(a, _)| a.to_ascii_lowercase());
         for (_, el) in entries {
             sc_obj.as_obj_mut().unwrap().push(el);
         }
@@ -740,7 +749,7 @@ impl Provider for SettingsProvider {
             .filter(|s| s.as_str() != "sicompass")
             .cloned()
             .collect();
-        other_sections.sort_by(|a, b| a.to_ascii_lowercase().cmp(&b.to_ascii_lowercase()));
+        other_sections.sort_by_key(|a| a.to_ascii_lowercase());
         for section in other_sections {
             result.push(self.populate_section(&section));
         }
@@ -823,12 +832,14 @@ impl Provider for SettingsProvider {
             self.fire_apply(&config_key, new_content);
             self.push_settings_op(
                 "settings-text",
-                &sec,
-                &config_key,
-                &prev,
-                new_content,
-                "text",
-                &format!("edit {lbl}"),
+                SettingsOp {
+                    section: &sec,
+                    config_key: &config_key,
+                    prev: &prev,
+                    new: new_content,
+                    kind: "text",
+                    label: &format!("edit {lbl}"),
+                },
             );
             return true;
         }
@@ -869,12 +880,14 @@ impl Provider for SettingsProvider {
             self.fire_apply("colorScheme", stored);
             self.push_settings_op(
                 "settings-radio",
-                "sicompass",
-                "colorScheme",
-                &prev,
-                stored,
-                "radio",
-                "color scheme",
+                SettingsOp {
+                    section: "sicompass",
+                    config_key: "colorScheme",
+                    prev: &prev,
+                    new: stored,
+                    kind: "radio",
+                    label: "color scheme",
+                },
             );
             return;
         }
@@ -913,12 +926,14 @@ impl Provider for SettingsProvider {
             self.fire_apply(&config_key, &stored);
             self.push_settings_op(
                 "settings-radio",
-                &section,
-                &config_key,
-                &prev,
-                &stored,
-                "radio",
-                &format!("set {rkey}"),
+                SettingsOp {
+                    section: &section,
+                    config_key: &config_key,
+                    prev: &prev,
+                    new: &stored,
+                    kind: "radio",
+                    label: &format!("set {rkey}"),
+                },
             );
         }
     }
@@ -944,12 +959,14 @@ impl Provider for SettingsProvider {
             self.fire_apply(&config_key, if checked { "true" } else { "false" });
             self.push_settings_op(
                 "settings-checkbox",
-                &section,
-                &config_key,
-                if prev { "true" } else { "false" },
-                if checked { "true" } else { "false" },
-                "checkbox",
-                &format!("toggle {lbl}"),
+                SettingsOp {
+                    section: &section,
+                    config_key: &config_key,
+                    prev: if prev { "true" } else { "false" },
+                    new: if checked { "true" } else { "false" },
+                    kind: "checkbox",
+                    label: &format!("toggle {lbl}"),
+                },
             );
         }
     }
@@ -1141,10 +1158,18 @@ impl Provider for SettingsProvider {
         if key == "colorScheme" && matches!(value, "dark" | "light") {
             self.color_scheme = value.to_owned();
         }
-        for e in self.checkbox_entries.iter_mut().filter(|e| e.config_key == key) {
+        for e in self
+            .checkbox_entries
+            .iter_mut()
+            .filter(|e| e.config_key == key)
+        {
             e.checked = value == "true";
         }
-        for e in self.radio_entries.iter_mut().filter(|e| e.config_key == key) {
+        for e in self
+            .radio_entries
+            .iter_mut()
+            .filter(|e| e.config_key == key)
+        {
             if e.options.iter().any(|o| o == value) {
                 e.current_value = value.to_owned();
             }
@@ -1161,6 +1186,28 @@ impl Provider for SettingsProvider {
     fn set_config_path(&mut self, path: std::path::PathBuf) {
         self.config_path_override = Some(path);
     }
+}
+
+// ---------------------------------------------------------------------------
+// Default + SDK registration
+// ---------------------------------------------------------------------------
+
+impl Default for SettingsProvider {
+    /// Create a headless `SettingsProvider` with no apply callback.
+    /// Use `set_apply_callback` and `set_config_path` (via the `Provider` trait)
+    /// to configure it after construction — enabling factory-registry creation
+    /// without a direct dependency on this crate from the app.
+    fn default() -> Self {
+        Self::new_headless()
+    }
+}
+
+/// Register the settings provider with the SDK factory registry.
+///
+/// The factory creates a headless `SettingsProvider`; the app configures it
+/// afterwards via `Provider::set_apply_callback` and `Provider::set_config_path`.
+pub fn register() {
+    sicompass_sdk::register_provider_factory("settings", || Box::new(SettingsProvider::default()));
 }
 
 // ---------------------------------------------------------------------------
@@ -1181,8 +1228,10 @@ mod tests {
         SettingsProvider::new_headless().with_config_path(test_config_path())
     }
 
-    fn with_callback() -> (SettingsProvider, Arc<Mutex<Vec<(String, String)>>>) {
-        let log: Arc<Mutex<Vec<(String, String)>>> = Arc::new(Mutex::new(Vec::new()));
+    type AppliedLog = Arc<Mutex<Vec<(String, String)>>>;
+
+    fn with_callback() -> (SettingsProvider, AppliedLog) {
+        let log: AppliedLog = Arc::new(Mutex::new(Vec::new()));
         let log2 = Arc::clone(&log);
         let p = SettingsProvider::new(move |k, v| {
             log2.lock().unwrap().push((k.to_owned(), v.to_owned()));
@@ -1199,7 +1248,7 @@ mod tests {
         let elems = p.fetch();
         let has_sc = elems
             .iter()
-            .any(|e| e.as_obj().map_or(false, |o| o.key == "sicompass"));
+            .any(|e| e.as_obj().is_some_and(|o| o.key == "sicompass"));
         assert!(has_sc);
     }
 
@@ -1209,14 +1258,14 @@ mod tests {
         let elems = p.fetch();
         let sc = elems
             .iter()
-            .find(|e| e.as_obj().map_or(false, |o| o.key == "sicompass"))
+            .find(|e| e.as_obj().is_some_and(|o| o.key == "sicompass"))
             .unwrap();
         let radio = sc
             .as_obj()
             .unwrap()
             .children
             .iter()
-            .find(|c| c.as_obj().map_or(false, |o| o.key.contains("<radio>")));
+            .find(|c| c.as_obj().is_some_and(|o| o.key.contains("<radio>")));
         assert!(radio.is_some());
     }
 
@@ -1257,18 +1306,18 @@ mod tests {
         let elems = p.fetch();
         let sc = elems
             .iter()
-            .find(|e| e.as_obj().map_or(false, |o| o.key == "sicompass"))
+            .find(|e| e.as_obj().is_some_and(|o| o.key == "sicompass"))
             .unwrap();
         let radio = sc
             .as_obj()
             .unwrap()
             .children
             .iter()
-            .find(|c| c.as_obj().map_or(false, |o| o.key.contains("<radio>")))
+            .find(|c| c.as_obj().is_some_and(|o| o.key.contains("<radio>")))
             .unwrap();
         let dark_checked = radio.as_obj().unwrap().children.iter().any(|c| {
             c.as_str()
-                .map_or(false, |s| s.contains("<checked>") && s.contains("dark"))
+                .is_some_and(|s| s.contains("<checked>") && s.contains("dark"))
         });
         assert!(dark_checked);
     }
@@ -1280,7 +1329,7 @@ mod tests {
         let elems = p.fetch();
         elems
             .into_iter()
-            .find(|e| e.as_obj().map_or(false, |o| o.key == "sicompass"))
+            .find(|e| e.as_obj().is_some_and(|o| o.key == "sicompass"))
             .unwrap()
             .as_obj()
             .unwrap()
@@ -1388,7 +1437,7 @@ mod tests {
             .collect();
 
         let mut sorted = labels.clone();
-        sorted.sort_by(|a, b| a.to_ascii_lowercase().cmp(&b.to_ascii_lowercase()));
+        sorted.sort_by_key(|a| a.to_ascii_lowercase());
         assert_eq!(
             labels, sorted,
             "sicompass entries must render in alphanumeric label order"
@@ -1413,14 +1462,14 @@ mod tests {
         let elems = p.fetch();
         let sc = elems
             .iter()
-            .find(|e| e.as_obj().map_or(false, |o| o.key == "sicompass"))
+            .find(|e| e.as_obj().is_some_and(|o| o.key == "sicompass"))
             .expect("sicompass section");
         let radio = sc
             .as_obj()
             .unwrap()
             .children
             .iter()
-            .find(|c| c.as_obj().map_or(false, |o| o.key.contains("<radio>")))
+            .find(|c| c.as_obj().is_some_and(|o| o.key.contains("<radio>")))
             .expect("color scheme radio");
         radio.as_obj().unwrap().key.clone()
     }
@@ -1437,14 +1486,14 @@ mod tests {
             let elems = p.fetch();
             let sc = elems
                 .iter()
-                .find(|e| e.as_obj().map_or(false, |o| o.key == "sicompass"))
+                .find(|e| e.as_obj().is_some_and(|o| o.key == "sicompass"))
                 .expect("sicompass section");
             let radio = sc
                 .as_obj()
                 .unwrap()
                 .children
                 .iter()
-                .find(|c| c.as_obj().map_or(false, |o| o.key.contains("<radio>")))
+                .find(|c| c.as_obj().is_some_and(|o| o.key.contains("<radio>")))
                 .expect("color scheme radio");
             radio
                 .as_obj()
@@ -1566,7 +1615,7 @@ mod tests {
         let elems = p.fetch();
         let sicompass_obj = elems
             .iter()
-            .find(|e| e.as_obj().map_or(false, |o| o.key == "sicompass"))
+            .find(|e| e.as_obj().is_some_and(|o| o.key == "sicompass"))
             .expect("sicompass section");
         let lang_radio = sicompass_obj
             .as_obj()
@@ -1574,7 +1623,7 @@ mod tests {
             .children
             .iter()
             .find(|c| {
-                c.as_obj().map_or(false, |o| {
+                c.as_obj().is_some_and(|o| {
                     // The radio_key string is "settings-radio-language"; under en-US
                     // it resolves to "language".
                     o.key.contains("language") || o.key.contains("settings-radio-language")
@@ -1658,14 +1707,14 @@ mod tests {
         let elems = p.fetch();
         let sc = elems
             .iter()
-            .find(|e| e.as_obj().map_or(false, |o| o.key == "sicompass"))
+            .find(|e| e.as_obj().is_some_and(|o| o.key == "sicompass"))
             .unwrap();
         let font_scale_radio = sc
             .as_obj()
             .unwrap()
             .children
             .iter()
-            .find(|c| c.as_obj().map_or(false, |o| o.key == "<radio>font scale"));
+            .find(|c| c.as_obj().is_some_and(|o| o.key == "<radio>font scale"));
         assert!(
             font_scale_radio.is_some(),
             "font scale radio missing from sicompass section"
@@ -1676,7 +1725,7 @@ mod tests {
             .unwrap()
             .children
             .iter()
-            .any(|c| c.as_str().map_or(false, |s| s == "<checked>1.000"));
+            .any(|c| c.as_str() == Some("<checked>1.000"));
         assert!(selected, "default value 1.000 not marked as checked");
     }
 
@@ -1689,7 +1738,7 @@ mod tests {
         let elems = p.fetch();
         let has = elems
             .iter()
-            .any(|e| e.as_obj().map_or(false, |o| o.key == "my section"));
+            .any(|e| e.as_obj().is_some_and(|o| o.key == "my section"));
         assert!(has);
     }
 
@@ -1709,7 +1758,7 @@ mod tests {
         let elems = p.fetch();
         let has = elems
             .iter()
-            .any(|e| e.as_obj().map_or(false, |o| o.key == "removable"));
+            .any(|e| e.as_obj().is_some_and(|o| o.key == "removable"));
         assert!(!has);
     }
 
@@ -1744,14 +1793,14 @@ mod tests {
         let elems = p.fetch();
         let sec = elems
             .iter()
-            .find(|e| e.as_obj().map_or(false, |o| o.key == "test_sec"))
+            .find(|e| e.as_obj().is_some_and(|o| o.key == "test_sec"))
             .unwrap();
         let radio = sec
             .as_obj()
             .unwrap()
             .children
             .iter()
-            .find(|c| c.as_obj().map_or(false, |o| o.key.contains("<radio>")));
+            .find(|c| c.as_obj().is_some_and(|o| o.key.contains("<radio>")));
         assert!(radio.is_some());
     }
 
@@ -1763,18 +1812,18 @@ mod tests {
         let elems = p.fetch();
         let sec = elems
             .iter()
-            .find(|e| e.as_obj().map_or(false, |o| o.key == "s"))
+            .find(|e| e.as_obj().is_some_and(|o| o.key == "s"))
             .unwrap();
         let radio = sec
             .as_obj()
             .unwrap()
             .children
             .iter()
-            .find(|c| c.as_obj().map_or(false, |o| o.key.contains("<radio>")))
+            .find(|c| c.as_obj().is_some_and(|o| o.key.contains("<radio>")))
             .unwrap();
         let date_checked = radio.as_obj().unwrap().children.iter().any(|c| {
             c.as_str()
-                .map_or(false, |s| s.contains("<checked>") && s.contains("date"))
+                .is_some_and(|s| s.contains("<checked>") && s.contains("date"))
         });
         assert!(date_checked);
     }
@@ -1789,11 +1838,11 @@ mod tests {
         let elems = p.fetch();
         let sec = elems
             .iter()
-            .find(|e| e.as_obj().map_or(false, |o| o.key == "s"))
+            .find(|e| e.as_obj().is_some_and(|o| o.key == "s"))
             .unwrap();
         let has_text = sec.as_obj().unwrap().children.iter().any(|c| {
             c.as_str()
-                .map_or(false, |s| s.contains("Server URL") && s.contains("<input>"))
+                .is_some_and(|s| s.contains("Server URL") && s.contains("<input>"))
         });
         assert!(has_text);
     }
@@ -1806,11 +1855,11 @@ mod tests {
         let elems = p.fetch();
         let sec = elems
             .iter()
-            .find(|e| e.as_obj().map_or(false, |o| o.key == "s"))
+            .find(|e| e.as_obj().is_some_and(|o| o.key == "s"))
             .unwrap();
         let has = sec.as_obj().unwrap().children.iter().any(|c| {
             c.as_str()
-                .map_or(false, |s| s.contains("<input>localhost</input>"))
+                .is_some_and(|s| s.contains("<input>localhost</input>"))
         });
         assert!(has);
     }
@@ -1825,12 +1874,14 @@ mod tests {
         let elems = p.fetch();
         let sec = elems
             .iter()
-            .find(|e| e.as_obj().map_or(false, |o| o.key == "s"))
+            .find(|e| e.as_obj().is_some_and(|o| o.key == "s"))
             .unwrap();
-        let has = sec.as_obj().unwrap().children.iter().any(|c| {
-            c.as_str()
-                .map_or(false, |s| s == "<checkbox>Enable feature")
-        });
+        let has = sec
+            .as_obj()
+            .unwrap()
+            .children
+            .iter()
+            .any(|c| c.as_str() == Some("<checkbox>Enable feature"));
         assert!(has);
     }
 
@@ -1842,11 +1893,11 @@ mod tests {
         let elems = p.fetch();
         let sec = elems
             .iter()
-            .find(|e| e.as_obj().map_or(false, |o| o.key == "s"))
+            .find(|e| e.as_obj().is_some_and(|o| o.key == "s"))
             .unwrap();
         let has = sec.as_obj().unwrap().children.iter().any(|c| {
             c.as_str()
-                .map_or(false, |s| s.starts_with("<checkbox checked>"))
+                .is_some_and(|s| s.starts_with("<checkbox checked>"))
         });
         assert!(has);
     }
@@ -2038,10 +2089,10 @@ mod tests {
         // The value surfaces wrapped in <password>, not <input>, so the app
         // masks it. The real value is still present in the tag for editing.
         let found = p.fetch().iter().any(|sec| {
-            sec.as_obj().map_or(false, |o| {
+            sec.as_obj().is_some_and(|o| {
                 o.children.iter().any(|c| {
                     c.as_str()
-                        .map_or(false, |s| s.contains("<password>s3cr3t</password>"))
+                        .is_some_and(|s| s.contains("<password>s3cr3t</password>"))
                 })
             })
         });
@@ -2246,14 +2297,14 @@ mod tests {
         let elems = p.fetch();
         let sec = elems
             .iter()
-            .find(|e| e.as_obj().map_or(false, |o| o.key == "empty_sec"))
+            .find(|e| e.as_obj().is_some_and(|o| o.key == "empty_sec"))
             .unwrap();
         let has_placeholder = sec
             .as_obj()
             .unwrap()
             .children
             .iter()
-            .any(|c| c.as_str().map_or(false, |s| s == "no settings"));
+            .any(|c| c.as_str() == Some("no settings"));
         assert!(has_placeholder);
     }
 
@@ -2765,7 +2816,10 @@ mod tests {
 
         p.set_hidden_setting_keys(&[]);
         let rows = format!("{:?}", p.fetch());
-        assert!(rows.contains("<checkbox checked>enable cloud sync"), "{rows}");
+        assert!(
+            rows.contains("<checkbox checked>enable cloud sync"),
+            "{rows}"
+        );
         assert!(rows.contains("auto update"), "{rows}");
     }
 
@@ -2790,26 +2844,4 @@ mod tests {
         assert!(!path.exists(), "nothing written");
         assert!(log.lock().unwrap().is_empty(), "nothing fired");
     }
-}
-
-// ---------------------------------------------------------------------------
-// Default + SDK registration
-// ---------------------------------------------------------------------------
-
-impl Default for SettingsProvider {
-    /// Create a headless `SettingsProvider` with no apply callback.
-    /// Use `set_apply_callback` and `set_config_path` (via the `Provider` trait)
-    /// to configure it after construction — enabling factory-registry creation
-    /// without a direct dependency on this crate from the app.
-    fn default() -> Self {
-        Self::new_headless()
-    }
-}
-
-/// Register the settings provider with the SDK factory registry.
-///
-/// The factory creates a headless `SettingsProvider`; the app configures it
-/// afterwards via `Provider::set_apply_callback` and `Provider::set_config_path`.
-pub fn register() {
-    sicompass_sdk::register_provider_factory("settings", || Box::new(SettingsProvider::default()));
 }
