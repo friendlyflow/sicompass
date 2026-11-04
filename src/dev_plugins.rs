@@ -64,6 +64,11 @@ pub fn link_checkouts(siblings: &Path, out: &Path) -> std::io::Result<Vec<String
         if locales.is_dir() {
             links.push((locales, "locales".to_owned()));
         }
+        // `asset:<plugin>/<file>` is read from here, by the app.
+        let assets = checkout.join("assets");
+        if assets.is_dir() {
+            links.push((assets, "assets".to_owned()));
+        }
         links.push((
             program,
             sicompass_sdk::plugin_abi::executable_name(&entry, target),

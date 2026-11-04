@@ -13,11 +13,12 @@ use sicompass::plugin_host::Grants;
 use sicompass::plugin_host::{ProcessProvider, Spec};
 use sicompass_sdk::{DashboardKey, DashboardKeysym, FfonElement, Provider, TimelineEntry};
 
+include!("support/examples.rs");
+
 /// `target/<profile>/examples/<name>`, building it when `cargo test --test
 /// process_plugin` did not.
 fn example(name: &str) -> PathBuf {
-    let exe = std::env::current_exe().unwrap();
-    let profile = exe.parent().unwrap().parent().unwrap();
+    let profile = profile_dir();
     let path = profile
         .join("examples")
         .join(format!("{name}{}", std::env::consts::EXE_SUFFIX));

@@ -30,11 +30,12 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 
 const REPO: &str = "friendlyflow/fixture-plugin-sicompass";
 
+include!("support/examples.rs");
+
 /// `examples/process_fixture.rs`, which `cargo test` builds, as this
 /// platform's program in the release.
 fn fixture_program() -> PathBuf {
-    let exe = std::env::current_exe().unwrap();
-    let profile = exe.parent().unwrap().parent().unwrap();
+    let profile = profile_dir();
     let path = profile
         .join("examples")
         .join(format!("process_fixture{}", std::env::consts::EXE_SUFFIX));

@@ -116,3 +116,21 @@ fn linking_again_leaves_the_links_that_are_right_alone() {
     assert!(!out.join("notes").join("stale").exists());
     assert!(manifest.is_file());
 }
+
+/// A plugin's `asset:<name>/<file>` is read from its folder, so a debug build needs that
+/// folder linked too. The sales demo's diagram failed to load without it.
+#[test]
+fn a_checkouts_assets_are_linked_too() {
+    let tmp = tempfile::tempdir().unwrap();
+    let siblings = tmp.path().join("projects");
+    checkout(&siblings, "salesdemo", "salesdemo", true);
+    let assets = siblings.join("salesdemo-plugin-sicompass").join("assets");
+    std::fs::create_dir_all(&assets).unwrap();
+    std::fs::write(assets.join("diagram.webp"), "picture").unwrap();
+    let out = tmp.path().join("dev-plugins");
+
+    link_checkouts(&siblings, &out).unwrap();
+
+    let linked = out.join("salesdemo").join("assets").join("diagram.webp");
+    assert_eq!(std::fs::read_to_string(linked).unwrap(), "picture");
+}

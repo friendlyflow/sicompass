@@ -3172,11 +3172,12 @@ mod tests {
 
     // --- plugin instantiation ---
 
+    include!("tests/support/examples.rs");
+
     /// `examples/process_fixture.rs`, the plugin process `cargo test` builds:
     /// `target/<profile>/examples/process_fixture`, without the `.exe`.
     fn fixture_entry() -> PathBuf {
-        let exe = std::env::current_exe().unwrap();
-        let profile = exe.parent().unwrap().parent().unwrap();
+        let profile = profile_dir();
         let entry = profile.join("examples").join("process_fixture");
         let built = PathBuf::from(format!(
             "{}{}",

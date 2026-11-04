@@ -18694,11 +18694,12 @@ fn email_plugin() -> Box<dyn Provider> {
     plugin_provider_granted("emailclient", None, Vec::new())
 }
 
+include!("support/examples.rs");
+
 /// The program `examples/plugin_<name>.rs` builds: `target/<profile>/examples/
 /// plugin_<name>`, without the `.exe` the app adds itself.
 fn plugin_program(name: &str) -> std::path::PathBuf {
-    let exe = std::env::current_exe().unwrap();
-    let profile = exe.parent().unwrap().parent().unwrap();
+    let profile = profile_dir();
     let entry = profile.join("examples").join(format!("plugin_{name}"));
     let built = std::path::PathBuf::from(format!(
         "{}{}",

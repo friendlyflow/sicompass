@@ -27,10 +27,11 @@ static STANDING: Mutex<LicenseStatus> = Mutex::new(LicenseStatus::Missing);
 
 const TIER: &str = "acme/cloud";
 
+include!("support/examples.rs");
+
 /// `examples/process_fixture.rs`, which `cargo test` builds.
 fn fixture_program() -> PathBuf {
-    let exe = std::env::current_exe().unwrap();
-    let profile = exe.parent().unwrap().parent().unwrap();
+    let profile = profile_dir();
     let path = profile
         .join("examples")
         .join(format!("process_fixture{}", std::env::consts::EXE_SUFFIX));
