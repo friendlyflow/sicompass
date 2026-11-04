@@ -16,6 +16,7 @@
 #![allow(dead_code, unused_imports)]
 
 pub mod boot;
+pub mod child_env;
 /// A debug build runs the plugins of the checkouts beside it.
 pub mod dev_plugins;
 /// Host for plugin processes: a plugin is a program the app starts and talks

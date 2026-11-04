@@ -11292,8 +11292,10 @@ fn terminal_auto_enters_and_leaves_dashboard_on_alt_screen() {
         .iter()
         .position(|p| p.name() == "terminal")
         .unwrap();
-    let submitted = renderer.providers[term_idx]
-        .commit_edit("", "printf '\\033[?1049h'; sleep 1; printf '\\033[?1049l'");
+    let submitted = renderer.providers[term_idx].commit_edit(
+        "",
+        "sh -c \"printf '\\033[?1049h'; sleep 3; printf '\\033[?1049l'\"",
+    );
     if !submitted {
         // Shell spawn failed (e.g. CI sandbox without /bin/sh). Skip.
         return;
@@ -11358,9 +11360,10 @@ fn auto_leave_lands_back_in_the_shells_own_mode_even_if_user_was_in_insert() {
         .iter()
         .position(|p| p.name() == "terminal")
         .unwrap();
-    if !renderer.providers[term_idx]
-        .commit_edit("", "printf '\\033[?1049h'; sleep 1; printf '\\033[?1049l'")
-    {
+    if !renderer.providers[term_idx].commit_edit(
+        "",
+        "sh -c \"printf '\\033[?1049h'; sleep 3; printf '\\033[?1049l'\"",
+    ) {
         return;
     }
 

@@ -25,6 +25,10 @@ const GITHUB_OWNER: &str = "friendlyflow";
 const GITHUB_REPO: &str = "sicompass";
 
 fn main() {
+    // First of all, while this is the only thread.
+    // SAFETY: no other thread exists yet.
+    unsafe { sicompass::child_env::keep_library_path_to_ourselves() };
+
     // A debug build runs the plugins built in the checkouts beside this one,
     // not the Store's copies. First, while this is the only thread: it sets
     // an environment variable. See `dev_plugins`.
