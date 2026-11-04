@@ -20505,7 +20505,7 @@ fn the_photo_album_shows_a_folder_as_one_grid_row_with_targets() {
 
     go_to_row(&mut r, "a.png");
     press(&mut r, Keycode::I);
-    assert_eq!(r.coordinate, Coordinate::Navigate);
+    assert_eq!(r.coordinate, Coordinate::InElement);
     assert_eq!(r.nav_targets.len(), 3);
     assert_eq!(r.nav_index, 0);
     press(&mut r, Keycode::Right);
@@ -20520,7 +20520,7 @@ fn the_photo_album_shows_a_folder_as_one_grid_row_with_targets() {
         "the big view shows the file itself"
     );
     press(&mut r, Keycode::Escape);
-    assert_eq!(r.coordinate, Coordinate::Navigate);
+    assert_eq!(r.coordinate, Coordinate::InElement);
     assert_eq!(r.nav_index, 1, "Escape comes back to the same picture");
 }
 
@@ -20603,5 +20603,5 @@ fn the_video_store_lists_only_videos_and_enter_plays_and_pauses() {
 
     press(&mut r, Keycode::Escape);
     assert_eq!(r.video_request, Some(sicompass_ui::video::Request::Stop));
-    assert_eq!(r.coordinate, Coordinate::Navigate);
+    assert_eq!(r.coordinate, Coordinate::InElement);
 }

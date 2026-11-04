@@ -36,7 +36,7 @@ Without the opt-in nothing changes: file browser names and text file lines stay 
 installed with a plugin. A tag that is not in the table stays as literal text.
 
 Pictures, links, buttons and videos are the row's *targets*. Landing on a row, the screen
-reader says how many it holds. `i` goes to the first and `a` to the last, which is navigate
+reader says how many it holds. `i` goes to the first and `a` to the last, which is in element
 mode: Left and Right move in reading order, Up and Down move a line, Enter activates, `d`
 opens a picture or video in the big view, Escape leaves. In the big view Enter pauses and
 resumes a video (see [video.md](video.md)).
@@ -114,7 +114,7 @@ font scale setting, so a sheet keeps working at any size.
 <div class="grid-container"><div class="grid-item"><img src="a.jpg" alt="Beach"><p>Beach</p></div>...</div>
 ```
 
-All of that is one row with one target per picture, and Up and Down in navigate mode move
+All of that is one row with one target per picture, and in element mode, Up and Down move
 a row of the grid. A row is laid out in boxes when its display is `grid` or `flex`, or when
 it holds a video or two pictures or more. The tutorial has a working one, and so do the
 photo album and video store plugins.

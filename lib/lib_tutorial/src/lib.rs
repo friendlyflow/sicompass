@@ -184,7 +184,7 @@ static SECTIONS: &[Node] = &[
                     Leaf("tutorial-sc-gen-updown"),
                     Leaf("tutorial-sc-gen-rightleft"),
                     Leaf("tutorial-sc-gen-enter"),
-                    Leaf("tutorial-sc-gen-navigate"),
+                    Leaf("tutorial-sc-gen-in-element"),
                     Leaf("tutorial-sc-gen-escape"),
                     Leaf("tutorial-sc-gen-page"),
                     Leaf("tutorial-sc-gen-f5"),
@@ -293,7 +293,7 @@ static SECTIONS: &[Node] = &[
                 children: &[],
             },
             Branch {
-                key: "tutorial-play-navigate",
+                key: "tutorial-play-in-element",
                 children: &[
                     Leaf("tutorial-nav-landing"),
                     Leaf("tutorial-nav-links-how"),
@@ -1353,7 +1353,7 @@ mod tests {
         );
     }
 
-    /// The photo grid is one row with six pictures in it, each a stop in navigate mode.
+    /// The photo grid is one row with six pictures in it, each a stop in in element mode.
     #[test]
     fn test_the_photo_grid_is_one_row_of_six_pictures() {
         let mut p = provider();
@@ -1430,17 +1430,17 @@ mod tests {
         assert!(sicompass_sdk::markup::style_sheet(css).is_some(), "{css}");
     }
 
-    /// Navigate mode needs rows that really hold several targets, each under a row
+    /// In element mode needs rows that really hold several targets, each under a row
     /// saying which key to press. The instruction is a row of its own, because the
     /// text before a link is what the screen reader calls that link.
     #[test]
-    fn test_navigate_section_has_rows_with_several_targets() {
+    fn test_in_element_section_has_rows_with_several_targets() {
         let mut p = provider();
         p.push_path("Interactive playground");
         let section = section_keys(&p.fetch())
             .into_iter()
-            .find(|k| k.starts_with("Navigate mode"))
-            .expect("a navigate mode section");
+            .find(|k| k.starts_with("In element mode"))
+            .expect("a in element mode section");
         p.push_path(&section);
         let rows: Vec<String> = p
             .fetch()
