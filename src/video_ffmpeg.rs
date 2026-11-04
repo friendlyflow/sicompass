@@ -16,6 +16,14 @@ use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::time::Duration;
 
+// vcpkg's static FFmpeg on Windows holds its Media Foundation wrappers, which need these
+// two libraries, and ffmpeg-sys-next names neither. Without them the link stops on
+// IID_ICodecAPI and IID_IMFTransform.
+#[cfg(all(windows, feature = "bundled-ffmpeg"))]
+#[link(name = "mfuuid")]
+#[link(name = "strmiids")]
+unsafe extern "C" {}
+
 /// Make video playable in this process.
 pub fn register() {
     if let Err(e) = ff::init() {
