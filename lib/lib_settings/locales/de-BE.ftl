@@ -33,7 +33,7 @@ settings-checkbox-shoulder-surfing-protection = Sichtschutz (leerer Bildschirm)
 settings-checkbox-screen-reader = Bildschirmleser
 settings-screen-reader-failed = Der Bildschirmleser konnte nicht gestartet werden: { $error }
 settings-checkbox-auto-update-check = beim Start nach Updates suchen
-settings-onboarding-body = Mit Hoch und Runter bewegst du dich durch die Liste. Drücke zweimal Home, um zur Wurzel zu gelangen und alle deine verfügbaren Programme zu sehen. Rechts öffnet einen Eintrag mit einem Pluszeichen (+), Links geht zum übergeordneten Eintrag, Enter aktiviert ein Kontrollkästchen, Escape geht zurück.
+settings-onboarding-body = Mit Hoch und Runter bewegst du dich durch die Liste. Drücke zweimal Home, um zur Wurzel zu gelangen und alle deine verfügbaren Programme zu sehen. Rechts öffnet einen Eintrag mit einem Pfeil nach rechts, Links geht zum übergeordneten Eintrag, Enter aktiviert ein Kontrollkästchen, Escape geht zurück.
 settings-radio-font-scale = Schriftgröße
 settings-radio-sort-order = Sortierreihenfolge
 

@@ -1,9 +1,9 @@
 # Tutorial provider strings, Belgian Dutch (Flemish).
 # Full key set rewritten to match the new English source.
 
-tutorial-display-name = handleiding --> hier kun je naar boven, beneden of rechts
+tutorial-display-name = handleiding
 
-tutorial-sec-getting-started = Aan de slag --> ga naar rechts om te bezoeken
+tutorial-sec-getting-started = Aan de slag
 tutorial-gs-intro = Welkom. Dit is een korte, praktische start. Doe elke stap terwijl je leest, elke stap hier is veilig en je mag ze zo vaak herhalen als je wilt. Druk nu op de Down-pijl om te beginnen.
 tutorial-gs-moved = Je drukte op Down en je schermlezer kondigde deze regel aan. Up en Down verplaatsen de selectie door een lijst. Het volgende item hieronder is een sectie. Ga er met Down naartoe en druk dan op de Rechts-pijl om binnen te stappen.
 tutorial-gs-step = Stap binnen in deze sectie, druk op Rechts

@@ -1,8 +1,8 @@
 # Tutorial provider strings, Belgian French.
 
-tutorial-display-name = tutoriel --> ici vous pouvez monter, descendre ou aller à droite
+tutorial-display-name = tutoriel
 
-tutorial-sec-getting-started = Pour commencer --> allez à droite pour visiter
+tutorial-sec-getting-started = Pour commencer
 tutorial-gs-intro = Bienvenue. Ceci est un démarrage court et pratique. Faites chaque étape au fur et à mesure de votre lecture, chaque étape ici est sans danger et vous pouvez la répéter autant de fois que vous le voulez. Appuyez sur la flèche Bas maintenant pour commencer.
 tutorial-gs-moved = Vous avez appuyé sur Bas et votre lecteur d'écran a annoncé cette ligne. Haut et Bas déplacent la sélection à travers une liste. L'élément suivant ci-dessous est une section. Descendez jusqu'à elle, puis appuyez sur la flèche Droite pour y entrer.
 tutorial-gs-step = Entrez dans cette section, appuyez sur Droite

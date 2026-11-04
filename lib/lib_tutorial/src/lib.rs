@@ -120,7 +120,7 @@ fn lorem_ipsum() -> &'static str {
 // are substituted at runtime by `apply_asset_placeholders`.
 
 static SECTIONS: &[Node] = &[
-    // 1. Getting Started: a guided do-and-confirm path. Each step asks for one
+    // 1. Getting started: a guided do-and-confirm path. Each step asks for one
     //    keypress and relies on the screen-reader announcement as confirmation.
     Branch {
         key: "tutorial-sec-getting-started",
@@ -801,7 +801,7 @@ mod tests {
     }
 
     const SECTION_NAMES: [&str; 7] = [
-        "Getting Started",
+        "Getting started",
         "Shortcuts at a glance",
         "How it works",
         "The programs",
@@ -821,12 +821,10 @@ mod tests {
             "expected exactly 7 top-level sections, got: {keys:?}"
         );
         assert!(
-            keys[0].starts_with("Getting Started"),
-            "Getting Started must be first, got: {:?}",
+            keys[0].starts_with("Getting started"),
+            "Getting started must be first, got: {:?}",
             keys[0]
         );
-        // The Getting Started heading carries a "go right to visit" hint, so it
-        // is matched by prefix; the others match exactly.
         for name in SECTION_NAMES {
             assert!(
                 keys.iter().any(|k| k.starts_with(name)),
@@ -838,24 +836,24 @@ mod tests {
     #[test]
     fn test_getting_started_is_interactive() {
         let mut p = provider();
-        // Enter via the rendered heading key (it carries a display hint suffix).
+        // Enter via the rendered heading key.
         let gs_key = section_keys(&p.fetch())[0].clone();
         p.push_path(&gs_key);
         let elems = p.fetch();
         let text = joined(&elems);
         assert!(
             text.contains("<checkbox>"),
-            "Getting Started must contain a checkbox to toggle"
+            "Getting started must contain a checkbox to toggle"
         );
         assert!(
             text.contains("<input>"),
-            "Getting Started must contain an input to edit"
+            "Getting started must contain an input to edit"
         );
         assert!(
             section_keys(&elems)
                 .iter()
                 .any(|k| k.starts_with("Step inside")),
-            "Getting Started must contain a sub-branch to step into"
+            "Getting started must contain a sub-branch to step into"
         );
     }
 

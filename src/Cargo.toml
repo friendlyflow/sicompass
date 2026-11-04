@@ -91,6 +91,10 @@ main = true
 # with it. This is a real obligation, not bookkeeping: cargo-about only sees
 # Rust crates and will never list them.
 [[package.metadata.packager.resources]]
+src = "../fonts/LICENSE-BootstrapIcons.txt"
+target = "licenses/LICENSE-BootstrapIcons.txt"
+
+[[package.metadata.packager.resources]]
 src = "../fonts/LICENSE-DejaVu.txt"
 target = "licenses/LICENSE-DejaVu.txt"
 
@@ -282,6 +286,7 @@ assets = [
     { source = "assets/icons/512x512.png", dest = "/usr/share/icons/hicolor/512x512/apps/sicompass.png", mode = "644" },
     { source = "LICENSE", dest = "/usr/share/doc/sicompass/LICENSE", mode = "644" },
     { source = "THIRD-PARTY-LICENSES.html", dest = "/usr/share/doc/sicompass/THIRD-PARTY-LICENSES.html", mode = "644" },
+    { source = "fonts/LICENSE-BootstrapIcons.txt", dest = "/usr/share/doc/sicompass/LICENSE-BootstrapIcons.txt", mode = "644" },
     { source = "fonts/LICENSE-DejaVu.txt", dest = "/usr/share/doc/sicompass/LICENSE-DejaVu.txt", mode = "644" },
     { source = "fonts/LICENSE-NotoColorEmoji.txt", dest = "/usr/share/doc/sicompass/LICENSE-NotoColorEmoji.txt", mode = "644" },
 ]

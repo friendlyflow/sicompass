@@ -543,6 +543,8 @@
             postInstall = ''
               # The font licenses have to travel with the binary, since the
               # fonts themselves are inside it.
+              install -Dm644 fonts/LICENSE-BootstrapIcons.txt \
+                $out/share/doc/sicompass/LICENSE-BootstrapIcons.txt
               install -Dm644 fonts/LICENSE-DejaVu.txt \
                 $out/share/doc/sicompass/LICENSE-DejaVu.txt
               install -Dm644 fonts/LICENSE-NotoColorEmoji.txt \

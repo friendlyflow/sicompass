@@ -92,6 +92,7 @@ features = ["bundled-sdl3"]
 # binary. cargo-about cannot know about them, since they are not Rust crates.
 include = [
     "THIRD-PARTY-LICENSES.html",
+    "fonts/LICENSE-BootstrapIcons.txt",
     "fonts/LICENSE-DejaVu.txt",
     "fonts/LICENSE-NotoColorEmoji.txt",
 ]

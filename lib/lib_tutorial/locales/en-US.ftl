@@ -2,17 +2,17 @@
 # The tutorial is short and guided. See docs/tutorial-guidelines.md.
 # Prose rule: no em dashes, no semicolons. Use commas or separate sentences.
 
-tutorial-display-name = tutorial --> here you can go up, down or right
+tutorial-display-name = tutorial
 
 # ---------------------------------------------------------------------------
-# 1. Getting Started (guided do-and-confirm)
+# 1. Getting started (guided do-and-confirm)
 # ---------------------------------------------------------------------------
-tutorial-sec-getting-started = Getting Started --> go right to visit
+tutorial-sec-getting-started = Getting started
 tutorial-gs-intro = Welcome. This is a short, hands-on start. Do each step as you read it, every step here is safe and you can repeat it as often as you like. Press the Down arrow now to begin.
 tutorial-gs-moved = You pressed Down and your screen reader announced this line. Up and Down move the selection through a list. The next item below is a section. Move Down to it, then press the Right arrow to step inside.
 tutorial-gs-step = Step inside this section, press Right
 tutorial-gs-inside = You stepped in with the Right arrow. This is one level deeper. Everything in Sicompass is a tree of lists you move through this way. Press the Left arrow to go back out.
-tutorial-gs-back = Up and Down move between items here, Right goes deeper, and Left comes back. Press Left now to return to Getting Started.
+tutorial-gs-back = Up and Down move between items here, Right goes deeper, and Left comes back. Press Left now to return to Getting started.
 tutorial-gs-checkbox-intro = Welcome back. Now try a checkbox. Move Down to the checkbox below and press Enter. Your screen reader announces checked or unchecked each time.
 tutorial-gs-checkbox = <checkbox>Practice checkbox, press Enter to toggle me
 tutorial-gs-input-intro = Next, edit some text. Move Down to the line below, press i to start typing, change the text, then press Enter to save or Escape to cancel.

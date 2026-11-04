@@ -61,7 +61,7 @@ should let the learner skip ahead and leave at any point without losing their pl
 ### 7. Front-load the payoff
 
 Order steps so an early one produces something the learner actually wanted. A short
-guided "Getting Started" path belongs at the very top of the tree, before the
+guided "Getting started" path belongs at the very top of the tree, before the
 exhaustive reference sections.
 
 ### 8. Fail gracefully and instructively
@@ -75,7 +75,7 @@ The wrong action tells you what they expected. Use it to correct the mental mode
 
 A guided onboarding and a reference manual want opposite structures (progressive and
 completable versus exhaustive and browsable). Do not let one `SECTIONS` tree try to
-be both. The current tree is organized as: a guided **Getting Started** path first,
+be both. The current tree is organized as: a guided **Getting started** path first,
 then a single **Shortcuts at a glance** key reference, then lean concept and program
 sections, and finally a pointer to the repo/SDK docs for plugin development. Keep it
 that way. When you add a topic, give it one short leaf in the relevant section, do not

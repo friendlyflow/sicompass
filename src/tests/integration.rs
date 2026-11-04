@@ -10258,7 +10258,7 @@ fn language_change_collapses_inactive_tutorial_and_announces() {
 
     // Simulate the tutorial having been navigated into: an expanded subtree and a
     // deep current_path recorded under the previous language.
-    renderer.providers[tut].set_current_path("/Getting Started");
+    renderer.providers[tut].set_current_path("/Getting started");
     {
         let obj = renderer.ffon[tut].as_obj_mut().unwrap();
         obj.children.clear();

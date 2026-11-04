@@ -1,8 +1,8 @@
 # Tutorial provider strings, Belgian German (Eastern Cantons).
 
-tutorial-display-name = Anleitung --> hier können Sie nach oben, unten oder rechts
+tutorial-display-name = Anleitung
 
-tutorial-sec-getting-started = Erste Schritte --> nach rechts gehen, um es zu besuchen
+tutorial-sec-getting-started = Erste Schritte
 tutorial-gs-intro = Willkommen. Dies ist ein kurzer, praktischer Einstieg. Führen Sie jeden Schritt aus, während Sie ihn lesen, jeder Schritt hier ist ungefährlich und Sie können ihn beliebig oft wiederholen. Drücken Sie jetzt den Pfeil unten, um zu beginnen.
 tutorial-gs-moved = Sie haben Pfeil unten gedrückt, und Ihr Screenreader hat diese Zeile angesagt. Oben und Unten bewegen die Auswahl durch die Einträge einer Liste. Der nächste Eintrag darunter ist ein Abschnitt. Bewegen Sie sich mit Unten dorthin, drücken Sie dann den Pfeil rechts, um hineinzugehen.
 tutorial-gs-step = In diesen Abschnitt hineingehen, Pfeil rechts drücken
