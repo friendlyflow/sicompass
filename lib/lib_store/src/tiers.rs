@@ -188,7 +188,7 @@ impl Tiers {
         out.push(FfonElement::new_str(format!(
             "{}: <input>{}</input>",
             url_label(),
-            self.session.store_url()
+            tags::escape(self.session.store_url())
         )));
         out
     }
@@ -489,7 +489,7 @@ fn fill_input(elements: &mut [FfonElement], label: &str, value: &str) {
     for e in elements {
         match e {
             FfonElement::Str(s) if s.starts_with(&prefix) => {
-                *s = format!("{prefix}{value}</input>");
+                *s = format!("{prefix}{}</input>", tags::escape(value));
             }
             FfonElement::Obj(o) => fill_input(&mut o.children, label, value),
             _ => {}

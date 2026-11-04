@@ -3,9 +3,10 @@
   "displayName": "project management",
   "type": "process",
   "entry": "plugin",
-  "version": "0.4.2",
+  "version": "0.4.4",
   "minAppVersion": "0.2.0",
   "description": "projectmanagement-description",
+  "markup": true,
   "settings": [
     {
       "type": "checkbox",
@@ -16,7 +17,8 @@
   ],
   "service": {
     "tier": "friendlyflow/cloud",
-    "what": "projectmanagement-service"
+    "what": "projectmanagement-service",
+    "switch": "kanbanCloudBackup"
   },
   "permissions": {
     "storage": true,

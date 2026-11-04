@@ -21,7 +21,13 @@ Tags in a row are only read as markup where it is safe to:
 `markup::escape_attribute` for attribute values, both in `sicompass_sdk`. The photo album
 plugin is a worked example, with a test holding exactly that file.
 
-Without the opt-in nothing changes: file browser names and text file lines stay literal.
+Every provider and plugin of ours asks for it. A third party's plugin that does not ask keeps
+its tags literal, because a plugin written before this could be showing a stranger's text
+unescaped.
+
+Every list is drawn the same way, whether or not anything styles it, and every background
+has rounded corners (`border-radius: 5px`) until a stylesheet says otherwise. A terminal's
+cell colours stay square, because neighbouring cells have to touch.
 
 ## A row of HTML
 

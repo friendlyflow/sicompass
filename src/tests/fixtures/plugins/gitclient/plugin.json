@@ -3,9 +3,10 @@
   "displayName": "git client",
   "type": "process",
   "entry": "plugin",
-  "version": "0.2.0",
+  "version": "0.3.1",
   "minAppVersion": "0.2.0",
   "description": "gitclient-description",
+  "markup": true,
   "settings": [
     {
       "type": "text",

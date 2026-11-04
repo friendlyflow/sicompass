@@ -48,6 +48,7 @@ use sicompass_sdk::localize;
 use sicompass_sdk::package::ReleaseInfo;
 use sicompass_sdk::provider::Provider;
 use sicompass_sdk::store::StoreEntry;
+use sicompass_sdk::tags;
 
 use crate::http::Fetch;
 use crate::install::{Installed, PluginOrigin, Source};
@@ -788,7 +789,7 @@ impl StoreProvider {
             .collect();
         if !waiting.is_empty() {
             let mut args = localize::Args::new();
-            args.set("names", waiting.join(", "));
+            args.set("names", tags::escape(&waiting.join(", ")));
             out.push(FfonElement::new_str(localize::t_args(
                 "store-data-waiting-root",
                 &args,
@@ -813,7 +814,7 @@ impl StoreProvider {
         match &self.loaded {
             Some(Err(e)) => {
                 let mut args = localize::Args::new();
-                args.set("err", e.clone());
+                args.set("err", tags::escape(e));
                 out.push(FfonElement::new_str(localize::t_args(
                     "store-load-failed",
                     &args,
@@ -865,15 +866,21 @@ impl StoreProvider {
         let mut args = localize::Args::new();
         let state = match installed.get(&offer.name) {
             Some(i) if i.origin == PluginOrigin::System => {
-                args.set("version", i.manifest.version.clone().unwrap_or_default());
+                args.set(
+                    "version",
+                    tags::escape(&i.manifest.version.clone().unwrap_or_default()),
+                );
                 localize::t_args("store-state-system", &args)
             }
             Some(i) => {
-                args.set("version", i.manifest.version.clone().unwrap_or_default());
+                args.set(
+                    "version",
+                    tags::escape(&i.manifest.version.clone().unwrap_or_default()),
+                );
                 match &offer.release {
                     // An update first: installing it from here approves it too.
                     Ok(r) if install::is_newer(r, &i.manifest) => {
-                        args.set("new", r.version.clone());
+                        args.set("new", tags::escape(&r.version));
                         localize::t_args("store-state-update", &args)
                     }
                     _ if !self.approved(&i.manifest) => {
@@ -892,14 +899,11 @@ impl StoreProvider {
         };
         // Said in the list line itself, so a screen reader hears it without
         // opening the entry.
+        let name = tags::escape(&offer.name);
         if offer.entry.as_ref().is_some_and(|e| e.frozen.is_some()) {
-            return format!(
-                "{}, {state}, {}",
-                offer.name,
-                localize::t("store-state-frozen")
-            );
+            return format!("{name}, {state}, {}", localize::t("store-state-frozen"));
         }
-        format!("{}, {state}", offer.name)
+        format!("{name}, {state}")
     }
 
     fn offer_lines(&self, offer: &Offer, installed: Option<&Installed>) -> Vec<FfonElement> {
@@ -907,13 +911,13 @@ impl StoreProvider {
         let line = |key: &str, args: &[(&str, String)]| {
             let mut a = localize::Args::new();
             for (k, v) in args {
-                a.set(*k, v.clone());
+                a.set(*k, tags::escape(v));
             }
             FfonElement::new_str(localize::t_args(key, &a))
         };
         let mut out = Vec::new();
         if let Some(note) = self.notes.get(name) {
-            out.push(FfonElement::new_str(note.clone()));
+            out.push(FfonElement::new_str(tags::escape(note)));
         }
         // Provided by this computer's configuration: runs without approval and
         // is changed by changing that configuration, never from here.
@@ -1153,6 +1157,11 @@ fn spawn(name: &str, f: impl FnOnce() + Send + 'static) {
 }
 
 impl Provider for StoreProvider {
+    /// Rows here are markup. Whatever a plugin or the user wrote is escaped on its way in.
+    fn markup(&self) -> bool {
+        true
+    }
+
     fn name(&self) -> &str {
         "store"
     }

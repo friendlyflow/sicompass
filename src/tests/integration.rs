@@ -8572,11 +8572,20 @@ fn text_editor_provider_lists_directory_and_parses_file() {
     )
     .unwrap();
     std::fs::create_dir(root.join("subdir")).unwrap();
+    {
+        use texteditor_plugin::ff::{Node, encode};
+        let mut section = Node::new("functions:");
+        section.children = vec![Node::new("fn foo"), Node::new("fn bar")];
+        let mut tree = Node::new("");
+        tree.children = vec![section, Node::new("end")];
+        tree.rehash();
+        std::fs::write(root.join("code.ff"), encode(&tree).unwrap()).unwrap();
+    }
 
     let mut editor = fs_plugin("texteditor");
     editor.on_setting_change("textEditorPath", root.to_str().unwrap());
 
-    // Directory listing contains all three entries.
+    // Directory listing contains every entry.
     let items = editor.fetch();
     let names: Vec<String> = items
         .iter()
@@ -8595,41 +8604,61 @@ fn text_editor_provider_lists_directory_and_parses_file() {
         "expected code.txt in {names:?}"
     );
     assert!(
+        names.iter().any(|n| n.contains("code.ff")),
+        "expected code.ff in {names:?}"
+    );
+    assert!(
         names.iter().any(|n| n.contains("subdir")),
         "expected subdir in {names:?}"
     );
 
-    // Entering a file returns its parsed FFON content.
-    // Elements are wrapped in <input> and annotated with <src=N>; strip for assertions.
+    // A text file opens as its lines, each as written: braces and `:` open no levels.
+    // Elements are annotated with <src=N>; strip for assertions.
     editor.push_path("code.txt");
+    let lines: Vec<String> = editor
+        .fetch()
+        .iter()
+        .map(|e| {
+            let row = e.as_str().expect("a text file's line has no level inside");
+            sicompass_sdk::tags::strip_display(row)
+        })
+        .collect();
+    assert_eq!(
+        lines,
+        ["functions:", "{", "  fn foo", "  fn bar", "}", "end"]
+    );
+    editor.pop_path();
+
+    // A `.ff` file is what has levels. Its first row is the level's header.
+    editor.push_path("code.ff");
     let file_items = editor.fetch();
     assert_eq!(
         file_items.len(),
-        2,
-        "code.txt should parse into 2 top-level elements"
+        3,
+        "code.ff should open as its header and 2 top-level elements"
     );
-    let section = file_items[0]
+    let section = file_items[1]
         .as_obj()
-        .expect("first element must be an Obj section");
+        .expect("the first element must be an Obj section");
     assert_eq!(
         sicompass_sdk::tags::strip_display(&section.key),
         "functions:",
         "section key should strip to 'functions:'"
     );
-    assert_eq!(section.children.len(), 2);
-    let end_raw = file_items[1]
+    assert_eq!(section.children.len(), 3, "its header and 2 elements");
+    let end_raw = file_items[2]
         .as_str()
-        .expect("second element should be a Str");
+        .expect("the second element should be a Str");
     assert_eq!(sicompass_sdk::tags::strip_display(end_raw), "end");
 
     // Navigating into a section returns its children (stripped keys).
     editor.push_path("functions:");
     let section_items = editor.fetch();
-    assert_eq!(section_items.len(), 2);
-    let foo_raw = section_items[0]
+    assert_eq!(section_items.len(), 3, "its header and 2 elements");
+    let foo_raw = section_items[1]
         .as_str()
         .expect("first child should be a Str");
-    let bar_raw = section_items[1]
+    let bar_raw = section_items[2]
         .as_str()
         .expect("second child should be a Str");
     assert_eq!(sicompass_sdk::tags::strip_display(foo_raw), "fn foo");

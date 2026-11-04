@@ -18,6 +18,23 @@ texteditor-error-change-here = cannot change { $path }: { $err }
 # The { $err } of the messages above when the system refused for lack of rights.
 texteditor-error-reason-permission-denied = permission denied
 
+# A .ff file: a tree of nodes, each hashed over its children and its text.
+# Every level of a .ff file opens with this row. Inside it: the hash of the
+# node whose children the level shows.
+texteditor-ff-header = header
+texteditor-ff-sha256 = sha256: { $hash }
+texteditor-ff-invalid = (not a valid .ff file: { $err })
+texteditor-ff-reason-truncated = it ends in the middle of a node
+texteditor-ff-reason-trailing = there are bytes after its root node
+texteditor-ff-reason-utf8 = a node's text is not UTF-8
+texteditor-ff-reason-too-deep = its nodes nest more than 256 levels deep
+texteditor-ff-reason-no-node = that node is no longer there
+texteditor-error-ff-hash = { $name } was changed outside sicompass or is damaged, its hashes do not match. Saving it writes new ones.
+texteditor-error-ff-too-long = a node holds at most 255 bytes of text
+texteditor-error-ff-too-many = a node holds at most 255 children
+texteditor-error-undo-ff-write-failed = undo: failed to write the .ff file
+texteditor-error-redo-ff-write-failed = redo: failed to write the .ff file
+
 texteditor-description = Edit any text file as a list of its lines, with indentation and sections as levels, and every change undoable.
 texteditor-setting-path = text editor path
 

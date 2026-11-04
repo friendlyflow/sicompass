@@ -25,6 +25,7 @@ use serde::Deserialize;
 use sicompass_sdk::ffon::FfonElement;
 use sicompass_sdk::localize;
 use sicompass_sdk::store::Store;
+use sicompass_sdk::tags;
 
 use crate::http::Fetch;
 use crate::payments::cert::{self, TierStatus, tier};
@@ -144,7 +145,11 @@ impl Publish {
     }
 
     fn input(key: &str, value: &str) -> FfonElement {
-        FfonElement::new_str(format!("{}: <input>{value}</input>", Self::label(key)))
+        FfonElement::new_str(format!(
+            "{}: <input>{}</input>",
+            Self::label(key),
+            tags::escape(value)
+        ))
     }
 
     /// The first line: what listing needs, and where the user stands.
@@ -221,7 +226,7 @@ impl Publish {
             )),
         ];
         if let Some(status) = &self.status {
-            out.push(FfonElement::new_str(status.clone()));
+            out.push(FfonElement::new_str(tags::escape(status)));
         }
         out
     }
@@ -251,7 +256,7 @@ impl Publish {
         let state = self
             .state_of(s, listed)
             .unwrap_or("store-publish-state-checking");
-        format!("{}, {}", s.name, localize::t(state))
+        format!("{}, {}", tags::escape(&s.name), localize::t(state))
     }
 
     fn yours(&mut self, listed: Option<&Store>) -> Vec<FfonElement> {
@@ -259,7 +264,7 @@ impl Publish {
             None => return vec![FfonElement::new_str(Self::label("store-publish-loading"))],
             Some(Err(e)) => {
                 let mut a = localize::Args::new();
-                a.set("err", e.clone());
+                a.set("err", tags::escape(e));
                 return vec![FfonElement::new_str(localize::t_args(
                     "store-publish-mine-failed",
                     &a,
@@ -292,7 +297,7 @@ impl Publish {
         };
         let line = |key: &str, k: &str, v: &str| {
             let mut a = localize::Args::new();
-            a.set(k, v.to_owned());
+            a.set(k, tags::escape(v));
             FfonElement::new_str(localize::t_args(key, &a))
         };
         let mut out = vec![
@@ -520,4 +525,24 @@ fn get_mine(server: &str, token: &str) -> Result<Vec<Submission>, String> {
             .map_err(|e| format!("The server's answer does not parse: {e}"))?;
     serde_json::from_value(v["plugins"].clone())
         .map_err(|e| format!("The server's answer does not parse: {e}"))
+}
+
+#[cfg(test)]
+mod markup_tests {
+    use super::*;
+
+    /// The Store's rows are markup, and what is typed into the form is not.
+    #[test]
+    fn a_typed_value_in_the_form_is_text() {
+        let nasty = r#"<img src="/etc/passwd"><b>x</b>"#;
+        let FfonElement::Str(row) = Publish::input("store-publish-label-name", nasty) else {
+            panic!("an input is a row");
+        };
+        assert!(!sicompass_sdk::markup::has_markup(&row), "{row}");
+        assert!(sicompass_sdk::markup::targets(&row).is_empty(), "{row}");
+        assert_eq!(
+            tags::extract_input(&row).as_deref(),
+            Some(tags::escape(nasty).as_str())
+        );
+    }
 }

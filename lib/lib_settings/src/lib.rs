@@ -293,9 +293,9 @@ impl SettingsProvider {
     /// secret entries (masked downstream), `<input>` otherwise.
     fn text_entry_value_tag(e: &TextEntry) -> String {
         if e.is_password {
-            sicompass_sdk::tags::format_password(&e.current_value)
+            sicompass_sdk::tags::format_password(&sicompass_sdk::tags::escape(&e.current_value))
         } else {
-            sicompass_sdk::tags::format_input(&e.current_value)
+            sicompass_sdk::tags::format_input(&sicompass_sdk::tags::escape(&e.current_value))
         }
     }
 
@@ -565,7 +565,7 @@ impl SettingsProvider {
             o.push(FfonElement::Str(format!(
                 "{}: {}",
                 localize::t("settings-label-version"),
-                v
+                sicompass_sdk::tags::escape(v)
             )));
         }
 
@@ -585,7 +585,11 @@ impl SettingsProvider {
             } else {
                 "<checkbox>"
             };
-            o.push(FfonElement::Str(format!("{}{}", tag, displayed)));
+            o.push(FfonElement::Str(format!(
+                "{}{}",
+                tag,
+                sicompass_sdk::tags::escape(&displayed)
+            )));
         }
 
         // Radio groups. The `radio_key` is treated as a Fluent message ID
@@ -594,11 +598,16 @@ impl SettingsProvider {
         // render identically).
         for e in &self.radio_entries {
             if e.section == section_name && self.shows(&e.config_key) {
-                let mut radio =
-                    FfonElement::new_obj(format!("<radio>{}", localize::t(&e.radio_key)));
+                let mut radio = FfonElement::new_obj(format!(
+                    "<radio>{}",
+                    sicompass_sdk::tags::escape(&localize::t(&e.radio_key))
+                ));
                 let ro = radio.as_obj_mut().unwrap();
                 for opt in &e.options {
-                    let label = Self::localize_option_label(&e.config_key, opt);
+                    let label = sicompass_sdk::tags::escape(&Self::localize_option_label(
+                        &e.config_key,
+                        opt,
+                    ));
                     let s = if *opt == e.current_value {
                         format!("<checked>{label}")
                     } else {
@@ -633,6 +642,11 @@ impl SettingsProvider {
 impl Provider for SettingsProvider {
     fn name(&self) -> &str {
         "settings"
+    }
+
+    /// Rows here are markup. Whatever a plugin or the user wrote is escaped on its way in.
+    fn markup(&self) -> bool {
+        true
     }
 
     fn fetch(&mut self) -> Vec<FfonElement> {
@@ -699,7 +713,7 @@ impl Provider for SettingsProvider {
                 let displayed = localize::t(&e.label);
                 entries.push((
                     displayed.clone(),
-                    FfonElement::Str(format!("{tag}{displayed}")),
+                    FfonElement::Str(format!("{tag}{}", sicompass_sdk::tags::escape(&displayed))),
                 ));
             }
         }
@@ -708,11 +722,14 @@ impl Provider for SettingsProvider {
                 && e.config_key != "colorScheme"
                 && self.shows(&e.config_key)
             {
-                let title = localize::t(&e.radio_key);
+                let title = sicompass_sdk::tags::escape(&localize::t(&e.radio_key));
                 let mut radio = FfonElement::new_obj(format!("<radio>{title}"));
                 let ro = radio.as_obj_mut().unwrap();
                 for opt in &e.options {
-                    let label = Self::localize_option_label(&e.config_key, opt);
+                    let label = sicompass_sdk::tags::escape(&Self::localize_option_label(
+                        &e.config_key,
+                        opt,
+                    ));
                     let s = if *opt == e.current_value {
                         format!("<checked>{label}")
                     } else {
@@ -2065,6 +2082,27 @@ mod tests {
     }
 
     // --- commit_edit (text entries) ---
+
+    /// A value is what the user typed, whatever it looks like, and these rows are markup.
+    #[test]
+    fn test_a_typed_value_is_text_and_survives_an_edit() {
+        let (mut p, _log) = with_callback();
+        p.add_text(
+            "sec",
+            "Server",
+            "serverKey",
+            r#"<img src="/etc/passwd"><b>x</b>"#,
+        );
+        assert!(p.markup());
+        let rows = format!("{:?}", p.fetch());
+        assert!(!rows.contains(r#"<b>x"#), "{rows}");
+        p.set_current_path("/sec/Server");
+        assert!(p.commit_edit("old", "<b>y</b>"));
+        assert_eq!(
+            p.text_entries[0].current_value, "<b>y</b>",
+            "stored as typed"
+        );
+    }
 
     #[test]
     fn test_commit_edit_updates_text_entry() {
