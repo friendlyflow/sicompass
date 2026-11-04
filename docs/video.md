@@ -1,7 +1,7 @@
 # Video
 
 A `<video>` in a row plays inside the window, like a picture: Enter or `d` on it
-opens the big view and starts it, Space pauses and resumes, Escape stops, and Left
+opens the big view and starts it, Enter pauses and resumes, Escape stops, and Left
 and Right move over the pictures and videos of the row. A video with no `poster`
 shows its first picture in the row.
 
@@ -38,9 +38,10 @@ licenses. `cargo about` only sees the Rust bindings (`ffmpeg-next` and `ffmpeg-s
 WTFPL).
 
 **Patents are a separate question from the licence.** The build decodes H.264 and HEVC, which
-are patent-encumbered in some countries. Whether that matters for distributing these
-packages has not been looked at by anyone qualified. Settle it before the first release that
-holds this, or switch those decoders off in the script with `--disable-decoder=`.
+are patent-encumbered in some countries. The project owner decided on 2026-11-04 to ship them
+anyway, because most `.mp4` files need them. That is a decision, not legal advice, and nobody
+qualified has reviewed it. To switch them off, add `--disable-decoder=h264,hevc` to the
+script (and handle the Windows build too).
 
 ## Sound
 

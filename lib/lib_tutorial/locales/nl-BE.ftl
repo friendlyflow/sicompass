@@ -124,7 +124,7 @@ tutorial-grid-more = Hetzelfde werkt met display flex, voor afbeeldingen naast e
 tutorial-play-video = Video
 tutorial-video-intro = Video's spelen binnen Sicompass, zoals afbeeldingen. De rij hieronder bevat een kort fragment met geluid. Ga omlaag naar de rij, en je schermlezer zegt dat er een video is.
 tutorial-video-clip = <video src="asset:tutorial/clip.mp4">Testfragment</video>
-tutorial-video-keys = Druk op Enter of d om het af te spelen. Spatie pauzeert en speelt weer verder, en Escape gaat terug. Als het afgelopen is, speelt Spatie het opnieuw af. Een rij kan meerdere video's en afbeeldingen bevatten, en Links en Rechts gaan ertussen terwijl er een open is.
+tutorial-video-keys = Druk op Enter of d om het af te spelen. Enter pauzeert en speelt weer verder, en Escape gaat terug. Als het afgelopen is, speelt Enter het opnieuw af. Een rij kan meerdere video's en afbeeldingen bevatten, en Links en Rechts gaan ertussen terwijl er een open is.
 tutorial-play-scroll = Scrolmodus maakt deze lijst en haar sublijsten plat tot één leesweergave. Druk op S en gebruik dan PgUp, PgDown, Home en End op de lange passage hieronder.
 tutorial-play-lorem = __LOREM_IPSUM__
 tutorial-sec-config = Instellingen en configuratie

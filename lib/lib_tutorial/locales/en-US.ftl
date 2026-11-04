@@ -144,7 +144,7 @@ tutorial-grid-more = The same works with display flex, for pictures side by side
 tutorial-play-video = Video
 tutorial-video-intro = Videos play inside Sicompass, like pictures. The row below holds a short clip with sound. Move down to it, and your screen reader says there is one video.
 tutorial-video-clip = <video src="asset:tutorial/clip.mp4">Test clip</video>
-tutorial-video-keys = Press Enter or d to play it. Space pauses and plays again, and Escape goes back. If it has ended, Space plays it again. A row can hold several videos and pictures, and Left and Right move between them while one is open.
+tutorial-video-keys = Press Enter or d to play it. Enter pauses and plays again, and Escape goes back. If it has ended, Enter plays it again. A row can hold several videos and pictures, and Left and Right move between them while one is open.
 tutorial-play-scroll = Scroll mode flattens this list and its sublists into one reading view. Press S, then use PgUp, PgDown, Home, and End on the long passage below.
 tutorial-play-lorem = __LOREM_IPSUM__
 
