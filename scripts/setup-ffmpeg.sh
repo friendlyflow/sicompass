@@ -49,7 +49,9 @@ else
     tmp="$(mktemp -d)"
     trap 'rm -rf "$tmp"' EXIT
 
-    curl -fsSL --proto '=https' --tlsv1.2 --retry 3 --retry-delay 2 \
+    # --retry-all-errors because plain --retry leaves out a dropped TLS handshake (curl
+    # exit 35), which ffmpeg.org did to a CI runner.
+    curl -fsSL --proto '=https' --tlsv1.2 --retry 5 --retry-delay 5 --retry-all-errors \
         "https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz" -o "$tmp/ffmpeg.tar.xz"
     tar -xf "$tmp/ffmpeg.tar.xz" -C "$tmp"
 
