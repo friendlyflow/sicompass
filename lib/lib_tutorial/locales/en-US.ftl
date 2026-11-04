@@ -135,6 +135,12 @@ tutorial-style-wide = <div class="wide">Using the full width</div>
 tutorial-style-wide-text = Most lists stop at 120 characters so that lines stay easy to read, but this one uses the whole width of the window, however wide that is, which you can see by making the window larger and watching this line run on until it reaches the edge.
 tutorial-style-site = Press Right to visit a small site: __SITE_JSON__
 tutorial-style-yours = Put a file called user.css in the same folder as settings.json to style every list your own way. It is read when Sicompass starts.
+tutorial-play-grid = A grid of photos
+tutorial-grid-intro = Pictures can sit side by side in a grid, like an album. The row below holds six of them. Move down to it, and your screen reader says how many images it holds.
+tutorial-grid-photos = <div class="photos"><img src="asset:tutorial/photo-1.jpg" alt="Photo 1"><img src="asset:tutorial/photo-2.jpg" alt="Photo 2"><img src="asset:tutorial/photo-3.jpg" alt="Photo 3"><img src="asset:tutorial/photo-4.jpg" alt="Photo 4"><img src="asset:tutorial/photo-5.jpg" alt="Photo 5"><img src="asset:tutorial/photo-6.jpg" alt="Photo 6"></div>
+tutorial-grid-keys = Press i to enter navigate mode on that row. Left and Right go from picture to picture, and Up and Down go to the row of pictures above or below. Press Enter or d to see the one you are on at full size, then Escape to come back.
+tutorial-grid-css = The rule for .photos says display: grid, grid-template-columns: repeat(3, 1fr), gap: 15px. This is a grid of three equal columns, with a gap between them. The pictures are made square with aspect-ratio and object-fit.
+tutorial-grid-more = The same works with display flex, for pictures side by side that wrap. Your own albums can use any of this.
 tutorial-play-scroll = Scroll mode flattens this list and its sublists into one reading view. Press S, then use PgUp, PgDown, Home, and End on the long passage below.
 tutorial-play-lorem = __LOREM_IPSUM__
 

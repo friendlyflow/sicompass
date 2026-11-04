@@ -114,6 +114,12 @@ tutorial-style-wide = <div class="wide">Utiliser toute la largeur</div>
 tutorial-style-wide-text = La plupart des listes s'arrêtent à 120 caractères pour que les lignes restent faciles à lire, mais celle-ci utilise toute la largeur de la fenêtre, quelle qu'elle soit, ce que vous pouvez voir en agrandissant la fenêtre et en regardant cette ligne continuer jusqu'au bord.
 tutorial-style-site = Appuyez sur Droite pour visiter un petit site : __SITE_JSON__
 tutorial-style-yours = Placez un fichier nommé user.css dans le même dossier que settings.json pour styler chaque liste à votre façon. Il est lu au démarrage de Sicompass.
+tutorial-play-grid = Une grille de photos
+tutorial-grid-intro = Les images peuvent se placer côte à côte dans une grille, comme dans un album. La ligne ci-dessous en contient six. Descendez jusqu'à elle, et votre lecteur d'écran dit combien d'images elle contient.
+tutorial-grid-photos = <div class="photos"><img src="asset:tutorial/photo-1.jpg" alt="Photo 1"><img src="asset:tutorial/photo-2.jpg" alt="Photo 2"><img src="asset:tutorial/photo-3.jpg" alt="Photo 3"><img src="asset:tutorial/photo-4.jpg" alt="Photo 4"><img src="asset:tutorial/photo-5.jpg" alt="Photo 5"><img src="asset:tutorial/photo-6.jpg" alt="Photo 6"></div>
+tutorial-grid-keys = Appuyez sur i pour entrer en mode navigation sur cette ligne. Gauche et Droite passent d'une image à l'autre, et Haut et Bas vont à la rangée d'images au-dessus ou en dessous. Appuyez sur Entrée ou d pour voir en grand celle où vous êtes, puis sur Échap pour revenir.
+tutorial-grid-css = La règle pour .photos dit display: grid, grid-template-columns: repeat(3, 1fr), gap: 15px. C'est une grille de trois colonnes égales, avec un espace entre elles. Les images sont rendues carrées avec aspect-ratio et object-fit.
+tutorial-grid-more = La même chose marche avec display flex, pour des images côte à côte qui passent à la ligne. Vos propres albums peuvent tout utiliser.
 tutorial-play-scroll = Le mode défilement aplatit cette liste et ses sous-listes en une seule vue de lecture. Appuyez sur S, puis utilisez PgUp, PgDown, Home et End sur le long passage ci-dessous.
 tutorial-play-lorem = __LOREM_IPSUM__
 tutorial-sec-config = Paramètres et configuration

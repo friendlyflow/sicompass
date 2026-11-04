@@ -115,6 +115,12 @@ tutorial-style-wide = <div class="wide">De volledige breedte gebruiken</div>
 tutorial-style-wide-text = De meeste lijsten stoppen bij 120 tekens zodat regels makkelijk leesbaar blijven, maar deze gebruikt de hele breedte van het venster, hoe breed dat ook is, wat je kunt zien door het venster groter te maken en te kijken hoe deze regel doorloopt tot aan de rand.
 tutorial-style-site = Druk op Rechts om een kleine site te bezoeken: __SITE_JSON__
 tutorial-style-yours = Zet een bestand met de naam user.css in dezelfde map als settings.json om elke lijst op jouw manier op te maken. Het wordt gelezen wanneer Sicompass start.
+tutorial-play-grid = Een raster van foto's
+tutorial-grid-intro = Afbeeldingen kunnen naast elkaar staan in een raster, zoals in een album. De rij hieronder bevat er zes. Ga omlaag naar de rij, en je schermlezer zegt hoeveel afbeeldingen erin zitten.
+tutorial-grid-photos = <div class="photos"><img src="asset:tutorial/photo-1.jpg" alt="Foto 1"><img src="asset:tutorial/photo-2.jpg" alt="Foto 2"><img src="asset:tutorial/photo-3.jpg" alt="Foto 3"><img src="asset:tutorial/photo-4.jpg" alt="Foto 4"><img src="asset:tutorial/photo-5.jpg" alt="Foto 5"><img src="asset:tutorial/photo-6.jpg" alt="Foto 6"></div>
+tutorial-grid-keys = Druk op i om de navigatiemodus op die rij te starten. Links en Rechts gaan van afbeelding naar afbeelding, en Omhoog en Omlaag gaan naar de rij afbeeldingen erboven of eronder. Druk op Enter of d om de afbeelding waar je op staat op volledige grootte te zien, en dan op Escape om terug te komen.
+tutorial-grid-css = De regel voor .photos zegt display: grid, grid-template-columns: repeat(3, 1fr), gap: 15px. Dit is een raster van drie gelijke kolommen, met ruimte ertussen. De afbeeldingen worden vierkant gemaakt met aspect-ratio en object-fit.
+tutorial-grid-more = Hetzelfde werkt met display flex, voor afbeeldingen naast elkaar die doorlopen op een volgende regel. Je eigen albums kunnen dit allemaal gebruiken.
 tutorial-play-scroll = Scrolmodus maakt deze lijst en haar sublijsten plat tot één leesweergave. Druk op S en gebruik dan PgUp, PgDown, Home en End op de lange passage hieronder.
 tutorial-play-lorem = __LOREM_IPSUM__
 tutorial-sec-config = Instellingen en configuratie

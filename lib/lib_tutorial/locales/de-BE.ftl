@@ -114,6 +114,12 @@ tutorial-style-wide = <div class="wide">Die volle Breite nutzen</div>
 tutorial-style-wide-text = Die meisten Listen enden bei 120 Zeichen, damit Zeilen gut lesbar bleiben, aber diese nutzt die ganze Breite des Fensters, wie breit es auch ist, was du siehst, wenn du das Fenster vergrößerst und diese Zeile bis zum Rand weiterlaufen lässt.
 tutorial-style-site = Drücke Rechts, um eine kleine Seite zu besuchen: __SITE_JSON__
 tutorial-style-yours = Lege eine Datei namens user.css in denselben Ordner wie settings.json, um jede Liste nach deinem Geschmack zu gestalten. Sie wird beim Start von Sicompass gelesen.
+tutorial-play-grid = Ein Raster aus Fotos
+tutorial-grid-intro = Bilder können in einem Raster nebeneinander stehen, wie in einem Album. Die Zeile unten enthält sechs davon. Gehe nach unten dorthin, und dein Bildschirmleser sagt, wie viele Bilder sie enthält.
+tutorial-grid-photos = <div class="photos"><img src="asset:tutorial/photo-1.jpg" alt="Foto 1"><img src="asset:tutorial/photo-2.jpg" alt="Foto 2"><img src="asset:tutorial/photo-3.jpg" alt="Foto 3"><img src="asset:tutorial/photo-4.jpg" alt="Foto 4"><img src="asset:tutorial/photo-5.jpg" alt="Foto 5"><img src="asset:tutorial/photo-6.jpg" alt="Foto 6"></div>
+tutorial-grid-keys = Drücke i, um den Navigationsmodus auf dieser Zeile zu starten. Links und Rechts gehen von Bild zu Bild, und Hoch und Runter gehen zur Bilderreihe darüber oder darunter. Drücke Enter oder d, um das aktuelle Bild groß zu sehen, und dann Escape, um zurückzukommen.
+tutorial-grid-css = Die Regel für .photos sagt display: grid, grid-template-columns: repeat(3, 1fr), gap: 15px. Das ist ein Raster aus drei gleich breiten Spalten, mit Abstand dazwischen. Die Bilder werden mit aspect-ratio und object-fit quadratisch gemacht.
+tutorial-grid-more = Dasselbe funktioniert mit display flex, für Bilder nebeneinander, die umbrechen. Deine eigenen Alben können all das nutzen.
 tutorial-play-scroll = Der Scroll-Modus ebnet diese Liste und ihre Unterlisten zu einer einzigen Leseansicht. Drücken Sie S, verwenden Sie dann Bild auf, Bild ab, Pos1 und Ende auf der langen Passage darunter.
 tutorial-play-lorem = __LOREM_IPSUM__
 tutorial-sec-config = Einstellungen und Konfiguration

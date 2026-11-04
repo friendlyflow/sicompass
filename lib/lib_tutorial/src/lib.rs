@@ -25,6 +25,14 @@ const FFON_JSON: &[u8] = include_bytes!("../assets/ffon.json");
 const TEXTURE_URI: &str = "asset:tutorial/texture.jpg";
 const FFON_URI: &str = "asset:tutorial/ffon.json";
 const SITE_JSON: &[u8] = include_bytes!("../assets/site.json");
+const PHOTOS: [&[u8]; 6] = [
+    include_bytes!("../assets/photo-1.jpg"),
+    include_bytes!("../assets/photo-2.jpg"),
+    include_bytes!("../assets/photo-3.jpg"),
+    include_bytes!("../assets/photo-4.jpg"),
+    include_bytes!("../assets/photo-5.jpg"),
+    include_bytes!("../assets/photo-6.jpg"),
+];
 const SITE_URI: &str = "asset:tutorial/site.json";
 
 /// Register this crate's translation bundles with the SDK localizer.
@@ -134,6 +142,13 @@ const STYLE_CSS: &str = "<style>
     ul.markers li:focus { background: #553377 }
     ul.markers li::marker { color: #ffaa00 }
     ul.wide { max-width: none }
+</style>";
+
+/// The grid of photos, which only its own section holds, since a stylesheet covers the
+/// list it is in and everything below.
+const GRID_CSS: &str = "<style>
+    .photos { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px }
+    .photos img { aspect-ratio: 1; object-fit: cover; border-radius: 6px }
 </style>";
 
 static SECTIONS: &[Node] = &[
@@ -351,6 +366,17 @@ static SECTIONS: &[Node] = &[
                         children: &[],
                     },
                     Leaf("tutorial-style-yours"),
+                ],
+            },
+            Branch {
+                key: "tutorial-play-grid",
+                children: &[
+                    Leaf(GRID_CSS),
+                    Leaf("tutorial-grid-intro"),
+                    Leaf("tutorial-grid-photos"),
+                    Leaf("tutorial-grid-keys"),
+                    Leaf("tutorial-grid-css"),
+                    Leaf("tutorial-grid-more"),
                 ],
             },
             Leaf("tutorial-play-scroll"),
@@ -764,7 +790,13 @@ mod tests {
     #[test]
     fn the_embedded_assets_resolve_through_the_registry() {
         register();
-        for uri in [TEXTURE_URI, FFON_URI, SITE_URI] {
+        for uri in [
+            TEXTURE_URI,
+            FFON_URI,
+            SITE_URI,
+            "asset:tutorial/photo-1.jpg",
+            "asset:tutorial/photo-6.jpg",
+        ] {
             let bytes = sicompass_sdk::assets::resolve(uri)
                 .unwrap_or_else(|| panic!("{uri} does not resolve"));
             assert!(!bytes.is_empty(), "{uri} resolved to nothing");
@@ -1287,6 +1319,31 @@ mod tests {
         );
     }
 
+    /// The photo grid is one row with six pictures in it, each a stop in navigate mode.
+    #[test]
+    fn test_the_photo_grid_is_one_row_of_six_pictures() {
+        let mut p = provider();
+        p.push_path("Interactive playground");
+        let section = section_keys(&p.fetch())
+            .into_iter()
+            .find(|k| k.starts_with("A grid of photos"))
+            .expect("a photo grid section");
+        p.push_path(&section);
+        let elems = p.fetch();
+        let rows: Vec<&str> = elems.iter().filter_map(|e| e.as_str()).collect();
+        let grid = rows
+            .iter()
+            .find(|r| r.contains(r#"class="photos""#))
+            .expect("the grid row");
+        let counts = sicompass_sdk::markup::target_counts(grid);
+        assert_eq!(counts.images, 6, "{grid}");
+        for n in 1..=6 {
+            assert!(
+                sicompass_sdk::assets::resolve(&format!("asset:tutorial/photo-{n}.jpg")).is_some()
+            );
+        }
+    }
+
     /// The site is an FFON document, with a stylesheet of its own.
     #[test]
     fn test_the_small_site_is_ffon_with_a_stylesheet() {
@@ -1477,6 +1534,9 @@ pub fn register() {
     sicompass_sdk::assets::register_bytes("tutorial", "texture.jpg", TEXTURE_JPG);
     sicompass_sdk::assets::register_bytes("tutorial", "ffon.json", FFON_JSON);
     sicompass_sdk::assets::register_bytes("tutorial", "site.json", SITE_JSON);
+    for (n, bytes) in PHOTOS.iter().enumerate() {
+        sicompass_sdk::assets::register_bytes("tutorial", &format!("photo-{}.jpg", n + 1), bytes);
+    }
 
     sicompass_sdk::register_provider_factory("tutorial", || Box::new(TutorialProvider::new()));
     sicompass_sdk::register_builtin_manifest(
