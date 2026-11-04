@@ -1,0 +1,18 @@
+[
+  "<style>ul { max-width: 80ch } h1 { color: #ffaa44 } h2 { color: #88ccff } .note { color: #aaccaa } li:focus { background: #234567 }</style>",
+  "<h1>A small site</h1>",
+  "<p>This page is one FFON file. Sicompass fetched it because of a link, and it brought its own stylesheet.</p>",
+  "<p class=\"note\">Press Left to go back to the tutorial.</p>",
+  {
+    "<h2>Projects</h2>": [
+      "<h2>Projects</h2>",
+      "<p>A row can be <b>bold</b> in places. The stylesheet still applies down here, because it covers its list and everything below.</p>"
+    ]
+  },
+  {
+    "<h2>About</h2>": [
+      "<h2>About</h2>",
+      "<p class=\"note\">Rows are still rows. The arrow keys and your screen reader work as they do everywhere.</p>"
+    ]
+  }
+]

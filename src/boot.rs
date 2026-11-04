@@ -38,6 +38,12 @@ pub struct ProgramsHooks {
 }
 
 impl HostHooks for ProgramsHooks {
+    /// `user.css` next to `settings.json`, which styles every list.
+    fn user_stylesheet(&self) -> Option<String> {
+        let path = sicompass_sdk::platform::app_config_dir()?.join("user.css");
+        std::fs::read_to_string(path).ok()
+    }
+
     fn apply_pending_settings(&self, renderer: &mut AppRenderer, initial: bool) {
         // The queue lives on AppState, and `view` only hands us the renderer,
         // so the caller has already established there is one to drain. The
@@ -130,6 +136,10 @@ pub fn app_state(hooks: ProgramsHooks) -> Result<AppState, SiError> {
         .unwrap_or(false);
 
     let screen_reader = Arc::clone(&hooks.screen_reader);
+    state
+        .renderer
+        .sheets
+        .set_user(hooks.user_stylesheet().as_deref());
     state.renderer.hooks = Box::new(hooks);
 
     // Load providers (tutorial + settings by default)

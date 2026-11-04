@@ -18753,6 +18753,7 @@ fn plugin_provider_granted(name: &str, storage: Option<&Path>, env: Env) -> Box<
             plugin_name: name,
             settings_section: display,
             plugin_dir: &dir,
+            markup: false,
             grants,
             env,
         })

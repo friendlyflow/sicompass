@@ -24,6 +24,8 @@ const FFON_JSON: &[u8] = include_bytes!("../assets/ffon.json");
 /// asset registry, which [`register`] populates.
 const TEXTURE_URI: &str = "asset:tutorial/texture.jpg";
 const FFON_URI: &str = "asset:tutorial/ffon.json";
+const SITE_JSON: &[u8] = include_bytes!("../assets/site.json");
+const SITE_URI: &str = "asset:tutorial/site.json";
 
 /// Register this crate's translation bundles with the SDK localizer.
 /// Idempotent.
@@ -118,6 +120,21 @@ fn lorem_ipsum() -> &'static str {
 // Section headings use `tutorial-sec-*` keys, content leaves use semantic keys
 // per section. Asset paths (TEXTURE_JPG, FFON_JSON) and the lorem-ipsum block
 // are substituted at runtime by `apply_asset_placeholders`.
+
+/// The stylesheet of the styled lists section. A list takes the classes of the row
+/// it belongs to, which is what `ul.warm` and the others find.
+const STYLE_CSS: &str = "<style>
+    ul.warm li { color: #ffddaa; background: #3a2417 }
+    ul.warm li:focus { background: #7a4a22 }
+    ul.cards li { padding: 8px 12px; margin: 6px 0; border: 1px solid #667788; border-radius: 8px }
+    ul.cards li:focus { background: #2a4a6a }
+    .hot { color: #ff9966 }
+    .done { color: #88aa88 }
+    .urgent { color: #ff9966; font-weight: bold }
+    ul.markers li:focus { background: #553377 }
+    ul.markers li::marker { color: #ffaa00 }
+    ul.wide { max-width: none }
+</style>";
 
 static SECTIONS: &[Node] = &[
     // 1. Getting started: a guided do-and-confirm path. Each step asks for one
@@ -257,6 +274,85 @@ static SECTIONS: &[Node] = &[
                 key: "tutorial-play-link",
                 children: &[],
             },
+            Branch {
+                key: "tutorial-play-navigate",
+                children: &[
+                    Leaf("tutorial-nav-landing"),
+                    Leaf("tutorial-nav-links-how"),
+                    Leaf("tutorial-nav-links"),
+                    Leaf("tutorial-nav-buttons-how"),
+                    Leaf("tutorial-nav-buttons"),
+                    Leaf("tutorial-nav-lines-how"),
+                    Leaf("tutorial-nav-lines"),
+                    Leaf("tutorial-nav-done"),
+                ],
+            },
+            Branch {
+                key: "tutorial-play-style",
+                children: &[
+                    Leaf(STYLE_CSS),
+                    Leaf("tutorial-style-intro"),
+                    Branch {
+                        key: "tutorial-style-warm",
+                        children: &[
+                            Leaf("tutorial-style-warm-text"),
+                            Leaf("tutorial-style-warm-more"),
+                            Leaf(
+                                "ul.warm li { color: #ffddaa } ul.warm li:focus { background: #7a4a22 }",
+                            ),
+                        ],
+                    },
+                    Branch {
+                        key: "tutorial-style-cards",
+                        children: &[
+                            Leaf("tutorial-style-cards-one"),
+                            Leaf("tutorial-style-cards-two"),
+                            Leaf(
+                                "ul.cards li { padding: 8px 12px } ul.cards li { border: 1px solid #667788 } ul.cards li { border-radius: 8px }",
+                            ),
+                        ],
+                    },
+                    Branch {
+                        key: "tutorial-style-headings",
+                        children: &[
+                            Leaf("tutorial-style-h1"),
+                            Leaf("tutorial-style-h2"),
+                            Leaf("tutorial-style-inline"),
+                            Leaf("tutorial-style-headings-how"),
+                        ],
+                    },
+                    Branch {
+                        key: "tutorial-style-classes",
+                        children: &[
+                            Leaf("tutorial-style-done"),
+                            Leaf("tutorial-style-urgent"),
+                            Leaf(".done { color: #88aa88 } .urgent { color: #ff9966 }"),
+                        ],
+                    },
+                    Branch {
+                        key: "tutorial-style-focus",
+                        children: &[
+                            Leaf("tutorial-style-focus-text"),
+                            Leaf("tutorial-style-marker-text"),
+                            Leaf(
+                                "ul.markers li:focus { background: #553377 } ul.markers li::marker { color: #ffaa00 }",
+                            ),
+                        ],
+                    },
+                    Branch {
+                        key: "tutorial-style-wide",
+                        children: &[
+                            Leaf("tutorial-style-wide-text"),
+                            Leaf("ul.wide { max-width: none }"),
+                        ],
+                    },
+                    Branch {
+                        key: "tutorial-style-site",
+                        children: &[],
+                    },
+                    Leaf("tutorial-style-yours"),
+                ],
+            },
             Leaf("tutorial-play-scroll"),
             Leaf("tutorial-play-lorem"),
         ],
@@ -366,6 +462,7 @@ fn apply_asset_placeholders(s: &str) -> String {
     // which is why the image example carries surrounding text.
     s.replace("__TEXTURE_JPG__", &format!("<image>{TEXTURE_URI}</image>"))
         .replace("__FFON_JSON__", &format!("<link>{FFON_URI}</link>"))
+        .replace("__SITE_JSON__", &format!("<link>{SITE_URI}</link>"))
         .replace("__LOREM_IPSUM__", lorem_ipsum())
 }
 
@@ -566,6 +663,11 @@ impl Provider for TutorialProvider {
         "tutorial"
     }
 
+    /// Every string here is written by this crate.
+    fn markup(&self) -> bool {
+        true
+    }
+
     fn display_name(&self) -> String {
         register_translations();
         localize::t("tutorial-display-name")
@@ -662,7 +764,7 @@ mod tests {
     #[test]
     fn the_embedded_assets_resolve_through_the_registry() {
         register();
-        for uri in [TEXTURE_URI, FFON_URI] {
+        for uri in [TEXTURE_URI, FFON_URI, SITE_URI] {
             let bytes = sicompass_sdk::assets::resolve(uri)
                 .unwrap_or_else(|| panic!("{uri} does not resolve"));
             assert!(!bytes.is_empty(), "{uri} resolved to nothing");
@@ -1159,6 +1261,72 @@ mod tests {
         }
     }
 
+    /// The styled lists: a stylesheet, HTML-named tags, and a site brought in by link.
+    #[test]
+    fn test_style_section_has_a_stylesheet_and_markup() {
+        let mut p = provider();
+        assert!(p.markup(), "these rows are written as markup");
+        p.push_path("Interactive playground");
+        let section = section_keys(&p.fetch())
+            .into_iter()
+            .find(|k| k.starts_with("Styled lists"))
+            .expect("a styled lists section");
+        p.push_path(&section);
+        let elems = p.fetch();
+        let css = elems[0].as_str().expect("the first row");
+        assert!(sicompass_sdk::markup::style_sheet(css).is_some(), "{css}");
+        let keys = section_keys(&elems);
+        assert!(
+            keys.iter().any(|k| k.contains(r#"class="warm""#)),
+            "{keys:?}"
+        );
+        assert!(
+            keys.iter()
+                .any(|k| k.contains("<link>asset:tutorial/site.json</link>")),
+            "{keys:?}"
+        );
+    }
+
+    /// The site is an FFON document, with a stylesheet of its own.
+    #[test]
+    fn test_the_small_site_is_ffon_with_a_stylesheet() {
+        let elems =
+            sicompass_sdk::ffon::parse_json(std::str::from_utf8(SITE_JSON).unwrap()).unwrap();
+        let css = elems[0].as_str().expect("the first row");
+        assert!(sicompass_sdk::markup::style_sheet(css).is_some(), "{css}");
+    }
+
+    /// Navigate mode needs rows that really hold several targets, each under a row
+    /// saying which key to press. The instruction is a row of its own, because the
+    /// text before a link is what the screen reader calls that link.
+    #[test]
+    fn test_navigate_section_has_rows_with_several_targets() {
+        let mut p = provider();
+        p.push_path("Interactive playground");
+        let section = section_keys(&p.fetch())
+            .into_iter()
+            .find(|k| k.starts_with("Navigate mode"))
+            .expect("a navigate mode section");
+        p.push_path(&section);
+        let rows: Vec<String> = p
+            .fetch()
+            .iter()
+            .filter_map(|e| e.as_str().map(str::to_owned))
+            .collect();
+        let counts: Vec<_> = rows
+            .iter()
+            .map(|r| sicompass_sdk::tags::target_counts(r))
+            .collect();
+        assert!(counts.iter().any(|c| c.links >= 3), "{rows:?}");
+        assert!(counts.iter().any(|c| c.buttons >= 2), "{rows:?}");
+        for pair in rows.windows(2) {
+            if sicompass_sdk::tags::target_counts(&pair[1]).total() > 0 {
+                assert!(pair[0].starts_with("i:"), "leads with the key: {}", pair[0]);
+                assert_eq!(sicompass_sdk::tags::target_counts(&pair[0]).total(), 0);
+            }
+        }
+    }
+
     #[test]
     fn test_playground_has_every_element_type() {
         let mut p = provider();
@@ -1308,6 +1476,7 @@ pub fn register() {
     // (which the tests do) is harmless.
     sicompass_sdk::assets::register_bytes("tutorial", "texture.jpg", TEXTURE_JPG);
     sicompass_sdk::assets::register_bytes("tutorial", "ffon.json", FFON_JSON);
+    sicompass_sdk::assets::register_bytes("tutorial", "site.json", SITE_JSON);
 
     sicompass_sdk::register_provider_factory("tutorial", || Box::new(TutorialProvider::new()));
     sicompass_sdk::register_builtin_manifest(

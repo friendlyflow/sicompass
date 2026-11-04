@@ -82,6 +82,38 @@ tutorial-play-radio-red = rot
 tutorial-play-image-intro = Bilder werden inline dargestellt, und sie können Text davor und dahinter tragen. Ihr Screenreader liest den Vortext, dann das Bild, dann den Nachtext, sodass ein Bild nie eine unbeschriftete Lücke ist.
 tutorial-play-image = Vortext, dann das Bild: __TEXTURE_JPG__ und Nachtext dahinter.
 tutorial-play-link = Drücken Sie Rechts, um diese verknüpfte Datei nachzuladen: __FFON_JSON__
+tutorial-play-navigate = Navigationsmodus, innerhalb einer Zeile bewegen
+tutorial-nav-landing = Manche Zeilen enthalten mehrere Bilder, Links oder Schaltflächen. Wenn du auf einer solchen Zeile landest, sagt dein Bildschirmleser, wie viele von jeder Art. Drücke Runter und höre zu.
+tutorial-nav-links-how = i: in der Zeile darunter, startet den Navigationsmodus auf dem ersten Link, oder a auf dem letzten. Rechts und Links wechseln zwischen den Links, und dein Bildschirmleser nennt jeden. Enter folgt dem aktuellen, Escape verlässt den Modus.
+tutorial-nav-links = Erste Seite __FFON_JSON__ zweite Seite __FFON_JSON__ dritte Seite __FFON_JSON__
+tutorial-nav-buttons-how = i: in der Zeile darunter, dasselbe mit Schaltflächen. Rechts geht zur zweiten, Enter drückt die aktuelle, und Escape verlässt den Modus.
+tutorial-nav-buttons = <button>demo</button>Erste Schaltfläche <button>demo</button>Zweite Schaltfläche
+tutorial-nav-lines-how = i: in der umbrochenen Zeile darunter gehen Runter und Hoch zur Zeile darunter oder darüber, und Rechts und Links gehen weiter einzeln.
+tutorial-nav-lines = Seite eins __FFON_JSON__ Seite zwei __FFON_JSON__ Seite drei __FFON_JSON__ Seite vier __FFON_JSON__
+tutorial-nav-done = Das ist der Navigationsmodus. Drücke Links, um zurückzugehen.
+tutorial-play-style = Gestaltete Listen, mit HTML und CSS
+tutorial-style-intro = Jede Liste lässt sich mit CSS gestalten, und ihre Zeilen können HTML-Tags enthalten. Drücke Rechts auf einem Abschnitt unten, um einen zu sehen. Seine letzte Zeile zeigt das CSS dazu.
+tutorial-style-warm = <div class="warm">Ein warmes Farbschema</div>
+tutorial-style-warm-text = Diese Zeilen nehmen ihre Farben aus einem Stylesheet.
+tutorial-style-warm-more = Bewege dich hoch und runter. Die ausgewählte Zeile hat auch eine eigene Farbe.
+tutorial-style-cards = <div class="cards">Karten</div>
+tutorial-style-cards-one = Innenabstand, ein Rahmen und runde Ecken machen aus jeder Zeile eine Karte.
+tutorial-style-cards-two = Die Tasten und dein Bildschirmleser ändern sich nicht. Eine Karte bleibt eine Zeile.
+tutorial-style-headings = Überschriften und Fett
+tutorial-style-h1 = <h1>Eine große Überschrift</h1>
+tutorial-style-h2 = <h2>Eine kleinere Überschrift</h2>
+tutorial-style-inline = <p>Eine Zeile kann ein <b>fettes</b> Wort haben, oder ein <span class="hot">farbiges</span>.</p>
+tutorial-style-headings-how = Diese kommen von HTML-Tags in der Zeile, wie h1, h2, b und span.
+tutorial-style-classes = Erledigte und dringende Zeilen
+tutorial-style-done = <p class="done">Letzte Woche geliefert</p>
+tutorial-style-urgent = <p class="urgent">Braucht heute eine Antwort</p>
+tutorial-style-focus = <div class="markers">Der Cursor und das Listenpräfix</div>
+tutorial-style-focus-text = Diese Liste hat eine eigene Cursorfarbe. Bewege dich hoch und runter.
+tutorial-style-marker-text = Der Pfeil oder Strich am Anfang einer Zeile kann auch eine eigene Farbe haben.
+tutorial-style-wide = <div class="wide">Die volle Breite nutzen</div>
+tutorial-style-wide-text = Die meisten Listen enden bei 120 Zeichen, damit Zeilen gut lesbar bleiben, aber diese nutzt die ganze Breite des Fensters, wie breit es auch ist, was du siehst, wenn du das Fenster vergrößerst und diese Zeile bis zum Rand weiterlaufen lässt.
+tutorial-style-site = Drücke Rechts, um eine kleine Seite zu besuchen: __SITE_JSON__
+tutorial-style-yours = Lege eine Datei namens user.css in denselben Ordner wie settings.json, um jede Liste nach deinem Geschmack zu gestalten. Sie wird beim Start von Sicompass gelesen.
 tutorial-play-scroll = Der Scroll-Modus ebnet diese Liste und ihre Unterlisten zu einer einzigen Leseansicht. Drücken Sie S, verwenden Sie dann Bild auf, Bild ab, Pos1 und Ende auf der langen Passage darunter.
 tutorial-play-lorem = __LOREM_IPSUM__
 tutorial-sec-config = Einstellungen und Konfiguration

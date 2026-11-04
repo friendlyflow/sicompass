@@ -103,6 +103,38 @@ tutorial-play-radio-red = red
 tutorial-play-image-intro = Images render inline, and they can carry text before and after. Your screen reader reads the prefix, then the image, then the suffix, so an image is never an unlabelled gap.
 tutorial-play-image = Prefix text, then the image: __TEXTURE_JPG__ and suffix text after it.
 tutorial-play-link = Press Right to lazy-load this linked file: __FFON_JSON__
+tutorial-play-navigate = Navigate mode, moving inside one row
+tutorial-nav-landing = Some rows hold several images, links or buttons. When you land on one, your screen reader says how many of each. Press Down and listen.
+tutorial-nav-links-how = i: on the row below, starts navigate mode on its first link, or a on its last. Right and Left move between the links, and your screen reader names each one. Enter follows the one you are on, Escape leaves.
+tutorial-nav-links = First page __FFON_JSON__ second page __FFON_JSON__ third page __FFON_JSON__
+tutorial-nav-buttons-how = i: on the row below, the same with buttons. Right moves to the second one, Enter presses the one you are on, and Escape leaves.
+tutorial-nav-buttons = <button>demo</button>First button <button>demo</button>Second button
+tutorial-nav-lines-how = i: on the row below, which wraps, Down and Up go to the line below or above, and Right and Left still go one by one.
+tutorial-nav-lines = Page one __FFON_JSON__ page two __FFON_JSON__ page three __FFON_JSON__ page four __FFON_JSON__
+tutorial-nav-done = That is navigate mode. Press Left to go back.
+tutorial-play-style = Styled lists, with HTML and CSS
+tutorial-style-intro = Any list can be styled with CSS, and its rows can hold HTML tags. Press Right on a section below to see one. Its last row shows the CSS that does it.
+tutorial-style-warm = <div class="warm">A warm colour theme</div>
+tutorial-style-warm-text = These rows take their colours from a stylesheet.
+tutorial-style-warm-more = Move up and down. The selected row has its own colour too.
+tutorial-style-cards = <div class="cards">Cards</div>
+tutorial-style-cards-one = Padding, a border and rounded corners make each row a card.
+tutorial-style-cards-two = The keys and your screen reader do not change. A card is still a row.
+tutorial-style-headings = Headings and bold
+tutorial-style-h1 = <h1>A big heading</h1>
+tutorial-style-h2 = <h2>A smaller heading</h2>
+tutorial-style-inline = <p>A row can have a <b>bold</b> word, or a <span class="hot">coloured</span> one.</p>
+tutorial-style-headings-how = These come from HTML tags inside the row, such as h1, h2, b and span.
+tutorial-style-classes = Done and urgent rows
+tutorial-style-done = <p class="done">Shipped last week</p>
+tutorial-style-urgent = <p class="urgent">Needs an answer today</p>
+tutorial-style-focus = <div class="markers">The cursor and the list prefix</div>
+tutorial-style-focus-text = This list has its own cursor colour. Move up and down.
+tutorial-style-marker-text = The arrow or dash at the start of a row can have its own colour as well.
+tutorial-style-wide = <div class="wide">Using the full width</div>
+tutorial-style-wide-text = Most lists stop at 120 characters so that lines stay easy to read, but this one uses the whole width of the window, however wide that is, which you can see by making the window larger and watching this line run on until it reaches the edge.
+tutorial-style-site = Press Right to visit a small site: __SITE_JSON__
+tutorial-style-yours = Put a file called user.css in the same folder as settings.json to style every list your own way. It is read when Sicompass starts.
 tutorial-play-scroll = Scroll mode flattens this list and its sublists into one reading view. Press S, then use PgUp, PgDown, Home, and End on the long passage below.
 tutorial-play-lorem = __LOREM_IPSUM__
 

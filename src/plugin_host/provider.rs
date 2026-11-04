@@ -53,6 +53,8 @@ pub struct Spec<'a> {
     /// The manifest `displayName`, which names its settings section.
     pub settings_section: &'a str,
     pub plugin_dir: &'a Path,
+    /// The manifest `markup`: its rows are markup, see `Provider::markup`.
+    pub markup: bool,
     pub grants: super::Grants,
     /// Environment variables set for the plugin's process on top of the app's.
     /// The app sets none; the tests use it to keep a plugin from finding the
@@ -62,6 +64,7 @@ pub struct Spec<'a> {
 
 /// A plugin process driven through the `Provider` trait.
 pub struct ProcessProvider {
+    markup: bool,
     channel: Channel,
     state: RefCell<State>,
     /// The manifest name, which names the plugin in messages and assets.
@@ -104,6 +107,7 @@ impl ProcessProvider {
             plugin_name,
             settings_section,
             plugin_dir,
+            markup,
             grants,
             env,
         } = spec;
@@ -145,6 +149,7 @@ impl ProcessProvider {
             .map_err(|e| format!("{}: {e}", exe.display()))?;
 
         let mut me = ProcessProvider {
+            markup,
             channel,
             state: RefCell::new(State {
                 pending_error: None,
@@ -1094,6 +1099,10 @@ impl Provider for ProcessProvider {
     }
 
     // ---- Dashboard ---------------------------------------------------------
+
+    fn markup(&self) -> bool {
+        self.markup
+    }
 
     fn dashboard_kind(&self) -> DashboardKind {
         to_sdk_kind(self.descriptor.dashboard_kind)

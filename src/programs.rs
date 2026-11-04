@@ -993,6 +993,7 @@ fn instantiate_user_plugin_approved(
                 // section the plugin's settings are read back from.
                 settings_section: &m.display_name,
                 plugin_dir,
+                markup: m.markup,
                 grants,
                 env: Vec::new(),
             }) {
@@ -2697,7 +2698,8 @@ mod tests {
         register_provider(&mut r, Box::new(MockProv::new("settings")));
         // A second tab, parked in `c/z` on `inner`.
         let (p, root) = fresh(&mut r);
-        let mut tab = sicompass_ui::app_state::TabSnapshot::nav_only(ids(&[1, 0, 0, 0]), String::new());
+        let mut tab =
+            sicompass_ui::app_state::TabSnapshot::nav_only(ids(&[1, 0, 0, 0]), String::new());
         tab.providers = vec![Box::new(MockProv::new("alpha")), p];
         tab.ffon = vec![FfonElement::new_obj("alpha"), root];
         r.tabs.push(tab);
@@ -3140,6 +3142,7 @@ mod tests {
 
     fn make_test_manifest(name: &str) -> PluginManifest {
         PluginManifest {
+            markup: false,
             name: name.to_owned(),
             display_name: name.to_owned(),
             plugin_type: PluginType::Process,

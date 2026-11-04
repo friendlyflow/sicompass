@@ -83,6 +83,38 @@ tutorial-play-radio-red = rood
 tutorial-play-image-intro = Afbeeldingen worden ter plaatse weergegeven, en ze kunnen tekst dragen ervoor en erna. Je schermlezer leest de voorvoegseltekst, dan de afbeelding, dan de achtervoegseltekst, zodat een afbeelding nooit een ongelabelde leemte is.
 tutorial-play-image = Voorvoegseltekst, dan de afbeelding: __TEXTURE_JPG__ en achtervoegseltekst erna.
 tutorial-play-link = Druk op Rechts om dit gelinkte bestand lui te laden: __FFON_JSON__
+tutorial-play-navigate = Navigatiemodus, bewegen binnen een rij
+tutorial-nav-landing = Sommige rijen bevatten meerdere afbeeldingen, links of knoppen. Als je op zo een rij terechtkomt, zegt je schermlezer hoeveel van elk. Druk op Omlaag en luister.
+tutorial-nav-links-how = i: op de rij hieronder, start de navigatiemodus op de eerste link, of a op de laatste. Rechts en Links bewegen tussen de links, en je schermlezer noemt elke link. Enter volgt de link waar je op staat, Escape verlaat de modus.
+tutorial-nav-links = Eerste pagina __FFON_JSON__ tweede pagina __FFON_JSON__ derde pagina __FFON_JSON__
+tutorial-nav-buttons-how = i: op de rij hieronder, hetzelfde met knoppen. Rechts gaat naar de tweede, Enter drukt op de knop waar je op staat, en Escape verlaat de modus.
+tutorial-nav-buttons = <button>demo</button>Eerste knop <button>demo</button>Tweede knop
+tutorial-nav-lines-how = i: op de rij hieronder, die afbreekt, gaan Omlaag en Omhoog naar de regel eronder of erboven, en Rechts en Links gaan nog altijd een voor een.
+tutorial-nav-lines = Pagina een __FFON_JSON__ pagina twee __FFON_JSON__ pagina drie __FFON_JSON__ pagina vier __FFON_JSON__
+tutorial-nav-done = Dat is de navigatiemodus. Druk op Links om terug te gaan.
+tutorial-play-style = Opgemaakte lijsten, met HTML en CSS
+tutorial-style-intro = Elke lijst kan opgemaakt worden met CSS, en de rijen kunnen HTML-tags bevatten. Druk op Rechts op een onderdeel hieronder om er een te zien. De laatste rij toont de CSS die het doet.
+tutorial-style-warm = <div class="warm">Een warm kleurenthema</div>
+tutorial-style-warm-text = Deze rijen halen hun kleuren uit een stylesheet.
+tutorial-style-warm-more = Beweeg omhoog en omlaag. De geselecteerde rij heeft ook een eigen kleur.
+tutorial-style-cards = <div class="cards">Kaarten</div>
+tutorial-style-cards-one = Marge, een rand en afgeronde hoeken maken van elke rij een kaart.
+tutorial-style-cards-two = De toetsen en je schermlezer veranderen niet. Een kaart is nog altijd een rij.
+tutorial-style-headings = Koppen en vet
+tutorial-style-h1 = <h1>Een grote kop</h1>
+tutorial-style-h2 = <h2>Een kleinere kop</h2>
+tutorial-style-inline = <p>Een rij kan een <b>vet</b> woord hebben, of een <span class="hot">gekleurd</span> woord.</p>
+tutorial-style-headings-how = Deze komen van HTML-tags in de rij, zoals h1, h2, b en span.
+tutorial-style-classes = Afgewerkte en dringende rijen
+tutorial-style-done = <p class="done">Vorige week verstuurd</p>
+tutorial-style-urgent = <p class="urgent">Heeft vandaag een antwoord nodig</p>
+tutorial-style-focus = <div class="markers">De cursor en het lijstvoorvoegsel</div>
+tutorial-style-focus-text = Deze lijst heeft een eigen cursorkleur. Beweeg omhoog en omlaag.
+tutorial-style-marker-text = De pijl of het streepje aan het begin van een rij kan ook een eigen kleur hebben.
+tutorial-style-wide = <div class="wide">De volledige breedte gebruiken</div>
+tutorial-style-wide-text = De meeste lijsten stoppen bij 120 tekens zodat regels makkelijk leesbaar blijven, maar deze gebruikt de hele breedte van het venster, hoe breed dat ook is, wat je kunt zien door het venster groter te maken en te kijken hoe deze regel doorloopt tot aan de rand.
+tutorial-style-site = Druk op Rechts om een kleine site te bezoeken: __SITE_JSON__
+tutorial-style-yours = Zet een bestand met de naam user.css in dezelfde map als settings.json om elke lijst op jouw manier op te maken. Het wordt gelezen wanneer Sicompass start.
 tutorial-play-scroll = Scrolmodus maakt deze lijst en haar sublijsten plat tot één leesweergave. Druk op S en gebruik dan PgUp, PgDown, Home en End op de lange passage hieronder.
 tutorial-play-lorem = __LOREM_IPSUM__
 tutorial-sec-config = Instellingen en configuratie

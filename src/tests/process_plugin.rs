@@ -71,6 +71,7 @@ fn open_in(dir: &Path, grants: Grants) -> Result<ProcessProvider, String> {
         plugin_name: "fixture",
         settings_section: "fixture",
         plugin_dir: dir,
+        markup: false,
         grants,
         env: Vec::new(),
     })
@@ -390,6 +391,7 @@ fn a_real_plugin_starts_fetches_and_stops() {
         plugin_name: &m.name,
         settings_section: &m.display_name,
         plugin_dir: &dir,
+        markup: false,
         grants,
         env: Vec::new(),
     })

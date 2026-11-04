@@ -82,6 +82,38 @@ tutorial-play-radio-red = rouge
 tutorial-play-image-intro = Les images s'affichent en ligne, et elles peuvent porter du texte avant et après. Votre lecteur d'écran lit le préfixe, puis l'image, puis le suffixe, de sorte qu'une image n'est jamais un trou sans étiquette.
 tutorial-play-image = Texte de préfixe, puis l'image : __TEXTURE_JPG__ et le texte de suffixe après elle.
 tutorial-play-link = Appuyez sur Droite pour charger paresseusement ce fichier lié : __FFON_JSON__
+tutorial-play-navigate = Mode navigation, se déplacer dans une ligne
+tutorial-nav-landing = Certaines lignes contiennent plusieurs images, liens ou boutons. Quand vous arrivez sur l'une d'elles, votre lecteur d'écran dit combien de chaque. Appuyez sur Bas et écoutez.
+tutorial-nav-links-how = i : sur la ligne ci-dessous, démarre le mode navigation sur le premier lien, ou a sur le dernier. Droite et Gauche passent d'un lien à l'autre, et votre lecteur d'écran nomme chacun. Entrée suit celui où vous êtes, Échap quitte.
+tutorial-nav-links = Première page __FFON_JSON__ deuxième page __FFON_JSON__ troisième page __FFON_JSON__
+tutorial-nav-buttons-how = i : sur la ligne ci-dessous, pareil avec des boutons. Droite passe au deuxième, Entrée appuie sur celui où vous êtes, et Échap quitte.
+tutorial-nav-buttons = <button>demo</button>Premier bouton <button>demo</button>Deuxième bouton
+tutorial-nav-lines-how = i : sur la ligne ci-dessous, qui passe à la ligne, Bas et Haut vont à la ligne en dessous ou au-dessus, et Droite et Gauche vont toujours un par un.
+tutorial-nav-lines = Page un __FFON_JSON__ page deux __FFON_JSON__ page trois __FFON_JSON__ page quatre __FFON_JSON__
+tutorial-nav-done = Voilà le mode navigation. Appuyez sur Gauche pour revenir.
+tutorial-play-style = Listes stylées, avec HTML et CSS
+tutorial-style-intro = Toute liste peut être stylée avec du CSS, et ses lignes peuvent contenir des balises HTML. Appuyez sur Droite sur une section ci-dessous pour en voir une. Sa dernière ligne montre le CSS qui le fait.
+tutorial-style-warm = <div class="warm">Un thème de couleurs chaudes</div>
+tutorial-style-warm-text = Ces lignes prennent leurs couleurs dans une feuille de style.
+tutorial-style-warm-more = Déplacez-vous vers le haut et le bas. La ligne sélectionnée a aussi sa propre couleur.
+tutorial-style-cards = <div class="cards">Cartes</div>
+tutorial-style-cards-one = Une marge, une bordure et des coins arrondis font de chaque ligne une carte.
+tutorial-style-cards-two = Les touches et votre lecteur d'écran ne changent pas. Une carte reste une ligne.
+tutorial-style-headings = Titres et gras
+tutorial-style-h1 = <h1>Un grand titre</h1>
+tutorial-style-h2 = <h2>Un titre plus petit</h2>
+tutorial-style-inline = <p>Une ligne peut avoir un mot en <b>gras</b>, ou un mot <span class="hot">coloré</span>.</p>
+tutorial-style-headings-how = Ils viennent de balises HTML dans la ligne, comme h1, h2, b et span.
+tutorial-style-classes = Lignes terminées et urgentes
+tutorial-style-done = <p class="done">Livré la semaine dernière</p>
+tutorial-style-urgent = <p class="urgent">Demande une réponse aujourd'hui</p>
+tutorial-style-focus = <div class="markers">Le curseur et le préfixe de liste</div>
+tutorial-style-focus-text = Cette liste a sa propre couleur de curseur. Déplacez-vous vers le haut et le bas.
+tutorial-style-marker-text = La flèche ou le tiret au début d'une ligne peut aussi avoir sa propre couleur.
+tutorial-style-wide = <div class="wide">Utiliser toute la largeur</div>
+tutorial-style-wide-text = La plupart des listes s'arrêtent à 120 caractères pour que les lignes restent faciles à lire, mais celle-ci utilise toute la largeur de la fenêtre, quelle qu'elle soit, ce que vous pouvez voir en agrandissant la fenêtre et en regardant cette ligne continuer jusqu'au bord.
+tutorial-style-site = Appuyez sur Droite pour visiter un petit site : __SITE_JSON__
+tutorial-style-yours = Placez un fichier nommé user.css dans le même dossier que settings.json pour styler chaque liste à votre façon. Il est lu au démarrage de Sicompass.
 tutorial-play-scroll = Le mode défilement aplatit cette liste et ses sous-listes en une seule vue de lecture. Appuyez sur S, puis utilisez PgUp, PgDown, Home et End sur le long passage ci-dessous.
 tutorial-play-lorem = __LOREM_IPSUM__
 tutorial-sec-config = Paramètres et configuration
