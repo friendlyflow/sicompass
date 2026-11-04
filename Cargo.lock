@@ -2851,7 +2851,7 @@ dependencies = [
 [[package]]
 name = "photoalbum-plugin"
 version = "0.1.0"
-source = "git+https://github.com/friendlyflow/photoalbum-plugin-sicompass?rev=5da606f226d9746ae7660914f3a340ad432ea435#5da606f226d9746ae7660914f3a340ad432ea435"
+source = "git+https://github.com/friendlyflow/photoalbum-plugin-sicompass?rev=2c1cf537f47eb6d2df294485ef72e6367e74b738#2c1cf537f47eb6d2df294485ef72e6367e74b738"
 dependencies = [
  "sicompass-sdk",
 ]
@@ -4930,7 +4930,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 [[package]]
 name = "videostore-plugin"
 version = "0.1.0"
-source = "git+https://github.com/friendlyflow/videostore-plugin-sicompass?rev=d4a48b77676e76fd65a89547730a30863e596199#d4a48b77676e76fd65a89547730a30863e596199"
+source = "git+https://github.com/friendlyflow/videostore-plugin-sicompass?rev=5eda4f63842b11855f52d37e5bba174c82ba5166#5eda4f63842b11855f52d37e5bba174c82ba5166"
 dependencies = [
  "sicompass-sdk",
 ]
