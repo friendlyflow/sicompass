@@ -152,6 +152,10 @@ every command with `cd PROJECT_ROOT &&` (the actual absolute project root).**
   `dist-workspace.toml` and run `dist generate`. The exception is
   `src/wix/main.wxs`, which is hand-edited and protected by
   `allow-dirty = ["msi"]`.
+- **desicompass and loginsicompass release after this repo**, each with
+  `/release <repo>`, because they pin it. A new sicompass tag leaves desicompass
+  behind until its pins and its `sicompass (>= X)` floor move. See "The session
+  repos" in `docs/releasing.md`. Say so in the report at step 10.
 - A release should carry roughly 25 assets across the four targets. If it has
   only the Windows ones, `custom-native-packages` failed inside the Release run
   and its logs are in the same run.

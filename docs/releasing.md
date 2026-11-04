@@ -237,3 +237,29 @@ So a file the app reads at runtime belongs **in the crate that owns it**:
 `sicompass_sdk::assets::register_bytes`. Then none of the four lists needs to
 know. `src/tests/packaging.rs` guards this: the top-level `assets/`
 may hold icons and the desktop entry only.
+
+## The session repos
+
+`desicompass` and `loginsicompass` release through the same tag-push idea, for
+Linux only. A `vX.Y.Z` tag there runs that repo's `release.yml`, which publishes
+a `.deb`, an `.rpm` and an archive. `/release desicompass` and
+`/release loginsicompass` follow those repos' own skills. Nothing is published
+there unless the `.deb`, installed in a bare container, starts. Each repo's
+`docs/releasing.md` explains what it does differently from this pipeline and why.
+
+**The order, when everything moves.** Each repo pins the ones before it, and a
+pin has to name a tag that exists:
+
+1. `sicompass-plugin-sdk`, if the SDK changed
+2. `sicompass-ui`
+3. `sicompass`
+4. `loginsicompass`
+5. `desicompass`
+
+After releasing sicompass, desicompass is out of date in three places that have
+to move together: the `sicompass-store` and `sicompass-tutorial` tags in
+`lib/lib_superkey/Cargo.toml`, its flake's `sicompass` input, and the
+`sicompass (>= X)` floor in its packages. Its `tests/packaging.rs` fails until
+they agree. The floor is what makes the two packages install together, since the
+sicompass `.deb` and `.rpm` are what satisfy it: desicompass depends on the
+package name `sicompass`, so that name must not change.

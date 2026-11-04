@@ -197,6 +197,10 @@ newline). A surface that edits text itself (a dashboard) builds on
 See [docs/releasing.md](docs/releasing.md) for the tag-to-artifact pipeline,
 the pre-release checklist, and the post-release smoke test.
 
+desicompass and loginsicompass have their own, smaller pipeline for Linux, and
+each has its own `/release <repo>`. The order across the repos is in
+[docs/releasing.md](docs/releasing.md#the-session-repos).
+
 ## Testing
 
 - If tests fail, fix the code — never leave a task with failing tests.
@@ -296,7 +300,7 @@ login screen ever calls. The sicompass-ui repo's Stop hook checks this.
 
 Where the renderer needs something only the embedder can answer, it asks:
 
-- `registry::HostHooks` — eight methods, every one defaulting to a no-op, stored
+- `registry::HostHooks` — nine methods, every one defaulting to a no-op, stored
   on `AppRenderer`. The app installs `boot::ProgramsHooks`; the greeter takes
   the defaults, which are all correct for something with no settings file, no
   updater and no tabs. Integration tests must install the app's hooks too (see
