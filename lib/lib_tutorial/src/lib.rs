@@ -286,7 +286,7 @@ static SECTIONS: &[Node] = &[
             Leaf("tutorial-play-image-intro"),
             Leaf("tutorial-play-image"),
             // A navigable Obj (empty children) whose key carries the <link> tag.
-            // Pressing Right lazy-loads the linked file's contents as children
+            // Pressing Enter lazy-loads the linked file's contents as children
             // (see resolve_link_to_elements). A Str leaf would not be navigable.
             Branch {
                 key: "tutorial-play-link",
@@ -774,9 +774,15 @@ impl Provider for TutorialProvider {
     /// real action. Instead of letting the generic press path silently re-fetch
     /// the list, confirm with a short spoken line so activating it has a clear,
     /// expected outcome.
-    fn on_button_press(&mut self, _function_name: &str) {
+    fn on_button_press(&mut self, function_name: &str) {
         register_translations();
-        self.pending_announce = Some(localize::t("tutorial-play-button-pressed"));
+        // The two buttons of the element mode example say which one was pressed.
+        let key = match function_name {
+            "first" => "tutorial-nav-button-first-pressed",
+            "second" => "tutorial-nav-button-second-pressed",
+            _ => "tutorial-play-button-pressed",
+        };
+        self.pending_announce = Some(localize::t(key));
     }
 
     fn take_error(&mut self) -> Option<String> {
@@ -938,6 +944,20 @@ mod tests {
             .iter()
             .filter_map(|e| e.as_obj().map(|o| o.key.to_owned()))
             .collect()
+    }
+
+    /// The two buttons of the element mode example say which of them was pressed.
+    #[test]
+    fn test_each_of_the_two_buttons_says_which_one_was_pressed() {
+        let mut p = provider();
+        p.push_path("Interactive playground");
+        p.on_button_press("first");
+        let first = p.take_error().expect("the first button announces itself");
+        p.on_button_press("second");
+        let second = p.take_error().expect("the second button announces itself");
+        assert_ne!(first, second);
+        assert!(first.to_lowercase().contains("first"), "{first}");
+        assert!(second.to_lowercase().contains("second"), "{second}");
     }
 
     #[test]
@@ -1455,7 +1475,11 @@ mod tests {
         assert!(counts.iter().any(|c| c.buttons >= 2), "{rows:?}");
         for pair in rows.windows(2) {
             if sicompass_sdk::tags::target_counts(&pair[1]).total() > 0 {
-                assert!(pair[0].starts_with("i:"), "leads with the key: {}", pair[0]);
+                assert!(
+                    pair[0].starts_with("Press i "),
+                    "leads with the key: {}",
+                    pair[0]
+                );
                 assert_eq!(sicompass_sdk::tags::target_counts(&pair[0]).total(), 0);
             }
         }
@@ -1479,7 +1503,7 @@ mod tests {
             "must contain the long passage for scroll practice"
         );
         // The link must be a navigable Obj (key carries <link>), not a Str leaf,
-        // otherwise pressing Right cannot lazy-load its contents.
+        // otherwise pressing Enter cannot lazy-load its contents.
         assert!(
             section_keys(&elems).iter().any(|k| k.contains("<link>")),
             "must contain a navigable link Obj"

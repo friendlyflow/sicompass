@@ -64,10 +64,12 @@ fn a_link_row_opens_the_json_page_it_points_at() {
     // Into the provider: the cursor is on the link row, shown as a link.
     press(&mut r, Keycode::Right);
     let label = r.current_list_item().map(|i| i.label.clone()).unwrap();
-    assert!(label.starts_with("+l"), "a link row: {label}");
+    assert!(label.starts_with("-l"), "a link row: {label}");
 
-    // Right follows it.
+    // Right does nothing on a link, Enter follows it.
     press(&mut r, Keycode::Right);
+    assert_eq!(r.current_id.depth(), 2, "Right stays where it is");
+    press(&mut r, Keycode::Return);
     assert_eq!(r.current_id.depth(), 3, "one level into the page");
     let root = r.ffon[0].as_obj().unwrap();
     let FfonElement::Obj(row) = &root.children[0] else {

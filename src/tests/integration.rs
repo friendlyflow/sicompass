@@ -1681,8 +1681,8 @@ fn webbrowser_fragment_link_navigates_to_target() {
     h.renderer.list_index = 0;
     h.renderer.sync_current_id_from_list();
 
-    // Press Right — should jump to the target (no fetch, no descend)
-    press_right(h.r());
+    // Press Enter — should jump to the target (no fetch, no descend)
+    press_enter(h.r());
 
     // Cursor must now be on the target row (index 1 in the page children)
     assert_eq!(
@@ -2311,7 +2311,7 @@ fn a_followed_link_to_a_web_page_is_rendered_by_the_browser_plugin() {
     sicompass::list::create_list_current_layer(h.r());
     press_right(h.r()); // into the URL Obj, onto the link
     sicompass::list::create_list_current_layer(h.r());
-    press_right(h.r()); // follow the link
+    press_enter(h.r()); // follow the link, with Enter: Right does nothing on a link
 
     let link_children = |r: &AppRenderer| -> Vec<String> {
         r.ffon[wb_idx]
@@ -2347,10 +2347,10 @@ fn a_followed_link_to_a_web_page_is_rendered_by_the_browser_plugin() {
 }
 
 /// A `<link>` Obj injected into the webbrowser FFON (simulating what
-/// `html_to_ffon` produces for `<a>` tags) should show the `+l` prefix in
-/// the visual list and navigating Right into it should push depth by one.
+/// `html_to_ffon` produces for `<a>` tags) should show the `-l` prefix in
+/// the visual list, Right should do nothing on it and Enter should follow it.
 #[test]
-fn webbrowser_link_obj_shows_plus_l_prefix_and_is_navigable() {
+fn webbrowser_link_obj_shows_dash_l_prefix_and_is_followed_with_enter() {
     let mut h = Harness::new_with_webbrowser();
     let wb_idx = h.provider_idx("webbrowser").expect("webbrowser not found");
     navigate_to_provider(h.r(), wb_idx);
@@ -2371,7 +2371,7 @@ fn webbrowser_link_obj_shows_plus_l_prefix_and_is_navigable() {
     press_right(h.r()); // navigate into the URL Obj (depth 3)
     sicompass::list::create_list_current_layer(h.r());
 
-    // The link Obj item should have a "+l" prefix in the visual list
+    // The link Obj item should have a "-l" prefix in the visual list
     let link_item = h
         .renderer
         .total_list
@@ -2382,12 +2382,12 @@ fn webbrowser_link_obj_shows_plus_l_prefix_and_is_navigable() {
         "link element should appear in the list"
     );
     assert!(
-        link_item.unwrap().label.starts_with("+l"),
-        "link Obj should have '+l' prefix, got: '{}'",
+        link_item.unwrap().label.starts_with("-l"),
+        "link Obj should have '-l' prefix, got: '{}'",
         link_item.unwrap().label
     );
 
-    // Navigate to the link item and press Right — should go one level deeper
+    // Navigate to the link item
     let link_vis_idx = h
         .renderer
         .total_list
@@ -2408,9 +2408,15 @@ fn webbrowser_link_obj_shows_plus_l_prefix_and_is_navigable() {
 
     let depth_before = h.renderer.current_id.depth();
     press_right(h.r());
+    assert_eq!(
+        h.renderer.current_id.depth(),
+        depth_before,
+        "Right does nothing on a link"
+    );
+    press_enter(h.r());
     assert!(
         h.renderer.current_id.depth() >= depth_before,
-        "navigating Right into a link Obj should not decrease depth"
+        "Enter on a link Obj should not decrease depth"
     );
 }
 
