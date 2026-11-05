@@ -396,18 +396,18 @@ sicompass-sdk = { workspace = true, features = ["package", "ipc", "plugin"] }
 # The plugins tests/integration.rs runs, each built into a program by its
 # `examples/plugin_<name>.rs`. Pinned by rev to the commit whose `plugin.json` and
 # `locales/` are in tests/fixtures/plugins/<name>; move both together.
-photoalbum-plugin = { git = "https://github.com/friendlyflow/photoalbum-plugin-sicompass", rev = "2c1cf537f47eb6d2df294485ef72e6367e74b738" }
-videostore-plugin = { git = "https://github.com/friendlyflow/videostore-plugin-sicompass", rev = "5eda4f63842b11855f52d37e5bba174c82ba5166" }
-notes-plugin = { git = "https://github.com/friendlyflow/notes-plugin-sicompass", rev = "e88d6333c4170344263eda378cb7a762023814fd" }
-projectmanagement-plugin = { git = "https://github.com/friendlyflow/projectmanagement-plugin-sicompass", rev = "4e949889fa7ab1f3fdc87b1d1e7e3af02fce693d" }
-filebrowser-plugin = { git = "https://github.com/friendlyflow/filebrowser-plugin-sicompass", rev = "5a6f98587b9c94edcc1f2f8af61ed8bf2a05e578" }
-texteditor-plugin = { git = "https://github.com/friendlyflow/texteditor-plugin-sicompass", rev = "9adfb2633aa23a281157fad86c3844c6e0bb9084" }
-gitclient-plugin = { git = "https://github.com/friendlyflow/gitclient-plugin-sicompass", rev = "1edae6da5f13df39848e630025748ef6975f5d0d" }
-claude-plugin = { git = "https://github.com/friendlyflow/claude-plugin-sicompass", rev = "18535a84c5440bcdd439a7295c830001c8325361" }
-terminal-plugin = { git = "https://github.com/friendlyflow/terminal-plugin-sicompass", rev = "e45215b4b84bedea89f57190831be99b01e19880" }
-chatclient-plugin = { git = "https://github.com/friendlyflow/chatclient-plugin-sicompass", rev = "29487ebd892a802daf9e36c267887710f545a38a" }
-emailclient-plugin = { git = "https://github.com/friendlyflow/emailclient-plugin-sicompass", rev = "23a48ad30224ebe8fbd2dc84904ef41d87bbefbb" }
-webbrowser-plugin = { git = "https://github.com/friendlyflow/webbrowser-plugin-sicompass", rev = "9549c36346839ffba4878e8410dcf708a860550a" }
+photoalbum-plugin = { git = "https://github.com/friendlyflow/photoalbum-plugin-sicompass", rev = "8537b4104d1555cddcc9bd6599a9b9e1264c590d" }
+videostore-plugin = { git = "https://github.com/friendlyflow/videostore-plugin-sicompass", rev = "8d976c197331fd95a9211215c11bc825a97185be" }
+notes-plugin = { git = "https://github.com/friendlyflow/notes-plugin-sicompass", rev = "2334e98ca974b52c876f89d0c9ad6ec9cf7b8430" }
+projectmanagement-plugin = { git = "https://github.com/friendlyflow/projectmanagement-plugin-sicompass", rev = "520fa555545f46b7d5fb7abb699ea14ea678ee05" }
+filebrowser-plugin = { git = "https://github.com/friendlyflow/filebrowser-plugin-sicompass", rev = "a60556ba04d2294a88a206d30f88a7e5bdc09741" }
+texteditor-plugin = { git = "https://github.com/friendlyflow/texteditor-plugin-sicompass", rev = "a9c2b75c7e30d8085ad97ff1f6947cd0bd56b0c2" }
+gitclient-plugin = { git = "https://github.com/friendlyflow/gitclient-plugin-sicompass", rev = "bb2024f1c17223bd1fbfa4e25906388da956f789" }
+claude-plugin = { git = "https://github.com/friendlyflow/claude-plugin-sicompass", rev = "44ec1e982145a50779b4ad29c1a136eb365e7a6b" }
+terminal-plugin = { git = "https://github.com/friendlyflow/terminal-plugin-sicompass", rev = "f95f29e890e5c17d44fe2e11a3e1101af77c13ce" }
+chatclient-plugin = { git = "https://github.com/friendlyflow/chatclient-plugin-sicompass", rev = "250e7218ee3dffd5f03473e9cdc8ca1056394f6b" }
+emailclient-plugin = { git = "https://github.com/friendlyflow/emailclient-plugin-sicompass", rev = "b4f01b4143c5fb35a0aabfb9e49b2e6c0dbe00a8" }
+webbrowser-plugin = { git = "https://github.com/friendlyflow/webbrowser-plugin-sicompass", rev = "2c45dfb13dbe660a4d19a3cf8d9d34b82223e1bd" }
 sicompass-builtins = { workspace = true }
 sicompass-settings = { workspace = true }
 sicompass-tutorial = { workspace = true }

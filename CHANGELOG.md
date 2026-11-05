@@ -3,6 +3,46 @@
 cargo-dist parses this file and uses the matching version's section as the
 GitHub Release body, so entries here are what users read on the download page.
 
+## 0.2.4
+
+### Pictures and video in your lists
+
+- A video plays right in the window, like a picture. Enter pauses and resumes it, and plays it again when it has ended. Every build plays video.
+- A row can hold several pictures or a video. Rows can be laid out as a grid, and your own `user.css` next to `settings.json` styles every list. Plugins can ask for the same (`docs/styling.md`).
+- Press `i` or `a` on a row with links, pictures, buttons or videos to move between them, and Enter uses the one you are on. Enter or `d` shows a picture big.
+
+### Finding your way
+
+- Links are a dash `l`, and Enter follows them. The list that opens shows the followed link on its parent line, and Sicompass says which link or button you used.
+- Links and buttons stand out in every row, and the row you are on has a rounded border.
+- List prefixes are icons: an arrow right means there is more inside, and a dash means there is not. A back arrow leads the parent line.
+- `f` searches, and Tab opens a beginner's manual, in four languages.
+- Scroll mode shows only the content, with deeper levels indented.
+
+### Checkboxes, radio choices and the text editor
+
+- Enter changes a checkbox or a radio choice whatever it holds, and `i` or `a` reach a link or button inside it. Its prefix says what it holds, such as `cl` for a checkbox with a link.
+- The text editor has a line numbers setting: none, absolute or relative. It opens a file as its lines, indentation included, and it opens and saves `.ff` files.
+
+### Fixes
+
+- Picking a language keeps you in the language list, where it used to drop you into the section above it.
+- Ctrl+F results no longer run over the last letter of a row's prefix.
+- Orca speaks a move between rows with similar names, says a typed key once, says a search key in front of its row, and says a paste.
+- A plugin reload or a changed folder keeps your place, and tabs reopen by folder name.
+- Text from a file, a web page, an email or a chat room is shown exactly as written, and can never become markup. Plugins need this version for that, so update them after updating Sicompass.
+- The Windows installer includes the licence texts of everything inside the program.
+
+### Store
+
+- A third party's plugin is listed only while its developer holds Sicompass Cloud or Sicompass Commercial, and a lapsed developer's entry stays at its last release.
+
+### No more Intel Mac builds
+
+Intel Macs are not built any more, for Sicompass or its plugins. Macs with Apple Silicon are.
+
+Built against Sicompass SDK 0.9.13.
+
 ## 0.2.3
 
 - The "enable cloud sync" checkbox of a plugin shows only while you hold the plugin's service, such as Sicompass Cloud. Paying turns it on for every installed plugin the service covers, and for the ones you install later while you still pay. You can turn it off again per plugin. When the subscription ends the checkbox disappears and your data stays where it is. The Sicompass Cloud and Commercial pages in Store, tiers say which plugins paying turns on.

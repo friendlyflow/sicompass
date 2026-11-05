@@ -653,8 +653,8 @@ dependencies = [
 
 [[package]]
 name = "chatclient-plugin"
-version = "0.3.1"
-source = "git+https://github.com/friendlyflow/chatclient-plugin-sicompass?rev=29487ebd892a802daf9e36c267887710f545a38a#29487ebd892a802daf9e36c267887710f545a38a"
+version = "0.3.2"
+source = "git+https://github.com/friendlyflow/chatclient-plugin-sicompass?rev=250e7218ee3dffd5f03473e9cdc8ca1056394f6b#250e7218ee3dffd5f03473e9cdc8ca1056394f6b"
 dependencies = [
  "serde",
  "serde_json",
@@ -686,8 +686,8 @@ dependencies = [
 
 [[package]]
 name = "claude-plugin"
-version = "0.3.1"
-source = "git+https://github.com/friendlyflow/claude-plugin-sicompass?rev=18535a84c5440bcdd439a7295c830001c8325361#18535a84c5440bcdd439a7295c830001c8325361"
+version = "0.3.2"
+source = "git+https://github.com/friendlyflow/claude-plugin-sicompass?rev=44ec1e982145a50779b4ad29c1a136eb365e7a6b#44ec1e982145a50779b4ad29c1a136eb365e7a6b"
 dependencies = [
  "natord",
  "serde",
@@ -1105,8 +1105,8 @@ checksum = "e079f19b08ca6239f47f8ba8509c11cf3ea30095831f7fed61441475edd8c449"
 
 [[package]]
 name = "emailclient-plugin"
-version = "0.3.1"
-source = "git+https://github.com/friendlyflow/emailclient-plugin-sicompass?rev=23a48ad30224ebe8fbd2dc84904ef41d87bbefbb#23a48ad30224ebe8fbd2dc84904ef41d87bbefbb"
+version = "0.3.2"
+source = "git+https://github.com/friendlyflow/emailclient-plugin-sicompass?rev=b4f01b4143c5fb35a0aabfb9e49b2e6c0dbe00a8#b4f01b4143c5fb35a0aabfb9e49b2e6c0dbe00a8"
 dependencies = [
  "async-imap",
  "async-trait",
@@ -1212,7 +1212,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -1324,8 +1324,8 @@ checksum = "64cd1e32ddd350061ae6edb1b082d7c54915b5c672c389143b9a63403a109f24"
 
 [[package]]
 name = "filebrowser-plugin"
-version = "0.3.2"
-source = "git+https://github.com/friendlyflow/filebrowser-plugin-sicompass?rev=5a6f98587b9c94edcc1f2f8af61ed8bf2a05e578#5a6f98587b9c94edcc1f2f8af61ed8bf2a05e578"
+version = "0.3.3"
+source = "git+https://github.com/friendlyflow/filebrowser-plugin-sicompass?rev=a60556ba04d2294a88a206d30f88a7e5bdc09741#a60556ba04d2294a88a206d30f88a7e5bdc09741"
 dependencies = [
  "base64 0.22.1",
  "libc",
@@ -1649,8 +1649,8 @@ dependencies = [
 
 [[package]]
 name = "gitclient-plugin"
-version = "0.3.1"
-source = "git+https://github.com/friendlyflow/gitclient-plugin-sicompass?rev=1edae6da5f13df39848e630025748ef6975f5d0d#1edae6da5f13df39848e630025748ef6975f5d0d"
+version = "0.3.2"
+source = "git+https://github.com/friendlyflow/gitclient-plugin-sicompass?rev=bb2024f1c17223bd1fbfa4e25906388da956f789#bb2024f1c17223bd1fbfa4e25906388da956f789"
 dependencies = [
  "natord",
  "sicompass-sdk",
@@ -2527,8 +2527,8 @@ checksum = "0676bb32a98c1a483ce53e500a81ad9c3d5b3f7c920c28c24e9cb0980d0b5bc8"
 
 [[package]]
 name = "notes-plugin"
-version = "0.4.4"
-source = "git+https://github.com/friendlyflow/notes-plugin-sicompass?rev=e88d6333c4170344263eda378cb7a762023814fd#e88d6333c4170344263eda378cb7a762023814fd"
+version = "0.4.5"
+source = "git+https://github.com/friendlyflow/notes-plugin-sicompass?rev=2334e98ca974b52c876f89d0c9ad6ec9cf7b8430#2334e98ca974b52c876f89d0c9ad6ec9cf7b8430"
 dependencies = [
  "serde",
  "serde_json",
@@ -2918,7 +2918,7 @@ dependencies = [
 [[package]]
 name = "photoalbum-plugin"
 version = "0.1.0"
-source = "git+https://github.com/friendlyflow/photoalbum-plugin-sicompass?rev=2c1cf537f47eb6d2df294485ef72e6367e74b738#2c1cf537f47eb6d2df294485ef72e6367e74b738"
+source = "git+https://github.com/friendlyflow/photoalbum-plugin-sicompass?rev=8537b4104d1555cddcc9bd6599a9b9e1264c590d#8537b4104d1555cddcc9bd6599a9b9e1264c590d"
 dependencies = [
  "sicompass-sdk",
 ]
@@ -3127,8 +3127,8 @@ dependencies = [
 
 [[package]]
 name = "projectmanagement-plugin"
-version = "0.4.4"
-source = "git+https://github.com/friendlyflow/projectmanagement-plugin-sicompass?rev=4e949889fa7ab1f3fdc87b1d1e7e3af02fce693d#4e949889fa7ab1f3fdc87b1d1e7e3af02fce693d"
+version = "0.4.5"
+source = "git+https://github.com/friendlyflow/projectmanagement-plugin-sicompass?rev=520fa555545f46b7d5fb7abb699ea14ea678ee05#520fa555545f46b7d5fb7abb699ea14ea678ee05"
 dependencies = [
  "serde",
  "serde_json",
@@ -3251,7 +3251,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3580,7 +3580,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3639,7 +3639,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -4009,7 +4009,7 @@ checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
 
 [[package]]
 name = "sicompass"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "accesskit",
  "accesskit_macos",
@@ -4064,7 +4064,7 @@ dependencies = [
 
 [[package]]
 name = "sicompass-builtins"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "sicompass-sdk",
  "sicompass-settings",
@@ -4074,9 +4074,9 @@ dependencies = [
 
 [[package]]
 name = "sicompass-sdk"
-version = "0.9.12"
+version = "0.9.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e91fbe10d15913cca347cb3016aaf7dfa33d3e93da94e4060140481b0d55938b"
+checksum = "e78b89c9a6cb4a27aa711c1263a4eeb1fa1d406ff11e082466ba23f9eaed4c86"
 dependencies = [
  "async-trait",
  "base64 0.23.1",
@@ -4105,7 +4105,7 @@ dependencies = [
 
 [[package]]
 name = "sicompass-settings"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "async-trait",
  "serde",
@@ -4116,7 +4116,7 @@ dependencies = [
 
 [[package]]
 name = "sicompass-store"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "base64 0.23.1",
  "ed25519-dalek",
@@ -4143,7 +4143,7 @@ dependencies = [
 
 [[package]]
 name = "sicompass-tutorial"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "serde_json",
  "sicompass-sdk",
@@ -4152,8 +4152,8 @@ dependencies = [
 
 [[package]]
 name = "sicompass-ui"
-version = "0.2.1"
-source = "git+https://github.com/friendlyflow/sicompass-ui?rev=2af1c00bafc57578848c91eeef1d2623ac6df797#2af1c00bafc57578848c91eeef1d2623ac6df797"
+version = "0.2.2"
+source = "git+https://github.com/friendlyflow/sicompass-ui?tag=v0.2.2#8db8dce68ff06aec30177f1752bb823e230fdbf8"
 dependencies = [
  "accesskit",
  "accesskit_macos",
@@ -4187,7 +4187,7 @@ dependencies = [
 
 [[package]]
 name = "sicompass-updater"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "reqwest",
  "semver",
@@ -4452,7 +4452,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -4466,8 +4466,8 @@ dependencies = [
 
 [[package]]
 name = "terminal-plugin"
-version = "0.3.1"
-source = "git+https://github.com/friendlyflow/terminal-plugin-sicompass?rev=e45215b4b84bedea89f57190831be99b01e19880#e45215b4b84bedea89f57190831be99b01e19880"
+version = "0.3.2"
+source = "git+https://github.com/friendlyflow/terminal-plugin-sicompass?rev=f95f29e890e5c17d44fe2e11a3e1101af77c13ce#f95f29e890e5c17d44fe2e11a3e1101af77c13ce"
 dependencies = [
  "libc",
  "natord",
@@ -4484,8 +4484,8 @@ checksum = "8f50febec83f5ee1df3015341d8bd429f2d1cc62bcba7ea2076759d315084683"
 
 [[package]]
 name = "texteditor-plugin"
-version = "0.3.1"
-source = "git+https://github.com/friendlyflow/texteditor-plugin-sicompass?rev=9adfb2633aa23a281157fad86c3844c6e0bb9084#9adfb2633aa23a281157fad86c3844c6e0bb9084"
+version = "0.3.2"
+source = "git+https://github.com/friendlyflow/texteditor-plugin-sicompass?rev=a9c2b75c7e30d8085ad97ff1f6947cd0bd56b0c2#a9c2b75c7e30d8085ad97ff1f6947cd0bd56b0c2"
 dependencies = [
  "base64 0.22.1",
  "libc",
@@ -5061,7 +5061,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 [[package]]
 name = "videostore-plugin"
 version = "0.1.0"
-source = "git+https://github.com/friendlyflow/videostore-plugin-sicompass?rev=5eda4f63842b11855f52d37e5bba174c82ba5166#5eda4f63842b11855f52d37e5bba174c82ba5166"
+source = "git+https://github.com/friendlyflow/videostore-plugin-sicompass?rev=8d976c197331fd95a9211215c11bc825a97185be#8d976c197331fd95a9211215c11bc825a97185be"
 dependencies = [
  "sicompass-sdk",
 ]
@@ -5199,8 +5199,8 @@ dependencies = [
 
 [[package]]
 name = "webbrowser-plugin"
-version = "0.3.2"
-source = "git+https://github.com/friendlyflow/webbrowser-plugin-sicompass?rev=9549c36346839ffba4878e8410dcf708a860550a#9549c36346839ffba4878e8410dcf708a860550a"
+version = "0.3.3"
+source = "git+https://github.com/friendlyflow/webbrowser-plugin-sicompass?rev=2c45dfb13dbe660a4d19a3cf8d9d34b82223e1bd#2c45dfb13dbe660a4d19a3cf8d9d34b82223e1bd"
 dependencies = [
  "libc",
  "scraper",
@@ -5265,7 +5265,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]

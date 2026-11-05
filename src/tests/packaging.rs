@@ -409,6 +409,40 @@ fn ffmpeg_license_is_in_the_packaging_lists_and_names_the_built_version() {
     );
 }
 
+/// The MSI ships the licence texts the other packages do. Nothing but this checks it
+/// before a release: `light` fails on a missing file only at a tag, on a runner.
+#[test]
+fn the_msi_ships_every_licence_and_each_file_exists() {
+    let wxs = read("src/wix/main.wxs");
+    let mut wanted = vec![
+        "LICENSE".to_owned(),
+        "THIRD-PARTY-LICENSES.html".to_owned(),
+        "LICENSE-FFmpeg.txt".to_owned(),
+    ];
+    wanted.extend(
+        sicompass_ui::fonts::LICENSES
+            .iter()
+            .map(|(name, _)| (*name).to_owned()),
+    );
+    for name in wanted {
+        assert!(
+            wxs.contains(&format!("Name='{name}'")),
+            "src/wix/main.wxs does not install {name}"
+        );
+    }
+    let root = workspace_root();
+    let mut sources = 0;
+    for part in wxs.split(r"Source='..\").skip(1) {
+        let path = part.split('\'').next().unwrap().replace('\\', "/");
+        assert!(
+            root.join(&path).is_file(),
+            "main.wxs names {path}, which is not there"
+        );
+        sources += 1;
+    }
+    assert_eq!(sources, 6, "the licence files in main.wxs");
+}
+
 /// `scripts/gen-icons.sh` regenerates `assets/icons/*` here, but the window
 /// icon is embedded by the renderer, which keeps its own copy. A regenerated
 /// icon that never reached that copy would leave every window on the old one.

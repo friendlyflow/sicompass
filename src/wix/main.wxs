@@ -109,6 +109,33 @@
                     </Component>
                     -->
 
+                    <!--
+                      The licence texts of what is inside the .exe: the fonts, FFmpeg
+                      and every crate. The other packages ship the same files, and
+                      `packaging.rs` holds this list to them. The paths are relative
+                      to src/, where `light` runs.
+                    -->
+                    <Directory Id='Licenses' Name='licenses'>
+                        <Component Id='LicenseSicompass' Guid='*'>
+                            <File Id='LicenseSicompassFile' Name='LICENSE' DiskId='1' Source='..\LICENSE' KeyPath='yes'/>
+                        </Component>
+                        <Component Id='LicenseThirdParty' Guid='*'>
+                            <File Id='LicenseThirdPartyFile' Name='THIRD-PARTY-LICENSES.html' DiskId='1' Source='..\THIRD-PARTY-LICENSES.html' KeyPath='yes'/>
+                        </Component>
+                        <Component Id='LicenseFFmpeg' Guid='*'>
+                            <File Id='LicenseFFmpegFile' Name='LICENSE-FFmpeg.txt' DiskId='1' Source='..\licenses\LICENSE-FFmpeg.txt' KeyPath='yes'/>
+                        </Component>
+                        <Component Id='LicenseBootstrapIcons' Guid='*'>
+                            <File Id='LicenseBootstrapIconsFile' Name='LICENSE-BootstrapIcons.txt' DiskId='1' Source='..\fonts\LICENSE-BootstrapIcons.txt' KeyPath='yes'/>
+                        </Component>
+                        <Component Id='LicenseDejaVu' Guid='*'>
+                            <File Id='LicenseDejaVuFile' Name='LICENSE-DejaVu.txt' DiskId='1' Source='..\fonts\LICENSE-DejaVu.txt' KeyPath='yes'/>
+                        </Component>
+                        <Component Id='LicenseNotoColorEmoji' Guid='*'>
+                            <File Id='LicenseNotoColorEmojiFile' Name='LICENSE-NotoColorEmoji.txt' DiskId='1' Source='..\fonts\LICENSE-NotoColorEmoji.txt' KeyPath='yes'/>
+                        </Component>
+                    </Directory>
+
                     <Directory Id='Bin' Name='bin'>
                         <Component Id='Path' Guid='3D255495-2455-4CAB-8782-168EF8D5E8A7' KeyPath='yes'>
                             <Environment
@@ -212,6 +239,12 @@
               `packaging.rs` pins the two lists against each other instead.
             -->
             <ComponentRef Id='binary0'/>
+            <ComponentRef Id='LicenseSicompass'/>
+            <ComponentRef Id='LicenseThirdParty'/>
+            <ComponentRef Id='LicenseFFmpeg'/>
+            <ComponentRef Id='LicenseBootstrapIcons'/>
+            <ComponentRef Id='LicenseDejaVu'/>
+            <ComponentRef Id='LicenseNotoColorEmoji'/>
             <ComponentRef Id='StartMenuShortcut'/>
 
             <Feature
