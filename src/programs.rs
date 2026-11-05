@@ -2210,7 +2210,11 @@ fn apply_setting(renderer: &mut AppRenderer, key: &str, value: &str, skip_enable
             // depth 2) without re-navigating, its list renders blank until a
             // manual refresh. So gate these on a live (non-startup) change.
             if !skip_enable {
+                let group = radio_group_at_cursor(renderer);
                 sicompass_ui::provider::refresh_current_directory(renderer);
+                if let Some(group) = group {
+                    back_into_radio_group(renderer, group);
+                }
                 sicompass_ui::provider::collapse_inactive_for_relocalize(renderer);
                 // Re-announce in the new locale so the screen reader switches
                 // voice even when the focused control's text is unchanged.
@@ -2233,6 +2237,80 @@ fn apply_setting(renderer: &mut AppRenderer, key: &str, value: &str, skip_enable
             provider.on_setting_change(key, value);
         }
     }
+}
+
+/// The radio group the cursor is inside, as [`back_into_radio_group`] finds it again.
+struct RadioGroupAtCursor {
+    /// The group's own row.
+    id: sicompass_sdk::ffon::IdArray,
+    /// Its choices, each as it reads with no tags.
+    choices: Vec<String>,
+    /// The choice the cursor is on.
+    at: usize,
+}
+
+fn radio_choices(group: &sicompass_sdk::ffon::FfonObject) -> Vec<String> {
+    use sicompass_sdk::ffon::FfonElement;
+    group
+        .children
+        .iter()
+        .map(|choice| match choice {
+            FfonElement::Str(text) => sicompass_sdk::tags::strip_display(text),
+            FfonElement::Obj(obj) => sicompass_sdk::tags::strip_display(&obj.key),
+        })
+        .collect()
+}
+
+fn radio_group_at_cursor(renderer: &AppRenderer) -> Option<RadioGroupAtCursor> {
+    use sicompass_sdk::ffon::get_ffon_at_id;
+    let mut id = renderer.current_id.clone();
+    let at = id.pop()?;
+    let group = get_ffon_at_id(&renderer.ffon, &id)?
+        .get(id.last()?)?
+        .as_obj()
+        .filter(|group| sicompass_sdk::tags::has_radio(&group.key))?;
+    Some(RadioGroupAtCursor {
+        id,
+        choices: radio_choices(group),
+        at,
+    })
+}
+
+/// A new language re-sorts the rows of a settings section, because they are sorted by
+/// what they say. So the group the cursor was in has moved, and its old place holds
+/// another row. Find it among its siblings by its choices, which are the same in every
+/// language where this matters (the language group's are each in their own), and put
+/// the cursor back on the same choice. If nothing matches the cursor stays where the
+/// refresh left it.
+fn back_into_radio_group(renderer: &mut AppRenderer, group: RadioGroupAtCursor) {
+    use sicompass_sdk::ffon::get_ffon_at_id;
+    let Some(found) = get_ffon_at_id(&renderer.ffon, &group.id).and_then(|rows| {
+        rows.iter().enumerate().find_map(|(index, row)| {
+            let obj = row
+                .as_obj()
+                .filter(|obj| sicompass_sdk::tags::has_radio(&obj.key))?;
+            (radio_choices(obj) == group.choices).then(|| (index, obj.key.clone()))
+        })
+    }) else {
+        return;
+    };
+    let (index, key) = found;
+    let mut id = group.id;
+    id.set_last(index);
+    id.push(group.at);
+    renderer.current_id = id;
+    // Its name is in the provider's path too, in the language it was entered in.
+    if let Some(provider) = renderer
+        .current_id
+        .get(0)
+        .and_then(|i| renderer.providers.get_mut(i))
+    {
+        provider.pop_path();
+        provider.push_path(&sicompass_sdk::tags::strip_display(&key));
+    }
+    sicompass_ui::list::create_list_current_layer(renderer);
+    renderer.list_index = group.at;
+    renderer.needs_redraw = true;
 }
 
 // ---------------------------------------------------------------------------
