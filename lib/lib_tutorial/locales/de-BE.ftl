@@ -124,7 +124,7 @@ tutorial-grid-intro = Bilder können in einem Raster nebeneinander stehen, wie i
 tutorial-grid-photos = <div class="photos"><img src="asset:tutorial/photo-1.jpg" alt="Foto 1"><img src="asset:tutorial/photo-2.jpg" alt="Foto 2"><img src="asset:tutorial/photo-3.jpg" alt="Foto 3"><img src="asset:tutorial/photo-4.jpg" alt="Foto 4"><img src="asset:tutorial/photo-5.jpg" alt="Foto 5"><img src="asset:tutorial/photo-6.jpg" alt="Foto 6"></div>
 tutorial-grid-keys = Drücke i, um den Im-Element-Modus auf dieser Zeile zu starten. Links und Rechts gehen von Bild zu Bild, und Hoch und Runter gehen zur Bilderreihe darüber oder darunter. Drücke Enter oder d, um das aktuelle Bild groß zu sehen, und dann Escape, um zurückzukommen.
 tutorial-grid-css = Die Regel für .photos sagt display: grid, grid-template-columns: repeat(3, 1fr), gap: 15px. Das ist ein Raster aus drei gleich breiten Spalten, mit Abstand dazwischen. Die Bilder werden mit aspect-ratio und object-fit quadratisch gemacht.
-tutorial-grid-more = Dasselbe funktioniert mit display flex, für Bilder nebeneinander, die umbrechen. Deine eigenen Alben können all das nutzen.
+tutorial-grid-more = Dasselbe funktioniert mit display flex, für Bilder nebeneinander, die umbrechen. Deine eigenen Alben können all das nutzen. Das Fotoalbum aus dem Store zeigt deine eigenen Bilder auf diese Weise.
 tutorial-play-video = Video
 tutorial-video-intro = Videos spielen in Sicompass, wie Bilder. Die Zeile unten enthält einen kurzen Ausschnitt mit Ton. Gehe nach unten dorthin, und dein Bildschirmleser sagt, dass es ein Video gibt.
 tutorial-video-clip = <video src="asset:tutorial/clip.mp4">Testausschnitt</video>

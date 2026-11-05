@@ -93,8 +93,10 @@ jobs:
             nix develop -c ./scripts/release-plugin.sh pack
           fi
 
+      # A dry run on a tag publishes nothing either: it is signed with a throwaway
+      # key, which the Store would refuse.
       - name: Publish
-        if: github.ref_type == 'tag'
+        if: github.ref_type == 'tag' && !inputs.dry_run
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -103,7 +105,7 @@ jobs:
           gh release upload "$GITHUB_REF_NAME" dist/* --clobber
 
       - name: Keep the dry run's files
-        if: github.ref_type != 'tag'
+        if: github.ref_type != 'tag' || inputs.dry_run
         uses: actions/upload-artifact@v4
         with:
           name: dist

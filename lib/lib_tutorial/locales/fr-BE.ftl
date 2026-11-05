@@ -124,7 +124,7 @@ tutorial-grid-intro = Les images peuvent se placer côte à côte dans une grill
 tutorial-grid-photos = <div class="photos"><img src="asset:tutorial/photo-1.jpg" alt="Photo 1"><img src="asset:tutorial/photo-2.jpg" alt="Photo 2"><img src="asset:tutorial/photo-3.jpg" alt="Photo 3"><img src="asset:tutorial/photo-4.jpg" alt="Photo 4"><img src="asset:tutorial/photo-5.jpg" alt="Photo 5"><img src="asset:tutorial/photo-6.jpg" alt="Photo 6"></div>
 tutorial-grid-keys = Appuyez sur i pour entrer en mode dans l'élément sur cette ligne. Gauche et Droite passent d'une image à l'autre, et Haut et Bas vont à la rangée d'images au-dessus ou en dessous. Appuyez sur Entrée ou d pour voir en grand celle où vous êtes, puis sur Échap pour revenir.
 tutorial-grid-css = La règle pour .photos dit display: grid, grid-template-columns: repeat(3, 1fr), gap: 15px. C'est une grille de trois colonnes égales, avec un espace entre elles. Les images sont rendues carrées avec aspect-ratio et object-fit.
-tutorial-grid-more = La même chose marche avec display flex, pour des images côte à côte qui passent à la ligne. Vos propres albums peuvent tout utiliser.
+tutorial-grid-more = La même chose marche avec display flex, pour des images côte à côte qui passent à la ligne. Vos propres albums peuvent tout utiliser. L'album photo du Store affiche vos propres images de cette façon.
 tutorial-play-video = Vidéo
 tutorial-video-intro = Les vidéos se lisent dans Sicompass, comme les images. La ligne ci-dessous contient un court extrait avec du son. Descendez jusqu'à elle, et votre lecteur d'écran dit qu'il y a une vidéo.
 tutorial-video-clip = <video src="asset:tutorial/clip.mp4">Extrait de test</video>

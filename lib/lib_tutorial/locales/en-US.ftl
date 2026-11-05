@@ -145,7 +145,7 @@ tutorial-grid-intro = Pictures can sit side by side in a grid, like an album. Th
 tutorial-grid-photos = <div class="photos"><img src="asset:tutorial/photo-1.jpg" alt="Photo 1"><img src="asset:tutorial/photo-2.jpg" alt="Photo 2"><img src="asset:tutorial/photo-3.jpg" alt="Photo 3"><img src="asset:tutorial/photo-4.jpg" alt="Photo 4"><img src="asset:tutorial/photo-5.jpg" alt="Photo 5"><img src="asset:tutorial/photo-6.jpg" alt="Photo 6"></div>
 tutorial-grid-keys = Press i to enter in element mode on that row. Left and Right go from picture to picture, and Up and Down go to the row of pictures above or below. Press Enter or d to see the one you are on at full size, then Escape to come back.
 tutorial-grid-css = The rule for .photos says display: grid, grid-template-columns: repeat(3, 1fr), gap: 15px. This is a grid of three equal columns, with a gap between them. The pictures are made square with aspect-ratio and object-fit.
-tutorial-grid-more = The same works with display flex, for pictures side by side that wrap. Your own albums can use any of this.
+tutorial-grid-more = The same works with display flex, for pictures side by side that wrap. Your own albums can use any of this. The photo album from the Store shows your own pictures this way.
 tutorial-play-video = Video
 tutorial-video-intro = Videos play inside Sicompass, like pictures. The row below holds a short clip with sound. Move down to it, and your screen reader says there is one video.
 tutorial-video-clip = <video src="asset:tutorial/clip.mp4">Test clip</video>

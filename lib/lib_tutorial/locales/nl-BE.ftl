@@ -125,7 +125,7 @@ tutorial-grid-intro = Afbeeldingen kunnen naast elkaar staan in een raster, zoal
 tutorial-grid-photos = <div class="photos"><img src="asset:tutorial/photo-1.jpg" alt="Foto 1"><img src="asset:tutorial/photo-2.jpg" alt="Foto 2"><img src="asset:tutorial/photo-3.jpg" alt="Foto 3"><img src="asset:tutorial/photo-4.jpg" alt="Foto 4"><img src="asset:tutorial/photo-5.jpg" alt="Foto 5"><img src="asset:tutorial/photo-6.jpg" alt="Foto 6"></div>
 tutorial-grid-keys = Druk op i om de in-elementmodus op die rij te starten. Links en Rechts gaan van afbeelding naar afbeelding, en Omhoog en Omlaag gaan naar de rij afbeeldingen erboven of eronder. Druk op Enter of d om de afbeelding waar je op staat op volledige grootte te zien, en dan op Escape om terug te komen.
 tutorial-grid-css = De regel voor .photos zegt display: grid, grid-template-columns: repeat(3, 1fr), gap: 15px. Dit is een raster van drie gelijke kolommen, met ruimte ertussen. De afbeeldingen worden vierkant gemaakt met aspect-ratio en object-fit.
-tutorial-grid-more = Hetzelfde werkt met display flex, voor afbeeldingen naast elkaar die doorlopen op een volgende regel. Je eigen albums kunnen dit allemaal gebruiken.
+tutorial-grid-more = Hetzelfde werkt met display flex, voor afbeeldingen naast elkaar die doorlopen op een volgende regel. Je eigen albums kunnen dit allemaal gebruiken. Het fotoalbum uit de Store toont je eigen foto's op deze manier.
 tutorial-play-video = Video
 tutorial-video-intro = Video's spelen binnen Sicompass, zoals afbeeldingen. De rij hieronder bevat een kort fragment met geluid. Ga omlaag naar de rij, en je schermlezer zegt dat er een video is.
 tutorial-video-clip = <video src="asset:tutorial/clip.mp4">Testfragment</video>

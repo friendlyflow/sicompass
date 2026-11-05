@@ -73,6 +73,18 @@
       "repo": "friendlyflow/webbrowser-plugin-sicompass",
       "pubkey": "BUWOjQt7xPQo+xwZuhtFNYX18cqpVlYLnAMzRvtrhMU=",
       "category": "network"
+    },
+    {
+      "name": "photoalbum",
+      "repo": "friendlyflow/photoalbum-plugin-sicompass",
+      "pubkey": "kxJT8aIbO6pmQdDm7T4JHjTX0kvsgBw/WmmdXSNncnQ=",
+      "category": "media"
+    },
+    {
+      "name": "videostore",
+      "repo": "friendlyflow/videostore-plugin-sicompass",
+      "pubkey": "RgxaqEauzw7HNDpgzl0TNjz3XVBLBKljxPZcIxbpZbQ=",
+      "category": "media"
     }
   ]
 }
