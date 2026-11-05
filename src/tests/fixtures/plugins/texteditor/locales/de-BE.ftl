@@ -16,6 +16,8 @@ texteditor-error-save = { $name } konnte nicht gespeichert werden: { $err }
 texteditor-error-add-here = in { $path } kann nichts hinzugefügt werden: { $err }
 texteditor-error-change-here = { $path } kann nicht geändert werden: { $err }
 texteditor-error-reason-permission-denied = Zugriff verweigert
+texteditor-error-reason-unreadable = die Datei kann nicht gelesen werden
+texteditor-error-reason-line-gone = diese Zeile ist nicht mehr in der Datei
 
 # A .ff file: a tree of nodes, each hashed over its children and its text.
 # Every level of a .ff file opens with this row. Inside it: the hash of the

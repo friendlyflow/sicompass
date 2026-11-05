@@ -16,6 +16,8 @@ texteditor-error-save = kon { $name } niet opslaan: { $err }
 texteditor-error-add-here = kan niets toevoegen aan { $path }: { $err }
 texteditor-error-change-here = kan { $path } niet wijzigen: { $err }
 texteditor-error-reason-permission-denied = geen toestemming
+texteditor-error-reason-unreadable = het bestand kan niet gelezen worden
+texteditor-error-reason-line-gone = die regel staat niet meer in het bestand
 
 # A .ff file: a tree of nodes, each hashed over its children and its text.
 # Every level of a .ff file opens with this row. Inside it: the hash of the

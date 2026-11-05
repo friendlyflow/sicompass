@@ -17366,6 +17366,38 @@ fn texteditor_line_deletion_is_undoable() {
     );
 }
 
+/// A tab saved inside a file comes back there at the next start, and an edit in it is
+/// written like any other. It used to change only the row, and the file silently stayed.
+#[test]
+fn texteditor_edit_in_a_restored_tab_is_written() {
+    let tmp = TempDir::new().unwrap();
+    let file = tmp.path().join("sample.txt");
+    std::fs::write(&file, "alpha\nbeta\ngamma").unwrap();
+
+    let mut renderer = setup_texteditor(tmp.path());
+    let tabs = serde_json::json!([{
+        "id": [0, 0, 2],
+        "path": file.to_str().unwrap(),
+        "program": "texteditor",
+    }]);
+    let section = serde_json::json!({ "tabs": tabs.to_string(), "activeTab": "0" });
+    sicompass::programs::apply_tabs_section(&mut renderer, section.as_object().unwrap());
+    sicompass::list::create_list_current_layer(&mut renderer);
+
+    cursor_to_label(&mut renderer, "gamma");
+    press(&mut renderer, Keycode::I);
+    type_text(&mut renderer, "X");
+    press_enter(&mut renderer);
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap(),
+        "alpha\nbeta\nXgamma"
+    );
+    assert_eq!(
+        renderer.total_list[2].label, "-ci Xgamma",
+        "still a line of the file"
+    );
+}
+
 /// The source line each row of the open file says it is, which the line numbers show.
 fn source_lines(r: &AppRenderer) -> Vec<usize> {
     use sicompass_sdk::tags;

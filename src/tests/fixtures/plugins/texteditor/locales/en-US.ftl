@@ -17,6 +17,8 @@ texteditor-error-add-here = cannot add to { $path }: { $err }
 texteditor-error-change-here = cannot change { $path }: { $err }
 # The { $err } of the messages above when the system refused for lack of rights.
 texteditor-error-reason-permission-denied = permission denied
+texteditor-error-reason-unreadable = the file cannot be read
+texteditor-error-reason-line-gone = that line is no longer in the file
 
 # A .ff file: a tree of nodes, each hashed over its children and its text.
 # Every level of a .ff file opens with this row. Inside it: the hash of the

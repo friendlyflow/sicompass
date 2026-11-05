@@ -4485,7 +4485,7 @@ checksum = "8f50febec83f5ee1df3015341d8bd429f2d1cc62bcba7ea2076759d315084683"
 [[package]]
 name = "texteditor-plugin"
 version = "0.3.2"
-source = "git+https://github.com/friendlyflow/texteditor-plugin-sicompass?rev=a9c2b75c7e30d8085ad97ff1f6947cd0bd56b0c2#a9c2b75c7e30d8085ad97ff1f6947cd0bd56b0c2"
+source = "git+https://github.com/friendlyflow/texteditor-plugin-sicompass?rev=993972169148649489d824ff8c82e85dfe0244fd#993972169148649489d824ff8c82e85dfe0244fd"
 dependencies = [
  "base64 0.22.1",
  "libc",
