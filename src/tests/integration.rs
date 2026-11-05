@@ -19127,6 +19127,54 @@ fn focused_row(r: &AppRenderer) -> String {
         .unwrap_or_else(|| format!("<no row at index {idx} of {}>", r.total_list.len()))
 }
 
+/// Like the text editor's: a tab restored inside a note edits it for real.
+#[test]
+fn an_edit_of_a_note_in_a_restored_tab_is_kept() {
+    let dir = TempDir::new().unwrap();
+    let mut r = notes_app_at(dir.path());
+    press_right(&mut r);
+    press_ctrl(&mut r, Keycode::A);
+    type_text(&mut r, "first");
+    press_enter(&mut r);
+    press_ctrl(&mut r, Keycode::A);
+    type_text(&mut r, "second");
+    press_enter(&mut r);
+    assert!(
+        notes_on_screen(&r).iter().any(|l| l.contains("second")),
+        "{:?}",
+        screen(&r)
+    );
+    let saved_path = r.providers[0].current_path().to_owned();
+    let saved_id: Vec<usize> = (0..r.current_id.depth())
+        .map(|i| r.current_id.get(i).unwrap())
+        .collect();
+    drop(r);
+
+    // The next start: a new process, the saved tab, and an edit.
+    let mut r = notes_app_at(dir.path());
+    let tabs = serde_json::json!([{ "id": saved_id, "path": saved_path, "program": "notes" }]);
+    let section = serde_json::json!({ "tabs": tabs.to_string(), "activeTab": "0" });
+    sicompass::programs::apply_tabs_section(&mut r, section.as_object().unwrap());
+    sicompass::list::create_list_current_layer(&mut r);
+    focus_row(&mut r, "first");
+    press(&mut r, Keycode::I);
+    type_text(&mut r, "X");
+    press_enter(&mut r);
+    assert!(
+        notes_on_screen(&r).iter().any(|l| l.contains("Xfirst")),
+        "{:?}",
+        screen(&r)
+    );
+    drop(r);
+
+    // And again, from the store itself.
+    let mut r = notes_app_at(dir.path());
+    press_right(&mut r);
+    let rows = notes_on_screen(&r);
+    assert!(rows.iter().any(|l| l.contains("Xfirst")), "{rows:?}");
+    assert!(rows.iter().any(|l| l.contains("second")), "{rows:?}");
+}
+
 /// Writing the very first note must leave the cursor on it.
 ///
 /// The regression this guards: an empty level renders a "no notes yet" line,
