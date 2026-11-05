@@ -44,6 +44,10 @@ permissions:
 jobs:
   publish:
     name: Create the GitHub Release
+    # Only a Release run started from a tag. `gh workflow run release.yml -f
+    # tag=dry-run` runs on a branch, and its plan still names the next version as
+    # an implicit tag, so without this a dry run could publish that version.
+    if: startsWith(github.event.workflow_run.head_branch, 'v')
     runs-on: ubuntu-latest
     steps:
       - name: Check for the release token

@@ -95,11 +95,21 @@ repo's `default_workflow_permissions` being `read`, because that is only the
 at the top and is granted it.
 
 `release-publish.yml` exists as a fallback for a 403 that does not currently
-happen, and it has never run. Its `workflow_run` trigger does not fire, because
-`release-on-tag.yml` dispatches `release.yml` on the **tag** ref, and
-`workflow_run` does not deliver for runs on non-branch refs. If the `host` job
-ever does start failing, that file would first need a `workflow_dispatch`
-trigger taking a run id.
+happen, and it has never published anything. Its `workflow_run` trigger does not
+fire for a real release, because `release-on-tag.yml` dispatches `release.yml` on
+the **tag** ref, and `workflow_run` does not deliver for runs on non-branch refs.
+If the `host` job ever does start failing, that file would first need a
+`workflow_dispatch` trigger taking a run id.
+
+It does fire for a run on a branch, which is what a dry run is, so it shows up as
+a "Publish release" run after one. It skips anything not started from a tag,
+because a dry run's plan still names the next version as an implicit tag.
+
+### Dry run
+
+`gh workflow run release.yml -f tag=dry-run` builds every archive, the MSI and the
+native packages on the real runners without publishing. Nothing else builds the
+MSI or the release's FFmpeg before a tag, so run it when either changes.
 
 Earlier revisions of this document claimed the `Release` run always goes red
 and that `release-publish.yml` does the real work. The v0.1.9 release disproved

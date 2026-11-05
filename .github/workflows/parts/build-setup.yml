@@ -30,7 +30,13 @@
   run: ./scripts/setup-freetype.ps1
 
 # FFmpeg is linked into the binary (`bundled-ffmpeg`), so it has to exist before cargo
-# runs too. See scripts/setup-ffmpeg.sh.
+# runs too. See scripts/setup-ffmpeg.sh. These steps run before dist's own "Install
+# dependencies", so `[dist.dependencies.apt]` is too late for what the script needs.
+- name: Install nasm for FFmpeg (Linux)
+  if: runner.os == 'Linux'
+  shell: bash
+  run: sudo apt-get update && sudo apt-get install -y nasm
+
 - name: Provide FFmpeg (Linux and macOS)
   if: runner.os != 'Windows'
   shell: bash

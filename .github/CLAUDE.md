@@ -191,7 +191,8 @@ and including 0.1.8, whose published binary read `shaders/*.spv` and
     `cargo test` there fails with "The system cannot find the path specified"
     before a single test runs. Scoping or removing that runner would let
     Windows run the portable subset the macOS legs already do.
-- `release-publish.yml` is a **dormant fallback**. It was written on the belief
+- `release-publish.yml` is a **dormant fallback**, which skips any run not started
+  from a tag, such as a dry run. It was written on the belief
   that cargo-dist's own `gh release create` could not work here, because the
   repo's `default_workflow_permissions` is `read`. The v0.1.9 release disproved
   that: the `host` job succeeded and created the release itself. A `read`
