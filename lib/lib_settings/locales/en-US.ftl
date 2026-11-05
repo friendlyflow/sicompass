@@ -48,6 +48,9 @@ settings-radio-sort-order = sort order
 # Sort-order options
 settings-sortOrder-option-alphanumerically = alphanumerically
 settings-sortOrder-option-chronologically = chronologically
+settings-textEditorLineNumbers-option-none = none
+settings-textEditorLineNumbers-option-absolute = absolute
+settings-textEditorLineNumbers-option-relative = relative
 
 # Error messages
 settings-error-malformed-undo-payload = settings: malformed undo payload

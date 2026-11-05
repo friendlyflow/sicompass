@@ -37,6 +37,7 @@ texteditor-error-redo-ff-write-failed = redo: failed to write the .ff file
 
 texteditor-description = Edit any text file as a list of its lines, with indentation and sections as levels, and every change undoable.
 texteditor-setting-path = text editor path
+texteditor-radio-line-numbers = line numbers
 
 # The tutorial's paragraphs about this program, under its programs section:
 # <name>-tutorial, then <name>-tutorial-2 and so on, read until one is missing.

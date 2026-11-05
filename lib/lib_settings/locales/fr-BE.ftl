@@ -40,6 +40,9 @@ settings-radio-sort-order = ordre de tri
 # Sort-order options
 settings-sortOrder-option-alphanumerically = alphanumérique
 settings-sortOrder-option-chronologically = chronologique
+settings-textEditorLineNumbers-option-none = aucun
+settings-textEditorLineNumbers-option-absolute = absolu
+settings-textEditorLineNumbers-option-relative = relatif
 
 # Messages d'erreur
 settings-error-malformed-undo-payload = paramètres : charge utile d'annulation invalide

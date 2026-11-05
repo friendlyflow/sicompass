@@ -40,6 +40,9 @@ settings-radio-sort-order = Sortierreihenfolge
 # Sort-order options
 settings-sortOrder-option-alphanumerically = alphanumerisch
 settings-sortOrder-option-chronologically = chronologisch
+settings-textEditorLineNumbers-option-none = keine
+settings-textEditorLineNumbers-option-absolute = absolut
+settings-textEditorLineNumbers-option-relative = relativ
 
 # Fehlermeldungen
 settings-error-malformed-undo-payload = Einstellungen: ungültige Undo-Nutzlast

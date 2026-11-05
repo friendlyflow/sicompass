@@ -17366,6 +17366,48 @@ fn texteditor_line_deletion_is_undoable() {
     );
 }
 
+/// The source line each row of the open file says it is, which the line numbers show.
+fn source_lines(r: &AppRenderer) -> Vec<usize> {
+    use sicompass_sdk::tags;
+    let rows = sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &r.current_id).unwrap();
+    rows.iter()
+        .map(|row| {
+            let inner = tags::extract_input(row.as_str().unwrap()).unwrap();
+            tags::extract_src(&inner).unwrap().0
+        })
+        .collect()
+}
+
+/// The line numbers are the rows' places in the file after every edit, undo included,
+/// since a stale `<src=N>` would show a wrong number.
+#[test]
+fn texteditor_rows_know_their_line_after_every_edit() {
+    let tmp = TempDir::new().unwrap();
+    std::fs::write(tmp.path().join("sample.txt"), "alpha\ngamma\ndelta").unwrap();
+
+    let mut renderer = setup_texteditor(tmp.path());
+    press_right(&mut renderer);
+    cursor_to_label(&mut renderer, "sample.txt");
+    press_right(&mut renderer);
+    assert_eq!(source_lines(&renderer), [0, 1, 2]);
+
+    cursor_to_label(&mut renderer, "gamma");
+    press_ctrl(&mut renderer, Keycode::I);
+    type_text(&mut renderer, "beta");
+    press_enter(&mut renderer);
+    assert_eq!(source_lines(&renderer), [0, 1, 2, 3], "after an insert");
+
+    press_ctrl(&mut renderer, Keycode::Z);
+    assert_eq!(source_lines(&renderer), [0, 1, 2], "after undoing it");
+
+    cursor_to_label(&mut renderer, "alpha");
+    press_ctrl(&mut renderer, Keycode::D);
+    assert_eq!(source_lines(&renderer), [0, 1], "after a delete");
+
+    press_ctrl(&mut renderer, Keycode::Z);
+    assert_eq!(source_lines(&renderer), [0, 1, 2], "after undoing that");
+}
+
 #[test]
 fn texteditor_line_insertion_is_undoable() {
     let tmp = TempDir::new().unwrap();

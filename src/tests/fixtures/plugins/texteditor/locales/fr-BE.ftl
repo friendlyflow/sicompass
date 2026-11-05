@@ -36,5 +36,6 @@ texteditor-error-redo-ff-write-failed = rétablir : impossible d'écrire le fich
 
 texteditor-description = Modifiez tout fichier texte comme une liste de ses lignes, avec l'indentation et les sections comme niveaux, et chaque modification annulable.
 texteditor-setting-path = chemin de l'éditeur de texte
+texteditor-radio-line-numbers = numéros de ligne
 
 texteditor-tutorial = Éditeur de texte, depuis le store : appuyez sur Droite sur un fichier pour ouvrir son contenu sous forme d'arbre et modifier les lignes sur place. Chaque changement est sur la chronologie d'annulation.

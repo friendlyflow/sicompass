@@ -2165,6 +2165,12 @@ fn apply_setting(renderer: &mut AppRenderer, key: &str, value: &str, skip_enable
         // colorScheme, shoulderSurfingProtection, fontScale: shared with the
         // login screen, so they are applied by the renderer's own code.
         k if accessibility::apply_display(renderer, k, value) => {}
+        // The text editor's own setting, for the renderer: only that knows where the
+        // cursor is, which a relative number counts from.
+        sicompass_ui::app_state::LINE_NUMBERS_SETTING => {
+            renderer.line_numbers = sicompass_ui::app_state::LineNumbers::from_setting(value);
+            renderer.needs_redraw = true;
+        }
         "maximized" => {
             // During the startup settings drain (skip_enable=true) the window
             // builder flag already handles the initial maximize state, so skip
@@ -2852,6 +2858,19 @@ mod tests {
     }
 
     // --- apply_setting (colorScheme) ---
+
+    #[test]
+    fn apply_setting_line_numbers() {
+        use sicompass_ui::app_state::{LINE_NUMBERS_SETTING, LineNumbers};
+        let mut r = AppRenderer::new();
+        assert_eq!(r.line_numbers, LineNumbers::None);
+        apply_setting(&mut r, LINE_NUMBERS_SETTING, "relative", false);
+        assert_eq!(r.line_numbers, LineNumbers::Relative);
+        apply_setting(&mut r, LINE_NUMBERS_SETTING, "absolute", false);
+        assert_eq!(r.line_numbers, LineNumbers::Absolute);
+        apply_setting(&mut r, LINE_NUMBERS_SETTING, "none", false);
+        assert_eq!(r.line_numbers, LineNumbers::None);
+    }
 
     #[test]
     fn apply_setting_color_scheme_light() {

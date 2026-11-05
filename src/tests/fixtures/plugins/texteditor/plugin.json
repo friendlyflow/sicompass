@@ -13,6 +13,13 @@
       "label": "texteditor-setting-path",
       "key": "textEditorPath",
       "default": "~"
+    },
+    {
+      "type": "radio",
+      "label": "texteditor-radio-line-numbers",
+      "key": "textEditorLineNumbers",
+      "options": ["none", "absolute", "relative"],
+      "default": "none"
     }
   ],
   "permissions": {

@@ -40,6 +40,9 @@ settings-radio-sort-order = sorteervolgorde
 # Sort-order options
 settings-sortOrder-option-alphanumerically = alfanumeriek
 settings-sortOrder-option-chronologically = chronologisch
+settings-textEditorLineNumbers-option-none = geen
+settings-textEditorLineNumbers-option-absolute = absoluut
+settings-textEditorLineNumbers-option-relative = relatief
 
 # Foutmeldingen
 settings-error-malformed-undo-payload = instellingen: ongeldige undo-payload
