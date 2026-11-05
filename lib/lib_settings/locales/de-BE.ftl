@@ -59,6 +59,11 @@ updates-need-approval = { $count ->
     [one] 1 Programm-Update verlangt mehr Zugriff: im Store genehmigen
    *[other] { $count } Programm-Updates verlangen mehr Zugriff: im Store genehmigen
 }
+updates-nix = sicompass { $version } ist da: aktualisiere deinen Flake-Pin und baue neu
+updates-need-newer-app = { $count ->
+    [one] 1 Programm-Update braucht sicompass { $version }
+   *[other] { $count } Programm-Updates brauchen sicompass { $version }
+}
 updates-installing = { $count ->
     [one] 1 Programm-Update wird installiert…
    *[other] { $count } Programm-Updates werden installiert…

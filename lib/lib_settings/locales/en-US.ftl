@@ -67,6 +67,11 @@ updates-need-approval = { $count ->
     [one] 1 program update asks for more access: approve it in the store
    *[other] { $count } program updates ask for more access: approve them in the store
 }
+updates-nix = sicompass { $version } is out: update your flake pin and rebuild
+updates-need-newer-app = { $count ->
+    [one] 1 program update needs sicompass { $version }
+   *[other] { $count } program updates need sicompass { $version }
+}
 updates-installing = { $count ->
     [one] Installing 1 program update…
    *[other] Installing { $count } program updates…

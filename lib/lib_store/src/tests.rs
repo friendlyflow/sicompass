@@ -1834,6 +1834,31 @@ fn no_update_is_found_when_the_release_is_not_newer_or_needs_a_newer_sicompass()
     assert!(updates::check(&sources).is_empty());
 }
 
+/// Not installable, and not silent: the banner says what it is waiting for.
+#[test]
+fn an_update_needing_a_newer_sicompass_is_held_back_by_name() {
+    let (server, keys) = (Server::start(), keys());
+    let h = installed_then_released(&server, &keys, "", "");
+    server.reset();
+    server.serve_store(&keys, &keys.store_secret, &[]);
+    server.serve_release(&release_with(
+        &keys,
+        &plugin_json("1.1.0", "", "99.0.0"),
+        None,
+    ));
+
+    let checked = updates::check_all(&h.sources(&server, &keys));
+    assert!(checked.pending.is_empty(), "{:?}", checked.pending);
+    assert_eq!(
+        checked.held_back,
+        [updates::HeldBack {
+            name: "demo".to_owned(),
+            to: "1.1.0".to_owned(),
+            needs_app: "99.0.0".to_owned(),
+        }]
+    );
+}
+
 #[test]
 fn a_plugin_the_configuration_provides_is_never_an_update() {
     let (server, keys) = (Server::start(), keys());

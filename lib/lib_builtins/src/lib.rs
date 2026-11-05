@@ -33,14 +33,19 @@ pub fn register_all() {
 /// (the app may not reach the Store crate itself). See
 /// `sicompass_store::updates`.
 pub mod plugin_updates {
-    pub use sicompass_store::updates::PendingUpdate;
     use sicompass_store::updates::{self, Sources};
+    pub use sicompass_store::updates::{Checked, HeldBack, PendingUpdate};
 
     /// Every installed plugin with a newer release. Downloads: call it off the
     /// UI thread.
     pub fn check() -> Vec<PendingUpdate> {
+        check_all().pending
+    }
+
+    /// [`check`], and the newer releases this sicompass is too old for. Downloads too.
+    pub fn check_all() -> Checked {
         Sources::here()
-            .map(|s| updates::check(&s))
+            .map(|s| updates::check_all(&s))
             .unwrap_or_default()
     }
 

@@ -16,12 +16,14 @@
 //!
 //! desicompass and the login screen are not here: they arrive with
 //! `nixos-rebuild`. Neither is the app itself where Nix installed it
-//! ([`app_updates_itself`]).
+//! ([`app_updates_itself`]), but the banner says when there is a newer one, because
+//! a flake pin does not move by itself and nothing else would tell. It also says
+//! when plugin updates wait for a newer sicompass.
 
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use sicompass_builtins::plugin_updates::{self, PendingUpdate};
+use sicompass_builtins::plugin_updates::{self, HeldBack, PendingUpdate};
 use sicompass_sdk::localize;
 use sicompass_ui::app_state::AppRenderer;
 
@@ -30,6 +32,10 @@ use sicompass_ui::app_state::AppRenderer;
 pub struct UpdateState {
     pub app: sicompass_updater::UpdateStatus,
     pub plugins: Vec<PendingUpdate>,
+    /// The newer sicompass, where Nix installed this one: only a rebuild brings it.
+    pub nix_app: Option<String>,
+    /// Plugin updates that need a newer sicompass than this one.
+    pub held_back: Vec<HeldBack>,
     /// The plugin updates are being installed.
     pub installing: bool,
     /// Apply the app's update once the plugins are installed.
@@ -66,18 +72,53 @@ pub fn app_updates_itself() -> bool {
         && !std::env::current_exe().is_ok_and(|exe| exe.starts_with("/nix/store"))
 }
 
-/// The startup check: the app's update (when it updates itself), then the
-/// plugins'. Each is written as soon as it is known. Downloads, so it runs on
-/// its own thread.
+/// Whether Nix installed this binary: an update is a new flake pin and a rebuild.
+fn installed_by_nix() -> bool {
+    std::env::current_exe().is_ok_and(|exe| exe.starts_with("/nix/store"))
+}
+
+/// Whether to ask GitHub for a newer sicompass: to install it, or where Nix installed
+/// this one, to say so.
+pub fn looks_for_app_update() -> bool {
+    app_updates_itself() || installed_by_nix()
+}
+
+/// What the app's check found. Where Nix installed the app it is only something to
+/// say: Ctrl+U must not offer it.
+fn record_app_status(
+    state: &mut UpdateState,
+    mut status: sicompass_updater::UpdateStatus,
+    by_nix: bool,
+) {
+    if by_nix {
+        state.nix_app = status
+            .app_update
+            .take()
+            .map(|update| update.new_version.to_string());
+    }
+    state.app = status;
+}
+
+/// The startup check: the app's update, then the plugins'. Each is written as soon as
+/// it is known. Downloads, so it runs on its own thread.
 pub fn check(state: &SharedUpdates, app: Option<sicompass_updater::UpdateChecker>) {
     if let Some(checker) = app {
         let status = checker.check_and_stage();
         for e in &status.errors {
             tracing::warn!("update check: {e}");
         }
-        lock(state).app = status;
+        record_app_status(&mut lock(state), status, installed_by_nix());
     }
-    let plugins = plugin_updates::check();
+    let plugin_updates::Checked { pending, held_back } = plugin_updates::check_all();
+    for p in &held_back {
+        tracing::info!(
+            "update check: {} {} needs sicompass {}",
+            p.name,
+            p.to,
+            p.needs_app
+        );
+    }
+    let plugins = pending;
     for p in &plugins {
         tracing::info!(
             "update check: {} {} -> {}{}",
@@ -91,13 +132,15 @@ pub fn check(state: &SharedUpdates, app: Option<sicompass_updater::UpdateChecker
             }
         );
     }
-    lock(state).plugins = plugins;
+    let mut state = lock(state);
+    state.plugins = plugins;
+    state.held_back = held_back;
 }
 
 /// The banner for `state`, or `None` when there is nothing to say.
 pub fn banner(state: &UpdateState) -> Option<String> {
     let installable = state.installable().count();
-    banner_for(
+    let ready = banner_for(
         state.installing,
         state
             .app
@@ -106,7 +149,34 @@ pub fn banner(state: &UpdateState) -> Option<String> {
             .map(|a| a.new_version.to_string()),
         installable,
         state.plugins.len() - installable,
-    )
+    );
+    if state.installing {
+        return ready;
+    }
+    let parts: Vec<String> = ready
+        .into_iter()
+        .chain(nix_notice(state.nix_app.as_deref()))
+        .chain(held_back_notice(&state.held_back))
+        .collect();
+    (!parts.is_empty()).then(|| parts.join(". "))
+}
+
+/// There is a newer sicompass, and only the user's flake pin and a rebuild bring it.
+fn nix_notice(version: Option<&str>) -> Option<String> {
+    let mut args = localize::Args::new();
+    args.set("version", version?);
+    Some(localize::t_args("updates-nix", &args))
+}
+
+/// Plugin updates wait for a newer sicompass: how many, and the version that runs them all.
+fn held_back_notice(held_back: &[HeldBack]) -> Option<String> {
+    let needed = held_back
+        .iter()
+        .max_by_key(|p| sicompass_updater::parse_version(&p.needs_app).ok())?;
+    let mut args = localize::Args::new();
+    args.set("count", held_back.len() as i64);
+    args.set("version", needed.needs_app.clone());
+    Some(localize::t_args("updates-need-newer-app", &args))
 }
 
 /// [`banner`], from what it says: whether plugins are being installed, the
@@ -394,6 +464,85 @@ mod tests {
             Some(
                 "Updates ready: 2 programs (Ctrl+U to install). \
                  2 program updates ask for more access: approve them in the store"
+            )
+        );
+    }
+
+    fn held(name: &str, needs_app: &str) -> HeldBack {
+        HeldBack {
+            name: name.to_owned(),
+            to: "9.9.9".to_owned(),
+            needs_app: needs_app.to_owned(),
+        }
+    }
+
+    /// Where Nix installed the app the banner says so, and Ctrl+U offers nothing.
+    #[test]
+    fn a_newer_sicompass_under_nix_is_said_and_not_offered() {
+        en();
+        let mut s = UpdateState::default();
+        let status = sicompass_updater::UpdateStatus {
+            app_update: Some(app_update("9.1.0")),
+            ..Default::default()
+        };
+        record_app_status(&mut s, status, true);
+        assert_eq!(s.nix_app.as_deref(), Some("9.1.0"));
+        assert!(s.app.app_update.is_none());
+        assert!(!s.pending(), "only a rebuild brings it");
+        assert_eq!(
+            banner(&s).as_deref(),
+            Some("sicompass 9.1.0 is out: update your flake pin and rebuild")
+        );
+    }
+
+    /// Elsewhere the same result is the update Ctrl+U installs, as it always was.
+    #[test]
+    fn a_newer_sicompass_elsewhere_stays_an_update() {
+        en();
+        let mut s = UpdateState::default();
+        let status = sicompass_updater::UpdateStatus {
+            app_update: Some(app_update("9.1.0")),
+            ..Default::default()
+        };
+        record_app_status(&mut s, status, false);
+        assert_eq!(s.nix_app, None);
+        assert!(s.pending());
+    }
+
+    #[test]
+    fn updates_waiting_for_a_newer_sicompass_are_said() {
+        en();
+        let mut s = UpdateState {
+            held_back: vec![held("notes", "0.2.4")],
+            ..Default::default()
+        };
+        assert_eq!(
+            banner(&s).as_deref(),
+            Some("1 program update needs sicompass 0.2.4")
+        );
+        assert!(!s.pending(), "Ctrl+U cannot install it");
+        // The version that runs them all.
+        s.held_back = vec![held("a", "0.2.4"), held("b", "0.10.0"), held("c", "0.9.0")];
+        assert_eq!(
+            banner(&s).as_deref(),
+            Some("3 program updates need sicompass 0.10.0")
+        );
+    }
+
+    /// Both together: what the user saw, with nothing to say why.
+    #[test]
+    fn the_notices_follow_what_ctrl_u_can_do() {
+        en();
+        let s = UpdateState {
+            nix_app: Some("0.2.4".to_owned()),
+            held_back: vec![held("notes", "0.2.4"), held("terminal", "0.2.4")],
+            ..Default::default()
+        };
+        assert_eq!(
+            banner(&s).as_deref(),
+            Some(
+                "sicompass 0.2.4 is out: update your flake pin and rebuild. \
+                 2 program updates need sicompass 0.2.4"
             )
         );
     }

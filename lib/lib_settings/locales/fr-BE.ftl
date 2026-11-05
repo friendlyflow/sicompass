@@ -59,6 +59,11 @@ updates-need-approval = { $count ->
     [one] 1 mise à jour de programme demande plus d'accès : approuvez-la dans le store
    *[other] { $count } mises à jour de programmes demandent plus d'accès : approuvez-les dans le store
 }
+updates-nix = sicompass { $version } est sorti : mettez à jour votre pin de flake et reconstruisez
+updates-need-newer-app = { $count ->
+    [one] 1 mise à jour de programme demande sicompass { $version }
+   *[other] { $count } mises à jour de programme demandent sicompass { $version }
+}
 updates-installing = { $count ->
     [one] Installation de 1 mise à jour de programme…
    *[other] Installation de { $count } mises à jour de programmes…

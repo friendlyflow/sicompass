@@ -59,6 +59,11 @@ updates-need-approval = { $count ->
     [one] 1 programma-update vraagt meer toegang: keur hem goed in de store
    *[other] { $count } programma-updates vragen meer toegang: keur ze goed in de store
 }
+updates-nix = sicompass { $version } is uit: werk je flake-pin bij en bouw opnieuw
+updates-need-newer-app = { $count ->
+    [one] 1 programma-update vraagt sicompass { $version }
+   *[other] { $count } programma-updates vragen sicompass { $version }
+}
 updates-installing = { $count ->
     [one] 1 programma-update wordt geïnstalleerd…
    *[other] { $count } programma-updates worden geïnstalleerd…

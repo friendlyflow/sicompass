@@ -95,7 +95,7 @@ fn main() {
     let update_state = read_auto_update_check_setting().then(|| {
         let state = sicompass::updates::SharedUpdates::default();
         let state_for_thread = std::sync::Arc::clone(&state);
-        let app_checker = sicompass::updates::app_updates_itself().then(|| {
+        let app_checker = sicompass::updates::looks_for_app_update().then(|| {
             let app_version = sicompass_updater::parse_version(env!("CARGO_PKG_VERSION"))
                 .unwrap_or_else(|_| semver::Version::new(0, 0, 0));
             sicompass_updater::UpdateChecker::new(app_version, GITHUB_OWNER, GITHUB_REPO)

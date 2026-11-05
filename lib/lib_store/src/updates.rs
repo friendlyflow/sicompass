@@ -72,8 +72,31 @@ pub struct PendingUpdate {
     shown: ReleaseInfo,
 }
 
+/// A newer release this sicompass is too old to run. It cannot be installed, but it
+/// must not vanish without a word: the way to it is updating sicompass.
+#[derive(Debug, Clone, PartialEq)]
+pub struct HeldBack {
+    pub name: String,
+    /// The release's version.
+    pub to: String,
+    /// The sicompass version it needs.
+    pub needs_app: String,
+}
+
+/// What a look at the installed plugins found.
+#[derive(Debug, Default)]
+pub struct Checked {
+    pub pending: Vec<PendingUpdate>,
+    pub held_back: Vec<HeldBack>,
+}
+
 /// Every installed plugin with a newer release this sicompass can run.
 pub fn check(sources: &Sources) -> Vec<PendingUpdate> {
+    check_all(sources).pending
+}
+
+/// [`check`], and the newer releases this sicompass is too old for.
+pub fn check_all(sources: &Sources) -> Checked {
     let keys: Vec<&str> = sources.trusted.iter().map(String::as_str).collect();
     let (_, offers) = load_offers(
         &sources.fetch,
@@ -85,7 +108,8 @@ pub fn check(sources: &Sources) -> Vec<PendingUpdate> {
     );
     let installed =
         install::installed_everywhere(&sources.system_plugin_dirs, Some(&sources.plugins_dir));
-    offers
+    let mut held_back = Vec::new();
+    let pending = offers
         .into_iter()
         .filter_map(|offer| {
             let current = installed.get(&offer.name)?;
@@ -94,9 +118,15 @@ pub fn check(sources: &Sources) -> Vec<PendingUpdate> {
             }
             let source = offer.source?;
             let release = offer.release.ok()?;
-            if !install::is_newer(&release, &current.manifest)
-                || install::needs_newer_app(&release).is_some()
-            {
+            if !install::is_newer(&release, &current.manifest) {
+                return None;
+            }
+            if let Some(needs_app) = install::needs_newer_app(&release) {
+                held_back.push(HeldBack {
+                    name: offer.name,
+                    to: release.version.clone(),
+                    needs_app,
+                });
                 return None;
             }
             let (_, sha) = release
@@ -116,7 +146,8 @@ pub fn check(sources: &Sources) -> Vec<PendingUpdate> {
                 shown: release,
             })
         })
-        .collect()
+        .collect();
+    Checked { pending, held_back }
 }
 
 /// Install `update` and record its approval. Refused when it needs one the
