@@ -64,7 +64,7 @@ delete a pushed tag. If a release is broken, release the next patch.
    `gh run list --workflow=release.yml --limit 1`. Judge success by the release
    page and its assets, not only the run status.
    For a plugin, the release has to carry one `plugin-<target>.tar.gz` per
-   platform (five), `release.json` and `release.json.sig`:
+   platform (four), `release.json` and `release.json.sig`:
    `gh release view vX.Y.Z --json assets`. The Store picks
    it up from `releases/latest/download/` with no change in sicompass.
 8. **Report** the tag, and name the repos that pin this one and now need their

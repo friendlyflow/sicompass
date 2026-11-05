@@ -56,7 +56,6 @@ host_target() {
     Linux-x86_64) echo x86_64-unknown-linux-musl ;;
     Linux-aarch64|Linux-arm64) echo aarch64-unknown-linux-musl ;;
     Darwin-arm64) echo aarch64-apple-darwin ;;
-    Darwin-x86_64) echo x86_64-apple-darwin ;;
     MINGW*|MSYS*|CYGWIN*) echo x86_64-pc-windows-msvc ;;
     *) fail "no plugin target for $(uname -s) $(uname -m)" ;;
   esac

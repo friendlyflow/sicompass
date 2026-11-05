@@ -100,7 +100,7 @@ every command with `cd PROJECT_ROOT &&` (the actual absolute project root).**
    grep -c 'OLD' README.md          # must print 0
    ```
 
-   The `.msi`, both `.dmg`s, the `.zip` and the `.tar.xz`s are not versioned in
+   The `.msi`, the `.dmg`, the `.zip` and the `.tar.xz`s are not versioned in
    their file names, so those links never need touching. After the release is
    published, `curl -sIL -o /dev/null -w '%{http_code}'` on the three bumped
    URLs should return 200.

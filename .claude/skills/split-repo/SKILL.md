@@ -80,9 +80,9 @@ with `command -v git-filter-repo`, and fall back to `nix develop -c`.
      the new name.
    - `about.toml`: fill `@TARGETS@` (Linux-only kinds:
      `"x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu"`, plugins: the
-     five release targets, `"x86_64-unknown-linux-musl",
-     "aarch64-unknown-linux-musl", "x86_64-apple-darwin",
-     "aarch64-apple-darwin", "x86_64-pc-windows-msvc"`), and delete the
+     four release targets, `"x86_64-unknown-linux-musl",
+     "aarch64-unknown-linux-musl", "aarch64-apple-darwin",
+     "x86_64-pc-windows-msvc"`), and delete the
      sections of first-party crates the repo does not use.
    - `README.md` and `CLAUDE.md`: fill every `@...@`. Write the README for
      someone who has never seen sicompass: what it is, how to install it, how to

@@ -75,7 +75,7 @@ git push origin vX.Y.Z
             |- build-local-artifacts        archives, .msi, installers
             |- custom-native-packages       -> native-packages.yml
             |     |- linux    .deb, .rpm, AppImage
-            |     `- macos    .app, .dmg   (x2, one per arch)
+            |     `- macos    .app, .dmg   (Apple Silicon)
             |- build-global-artifacts
             `- host                    FAILS with 403, see below
                -> release-publish.yml  creates the actual GitHub Release

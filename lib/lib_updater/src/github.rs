@@ -215,7 +215,7 @@ mod tests {
     fn no_asset_is_selected_off_windows() {
         let a = assets(&[
             "sicompass_0.1.9_amd64.deb",
-            "sicompass-x86_64-apple-darwin.dmg",
+            "sicompass-aarch64-apple-darwin.dmg",
             "sicompass-x86_64-pc-windows-msvc.msi",
         ]);
         assert!(select_asset(&a, "x86_64").is_none());

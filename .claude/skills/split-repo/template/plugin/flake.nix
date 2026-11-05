@@ -7,21 +7,18 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    nixpkgs-x86-darwin.url = "github:NixOS/nixpkgs/nixpkgs-26.05-darwin";
     rust-overlay = {
       url = "github:oxalica/rust-overlay";
       inputs.nixpkgs.follows = "nixpkgs";
     };
   };
 
-  outputs = { self, nixpkgs, nixpkgs-x86-darwin, rust-overlay }:
+  outputs = { self, nixpkgs, rust-overlay }:
     let
-      supportedSystems = [ "aarch64-linux" "aarch64-darwin" "x86_64-linux" "x86_64-darwin" ];
-      nixpkgsInputFor = system:
-        if system == "x86_64-darwin" then nixpkgs-x86-darwin else nixpkgs;
+      supportedSystems = [ "aarch64-linux" "aarch64-darwin" "x86_64-linux" ];
       forAllSystems = nixpkgs.lib.genAttrs supportedSystems;
       nixpkgsFor = forAllSystems (system:
-        import (nixpkgsInputFor system) {
+        import nixpkgs {
           inherit system;
           overlays = [ rust-overlay.overlays.default ];
         });
@@ -36,7 +33,6 @@
             "x86_64-linux" = "x86_64-unknown-linux-musl";
             "aarch64-linux" = "aarch64-unknown-linux-musl";
             "aarch64-darwin" = "aarch64-apple-darwin";
-            "x86_64-darwin" = "x86_64-apple-darwin";
           }.${system};
           rustToolchain = pkgs.rust-bin.stable.latest.default.override {
             extensions = [ "rust-src" "rust-analyzer" "clippy" "rustfmt" ];

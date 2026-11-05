@@ -20,8 +20,8 @@ name: Native packages
 #   - Every uploaded file must sit flat in `out/` with no spaces in its name.
 #     release-publish.yml globs with an unquoted `$(find ...)`, so a space
 #     breaks the upload and a stray file gets attached to the release.
-#   - Both macOS legs produce the same filename, so the .dmg is renamed to its
-#     target triple before upload or the two collide.
+#   - The .dmg is renamed to its target triple before upload, which is the name
+#     the README and the release notes link to.
 #   - Nothing here runs on a commit or a pull request. It only ever runs as
 #     part of a Release, which is itself dispatch-triggered.
 
@@ -190,8 +190,8 @@ jobs:
         run: cargo install cargo-packager --locked --version "$CARGO_PACKAGER_VERSION"
 
       - name: Point the packager at this runner's MoltenVK
-        # Homebrew's prefix is /opt/homebrew on Apple Silicon and /usr/local on
-        # Intel, and the Cargo.toml can only hold one of them.
+        # Homebrew's prefix depends on the runner, and the Cargo.toml has to hold
+        # a fixed path.
         run: |
           set -euo pipefail
           PREFIX="$(brew --prefix)"

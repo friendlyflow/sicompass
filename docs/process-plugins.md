@@ -170,8 +170,8 @@ makes the executable runnable, and swaps the folder in. What the user approves i
 that it runs at all.
 
 The targets: `x86_64` and `aarch64-unknown-linux-musl` (static, so one build runs on
-every distribution, NixOS included), `x86_64` and `aarch64-apple-darwin`, and
-`x86_64-pc-windows-msvc`.
+every distribution, NixOS included), `aarch64-apple-darwin` (Intel macs are not
+built any more), and `x86_64-pc-windows-msvc`.
 
 **Approval.** A plugin process always needs the user's approval
 (`plugin_abi::needs_approval`). Its fingerprint starts with `process;`, so an

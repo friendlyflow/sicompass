@@ -4,37 +4,23 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
-    # Intel macOS only. nixpkgs 26.11 dropped x86_64-darwin outright, and it
-    # does not merely stop building: `import nixpkgs { system =
-    # "x86_64-darwin"; }` throws, so a single-input flake that lists the system
-    # fails to evaluate on *every* platform, not just that one. 26.05 is the
-    # last branch carrying it, and it gets security fixes until the end of
-    # 2026. Retire this input, and the system below, when that runs out.
-    nixpkgs-x86-darwin.url = "github:NixOS/nixpkgs/nixpkgs-26.05-darwin";
-
     # Splits each package into a dependency build keyed on Cargo.lock alone and
     # the workspace crates on top, so an edit to sicompass itself does not
     # recompile the whole dependency graph. See `buildMember` below.
     crane.url = "github:ipetkov/crane";
   };
 
-  outputs = { self, nixpkgs, nixpkgs-x86-darwin, crane }:
+  outputs = { self, nixpkgs, crane }:
     let
       supportedSystems = [
         "aarch64-linux"
         "aarch64-darwin"
         "x86_64-linux"
-        "x86_64-darwin"
       ];
-
-      # Which nixpkgs a given system is built from. Everything tracks unstable
-      # except Intel macOS, which unstable no longer has, per the input note.
-      nixpkgsInputFor = system:
-        if system == "x86_64-darwin" then nixpkgs-x86-darwin else nixpkgs;
 
       forAllSystems = nixpkgs.lib.genAttrs supportedSystems;
       nixpkgsFor = forAllSystems (system:
-        import (nixpkgsInputFor system) { inherit system; });
+        import nixpkgs { inherit system; });
 
       # Single source of truth for the version. Reading it here means
       # `nix build` cannot drift from `cargo build` when the workspace version

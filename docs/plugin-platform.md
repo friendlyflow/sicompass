@@ -431,7 +431,8 @@ attached to a GitHub Release under fixed names so
 
 The targets are `x86_64-unknown-linux-musl` and `aarch64-unknown-linux-musl`
 (static, so one build runs on every distribution, NixOS included),
-`x86_64-apple-darwin`, `aarch64-apple-darwin` and `x86_64-pc-windows-msvc`.
+`aarch64-apple-darwin` and `x86_64-pc-windows-msvc`. Intel macs are not built
+any more, and the Store offers a plugin only the platforms it was built for.
 
 The signature covers `release.json`, which pins every archive by hash. So the
 Store can show version, permissions and tier from a 1 KB download, then
