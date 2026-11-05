@@ -17,7 +17,7 @@ tutorial-gs-checkbox-intro = Welcome back. Now try a checkbox. Move Down to the 
 tutorial-gs-checkbox = <checkbox>Practice checkbox, press Enter to toggle me
 tutorial-gs-input-intro = Next, edit some text. Move Down to the line below, press i to start typing, change the text, then press Enter to save or Escape to cancel.
 tutorial-gs-input = Edit me, press i or a then Enter: <input>hello world</input>
-tutorial-gs-modes = That is the core of getting around. A few more keys to try from here: colon opens commands, Tab searches this list, S starts scroll mode, and Ctrl+W speaks where you are. Press Escape to leave any of them.
+tutorial-gs-modes = That is the core of getting around. A few more keys to try from here: colon opens commands, F searches this list, Tab opens the beginner's manual, S starts scroll mode, and Ctrl+W speaks where you are. Press Escape to leave any of them.
 tutorial-gs-done = You are ready. The sections below explain how Sicompass works and list every key. Browse them in any order, and press Left at any time to return to the root. Happy navigating.
 
 # ---------------------------------------------------------------------------
@@ -49,7 +49,8 @@ tutorial-sc-in-select = Shift with an arrow key: extend a selection from the cur
 tutorial-sc-in-chain = Ctrl+Shift+I and Ctrl+Shift+A: save this edit and open a new item before or after it, staying in edit mode so you can keep typing.
 tutorial-sc-command = Command and search
 tutorial-sc-cmd-colon = : (colon): open command mode, type a command name and press Enter to run it.
-tutorial-sc-cmd-tab = Tab: search and filter the current list as you type. Enter goes to the match rather than activating it, and Escape clears the search.
+tutorial-sc-cmd-f = F: search and filter the current list as you type. Enter goes to the match rather than activating it, and Escape clears the search.
+tutorial-sc-cmd-manual = Tab: open the beginner's manual, a list that explains the basics from the top. Escape leaves it, and Tab opens it again.
 tutorial-sc-cmd-ctrlf = Ctrl+F: extended search through all children, with results as a flat list you can jump to. It also works while you are editing text.
 tutorial-sc-cmd-lineends = Ctrl+Home and Ctrl+End: move the cursor to the start or end of what you have typed.
 tutorial-sc-cmd-scroll = S: scroll mode, flatten the list and its sublists into one continuous reading view.

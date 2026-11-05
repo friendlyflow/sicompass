@@ -212,7 +212,8 @@ static SECTIONS: &[Node] = &[
                 key: "tutorial-sc-command",
                 children: &[
                     Leaf("tutorial-sc-cmd-colon"),
-                    Leaf("tutorial-sc-cmd-tab"),
+                    Leaf("tutorial-sc-cmd-f"),
+                    Leaf("tutorial-sc-cmd-manual"),
                     Leaf("tutorial-sc-cmd-ctrlf"),
                     Leaf("tutorial-sc-cmd-lineends"),
                     Leaf("tutorial-sc-cmd-scroll"),

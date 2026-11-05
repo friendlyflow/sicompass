@@ -365,8 +365,9 @@ fn press_escape(r: &mut AppRenderer) {
 fn press_colon(r: &mut AppRenderer) {
     press(r, Keycode::Colon);
 }
+/// Start a search: f in general mode, which was Tab before Tab became the manual.
 fn press_tab(r: &mut AppRenderer) {
-    press(r, Keycode::Tab);
+    press(r, Keycode::F);
 }
 
 fn type_text(r: &mut AppRenderer, text: &str) {
@@ -6370,11 +6371,12 @@ fn get_meta_tag_derived_hints_appear_for_input_children() {
     renderer.current_id.push(0); // first row → depth 2, container = ffon[0]
 
     let meta = sicompass::provider::get_meta(&renderer);
-    // Tag-derived: children have <input> → Tab search/cycle hint.
+    // Tag-derived: children have <input> → the F search hint (it was Tab, which opens
+    // the beginner's manual now).
     assert!(
         meta.iter()
-            .any(|s| s.contains("Tab") && s.contains("Search")),
-        "input children should auto-derive Tab Search hint, got: {meta:?}"
+            .any(|s| s.starts_with("F ") && s.contains("Search")),
+        "input children should auto-derive the F Search hint, got: {meta:?}"
     );
 }
 
