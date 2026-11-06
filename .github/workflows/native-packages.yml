@@ -158,7 +158,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: macos-14
+          - runner: macos-15
             arch: aarch64
             triple: aarch64-apple-darwin
     runs-on: ${{ matrix.runner }}

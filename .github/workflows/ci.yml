@@ -48,7 +48,7 @@ jobs:
           # then surfaced during an actual release. CI has to build the way the
           # release does or it is not testing the release.
           - name: macos aarch64
-            os: macos-14
+            os: macos-15
             flags: ""
             full: false
             subset: true

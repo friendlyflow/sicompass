@@ -122,6 +122,15 @@ local-artifacts-jobs = ["./native-packages"]
 # exist, and it reads back the asset list to build the table from.
 post-announce-jobs = ["./release-notes-downloads"]
 
+# The runner each target builds on. dist's default for aarch64-apple-darwin is
+# macos-14, which GitHub retired on 2026-11-02: a job asking for it is cancelled
+# at once with "The configuration 'macos-14-arm64-us-default' is not supported".
+# The minimum macOS the binary runs on is MACOSX_DEPLOYMENT_TARGET in
+# .cargo/config.toml, not the runner's version. ci.yml and native-packages.yml
+# name their macOS runner themselves, so move all three together.
+[dist.github-custom-runners]
+aarch64-apple-darwin = "macos-15"
+
 # System packages installed on each runner before the build. Only the block
 # matching the runner's OS applies, so no per-target gymnastics are needed.
 [dist.dependencies.apt]
