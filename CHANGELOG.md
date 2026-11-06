@@ -3,6 +3,21 @@
 cargo-dist parses this file and uses the matching version's section as the
 GitHub Release body, so entries here are what users read on the download page.
 
+## 0.2.5
+
+### Store and updates
+
+- The photo album and the video store are in the Store, in a new media category. The tutorial's grid section points at the album.
+- The update banner says what Ctrl+U cannot do. Where Nix installed the app, a newer release is named with "update your flake pin and rebuild" and not offered. Plugin updates that need a newer Sicompass than yours are counted and name the version, where they used to vanish without a word. In four languages.
+
+### Speed
+
+- Pages from plugins arrive much faster. A folder of 50,000 entries is read in about 1.5 milliseconds, where it took more than 800.
+
+### Fixes
+
+- An edit made in a text editor tab that was restored inside a file is written.
+
 ## 0.2.4
 
 ### Pictures and video in your lists

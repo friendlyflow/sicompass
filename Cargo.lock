@@ -4009,7 +4009,7 @@ checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
 
 [[package]]
 name = "sicompass"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "accesskit",
  "accesskit_macos",
@@ -4064,7 +4064,7 @@ dependencies = [
 
 [[package]]
 name = "sicompass-builtins"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "sicompass-sdk",
  "sicompass-settings",
@@ -4105,7 +4105,7 @@ dependencies = [
 
 [[package]]
 name = "sicompass-settings"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "async-trait",
  "serde",
@@ -4116,7 +4116,7 @@ dependencies = [
 
 [[package]]
 name = "sicompass-store"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "base64 0.23.1",
  "ed25519-dalek",
@@ -4143,7 +4143,7 @@ dependencies = [
 
 [[package]]
 name = "sicompass-tutorial"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "serde_json",
  "sicompass-sdk",
@@ -4187,7 +4187,7 @@ dependencies = [
 
 [[package]]
 name = "sicompass-updater"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "reqwest",
  "semver",
