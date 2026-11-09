@@ -26,7 +26,7 @@ notes-error-header-readonly = l'en-tête ne peut pas être modifié, changez la 
 notes-error-unreadable = vos notes n'ont pas pu être lues, rien n'a été enregistré, les fichiers sur le disque sont intacts
 notes-error-save = vos notes n'ont pas pu être enregistrées
 
-notes-description = Vos propres notes, un arbre de listes dans lesquelles vous écrivez, avec une synchronisation cloud en option.
+notes-description = Vos propres notes, une hiérarchie dans laquelle vous écrivez, avec une synchronisation cloud en option.
 notes-service = garde vos notes identiques sur vos ordinateurs via le serveur de Sicompass Cloud
 
 notes-cloud-needs-payment = synchronisation cloud : demande Sicompass Cloud, voir store, abonnements

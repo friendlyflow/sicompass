@@ -39,7 +39,7 @@ notes-error-unreadable = your notes could not be read, so nothing has been saved
 notes-error-save = your notes could not be saved
 
 # The Store's description of this plugin, and of the paid service it offers.
-notes-description = Your own notes, a tree of lists you write in, with an optional cloud sync.
+notes-description = Your own notes, a hierarchy you write in, with an optional cloud sync.
 notes-service = keeps your notes in sync between your computers through the Sicompass Cloud server
 
 # The row at the top of the notes while cloud sync is on. It never links

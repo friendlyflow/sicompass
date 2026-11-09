@@ -26,7 +26,7 @@ notes-error-header-readonly = de kop kan niet bewerkt worden, wijzig de zichtbaa
 notes-error-unreadable = je notities konden niet gelezen worden, er is niets opgeslagen, de bestanden op schijf zijn ongewijzigd
 notes-error-save = je notities konden niet opgeslagen worden
 
-notes-description = Je eigen notities, een boom van lijsten waarin je schrijft, met een optionele cloudsynchronisatie.
+notes-description = Je eigen notities, een hiërarchie waarin je schrijft, met een optionele cloudsynchronisatie.
 notes-service = houdt je notities gelijk tussen je computers via de server van Sicompass Cloud
 
 notes-cloud-needs-payment = cloudsynchronisatie: heeft Sicompass Cloud nodig, zie store, abonnementen

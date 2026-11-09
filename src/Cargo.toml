@@ -398,7 +398,7 @@ sicompass-sdk = { workspace = true, features = ["package", "ipc", "plugin"] }
 # `locales/` are in tests/fixtures/plugins/<name>; move both together.
 photoalbum-plugin = { git = "https://github.com/friendlyflow/photoalbum-plugin-sicompass", rev = "8537b4104d1555cddcc9bd6599a9b9e1264c590d" }
 videostore-plugin = { git = "https://github.com/friendlyflow/videostore-plugin-sicompass", rev = "8d976c197331fd95a9211215c11bc825a97185be" }
-notes-plugin = { git = "https://github.com/friendlyflow/notes-plugin-sicompass", rev = "2334e98ca974b52c876f89d0c9ad6ec9cf7b8430" }
+notes-plugin = { git = "https://github.com/friendlyflow/notes-plugin-sicompass", rev = "bb3676bd8c24882231292c2689217292180fe3d2" }
 projectmanagement-plugin = { git = "https://github.com/friendlyflow/projectmanagement-plugin-sicompass", rev = "520fa555545f46b7d5fb7abb699ea14ea678ee05" }
 filebrowser-plugin = { git = "https://github.com/friendlyflow/filebrowser-plugin-sicompass", rev = "a60556ba04d2294a88a206d30f88a7e5bdc09741" }
 texteditor-plugin = { git = "https://github.com/friendlyflow/texteditor-plugin-sicompass", rev = "993972169148649489d824ff8c82e85dfe0244fd" }

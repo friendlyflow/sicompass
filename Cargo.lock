@@ -2543,7 +2543,7 @@ checksum = "0676bb32a98c1a483ce53e500a81ad9c3d5b3f7c920c28c24e9cb0980d0b5bc8"
 [[package]]
 name = "notes-plugin"
 version = "0.4.5"
-source = "git+https://github.com/friendlyflow/notes-plugin-sicompass?rev=2334e98ca974b52c876f89d0c9ad6ec9cf7b8430#2334e98ca974b52c876f89d0c9ad6ec9cf7b8430"
+source = "git+https://github.com/friendlyflow/notes-plugin-sicompass?rev=bb3676bd8c24882231292c2689217292180fe3d2#bb3676bd8c24882231292c2689217292180fe3d2"
 dependencies = [
  "serde",
  "serde_json",
