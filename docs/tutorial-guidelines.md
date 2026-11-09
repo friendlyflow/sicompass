@@ -111,6 +111,15 @@ Tutorial content is keyed through Fluent and must exist in all four locale bundl
 the raw key id to the user. When you add a leaf or branch, add it to every locale
 file.
 
+## When to update it
+
+The tutorial describes the keys, the modes, the element types and what is said, so
+it changes in the same change as any of them, even when that change is made in
+`../sicompass-ui`. The beginner's manual (Tab) describes the same things in short.
+Its rules are in `../sicompass-ui/docs/manual-guidelines.md`, and it is checked in the
+same change. A soft hook (`.claude/hooks/check-help-texts.sh`) reminds you when an
+edit to the keys left both texts alone.
+
 ## When you add or change a section
 
 1. Add the branch or leaf to `SECTIONS` in `src/lib.rs`.
@@ -118,4 +127,5 @@ file.
 3. Follow the prose style (no em dashes, no semicolons).
 4. Add or update the structural tests in `src/lib.rs` (the `tests` module asserts
    section placement and content).
-5. Run `cargo test -p sicompass-tutorial`.
+5. Run `cargo test -p sicompass-tutorial`. It checks that every key is in all four
+   files and that no text holds an em dash or a semicolon.

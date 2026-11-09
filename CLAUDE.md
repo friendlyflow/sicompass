@@ -53,8 +53,29 @@ and `run-tests.sh` runs the suite of the repo that owns the edited file.
 
 In `README.md`, do not use em dashes or semicolons. Use commas instead, or
 split into separate sentences (parentheses are fine for true parentheticals).
-The tutorial has the same rule and more, in
-[lib/lib_tutorial/CLAUDE.md](lib/lib_tutorial/CLAUDE.md).
+The help texts have the same rule and more, see below.
+
+## Help texts: the tutorial and the beginner's manual
+
+Three texts tell a user what the keys do. Keep them true in the same change as
+anything they describe: a key, a mode, an element type or its mark in the list
+prefix, or what is said after an action.
+
+- **The tutorial** (`lib/lib_tutorial`, hands-on, the app only). Rules:
+  [docs/tutorial-guidelines.md](docs/tutorial-guidelines.md), summed up in
+  [lib/lib_tutorial/CLAUDE.md](lib/lib_tutorial/CLAUDE.md).
+- **The beginner's manual** (Tab, `manual-NN` in `../sicompass-ui/locales`, short
+  and linear). Rules: `../sicompass-ui/docs/manual-guidelines.md`.
+- **The login screen's manual** (`login-manual-NN` in `../loginsicompass/locales`),
+  under the manual's rules.
+
+Every string is in all four languages, with no em dashes and no semicolons. Tests
+hold that in each repo. A soft hook,
+[.claude/hooks/check-help-texts.sh](.claude/hooks/check-help-texts.sh), reminds
+once per file when an edit to keys or speech (sicompass-ui's shortcuts, handlers,
+element mode, events and locales, the greeter's page) left a text that describes
+it unchanged. It never blocks: update the text, or say in your reply why it needs
+nothing. Check `README.md` too when a feature it lists changes.
 
 ## Generated files that are committed
 

@@ -1112,8 +1112,8 @@ mod tests {
         p.push_path("How it works");
         let text = joined(&p.fetch()).to_lowercase();
         assert!(
-            text.contains("tree of lists"),
-            "must explain the tree-of-lists model"
+            text.contains("hierarchy"),
+            "must explain the hierarchy model"
         );
         assert!(text.contains("undo"), "must mention undo");
         assert!(
@@ -1621,5 +1621,85 @@ mod tests {
         p.pop_path();
         assert_eq!(p.current_path(), "/");
         assert_eq!(section_keys(&p.fetch()).len(), 7);
+    }
+
+    // ---- The tutorial's rules (docs/tutorial-guidelines.md) ----------------
+
+    const LOCALES: [(&str, &str); 4] = [
+        ("en-US", include_str!("../locales/en-US.ftl")),
+        ("nl-BE", include_str!("../locales/nl-BE.ftl")),
+        ("fr-BE", include_str!("../locales/fr-BE.ftl")),
+        ("de-BE", include_str!("../locales/de-BE.ftl")),
+    ];
+
+    /// The messages of a locale file as `(key, value)`, a value that runs on over
+    /// indented lines joined with spaces. Comments and attributes are skipped. The
+    /// same reading as sicompass-ui's `help_text::messages`, which holds the
+    /// manual to the same rules.
+    fn messages(ftl: &str) -> Vec<(String, String)> {
+        let mut out: Vec<(String, String)> = Vec::new();
+        for line in ftl.lines() {
+            if line.trim_start().starts_with('#') || line.trim().is_empty() {
+                continue;
+            }
+            if line.starts_with(' ') || line.starts_with('\t') {
+                let more = line.trim();
+                if !more.starts_with('.')
+                    && let Some((_, value)) = out.last_mut()
+                {
+                    value.push(' ');
+                    value.push_str(more);
+                }
+                continue;
+            }
+            if let Some((key, value)) = line.split_once('=') {
+                let key = key.trim();
+                if !key.is_empty()
+                    && key
+                        .chars()
+                        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+                {
+                    out.push((key.to_owned(), value.trim().to_owned()));
+                }
+            }
+        }
+        out
+    }
+
+    /// Every string exists in all four languages. A key missing from the active
+    /// locale shows as its raw id, and one only another language has is never read.
+    #[test]
+    fn every_locale_has_the_same_tutorial_keys() {
+        use std::collections::BTreeSet;
+        let keys = |ftl: &str| -> BTreeSet<String> {
+            messages(ftl).into_iter().map(|(k, _)| k).collect()
+        };
+        let english = keys(LOCALES[0].1);
+        assert!(english.len() > 50, "parsed too few keys: {}", english.len());
+        for (locale, ftl) in &LOCALES[1..] {
+            let other = keys(ftl);
+            let missing: Vec<_> = english.difference(&other).collect();
+            let extra: Vec<_> = other.difference(&english).collect();
+            assert!(missing.is_empty(), "{locale} is missing {missing:?}");
+            assert!(extra.is_empty(), "{locale} has keys English lacks: {extra:?}");
+        }
+    }
+
+    /// The prose rule: no em dashes and no semicolons, in any language. A screen
+    /// reader turns punctuation into pauses, and these two read oddly.
+    #[test]
+    fn tutorial_text_has_no_em_dash_or_semicolon() {
+        let mut faults = Vec::new();
+        for (locale, ftl) in LOCALES {
+            for (key, value) in messages(ftl) {
+                if value.contains('\u{2014}') {
+                    faults.push(format!("{locale} {key}: an em dash"));
+                }
+                if value.contains(';') {
+                    faults.push(format!("{locale} {key}: a semicolon"));
+                }
+            }
+        }
+        assert!(faults.is_empty(), "{}", faults.join("\n"));
     }
 }

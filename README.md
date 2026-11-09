@@ -120,6 +120,14 @@ Claude Code if you want to use it. It runs with the login that tool already
 has, so there is no key to paste here. Sicompass finds `claude` on your `PATH`
 or in `~/.local/bin`, where Claude Code's installer puts it.
 
+### Updating
+
+Sicompass checks for a new version of itself and of your programs at launch,
+and says at the top which updates are ready. Press ctrl+u to install them.
+Where Nix installed it, a new version is named but not installed, so update
+your flake pin and rebuild. A program update that needs a newer Sicompass waits
+until you have it, and the line at the top says which version it needs.
+
 ### Checking that it worked
 
 ```bash
@@ -155,6 +163,7 @@ the icon.
 - **Flat interface**: no popups, dialogs, or overlays, everything is navigated inline in the list you are on
 - **Keyboard-first**: your hands never leave the keyboard, with tabbed workspaces and letter-driven command palettes
 - **Native accessibility**: built-in screen reader support on Linux, macOS, and Windows
+- **Help built in**: Tab opens a short beginner's manual from anywhere, and the tutorial lets you try every element and key
 - **Cross-platform**: packaged for Windows, macOS, and Linux, with paths, shells, and PTYs routed through platform helpers
 - **High-performance rendering**: Vulkan graphics with a FreeType2 glyph atlas
 - **Extensible**: plugins, installed and updated from the built-in Store without a restart
@@ -164,9 +173,10 @@ the icon.
 ## Built-in providers
 
 Each provider turns a different data source into the same keyboard-navigable
-tree: the Store and Settings. The Web Browser, the File Browser, the Text
-Editor, Notes, Project Management, the Git Client, the Terminal, Claude, Chat,
-Email, Remote and the Sales demo are installed from the Store. Saving and opening a file
+tree. The tutorial, the Store and Settings ship with the app. The Web Browser,
+the File Browser, the Text Editor, Notes, Project Management, the Git Client,
+the Terminal, Claude, Chat, Email, Remote, the Photo Album, the Video Store and
+the Sales demo are installed from the Store. Saving and opening a file
 (ctrl+s, ctrl+o) go through the File Browser, so install it first.
 
 The Store lists the programs you can add. Each one says what it may reach
@@ -200,7 +210,8 @@ opens in its own tab.
   pull, push, stage, branch, merge, rebase and stash are colon commands, and
   staging and committing undo with ctrl+z.
 - **Text Editor** opens a file as a list of its lines, each shown as it is in
-  the file, indentation included. A `.ff` file opens as its tree of nodes.
+  the file, indentation included. Line numbers, absolute or relative, are a
+  setting. A `.ff` file opens as its tree of nodes.
 - **Project Management** is the kanban board described just above.
 - **Claude** starts a Claude Code session in the folder you stand in. Answers
   arrive as a tree of messages, tool calls and results, and a second colon

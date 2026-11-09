@@ -11,7 +11,7 @@ tutorial-sec-getting-started = Getting started
 tutorial-gs-intro = Welcome. This is a short, hands-on start. Do each step as you read it, every step here is safe and you can repeat it as often as you like. Press the Down arrow now to begin.
 tutorial-gs-moved = You pressed Down and your screen reader announced this line. Up and Down move the selection through a list. The next item below is a section. Move Down to it, then press the Right arrow to step inside.
 tutorial-gs-step = Step inside this section, press Right
-tutorial-gs-inside = You stepped in with the Right arrow. This is one level deeper. Everything in Sicompass is a tree of lists you move through this way. Press the Left arrow to go back out.
+tutorial-gs-inside = You stepped in with the Right arrow. This is one level deeper. Every screen in Sicompass is one list, a layer of a larger hierarchy, and you move between the layers this way. Press the Left arrow to go back out.
 tutorial-gs-back = Up and Down move between items here, Right goes deeper, and Left comes back. Press Left now to return to Getting started.
 tutorial-gs-checkbox-intro = Welcome back. Now try a checkbox. Move Down to the checkbox below and press Enter. Your screen reader announces checked or unchecked each time.
 tutorial-gs-checkbox = <checkbox>Practice checkbox, press Enter to toggle me
@@ -71,7 +71,7 @@ tutorial-sc-file-update = Ctrl+U: install the updates that are ready, the app's 
 # 3. How it works (the mental model, lean)
 # ---------------------------------------------------------------------------
 tutorial-sec-how-it-works = How it works
-tutorial-hiw-tree = Every graphical interface is really a tree of lists. Sicompass makes that structure explicit and navigable entirely from the keyboard, so one set of keys drives everything.
+tutorial-hiw-tree = Every graphical interface is really a hierarchy. Sicompass makes that hierarchy explicit and navigable entirely from the keyboard, so one set of keys drives everything.
 tutorial-hiw-programs = Each item at the root is a program, also called a provider: the web browser, email, this tutorial. They all plug into the same tree, so once you can navigate one you can navigate them all.
 tutorial-hiw-modes = Keys mean different things in different modes. You start in general mode and drop into insert, command, or search mode as needed. The Terminal and Claude views name themselves command mode and first command mode, because : is what opens them. The Shortcuts at a glance section lists them all.
 tutorial-hiw-editing = Any item that contains an input box is editable. Press i or a to edit it, Enter to save, Escape to cancel. The settings program makes values editable, and the file browser, from the Store, makes file names editable.
@@ -93,7 +93,7 @@ tutorial-prog-settings = Settings: always the last item at the root. It configur
 # ---------------------------------------------------------------------------
 tutorial-sec-playground = Interactive playground
 tutorial-play-intro = A hands-on playground for the interactive element types Sicompass supports. Try each one as you go.
-tutorial-play-marks = A right arrow at the start of a row means there is more inside, and your screen reader says arrow right. A dash means there is nothing inside, and it says dash. A left arrow before the name of the parent means Left goes back, and it says arrow left.
+tutorial-play-marks = A right arrow at the start of a row means there is more inside, and your screen reader says arrow right. A dash means there is nothing inside, and it says dash. A left arrow before the name of the parent means Left goes back, and it says arrow left. After the mark, a letter says what kind of row it is: i an input, c a checkbox, R a group of choices and r a choice in it, b a button, l a link, p a picture and v a video. More letters say what a row holds, such as l when a checkbox holds a link.
 tutorial-play-checkbox = <checkbox checked>Checkboxes toggle with Enter (this one starts checked)
 tutorial-play-button = Buttons run an action with Enter, try this one: <button>demo</button>activate me
 tutorial-play-button-pressed = You activated the demo button. This one does nothing, it is here so you can practice.
@@ -159,9 +159,9 @@ tutorial-play-lorem = __LOREM_IPSUM__
 tutorial-sec-config = Settings and config
 tutorial-cfg-file = All configuration lives in one file, ~/.config/sicompass/settings.json, organized by namespace with a section per program.
 tutorial-cfg-logs = Sicompass writes a daily log file, sicompass.log, to a platform directory: ~/.local/state/sicompass/ on Linux, ~/Library/Logs/sicompass/ on macOS, and %LOCALAPPDATA%\sicompass\ on Windows. Set the RUST_LOG environment variable to also print logs to the terminal. Logs help when you report a problem.
-tutorial-cfg-settings = The Settings program edits everything live: color scheme, display scaling, and a shoulder-surfing blank that hides the screen while the screen reader keeps working. Each program brings its own values too, such as URL history under web browser, which sets how many addresses are remembered. In a desicompass session, color scheme, language and the accessibility settings, the screen reader among them, are in the superkey's Settings instead, shared with the login screen.
+tutorial-cfg-settings = The Settings program edits everything live: color scheme, display scaling, and a shoulder-surfing blank that hides the screen while the screen reader keeps working. Each program brings its own values too, such as URL history under web browser, which sets how many addresses are remembered. In a desicompass session, color scheme, language and the accessibility settings, the screen reader among them, are in the superkey's Settings instead, shared with the login screen. Line numbers under text editor numbers the lines of a file, absolute or relative.
 tutorial-cfg-saveload = Some programs support their own config files. Ctrl+S saves, Ctrl+Shift+S saves under a new name, and Ctrl+O opens a saved file.
-tutorial-cfg-updates = Sicompass checks for updates of itself and of your programs at launch, and says at the top which are ready. Press Ctrl+U to install them. A program update that asks for more access waits for you in the store, where you see what it asks for. Program updates are verified by their signature and SHA-256.
+tutorial-cfg-updates = Sicompass checks for updates of itself and of your programs at launch, and says at the top which are ready. Press Ctrl+U to install them. A program update that asks for more access waits for you in the store, where you see what it asks for. Program updates are verified by their signature and SHA-256. Where Nix installed Sicompass, a new version is named but not installed: update your flake pin and rebuild. A program update that needs a newer Sicompass waits, and the line at the top says which version it needs.
 
 # ---------------------------------------------------------------------------
 # 7. Extending Sicompass (pointer to the real docs)
