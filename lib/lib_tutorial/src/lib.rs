@@ -204,6 +204,7 @@ static SECTIONS: &[Node] = &[
                     Leaf("tutorial-sc-in-backspace"),
                     Leaf("tutorial-sc-in-delete"),
                     Leaf("tutorial-sc-in-newline"),
+                    Leaf("tutorial-sc-in-move"),
                     Leaf("tutorial-sc-in-select"),
                     Leaf("tutorial-sc-in-chain"),
                 ],
