@@ -389,6 +389,32 @@ fn a_plugin_from_before_1_3_is_not_asked_to_search() {
     assert!(!p.is_poisoned(), "{:?}", p.take_error());
 }
 
+/// A plugin that speaks 1.4 says what a line can be written from.
+#[test]
+fn a_current_plugin_is_asked_what_a_line_is_written_from() {
+    let dir = install("process_fixture");
+    let mut p = open_in(dir.path(), grants(None)).unwrap();
+    p.set_current_path("/docs");
+    let c = p.completions();
+    assert_eq!(c.words[0].data, "echo");
+    assert_eq!(c.lines[0].data, "ls /docs");
+    assert!(!p.is_poisoned(), "{:?}", p.take_error());
+}
+
+/// A plugin from before 1.4 would exit on that request, so it is never sent
+/// it, and has nothing to offer.
+#[test]
+fn a_plugin_from_before_1_4_is_not_asked_what_a_line_is_written_from() {
+    let dir = install("process_fixture_old");
+    let mut p = open_in(dir.path(), grants(None)).unwrap();
+    assert_eq!(
+        p.completions(),
+        sicompass_sdk::provider::Completions::default()
+    );
+    p.tick();
+    assert!(!p.is_poisoned(), "{:?}", p.take_error());
+}
+
 #[test]
 fn a_missing_executable_is_an_error_not_a_panic() {
     let dir = tempfile::tempdir().unwrap();

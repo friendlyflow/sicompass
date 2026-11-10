@@ -22,6 +22,23 @@ produce the installable Linux package. It reads the version from
   package name.
 - Editing `flake.nix` itself: see [.claude/rules/nix-flake.md](.claude/rules/nix-flake.md).
 
+## The user tests first, then the patches go
+
+The user tries every change by hand before it is committed. So a task ends with
+a plain `cargo build -p sicompass` in this checkout succeeding, with no
+`SICOMPASS_PLUGIN_PATH=` or any other workaround: that build also builds every
+sibling plugin (`src/build.rs`), and it is the one the user runs.
+
+- While an SDK or renderer change is unpublished, the local `[patch]` sections
+  stay **on**: `[patch.crates-io]` for the SDK in this repo, in
+  `../sicompass-ui` and in **every sibling plugin checkout** that fails without
+  it (a plugin using new API, such as `../filebrowser-plugin-sicompass`), and
+  the `sicompass-ui` patch here.
+- They are commented out again only as part of a commit, after the user has
+  tested, never as tidying at the end of a task.
+- If that build fails in a sibling checkout, switch its patch on. Do not hand
+  the user a command that skips the plugins.
+
 ## Sibling repos
 
 sicompass is being split into sibling repos under the same parent directory,

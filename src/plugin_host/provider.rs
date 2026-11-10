@@ -918,6 +918,34 @@ impl Provider for ProcessProvider {
         }
     }
 
+    /// Asked only of a plugin that speaks 1.4: an older one would take the
+    /// request for a broken channel. It never lists `compose` either, so the
+    /// app does not ask it.
+    fn completions(&mut self) -> sicompass_sdk::provider::Completions {
+        if !self.channel.speaks("1.4") {
+            return Default::default();
+        }
+        let items = |v: Vec<sicompass_sdk::plugin_ipc::ListItem>| {
+            v.into_iter()
+                .map(|i| ListItem {
+                    label: i.label,
+                    data: i.data,
+                })
+                .collect()
+        };
+        match self.req("completions", Request::Completions) {
+            Ok(Response::Completions(c)) => sicompass_sdk::provider::Completions {
+                words: items(c.words),
+                lines: items(c.lines),
+            },
+            Ok(Response::Unsupported) | Err(_) => Default::default(),
+            Ok(other) => {
+                self.wrong_answer("completions", &other);
+                Default::default()
+            }
+        }
+    }
+
     fn execute_command(&mut self, cmd: &str, selection: &str) -> bool {
         let done = self.req_bool(
             "execute-command",

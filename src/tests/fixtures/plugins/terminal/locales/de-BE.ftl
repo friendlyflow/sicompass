@@ -11,5 +11,6 @@ terminal-setting-auto-dashboard = Dashboard für interaktive Programme automatis
 # aufgelistet werden.
 terminal-command-shell = Shell
 terminal-command-browse = Ordner
+terminal-command-compose = einen Befehl schreiben
 
-terminal-tutorial = Terminal, aus dem Store: Drücken Sie :, um die Liste in eine echte Shell zu verwandeln, die in dem Ordner läuft, in dem Sie gerade sind, mit einer Eingabezeile unten. Die Kopfzeile sagt dann Befehlsmodus. Gehen Sie zuerst mit Rechts in einen Ordner, wenn Sie die Shell eine Ebene tiefer möchten. Escape führt zurück zu den Ordnern, und Vollbild-Programme wie vim und htop erhalten ihren eigenen interaktiven Modus.
+terminal-tutorial = Terminal, aus dem Store: Drücken Sie :, um die Liste in eine echte Shell zu verwandeln, die in dem Ordner läuft, in dem Sie gerade sind, mit einer Eingabezeile unten. Die Kopfzeile sagt dann erster Befehlsmodus. Drücken Sie noch einmal :, um im zweiten Befehlsmodus einen Befehl zu schreiben: zuerst die Programme, dann die Befehle, die Sie vorher ausgeführt haben. Tab vervollständigt das Wort, das Sie tippen, und Enter setzt den Befehl in die Eingabezeile, wo Enter ihn ausführt. Gehen Sie zuerst mit Rechts in einen Ordner, wenn Sie die Shell eine Ebene tiefer möchten. Escape führt zurück zu den Ordnern, und Vollbild-Programme wie vim und htop erhalten ihren eigenen interaktiven Modus.

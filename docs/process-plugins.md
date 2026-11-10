@@ -60,14 +60,14 @@ Each message is a little-endian `u32` byte count, then the message in postcard
 carries an id and its reply names it.
 
 1. The plugin speaks first: `Hello { protocol, name }`. The app refuses a plugin
-   whose protocol major differs from its own (`PROTOCOL_VERSION`, now `1.3`) and
+   whose protocol major differs from its own (`PROTOCOL_VERSION`, now `1.4`) and
    says "update it from the Store". It keeps the version the plugin named
    (`Channel::speaks`).
 2. The app calls with `Call { id, request }`. There is one `Request` per thing a
    provider does, the same set the WIT `provider` interface had, plus
    `LocaleChanged`, (1.1) `CannotAddHere`, (1.2) `AllowsScrollPrefetch` and
    (1.3) `StartExtendedSearch`, `TakeExtendedSearchItems` and
-   `StopExtendedSearch`. The plugin answers with `Reply { id, response, moved_to }`.
+   `StopExtendedSearch`, and (1.4) `Completions`. The plugin answers with `Reply { id, response, moved_to }`.
    `moved_to` is where the plugin is now, when the call moved it (a command, an
    edit, a shell's `cd`), so `current_path` never needs a call.
 3. The plugin asks with `HostCall { id, request }` for what only the app knows, and
@@ -111,6 +111,26 @@ reads names, never contents, and writes nothing. The file browser's stops at
 
 A plugin without a walk, or older than 1.3, gets the same as scroll mode:
 the app fetches a few levels ahead first, unless `AllowsScrollPrefetch` says no.
+
+### A line written for a prompt (the second `:`)
+
+A plugin whose list ends in a prompt, an `<input>` the user writes a line in
+(a shell, a chat with a program), lists `COMPOSE_COMMAND` (`compose`) in
+`commands()` while that prompt is there. `:` then opens second command mode
+instead of the command list: the user writes the line, and the app asks
+`Plugin::completions` once (`Completions`) for what to offer under it. `words`
+are completed at the caret (the terminal's programs, Claude's skills as
+`/name`), `lines` replace the whole line (what was run or sent before). The app
+filters them as the user types and shows the words first: a word when it starts
+with the word at the caret (leading punctuation aside, so `rev` finds
+`/review`), a line when it loosely matches the whole line. Tab takes the
+highlighted row. Enter takes it too, then puts the line in the prompt through
+`set_input_value` and starts editing it there, so a second Enter runs or sends
+it. Only a line no row matches goes in as written. Escape leaves the prompt as
+it was.
+
+A plugin older than 1.4 is never sent `Completions`, and could not have listed
+`compose`, so its `:` does what it did.
 
 ### What a plugin asks the app
 

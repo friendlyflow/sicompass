@@ -214,10 +214,13 @@ opens in its own tab.
   setting. A `.ff` file opens as its tree of nodes.
 - **Project Management** is the kanban board described just above.
 - **Claude** starts a Claude Code session in the folder you stand in. Answers
-  arrive as a tree of messages, tool calls and results, and a second colon
-  lists the project's skills.
-- **Terminal** turns that folder into a real shell. Full screen programs like
-  vim and htop get an interactive mode that hands them the raw keys.
+  arrive as a tree of messages, tool calls and results. A second colon writes
+  a prompt from the project's skills and your earlier prompts, and Tab
+  completes them.
+- **Terminal** turns that folder into a real shell. A second colon writes a
+  command from the programs you have and the commands you ran before, and Tab
+  completes them. Full screen programs like vim and htop get an interactive
+  mode that hands them the raw keys.
 
 All five come from the Store. The git client, Claude and the terminal each
 drive a tool you may already have, and they use your own `git`, shell and

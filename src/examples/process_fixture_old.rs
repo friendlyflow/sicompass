@@ -29,6 +29,7 @@ fn main() {
             Request::StartExtendedSearch
             | Request::TakeExtendedSearchItems
             | Request::StopExtendedSearch => return,
+            Request::Completions => return,
             _ => Response::Unit,
         };
         let reply = Message::Reply {

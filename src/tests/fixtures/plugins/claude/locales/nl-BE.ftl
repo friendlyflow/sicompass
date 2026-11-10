@@ -11,7 +11,7 @@ claude-setting-folder = map van Claude Code (sessies en skills)
 # Commandonamen, getoond waar de commando's van de provider opgesomd worden.
 claude-command-session = sessie
 claude-command-browse = mappen
-claude-command-skills = vaardigheden
+claude-command-compose = een vraag schrijven
 claude-command-sessions = sessies
 claude-command-delete-session = sessie verwijderen
 
@@ -27,4 +27,4 @@ claude-confirm-delete-yes = ja, verwijderen
 claude-session-deleted = sessie verwijderd:
 claude-session-delete-failed = kon die sessie niet verwijderen
 
-claude-tutorial = Claude, uit de store: druk op : om de lijst te veranderen in een Claude-sessie die draait in de map waar je nu bent, met onderaan een invoerregel. De koptekst zegt dan eerste commandomodus, want hier is een tweede : beschikbaar. De map is belangrijk, want die bepaalt welk project Claude ziet, dus ga eerst met Rechts een map binnen als je een niveau dieper wilt werken. Typ een vraag en druk op Enter, en het antwoord verschijnt als een boom van berichten, tool-oproepen en resultaten die je kunt doorlopen. Escape brengt je terug naar de mappen. Druk je bij de invoerregel opnieuw op :, dan opent de tweede commandomodus met de vaardigheden van het project, waar Enter de gekozen vaardigheid in je vraag zet. Druk je : in een andere map, dan start daar een nieuwe sessie die het vorige gesprek vervangt.
+claude-tutorial = Claude, uit de store: druk op : om de lijst te veranderen in een Claude-sessie die draait in de map waar je nu bent, met onderaan een invoerregel. De koptekst zegt dan eerste commandomodus, want hier is een tweede : beschikbaar. De map is belangrijk, want die bepaalt welk project Claude ziet, dus ga eerst met Rechts een map binnen als je een niveau dieper wilt werken. Typ een vraag en druk op Enter, en het antwoord verschijnt als een boom van berichten, tool-oproepen en resultaten die je kunt doorlopen. Escape brengt je terug naar de mappen. Druk je ergens in de sessie opnieuw op :, dan opent de tweede commandomodus om een vraag te schrijven, met eerst de vaardigheden van het project en daarna je eerdere vragen. Tab vult de vaardigheid aan die je typt, en Enter zet de vraag in de invoerregel. Druk je : in een andere map, dan start daar een nieuwe sessie die het vorige gesprek vervangt.

@@ -11,7 +11,7 @@ claude-setting-folder = dossier de Claude Code (sessions et compétences)
 # Noms de commande affichés partout où les commandes du fournisseur sont listées.
 claude-command-session = session
 claude-command-browse = dossiers
-claude-command-skills = compétences
+claude-command-compose = écrire une question
 claude-command-sessions = sessions
 claude-command-delete-session = supprimer la session
 
@@ -27,4 +27,4 @@ claude-confirm-delete-yes = oui, la supprimer
 claude-session-deleted = session supprimée :
 claude-session-delete-failed = impossible de supprimer cette session
 
-claude-tutorial = Claude, depuis le store : appuyez sur : pour transformer la liste en une session Claude qui s'exécute dans le dossier où vous êtes, avec une ligne d'entrée en bas. L'en-tête indique alors premier mode commande, car un second : est disponible ici. Le dossier compte, car il détermine quel projet Claude peut voir, alors entrez d'abord dans un dossier avec Droite si vous le voulez un niveau plus bas. Tapez une question et appuyez sur Enter, et la réponse arrive sous forme d'arbre de messages, d'appels d'outils et de résultats que vous pouvez parcourir. Échap ramène aux dossiers. Appuyer de nouveau sur : à la ligne d'entrée ouvre les compétences du projet en second mode commande, où Enter place la compétence choisie dans votre question. Appuyer sur : dans un autre dossier y démarre une nouvelle session, qui remplace la conversation précédente.
+claude-tutorial = Claude, depuis le store : appuyez sur : pour transformer la liste en une session Claude qui s'exécute dans le dossier où vous êtes, avec une ligne d'entrée en bas. L'en-tête indique alors premier mode commande, car un second : est disponible ici. Le dossier compte, car il détermine quel projet Claude peut voir, alors entrez d'abord dans un dossier avec Droite si vous le voulez un niveau plus bas. Tapez une question et appuyez sur Enter, et la réponse arrive sous forme d'arbre de messages, d'appels d'outils et de résultats que vous pouvez parcourir. Échap ramène aux dossiers. Appuyer de nouveau sur : n'importe où dans la session ouvre le second mode commande pour écrire une question, avec d'abord les compétences du projet puis vos questions précédentes. Tab complète la compétence que vous tapez, et Entrée met la question dans la ligne d'entrée. Appuyer sur : dans un autre dossier y démarre une nouvelle session, qui remplace la conversation précédente.

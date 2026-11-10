@@ -331,25 +331,6 @@ fn slot_key_at(renderer: &AppRenderer, slot_id: &sicompass_sdk::ffon::IdArray) -
     }
 }
 
-/// Replace the live input slot's children (the real on-disk recall history is
-/// unpredictable in tests) with the given `<button>` entries.
-fn set_history_buttons(
-    renderer: &mut AppRenderer,
-    slot_id: &sicompass_sdk::ffon::IdArray,
-    cmds: &[&str],
-) {
-    let idx = slot_id.last().unwrap();
-    let slot = sicompass::state::navigate_to_slice_pub(&mut renderer.ffon, slot_id)
-        .and_then(|arr| arr.get_mut(idx))
-        .and_then(|e| e.as_obj_mut())
-        .expect("cursor should be on the +i slot");
-    slot.children.clear();
-    for cmd in cmds {
-        slot.children
-            .push(FfonElement::new_str(format!("<button>{cmd}</button>{cmd}")));
-    }
-}
-
 fn press_right(r: &mut AppRenderer) {
     press(r, Keycode::Right);
 }
@@ -10788,7 +10769,10 @@ fn tab_switcher_order_survives_a_restart() {
     sicompass::programs::apply_tabs_section(fresh.r(), &sec);
     assert_eq!(fresh.renderer.tabs.len(), 3);
     assert_eq!(fresh.renderer.active_tab, active);
-    assert_eq!(fresh.renderer.tab_mru, mru, "the order comes back as it was left");
+    assert_eq!(
+        fresh.renderer.tab_mru, mru,
+        "the order comes back as it was left"
+    );
 }
 
 /// A dropped tab (its program is gone) moves the tabs after it down one. The
@@ -10802,8 +10786,14 @@ fn apply_tabs_section_keeps_active_tab_and_order_when_a_tab_is_dropped() {
     );
     let mut sec = serde_json::Map::new();
     sec.insert("tabs".to_owned(), serde_json::Value::String(tabs_json));
-    sec.insert("activeTab".to_owned(), serde_json::Value::String("3".to_owned()));
-    sec.insert("tabMru".to_owned(), serde_json::Value::String("[3,1,0,2]".to_owned()));
+    sec.insert(
+        "activeTab".to_owned(),
+        serde_json::Value::String("3".to_owned()),
+    );
+    sec.insert(
+        "tabMru".to_owned(),
+        serde_json::Value::String("[3,1,0,2]".to_owned()),
+    );
 
     sicompass::programs::apply_tabs_section(h.r(), &sec);
 
@@ -11463,7 +11453,7 @@ fn auto_leave_lands_back_in_the_shells_own_mode_even_if_user_was_in_insert() {
     // switching back into Insert.
     assert_eq!(
         renderer.coordinate,
-        Coordinate::SessionCommand,
+        Coordinate::SessionFirstCommand,
         "auto-leave must land in the shell's own mode, not the pre-launch Insert mode"
     );
     assert!(
@@ -11630,7 +11620,7 @@ fn terminal_colon_opens_a_shell_in_the_folder_being_listed() {
 
     // `:` is a view swap, never the command palette, for this provider — and the
     // shell it opens names itself rather than staying `general mode`.
-    assert_eq!(renderer.coordinate, Coordinate::SessionCommand);
+    assert_eq!(renderer.coordinate, Coordinate::SessionFirstCommand);
     assert_eq!(
         renderer.providers[0].current_path(),
         root.to_str().unwrap(),
@@ -11646,7 +11636,7 @@ fn terminal_colon_opens_a_shell_in_the_folder_being_listed() {
         .last()
         .expect("shell list should not be empty");
     assert!(
-        last.label.starts_with("+i "),
+        last.label.starts_with("-i "),
         "expected the input slot; got {:?}",
         last.label
     );
@@ -11907,7 +11897,7 @@ fn terminal_folder_without_subfolders_is_still_enterable() {
     // And `:` there runs the shell in it.
     press_colon(&mut renderer);
     assert_eq!(renderer.providers[0].current_path(), ws.to_str().unwrap());
-    assert!(renderer.total_list.last().unwrap().label.starts_with("+i "));
+    assert!(renderer.total_list.last().unwrap().label.starts_with("-i "));
 }
 
 #[test]
@@ -11930,7 +11920,7 @@ fn terminal_colon_on_an_empty_folder_opens_a_shell_where_it_stands() {
     press_colon(&mut renderer);
 
     assert_eq!(renderer.providers[0].current_path(), root.to_str().unwrap());
-    assert!(renderer.total_list.last().unwrap().label.starts_with("+i "));
+    assert!(renderer.total_list.last().unwrap().label.starts_with("-i "));
 }
 
 #[test]
@@ -11946,7 +11936,7 @@ fn terminal_escape_returns_to_the_folder_listing() {
     register_terminal_rooted_at(&mut renderer, &root);
     press_right(&mut renderer);
     press_colon(&mut renderer); // shell, running in the root being listed
-    assert!(renderer.total_list.last().unwrap().label.starts_with("+i "));
+    assert!(renderer.total_list.last().unwrap().label.starts_with("-i "));
     let pid = renderer.providers[0].process_id();
 
     press_escape(&mut renderer);
@@ -11980,7 +11970,7 @@ fn terminal_escape_returns_to_the_folder_listing() {
 
     // And `:` again returns to the same session, in the same folder.
     press_colon(&mut renderer);
-    assert!(renderer.total_list.last().unwrap().label.starts_with("+i "));
+    assert!(renderer.total_list.last().unwrap().label.starts_with("-i "));
     assert_eq!(renderer.providers[0].process_id(), pid);
     assert_eq!(renderer.providers[0].current_path(), root.to_str().unwrap());
 }
@@ -12012,7 +12002,7 @@ fn terminal_left_is_inert_in_the_shell_and_escape_keeps_the_path() {
         "Left is a no-op in the shell"
     );
     assert_eq!(renderer.providers[0].current_path(), ws.to_str().unwrap());
-    assert!(renderer.total_list.last().unwrap().label.starts_with("+i "));
+    assert!(renderer.total_list.last().unwrap().label.starts_with("-i "));
 
     // Escape leaves the view, and the path stays where the shell was.
     press_escape(&mut renderer);
@@ -12038,36 +12028,6 @@ fn terminal_left_is_inert_in_the_shell_and_escape_keeps_the_path() {
     }
 }
 #[test]
-fn terminal_history_children_are_still_reachable_and_escapable() {
-    // Inside the input slot's history the "back out of the shell" shortcuts must
-    // stand down, or Left would exit the shell instead of returning to the input
-    // line the history belongs to.
-    let tmp = TempDir::new().unwrap();
-    let root = tmp.path().canonicalize().unwrap();
-    std::fs::create_dir(root.join("workspace")).unwrap();
-
-    ensure_builtins();
-    let mut renderer = app_renderer();
-    register_terminal_rooted_at(&mut renderer, &root);
-    press_right(&mut renderer);
-    press_colon(&mut renderer);
-    let slot_id = renderer.current_id.clone();
-
-    // Give the slot a history button so descending is possible.
-    set_history_buttons(&mut renderer, &slot_id, &["ls"]);
-    press_right(&mut renderer);
-    assert_eq!(renderer.current_id.depth(), slot_id.depth() + 1);
-    assert_eq!(renderer.total_list.len(), 1, "inside the history list");
-
-    press_left(&mut renderer);
-    assert_eq!(renderer.current_id, slot_id, "back to the input line");
-    assert!(
-        renderer.total_list.last().unwrap().label.starts_with("+i "),
-        "still in the shell view",
-    );
-}
-
-#[test]
 fn colon_still_opens_the_command_palette_for_other_providers() {
     // The terminal branch in `handle_colon` must not leak to anyone else.
     ensure_builtins();
@@ -12082,14 +12042,13 @@ fn colon_still_opens_the_command_palette_for_other_providers() {
 }
 
 // ---------------------------------------------------------------------------
-// `+i` terminal live input slot with `<button>` history children
+// The terminal's live input slot
 // ---------------------------------------------------------------------------
 
 #[test]
-fn terminal_input_slot_renders_as_plus_i() {
-    // The terminal's live input line is a `+i` Obj (an <input> whose children
-    // are `<button>` history Strs), so the trailing rendered list item carries
-    // the `+i` prefix.
+fn terminal_input_slot_renders_as_minus_i() {
+    // The terminal's live input line is a `-i` Str, an <input> with nothing
+    // under it: past commands are offered by the second `:`, not by Right.
     ensure_builtins();
     let mut renderer = app_renderer();
     // Descend into the terminal provider and press `:` to reach the shell.
@@ -12100,8 +12059,8 @@ fn terminal_input_slot_renders_as_plus_i() {
         .last()
         .expect("terminal list should not be empty");
     assert!(
-        last.label.starts_with("+i "),
-        "terminal input slot should render as `+i`; got {:?}",
+        last.label.starts_with("-i "),
+        "terminal input slot should render as `-i`; got {:?}",
         last.label
     );
 }
@@ -12203,7 +12162,7 @@ fn claude_colon_lists_the_sessions_of_the_folder_being_listed() {
         root.to_str().unwrap(),
         "the list describes the listed folder, not the focused one",
     );
-    assert_eq!(renderer.coordinate, Coordinate::SessionList);
+    assert_eq!(renderer.coordinate, Coordinate::SessionFirstCommand);
     assert_eq!(
         labels(&renderer),
         vec!["-b new session", "+ An earlier session"],
@@ -12527,7 +12486,7 @@ fn claude_escape_leaves_the_whole_layer_from_either_rung() {
 
     // From the list, the same single press.
     press_colon(&mut renderer);
-    assert_eq!(renderer.coordinate, Coordinate::SessionList);
+    assert_eq!(renderer.coordinate, Coordinate::SessionFirstCommand);
     press_escape(&mut renderer);
     assert_eq!(renderer.coordinate, Coordinate::General);
     assert_eq!(labels(&renderer), vec!["+ workspace"]);
@@ -12569,7 +12528,7 @@ fn claude_left_out_of_a_session_lands_on_that_session() {
     assert_eq!(renderer.coordinate, Coordinate::SessionFirstCommand);
 
     press_left(&mut renderer);
-    assert_eq!(renderer.coordinate, Coordinate::SessionList);
+    assert_eq!(renderer.coordinate, Coordinate::SessionFirstCommand);
     assert_eq!(
         renderer.total_list[renderer.list_index].label, target,
         "back on the session that was open, not on the new-session button",
@@ -12577,7 +12536,7 @@ fn claude_left_out_of_a_session_lands_on_that_session() {
 }
 
 #[test]
-fn claude_new_session_opens_an_empty_session_typing_on_its_prompt() {
+fn claude_new_session_opens_an_empty_session_on_its_prompt() {
     let tmp = TempDir::new().unwrap();
     let root = tmp.path().canonicalize().unwrap();
     std::fs::create_dir(root.join("workspace")).unwrap();
@@ -12593,15 +12552,11 @@ fn claude_new_session_opens_an_empty_session_typing_on_its_prompt() {
         vec!["-b new session", "+ An earlier session"]
     );
 
-    // Enter on the button swaps the list for an empty session and lands typing
-    // on its prompt row, the same row every session has.
+    // Enter on the button swaps the list for an empty session and lands on its
+    // prompt row, the same row every session has, in the session's own mode:
+    // `i` types a prompt, `:` writes one from the skills.
     press_enter(&mut renderer);
-    assert_eq!(renderer.coordinate, Coordinate::Insert);
-    assert_eq!(
-        renderer.previous_coordinate,
-        Coordinate::SessionFirstCommand,
-        "Escape lands in the session",
-    );
+    assert_eq!(renderer.coordinate, Coordinate::SessionFirstCommand);
     assert_eq!(
         renderer.current_id.last(),
         Some(renderer.total_list.len() - 1),
@@ -12630,9 +12585,8 @@ fn claude_new_session_opens_an_empty_session_typing_on_its_prompt() {
 
 #[test]
 fn claude_an_empty_session_list_does_not_hand_colon_a_palette() {
-    // With no past sessions the list is the `new session` button alone. The
-    // view sentinels are filtered out of the insert palette, so `:` here must
-    // not open a one-item palette offering "session list".
+    // With no past sessions the list is the `new session` button alone, and
+    // the list has no prompt, so `:` here must not open second command mode.
     let tmp = TempDir::new().unwrap();
     let root = tmp.path().canonicalize().unwrap();
     std::fs::create_dir(root.join("workspace")).unwrap();
@@ -12647,9 +12601,10 @@ fn claude_an_empty_session_list_does_not_hand_colon_a_palette() {
 
     press_colon(&mut renderer);
 
-    assert!(
-        renderer.suspended_input_edit.is_none(),
-        "no insert palette here",
+    assert_ne!(
+        renderer.coordinate,
+        Coordinate::SecondCommand,
+        "no line to write here"
     );
     assert!(
         renderer.error_message.contains("Escape"),
@@ -12744,18 +12699,19 @@ fn claude_second_colon_lists_the_projects_skills() {
 
     press_colon(&mut renderer);
 
+    assert_eq!(renderer.coordinate, Coordinate::SecondCommand);
     assert_eq!(
         labels(&renderer),
         vec![
-            "deploy - Ship it".to_string(),
-            "review - Review the diff".to_string()
+            "/deploy - Ship it".to_string(),
+            "/review - Review the diff".to_string()
         ],
         "natural-sorted, name first so a prefix search finds it",
     );
     assert_eq!(
         renderer.providers[0].process_id(),
         None,
-        "the palette needs no running child",
+        "writing a line needs no running child",
     );
 }
 
@@ -12777,13 +12733,17 @@ fn claude_second_colon_enter_fills_the_prompt_without_sending() {
         Coordinate::Insert,
         "ready to keep typing"
     );
-    assert_eq!(renderer.input_buffer, "/review");
+    assert_eq!(
+        renderer.input_buffer, "/review ",
+        "with nothing written, Enter takes the highlighted skill"
+    );
     let slot_id = renderer.current_id.clone();
     assert!(
-        slot_key_at(&renderer, &slot_id).contains("<input>/review</input>"),
+        slot_key_at(&renderer, &slot_id).contains("<input>/review </input>"),
         "got {:?}",
         slot_key_at(&renderer, &slot_id)
     );
+    assert!(renderer.providers[0].process_id().is_none(), "nothing sent");
 }
 
 #[test]
@@ -12803,12 +12763,12 @@ fn claude_second_colon_escape_leaves_the_prompt_untouched() {
     assert_eq!(
         slot_key_at(&renderer, &renderer.current_id.clone()),
         before,
-        "byte-identical after a cancelled palette",
+        "byte-identical after a cancelled line",
     );
 }
 
 #[test]
-fn claude_skills_palette_filters_as_you_type() {
+fn claude_writes_a_prompt_with_skills_completed_by_tab() {
     let tmp = TempDir::new().unwrap();
     let root = tmp.path().canonicalize().unwrap();
     for n in ["review", "deploy", "release"] {
@@ -12821,20 +12781,30 @@ fn claude_skills_palette_filters_as_you_type() {
 
     press_colon(&mut renderer);
     assert_eq!(renderer.total_list.len(), 3);
-    type_text(&mut renderer, "rev");
+    type_text(&mut renderer, "/rev");
     assert_eq!(
         renderer.filtered_list_indices.len(),
         1,
-        "the app's existing fuzzy filter already covers this list"
+        "the skills are filtered on the word being typed"
+    );
+    press(&mut renderer, Keycode::Tab);
+    assert_eq!(renderer.input_buffer, "/review ");
+
+    type_text(&mut renderer, "this, then /dep");
+    press(&mut renderer, Keycode::Tab);
+    assert_eq!(
+        renderer.input_buffer, "/review this, then /deploy ",
+        "a second skill completes where the caret is"
     );
 
     press_enter(&mut renderer);
-    assert_eq!(renderer.input_buffer, "/review");
+    assert_eq!(renderer.coordinate, Coordinate::Insert);
+    assert_eq!(renderer.input_buffer, "/review this, then /deploy ");
 }
 
 #[test]
-fn claude_ctrl_colon_keeps_the_half_typed_message() {
-    // The case Ctrl+: exists for: a bare `:` in the prompt is just a colon.
+fn claude_colon_while_typing_a_prompt_is_a_typed_colon() {
+    // There is no Ctrl+: any more: typing, `:` and Ctrl+: are left to the text.
     let tmp = TempDir::new().unwrap();
     let root = tmp.path().canonicalize().unwrap();
     project_skill(&root, "review", "");
@@ -12845,18 +12815,11 @@ fn claude_ctrl_colon_keeps_the_half_typed_message() {
     press(&mut renderer, Keycode::I);
     type_text(&mut renderer, "explain ");
 
+    press_colon(&mut renderer);
     press_ctrl_shift(&mut renderer, Keycode::Semicolon);
-    press_enter(&mut renderer);
 
     assert_eq!(renderer.coordinate, Coordinate::Insert);
-    assert_eq!(
-        renderer.input_buffer, "explain /review",
-        "spliced at the caret"
-    );
-    assert!(
-        slot_key_at(&renderer, &renderer.current_id.clone())
-            .contains("<input>explain /review</input>")
-    );
+    assert_eq!(renderer.input_buffer, "explain ");
 }
 
 #[test]
@@ -12890,8 +12853,8 @@ fn claude_double_home_in_the_session_says_escape_first_instead_of_freezing() {
 }
 
 #[test]
-fn claude_new_session_ctrl_colon_lists_the_projects_skills() {
-    // A new session's first prompt is typed where every later one is, so the
+fn claude_new_session_colon_lists_the_projects_skills() {
+    // A new session's first prompt is written where every later one is, so the
     // skills are there for it too.
     let tmp = TempDir::new().unwrap();
     let root = tmp.path().canonicalize().unwrap();
@@ -12904,25 +12867,32 @@ fn claude_new_session_ctrl_colon_lists_the_projects_skills() {
     press_right(&mut renderer);
     press_colon(&mut renderer);
     press_enter(&mut renderer);
-    type_text(&mut renderer, "please ");
+    assert_eq!(
+        renderer.coordinate,
+        Coordinate::SessionFirstCommand,
+        "on the new session's prompt, not typing yet"
+    );
 
-    press_ctrl_shift(&mut renderer, Keycode::Semicolon);
+    press_colon(&mut renderer);
     assert_eq!(renderer.coordinate, Coordinate::SecondCommand);
     assert_eq!(
         labels(&renderer),
-        vec!["review - Review the diff".to_string()]
+        vec!["/review - Review the diff".to_string()]
     );
 
+    type_text(&mut renderer, "please /re");
+    press(&mut renderer, Keycode::Tab);
     press_enter(&mut renderer);
     assert_eq!(renderer.coordinate, Coordinate::Insert);
-    assert_eq!(
-        renderer.input_buffer, "please /review",
-        "spliced at the caret"
-    );
+    assert_eq!(renderer.input_buffer, "please /review ");
 }
 
 #[test]
-fn claude_ctrl_colon_escape_keeps_the_half_typed_message() {
+fn claude_escape_after_writing_a_line_keeps_it_everywhere() {
+    // Enter in second command mode puts the line in the prompt, and the edit
+    // that opens on it starts from there, so Escape keeps the line. The row on
+    // screen, the element and the provider's own copy must agree on that, or
+    // the next `fetch()` rebuilds the slot from a stale copy.
     let tmp = TempDir::new().unwrap();
     let root = tmp.path().canonicalize().unwrap();
     project_skill(&root, "review", "");
@@ -12930,122 +12900,67 @@ fn claude_ctrl_colon_escape_keeps_the_half_typed_message() {
     ensure_builtins();
     let mut renderer = app_renderer();
     let _sessions = register_claude_in_session(&mut renderer, &root);
-    press(&mut renderer, Keycode::I);
-    type_text(&mut renderer, "explain ");
-
-    press_ctrl_shift(&mut renderer, Keycode::Semicolon);
-    type_text(&mut renderer, "rev");
-    press_escape(&mut renderer);
-
-    assert_eq!(renderer.coordinate, Coordinate::Insert);
-    assert_eq!(renderer.input_buffer, "explain ", "the draft survives");
-    assert_eq!(renderer.cursor_position, "explain ".len());
-}
-
-#[test]
-fn claude_escape_after_inserting_a_skill_clears_the_prompt() {
-    // Escape in Insert cancels the whole edit, so the prompt goes back to how it
-    // was before typing started — skill and all. The provider's own copy of the
-    // pending text has to be cancelled with it, or the next `fetch()` rebuilds
-    // the slot from the stale copy and the skill reappears.
-    let tmp = TempDir::new().unwrap();
-    let root = tmp.path().canonicalize().unwrap();
-    project_skill(&root, "review", "");
-
-    ensure_builtins();
-    let mut renderer = app_renderer();
-    let _sessions = register_claude_in_session(&mut renderer, &root);
-    press(&mut renderer, Keycode::I);
-    type_text(&mut renderer, "explain ");
-    press_ctrl_shift(&mut renderer, Keycode::Semicolon);
+    press_colon(&mut renderer);
+    type_text(&mut renderer, "/rev");
+    press(&mut renderer, Keycode::Tab);
+    type_text(&mut renderer, "this");
     press_enter(&mut renderer);
-    assert_eq!(renderer.input_buffer, "explain /review");
+    assert_eq!(renderer.input_buffer, "/review this");
+    type_text(&mut renderer, " and that");
 
     press_escape(&mut renderer);
 
     let slot_id = renderer.current_id.clone();
+    let want = "<input>/review this</input>";
     assert!(
-        slot_key_at(&renderer, &slot_id).contains("<input></input>"),
-        "the element should be back to empty; got {:?}",
+        slot_key_at(&renderer, &slot_id).contains(want),
+        "the element keeps the line, not the cancelled typing; got {:?}",
         slot_key_at(&renderer, &slot_id)
     );
-    // And it must stay empty once the provider re-renders the slot.
-    let refetched = renderer.providers[0].fetch();
-    let key = refetched.last().unwrap().as_str().unwrap();
-    assert!(
-        key.contains("<input></input>"),
-        "a refetch brought the cancelled text back; got {key:?}"
-    );
-}
-
-#[test]
-fn claude_escape_after_a_skill_clears_the_row_the_user_actually_sees() {
-    // Reported: after Escape the prompt still showed the skill, while pressing
-    // `i` on it gave an empty buffer. That pattern means the FFON is right and
-    // the *rendered* row is stale, so assert on `total_list` — what is on
-    // screen — as well as on the element, and again after a re-entry.
-    let tmp = TempDir::new().unwrap();
-    let root = tmp.path().canonicalize().unwrap();
-    project_skill(&root, "review", "");
-
-    ensure_builtins();
-    let mut renderer = app_renderer();
-    let _sessions = register_claude_in_session(&mut renderer, &root);
-    press(&mut renderer, Keycode::I);
-    type_text(&mut renderer, "explain ");
-    press_ctrl_shift(&mut renderer, Keycode::Semicolon);
-    press_enter(&mut renderer);
-
-    press_escape(&mut renderer);
-
     let shown = |r: &AppRenderer| r.total_list.last().unwrap().label.clone();
     assert!(
-        !shown(&renderer).contains("/review"),
-        "the row on screen still shows the skill: {:?}",
+        shown(&renderer).ends_with("/review this"),
+        "the row on screen: {:?}",
         shown(&renderer)
     );
-
-    // Re-enter and leave again: the second Escape must not resurrect it.
-    press(&mut renderer, Keycode::I);
-    assert_eq!(renderer.input_buffer, "", "nothing left to edit");
-    press_escape(&mut renderer);
-    assert!(
-        !shown(&renderer).contains("/review"),
-        "resurrected on the second escape: {:?}",
-        shown(&renderer)
-    );
+    let refetched = renderer.providers[0].fetch();
+    let key = refetched.last().unwrap().as_str().unwrap();
+    assert!(key.contains(want), "and so does a refetch; got {key:?}");
 
     // And a provider-driven refresh, the way streaming output triggers one.
     sicompass::provider::refresh_current_directory(&mut renderer);
     assert!(
-        !shown(&renderer).contains("/review"),
-        "a refresh brought it back: {:?}",
+        shown(&renderer).ends_with("/review this"),
+        "a refresh changed it: {:?}",
         shown(&renderer)
     );
 }
 
 #[test]
-fn claude_second_colon_with_no_skills_is_inert() {
-    // No `.claude/skills/` at all: `:` in the session has nothing to offer, and
-    // must not open an empty palette the user cannot get out of by ear.
+fn claude_second_colon_with_no_skills_still_writes_a_line() {
+    // No `.claude/skills/` and nothing sent yet: no rows, but a prompt can
+    // still be written, and the header says so.
     let tmp = TempDir::new().unwrap();
     let root = tmp.path().canonicalize().unwrap();
 
     ensure_builtins();
     let mut renderer = app_renderer();
     let _sessions = register_claude_in_session(&mut renderer, &root);
-    let before = renderer.coordinate;
 
     press_colon(&mut renderer);
+    assert_eq!(renderer.coordinate, Coordinate::SecondCommand);
+    assert!(renderer.total_list.is_empty(), "{:?}", labels(&renderer));
 
-    assert_eq!(renderer.coordinate, before, "still in the session");
-    assert!(renderer.suspended_input_edit.is_none());
+    type_text(&mut renderer, "hello");
+    press_enter(&mut renderer);
+    assert_eq!(renderer.coordinate, Coordinate::Insert);
+    assert_eq!(renderer.input_buffer, "hello");
 }
 
 #[test]
-fn terminal_second_colon_stays_inert() {
-    // The terminal has a live prompt too, but offers nothing beyond the view
-    // swap — so the shape-based palette check must not fire for it.
+fn terminal_second_colon_writes_a_command() {
+    // `:` into the shell, `:` again to write a command: the programs first,
+    // then the commands run before.
     let tmp = TempDir::new().unwrap();
     let root = tmp.path().canonicalize().unwrap();
     std::fs::create_dir(root.join("workspace")).unwrap();
@@ -13055,14 +12970,45 @@ fn terminal_second_colon_stays_inert() {
     register_terminal_rooted_at(&mut renderer, &root);
     press_right(&mut renderer);
     press_colon(&mut renderer); // into the shell
+    assert_eq!(renderer.coordinate, Coordinate::SessionFirstCommand);
 
     press_colon(&mut renderer);
-
+    assert_eq!(renderer.coordinate, Coordinate::SecondCommand);
     assert!(
-        renderer.suspended_input_edit.is_none(),
-        "no palette for a provider with nothing to insert"
+        renderer.header_text().starts_with("second command mode"),
+        "{}",
+        renderer.header_text()
     );
-    assert_eq!(renderer.coordinate, Coordinate::SessionCommand);
+
+    // `echo` is wherever the test runs, but where it is not, completing it
+    // proves nothing, so only then is it asked for.
+    let has_echo = std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
+        .any(|d| d.join("echo").is_file());
+    // The argument is one no program starts with and nothing was run before,
+    // so no row matches it and Enter takes the line as written.
+    if has_echo {
+        type_text(&mut renderer, "echo");
+        assert_eq!(
+            renderer.current_list_item().map(|i| i.label.as_str()),
+            Some("echo"),
+            "the program is the first row for its own name"
+        );
+        press(&mut renderer, Keycode::Tab);
+        assert_eq!(renderer.input_buffer, "echo ");
+        type_text(&mut renderer, "zq9");
+    } else {
+        type_text(&mut renderer, "echo zq9");
+    }
+
+    press_enter(&mut renderer);
+    assert_eq!(renderer.coordinate, Coordinate::Insert);
+    assert_eq!(renderer.input_buffer, "echo zq9");
+    let slot_id = renderer.current_id.clone();
+    assert!(
+        slot_key_at(&renderer, &slot_id).contains("<input>echo zq9</input>"),
+        "{:?}",
+        slot_key_at(&renderer, &slot_id)
+    );
 }
 
 #[test]
@@ -13161,7 +13107,7 @@ fn claude_left_returns_to_the_session_list() {
 
     press_left(&mut renderer);
 
-    assert_eq!(renderer.coordinate, Coordinate::SessionList);
+    assert_eq!(renderer.coordinate, Coordinate::SessionFirstCommand);
     assert_eq!(labels(&renderer)[0], "-b new session");
     assert_eq!(
         renderer.total_list[renderer.list_index].label, "+ A fixture session",
@@ -13181,50 +13127,12 @@ fn claude_left_returns_to_the_session_list() {
 }
 
 #[test]
-fn enter_on_history_button_fills_input() {
-    // Enter on a `<button>` history child fills the `+i` slot's <input> with
-    // that command, moves focus onto the slot, and the value survives a
-    // re-fetch (the provider persists it as `pending_input`).
+fn general_enter_on_live_input_slot_runs_it_in_place() {
+    // Enter on the slot runs/commits the command and stays on the shell's own
+    // level.
     ensure_builtins();
     let mut renderer = app_renderer();
     let slot_id = register_terminal_in_shell(&mut renderer);
-    set_history_buttons(&mut renderer, &slot_id, &["git status"]);
-
-    // Focus that child, one level inside the slot.
-    let mut id = slot_id.clone();
-    id.push(0);
-    renderer.current_id = id;
-    sicompass::list::create_list_current_layer(&mut renderer);
-
-    sicompass::handlers::handle_enter_general(&mut renderer);
-
-    // Focus moved back onto the `+i` slot itself, still the shell's at-rest mode.
-    assert_eq!(renderer.current_id, slot_id);
-    assert_eq!(renderer.coordinate, Coordinate::SessionCommand);
-    let slot_key = slot_key_at(&renderer, &slot_id);
-    assert!(
-        slot_key.contains("<input>git status</input>"),
-        "slot <input> should hold the picked command; got {slot_key:?}"
-    );
-
-    // The value survives a re-fetch — the provider persisted it.
-    let refetched = renderer.providers[0].fetch();
-    let key = &refetched.last().unwrap().as_obj().unwrap().key;
-    assert!(
-        key.contains("<input>git status</input>"),
-        "re-fetched +i slot should keep the filled value; got {key:?}"
-    );
-}
-
-#[test]
-fn general_enter_on_live_input_slot_does_not_descend_into_history() {
-    // Enter on the `+i` slot itself runs/commits the command — it must NOT
-    // navigate into the history buttons (that is what Right arrow does).
-    ensure_builtins();
-    let mut renderer = app_renderer();
-    let slot_id = register_terminal_in_shell(&mut renderer);
-    // Give the slot a history button so descending *would* be possible.
-    set_history_buttons(&mut renderer, &slot_id, &["ls"]);
     sicompass::list::create_list_current_layer(&mut renderer);
 
     sicompass::handlers::handle_enter_general(&mut renderer);
@@ -13234,42 +13142,7 @@ fn general_enter_on_live_input_slot_does_not_descend_into_history() {
     assert_eq!(
         renderer.current_id.depth(),
         slot_id.depth(),
-        "General-mode Enter on the +i slot must not descend into history"
-    );
-}
-
-#[test]
-fn search_enter_on_history_button_fills_input() {
-    // Enter on a `+i` history button while in SimpleSearch (Tab / Ctrl-F)
-    // behaves like General-mode Enter: it fills the slot's <input>.
-    ensure_builtins();
-    let mut renderer = app_renderer();
-    let slot_id = register_terminal_in_shell(&mut renderer);
-    set_history_buttons(&mut renderer, &slot_id, &["git log"]);
-
-    // Focus the history button and build its list layer.
-    let mut id = slot_id.clone();
-    id.push(0);
-    renderer.current_id = id;
-    sicompass::list::create_list_current_layer(&mut renderer);
-
-    // Simulate being in SimpleSearch with that child selected.
-    renderer.coordinate = Coordinate::SimpleSearch;
-    renderer.previous_coordinate = Coordinate::General;
-    renderer.list_index = 0;
-
-    press_enter(&mut renderer);
-
-    assert_eq!(
-        renderer.coordinate,
-        Coordinate::SessionCommand,
-        "search mode should exit"
-    );
-    assert_eq!(renderer.current_id, slot_id, "focus moved onto the +i slot");
-    let slot_key = slot_key_at(&renderer, &slot_id);
-    assert!(
-        slot_key.contains("<input>git log</input>"),
-        "search Enter should fill the +i <input>; got {slot_key:?}"
+        "General-mode Enter on the slot stays on the shell's level"
     );
 }
 
@@ -17834,15 +17707,17 @@ fn controls_palette_maximize_label_tracks_state() {
 // which mode you were in.
 
 #[test]
-fn the_shell_view_says_command_mode_in_the_header_and_on_ctrl_w() {
+fn the_shell_view_says_first_command_mode_in_the_header_and_on_ctrl_w() {
     ensure_builtins();
     let mut renderer = app_renderer();
     register_terminal_in_shell(&mut renderer);
 
-    // One colon layer on offer, so the name carries no ordinal.
-    assert_eq!(renderer.coordinate, Coordinate::SessionCommand);
+    // Reached by one `:`, with a second on offer.
+    assert_eq!(renderer.coordinate, Coordinate::SessionFirstCommand);
     assert!(
-        renderer.header_text().starts_with("command mode, layer:"),
+        renderer
+            .header_text()
+            .starts_with("first command mode, layer:"),
         "header: {:?}",
         renderer.header_text()
     );
@@ -17850,7 +17725,7 @@ fn the_shell_view_says_command_mode_in_the_header_and_on_ctrl_w() {
     press_ctrl(&mut renderer, Keycode::W);
     let spoken = announced_text(&renderer).expect("Ctrl+W should still work in the shell");
     assert!(
-        spoken.starts_with("command mode, layer:"),
+        spoken.starts_with("first command mode, layer:"),
         "whereami: {spoken:?}"
     );
 }
@@ -17864,7 +17739,10 @@ fn entering_and_leaving_the_shell_announces_the_mode() {
     register_terminal_in_shell(&mut renderer);
 
     let entered = announced_text(&renderer).expect("entering the shell announces");
-    assert!(entered.starts_with("command mode"), "entering: {entered:?}");
+    assert!(
+        entered.starts_with("first command mode"),
+        "entering: {entered:?}"
+    );
 
     press_escape(&mut renderer);
     assert_eq!(renderer.coordinate, Coordinate::General);
@@ -17882,7 +17760,7 @@ fn the_claude_session_says_first_command_mode() {
     let mut renderer = app_renderer();
     let _sessions = register_claude_in_session(&mut renderer, &root);
 
-    // claude offers `skills` on top of the view swap, so this is the first of two.
+    // Reached by one `:`, with a second on offer.
     assert_eq!(renderer.coordinate, Coordinate::SessionFirstCommand);
     assert!(
         renderer
@@ -17901,7 +17779,7 @@ fn the_claude_session_says_first_command_mode() {
 }
 
 #[test]
-fn the_claude_skills_palette_says_second_command_mode() {
+fn claude_writing_a_prompt_says_second_command_mode() {
     let tmp = TempDir::new().unwrap();
     let root = tmp.path().canonicalize().unwrap();
     project_skill(&root, "review", "---\ndescription: Review the diff\n---\n");
@@ -17920,7 +17798,7 @@ fn the_claude_skills_palette_says_second_command_mode() {
         "header: {:?}",
         renderer.header_text()
     );
-    // `w` is a filter character in a palette, so ask the announcement builder
+    // `w` is a typed character there, so ask the announcement builder
     // directly — it is the same one the `w` key drives.
     renderer.speak_focus_position();
     let spoken = announced_text(&renderer).expect("ann set");
@@ -17948,10 +17826,6 @@ fn the_file_browser_palette_still_says_command_mode() {
 
     assert_eq!(renderer.coordinate, Coordinate::Command);
     assert!(
-        renderer.suspended_input_edit.is_none(),
-        "the file browser has no live prompt to park"
-    );
-    assert!(
         renderer.header_text().starts_with("command mode, layer:"),
         "header: {:?}",
         renderer.header_text()
@@ -17972,7 +17846,7 @@ fn no_general_mode_key_goes_silent_inside_a_shell() {
     ensure_builtins();
     let mut renderer = app_renderer();
     register_terminal_in_shell(&mut renderer);
-    let at_rest = Coordinate::SessionCommand;
+    let at_rest = Coordinate::SessionFirstCommand;
     assert_eq!(renderer.coordinate, at_rest);
 
     // M: the hint screen, and Escape back.

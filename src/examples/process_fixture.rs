@@ -140,6 +140,18 @@ impl Plugin for Fixture {
             true
         }))
     }
+    /// One program and one line run before, named after the current path so
+    /// the host is seen asking the live plugin.
+    fn completions(&mut self) -> plugin::Completions {
+        let item = |s: String| plugin::ListItem {
+            label: s.clone(),
+            data: s,
+        };
+        plugin::Completions {
+            words: vec![item("echo".into())],
+            lines: vec![item(format!("ls {}", self.path))],
+        }
+    }
     fn take_timeline_entries(&mut self) -> Vec<ProviderOp> {
         std::mem::take(&mut self.ops)
     }
