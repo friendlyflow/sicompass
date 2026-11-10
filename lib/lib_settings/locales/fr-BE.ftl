@@ -33,7 +33,6 @@ settings-checkbox-shoulder-surfing-protection = protection contre l'espionnage (
 settings-checkbox-screen-reader = lecteur d'écran
 settings-screen-reader-failed = Impossible de démarrer le lecteur d'écran : { $error }
 settings-checkbox-auto-update-check = vérifier les mises à jour au démarrage
-settings-onboarding-body = Utilisez Haut et Bas pour parcourir la liste. Appuyez deux fois sur Home pour atteindre la racine et voir tous vos programmes disponibles. Droite ouvre un élément qui affiche une flèche vers la droite, Gauche remonte au parent, Entrée coche une case, Échap revient en arrière.
 settings-radio-font-scale = taille du texte
 settings-radio-sort-order = ordre de tri
 
