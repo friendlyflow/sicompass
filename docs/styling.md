@@ -79,7 +79,8 @@ whole window.
 | `ul`, `li`, `ul.class` | The list and its rows. |
 | `.class`, `div`, `p`, `img`, `a`, `video` | What is inside a row. |
 | `.a .b` | Descendants. |
-| `li:focus` | The row or target the cursor is on. |
+| `li:focus` | The row the cursor is on. |
+| `img:focus`, `video:focus`, `a:focus`, `button:focus` | The target the cursor is on in element mode. |
 | `li::marker` | The list prefix: the arrow or dash and its letter. |
 | `@media (prefers-color-scheme: dark)` | The colour scheme setting, or `light`. |
 
@@ -102,6 +103,7 @@ whole window.
 | `justify-content` | `start`, `flex-start`, `center`, `end`, `flex-end`, `space-between`. |
 | `object-fit` | `contain`, `cover`. |
 | `aspect-ratio` | `1` or `16 / 9`. |
+| `outline`, `outline-width`, `outline-color`, `outline-offset` | The mark round the cursor. See below. |
 
 Lengths are `px`, `em`, `rem`, `ch`, `%`, and `fr` in a grid track. CSS pixels grow with the
 font scale setting, so a sheet keeps working at any size.
@@ -125,6 +127,28 @@ a row of the grid. A row is laid out in boxes when its display is `grid` or `fle
 it holds a video or two pictures or more. The tutorial has a working one, and so do the
 photo album and video store plugins.
 
+## The cursor's outline
+
+The cursor's row and, in element mode, its target are marked with `outline`. The default sheet
+gives the row a 3 px ring and every target a 3 px frame:
+
+```
+li:focus { outline: 3px solid; outline-offset: 3px }
+img:focus, video:focus { outline: 3px solid }
+a:focus, button:focus { outline: 3px solid; outline-offset: 2px }
+```
+
+Unlike a browser's, the outline is drawn inside the edge of what it marks, and `outline-offset`
+is the room between it and what is inside. A row of boxes keeps that room whether or not the
+cursor is on it, so the outline never covers a picture, a neighbour or the row's own ring, and
+nothing moves when the cursor arrives. A picture's box keeps the size the sheet gives it, and
+the picture is drawn smaller inside it. Leave out the colour to keep the theme's.
+
+```
+li:focus { outline: 4px solid #e80; outline-offset: 6px }
+img:focus { outline-color: #e80 }
+```
+
 ## What is ignored
 
 These are refused on purpose. Source order is what the keys and the screen reader follow:
@@ -137,7 +161,8 @@ Any property not listed above is ignored and logged once, the way a browser igno
 Accessibility sits on top of the cascade, and a sheet cannot turn it off:
 
 - Text below 4.5:1 contrast against what is behind it falls back to the theme's colour.
-- `:focus` must stay visible. A focus style that would hide the cursor is not used.
+- `:focus` must stay visible. A focus style that would hide the cursor is not used, and an
+  outline is never thinner than 2 px, `outline: none` included.
 
 ## Limits
 
