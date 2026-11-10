@@ -3,6 +3,25 @@
 cargo-dist parses this file and uses the matching version's section as the
 GitHub Release body, so entries here are what users read on the download page.
 
+## 0.2.6
+
+### Writing a command or a prompt
+
+- In the terminal and in Claude, a second colon writes a line for the input: the programs you have, or the project's skills, first, then what you ran or sent before. Tab completes the word you are typing, and Enter puts the line in the input, where Enter runs or sends it. It replaces Ctrl+: and the history under the terminal's input.
+- Every colon counts: the shell, Claude's session list and a session are first command mode, and what the second colon opens is second command mode. A new Claude session opens on its prompt without typing yet.
+
+### Finding your way
+
+- Ctrl+F searches below what you opened. The file browser walks the whole folder tree on its own thread, and the results join the list as they arrive. A long search says when it ends, and when it stopped at its limit.
+- PgUp and PgDn move one screen in every mode, with the cursor at the same height, and they and Home and End are spoken.
+- A row with several links, buttons, pictures or videos starts with an arrow right, and Right goes into it.
+- The first launch opens the beginner's manual. The manual says Tab opens it again, and the order of the `t` list survives a restart.
+
+### Fixes
+
+- Enter on the git client's confirmation (yes or no) runs the command again.
+- A refresh no longer moves the reader in the beginner's manual.
+
 ## 0.2.5
 
 ### Store and updates

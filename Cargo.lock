@@ -686,8 +686,8 @@ dependencies = [
 
 [[package]]
 name = "claude-plugin"
-version = "0.3.3"
-source = "git+https://github.com/friendlyflow/claude-plugin-sicompass?rev=c17fd8b3850a91b39a39a832ed5589dcc2c3312e#c17fd8b3850a91b39a39a832ed5589dcc2c3312e"
+version = "0.3.4"
+source = "git+https://github.com/friendlyflow/claude-plugin-sicompass?rev=3ea256854a7aeaf932583dde1cae07c48759eec9#3ea256854a7aeaf932583dde1cae07c48759eec9"
 dependencies = [
  "natord",
  "serde",
@@ -1323,8 +1323,8 @@ checksum = "64cd1e32ddd350061ae6edb1b082d7c54915b5c672c389143b9a63403a109f24"
 
 [[package]]
 name = "filebrowser-plugin"
-version = "0.3.3"
-source = "git+https://github.com/friendlyflow/filebrowser-plugin-sicompass?rev=a60556ba04d2294a88a206d30f88a7e5bdc09741#a60556ba04d2294a88a206d30f88a7e5bdc09741"
+version = "0.3.4"
+source = "git+https://github.com/friendlyflow/filebrowser-plugin-sicompass?rev=fea07e28cb8ad5e38128d714199f9fd3b1bc40bd#fea07e28cb8ad5e38128d714199f9fd3b1bc40bd"
 dependencies = [
  "base64 0.22.1",
  "libc",
@@ -3976,7 +3976,7 @@ checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
 
 [[package]]
 name = "sicompass"
-version = "0.2.5"
+version = "0.2.6"
 dependencies = [
  "accesskit",
  "accesskit_macos",
@@ -4031,7 +4031,7 @@ dependencies = [
 
 [[package]]
 name = "sicompass-builtins"
-version = "0.2.5"
+version = "0.2.6"
 dependencies = [
  "sicompass-sdk",
  "sicompass-settings",
@@ -4041,9 +4041,9 @@ dependencies = [
 
 [[package]]
 name = "sicompass-sdk"
-version = "0.9.14"
+version = "0.9.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fe3b52b80287c856a9875656cc099999bfb4203a38604c0278d57f7539827aa5"
+checksum = "e6ffad6aabc712811e288a05b73776e883ac79fe0dd8957840e5ff3c0b46b021"
 dependencies = [
  "async-trait",
  "base64 0.23.1",
@@ -4072,7 +4072,7 @@ dependencies = [
 
 [[package]]
 name = "sicompass-settings"
-version = "0.2.5"
+version = "0.2.6"
 dependencies = [
  "async-trait",
  "serde",
@@ -4083,7 +4083,7 @@ dependencies = [
 
 [[package]]
 name = "sicompass-store"
-version = "0.2.5"
+version = "0.2.6"
 dependencies = [
  "base64 0.23.1",
  "ed25519-dalek",
@@ -4110,7 +4110,7 @@ dependencies = [
 
 [[package]]
 name = "sicompass-tutorial"
-version = "0.2.5"
+version = "0.2.6"
 dependencies = [
  "serde_json",
  "sicompass-sdk",
@@ -4119,8 +4119,8 @@ dependencies = [
 
 [[package]]
 name = "sicompass-ui"
-version = "0.2.2"
-source = "git+https://github.com/friendlyflow/sicompass-ui?rev=1e8e61c248c199d261f09947dc531eea4a72fd38#1e8e61c248c199d261f09947dc531eea4a72fd38"
+version = "0.2.3"
+source = "git+https://github.com/friendlyflow/sicompass-ui?tag=v0.2.3#a100148f298032b71c3bd14e4cec0858dd2f404e"
 dependencies = [
  "accesskit",
  "accesskit_macos",
@@ -4154,7 +4154,7 @@ dependencies = [
 
 [[package]]
 name = "sicompass-updater"
-version = "0.2.5"
+version = "0.2.6"
 dependencies = [
  "reqwest",
  "semver",
@@ -4439,8 +4439,8 @@ dependencies = [
 
 [[package]]
 name = "terminal-plugin"
-version = "0.3.2"
-source = "git+https://github.com/friendlyflow/terminal-plugin-sicompass?rev=3413443e4aad9dc93ef3ffc04f6a9e76fd9f5032#3413443e4aad9dc93ef3ffc04f6a9e76fd9f5032"
+version = "0.3.3"
+source = "git+https://github.com/friendlyflow/terminal-plugin-sicompass?rev=0e24a2e7c91655acdfba0204e007c124fa3e130d#0e24a2e7c91655acdfba0204e007c124fa3e130d"
 dependencies = [
  "libc",
  "natord",
