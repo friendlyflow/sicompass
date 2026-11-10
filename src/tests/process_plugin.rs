@@ -345,6 +345,50 @@ fn a_plugin_from_before_1_2_is_not_asked_and_is_not_fetched_ahead() {
     assert!(!p.is_poisoned(), "{:?}", p.take_error());
 }
 
+/// A plugin that speaks 1.3 walks on its own thread, and the host hands what
+/// it found over batch by batch until the walk is over.
+#[test]
+fn a_current_plugin_runs_an_extended_search() {
+    let dir = install("process_fixture");
+    let mut p = open_in(dir.path(), grants(None)).unwrap();
+    p.set_current_path("/docs");
+    assert!(p.start_extended_search());
+    let mut found = Vec::new();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        let progress = p.take_extended_search_items();
+        found.extend(progress.items);
+        if progress.done {
+            assert!(!progress.cut_short, "it saw everything");
+            break;
+        }
+        assert!(std::time::Instant::now() < deadline, "the walk never ended");
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    let paths: Vec<_> = found.iter().map(|i| i.nav_path.as_str()).collect();
+    assert_eq!(paths, ["/docs/sub/deep", "/docs/sub/deeper"]);
+    assert_eq!(found[0].label, "- deep");
+    assert_eq!(found[0].breadcrumb, "sub > ");
+    p.stop_extended_search();
+    assert!(!p.is_poisoned(), "{:?}", p.take_error());
+}
+
+/// A plugin from before 1.3 would exit on the walk's requests, so it is never
+/// sent them: there is no walk, and Ctrl+F searches what is loaded.
+#[test]
+fn a_plugin_from_before_1_3_is_not_asked_to_search() {
+    let dir = install("process_fixture_old");
+    let mut p = open_in(dir.path(), grants(None)).unwrap();
+    assert!(!p.start_extended_search());
+    assert_eq!(
+        p.take_extended_search_items(),
+        sicompass_sdk::ExtendedSearchProgress::default()
+    );
+    p.stop_extended_search();
+    p.tick();
+    assert!(!p.is_poisoned(), "{:?}", p.take_error());
+}
+
 #[test]
 fn a_missing_executable_is_an_error_not_a_panic() {
     let dir = tempfile::tempdir().unwrap();

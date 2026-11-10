@@ -24,8 +24,8 @@ use sicompass_sdk::plugin_ipc::{
 };
 use sicompass_sdk::{
     CellAttrs, DashboardCell, DashboardCursor, DashboardFrame, DashboardKey, DashboardKeysym,
-    DashboardKind, DashboardPalette, DashboardRequest, DashboardSelection, FfonElement, ListItem,
-    NavigationRequest, Provider, SearchResultItem, TimelineEntry, ffon,
+    DashboardKind, DashboardPalette, DashboardRequest, DashboardSelection, ExtendedSearchProgress,
+    FfonElement, ListItem, NavigationRequest, Provider, SearchResultItem, TimelineEntry, ffon,
 };
 
 use super::channel::{Answer, CallError, Channel};
@@ -1053,6 +1053,51 @@ impl Provider for ProcessProvider {
                 None
             }
             Err(_) => None,
+        }
+    }
+
+    /// `false` for a plugin older than 1.3, which has no walk to start.
+    fn start_extended_search(&mut self) -> bool {
+        self.channel.speaks("1.3")
+            && self.req_bool("start-extended-search", Request::StartExtendedSearch)
+    }
+
+    fn take_extended_search_items(&mut self) -> ExtendedSearchProgress {
+        if !self.channel.speaks("1.3") {
+            return ExtendedSearchProgress::default();
+        }
+        match self.req(
+            "take-extended-search-items",
+            Request::TakeExtendedSearchItems,
+        ) {
+            Ok(Response::SearchBatch {
+                items,
+                done,
+                cut_short,
+            }) => ExtendedSearchProgress {
+                items: items
+                    .into_iter()
+                    .map(|i| SearchResultItem {
+                        label: i.label,
+                        breadcrumb: i.breadcrumb,
+                        nav_path: i.nav_path,
+                    })
+                    .collect(),
+                done,
+                cut_short,
+            },
+            Ok(other) => {
+                self.wrong_answer("take-extended-search-items", &other);
+                ExtendedSearchProgress::default()
+            }
+            // A plugin that is gone has nothing more to give.
+            Err(_) => ExtendedSearchProgress::default(),
+        }
+    }
+
+    fn stop_extended_search(&mut self) {
+        if self.channel.speaks("1.3") {
+            let _ = self.req("stop-extended-search", Request::StopExtendedSearch);
         }
     }
 

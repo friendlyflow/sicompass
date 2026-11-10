@@ -122,6 +122,24 @@ impl Plugin for Fixture {
     fn cannot_add_here(&mut self) -> Option<String> {
         (self.path == "/full").then(|| "nothing fits in /full".to_owned())
     }
+
+    /// Two names below the current path, so the host sees a walk end.
+    fn extended_search(&self) -> Option<plugin::ExtendedSearch> {
+        let root = self.path.trim_end_matches('/').to_owned();
+        Some(Box::new(move |found| {
+            for name in ["deep", "deeper"] {
+                let item = plugin::SearchResult {
+                    label: format!("- {name}"),
+                    breadcrumb: "sub > ".into(),
+                    nav_path: format!("{root}/sub/{name}"),
+                };
+                if !found(item) {
+                    break;
+                }
+            }
+            true
+        }))
+    }
     fn take_timeline_entries(&mut self) -> Vec<ProviderOp> {
         std::mem::take(&mut self.ops)
     }

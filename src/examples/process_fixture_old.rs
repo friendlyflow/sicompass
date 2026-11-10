@@ -26,6 +26,9 @@ fn main() {
             Request::Poll => Response::Poll(PollResult::default()),
             Request::CannotAddHere => return,
             Request::AllowsScrollPrefetch => return,
+            Request::StartExtendedSearch
+            | Request::TakeExtendedSearchItems
+            | Request::StopExtendedSearch => return,
             _ => Response::Unit,
         };
         let reply = Message::Reply {

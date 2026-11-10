@@ -60,12 +60,14 @@ Each message is a little-endian `u32` byte count, then the message in postcard
 carries an id and its reply names it.
 
 1. The plugin speaks first: `Hello { protocol, name }`. The app refuses a plugin
-   whose protocol major differs from its own (`PROTOCOL_VERSION`, now `1.2`) and
+   whose protocol major differs from its own (`PROTOCOL_VERSION`, now `1.3`) and
    says "update it from the Store". It keeps the version the plugin named
    (`Channel::speaks`).
 2. The app calls with `Call { id, request }`. There is one `Request` per thing a
    provider does, the same set the WIT `provider` interface had, plus
-   `LocaleChanged`, (1.1) `CannotAddHere` and (1.2) `AllowsScrollPrefetch`. The plugin answers with `Reply { id, response, moved_to }`.
+   `LocaleChanged`, (1.1) `CannotAddHere`, (1.2) `AllowsScrollPrefetch` and
+   (1.3) `StartExtendedSearch`, `TakeExtendedSearchItems` and
+   `StopExtendedSearch`. The plugin answers with `Reply { id, response, moved_to }`.
    `moved_to` is where the plugin is now, when the call moved it (a command, an
    edit, a shell's `cd`), so `current_path` never needs a call.
 3. The plugin asks with `HostCall { id, request }` for what only the app knows, and
@@ -83,6 +85,32 @@ is a default only safe for a plugin that could have said no:
 `AllowsScrollPrefetch` is `true` in the trait and `false` for a plugin older
 than 1.2, because scroll mode (`S`) then calls `fetch` for levels the user has
 not opened, and a plugin whose fetch marks mail read must be able to refuse.
+
+### Ctrl+F below what the user opened
+
+Extended search (Ctrl+F) lists the tree the app holds, which for most plugins
+is the current level and what the user opened before. A plugin reaches deeper
+by implementing `Plugin::extended_search`: it returns a walk (a closure over the
+path and its settings, not `self`), and the runtime runs it on a thread of its
+own (`StartExtendedSearch`). The app takes what it found every 100 ms
+(`TakeExtendedSearchItems`, at most 5 000 per take) and adds it to the list as
+the user types, so nothing waits on the walk. Leaving the search sends
+`StopExtendedSearch`, and the walk's next result is refused, which ends it. The
+runtime caps a walk at 200 000 results whatever the plugin's own budget.
+
+The walk returns whether it saw everything. The last batch says `cut_short`
+when it did not (its own budget, the runtime's cap, a panic), and the app says
+so: the search header's count reads `stopped at the limit`, and a walk that ran
+over a second is announced when it ends.
+
+A result's `nav_path` is in the plugin's own path form (`current_path`), and
+Enter goes there level by level (`navigate_to_path`), as the user would. A walk
+reads names, never contents, and writes nothing. The file browser's stops at
+100 000 results or 30 seconds, and goes into no symlink, other filesystem,
+`node_modules` or cache folder (`CACHEDIR.TAG`).
+
+A plugin without a walk, or older than 1.3, gets the same as scroll mode:
+the app fetches a few levels ahead first, unless `AllowsScrollPrefetch` says no.
 
 ### What a plugin asks the app
 
