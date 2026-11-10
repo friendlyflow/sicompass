@@ -19,7 +19,7 @@ if [[ "$FILE_PATH" =~ \.rs$ ]]; then
   REPO_DIR=$(git -C "$(dirname "$FILE_PATH")" rev-parse --show-toplevel 2>/dev/null)
   [ -n "$REPO_DIR" ] || REPO_DIR="$PROJECT_DIR"
 
-  # The tests below can start sicompass and rewrite the production config, so
+  # The tests below can start sicompass and rewrite the dev config, so
   # capture it first (same chain as the PreToolUse hook; a no-op if unchanged).
   "$(dirname "$0")/snapshot-settings.sh" >/dev/null 2>&1
 

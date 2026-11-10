@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
-# Snapshots the live sicompass config before anything that can overwrite it.
+# Snapshots the dev build's sicompass config before anything that can overwrite it.
 #
-# The same machine runs sicompass in production and in development, and both
-# read/write ~/.config/sicompass/settings.json. A test run (or a dev run) can
-# rewrite the production file, so the real settings are kept as an ever-growing
-# chain of numbered copies:
+# A debug build (and every test binary) owns its own tree,
+# ~/.config/sicompass-dev, never the installed app's ~/.config/sicompass
+# (`sicompass_sdk::platform::app_dir_name`). So only the dev settings can be
+# rewritten by a test run or a dev run, and only they are kept, as an
+# ever-growing chain of numbered copies:
 #
 #   settings.json -> settings_copy0.json -> settings_copy1.json -> ...
+#
+# The release folder is left alone: nothing run from this checkout in debug
+# writes there.
 #
 # On every call: compare settings.json with the highest-numbered copy. Identical
 # means nothing new to keep, so do nothing. Different means the live file holds
@@ -17,7 +21,7 @@
 # Numbering starts at 0 when no numbered copy exists yet.
 set -u
 
-DIR="${XDG_CONFIG_HOME:-$HOME/.config}/sicompass"
+DIR="${XDG_CONFIG_HOME:-$HOME/.config}/sicompass-dev"
 LIVE="$DIR/settings.json"
 
 [ -f "$LIVE" ] || exit 0
@@ -48,5 +52,5 @@ else
 fi
 
 cp -p "$LIVE" "$DIR/settings_copy$next.json" || exit 0
-printf '{"systemMessage":"sicompass settings.json changed since %s - saved a copy as settings_copy%s.json before running","suppressOutput":true}\n' \
+printf '{"systemMessage":"sicompass-dev settings.json changed since %s - saved a copy as settings_copy%s.json before running","suppressOutput":true}\n' \
   "$(basename "${last:-<none>}")" "$next"

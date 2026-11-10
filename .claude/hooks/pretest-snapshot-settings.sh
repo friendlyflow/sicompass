@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
-# PreToolUse/Bash hook: snapshot ~/.config/sicompass/settings.json before any
-# command that can start sicompass and rewrite it (tests, benches, dev runs).
+# PreToolUse/Bash hook: snapshot ~/.config/sicompass-dev/settings.json before
+# any command that can start a debug sicompass and rewrite it (tests, benches,
+# dev runs). Release runs (`nix run`, `target/release/sicompass`) use the
+# installed app's folder, which this no longer copies.
 #
-# Runs *before* the command, so the production settings are always captured
+# Runs *before* the command, so the dev settings are always captured
 # first. See snapshot-settings.sh for the copy chain.
 set -u
 
@@ -17,8 +19,7 @@ fi
 
 case "$CMD" in
   *"cargo test"* | *"cargo nextest"* | *"cargo bench"* | *"cargo run"* | \
-  *"nix run"* | *"nix build"* | *"xvfb-run"* | \
-  *target/debug/sicompass* | *target/release/sicompass* | "")
+  *"xvfb-run"* | *target/debug/sicompass* | "")
     exec "$(dirname "$0")/snapshot-settings.sh"
     ;;
 esac
