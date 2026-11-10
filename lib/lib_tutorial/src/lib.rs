@@ -1477,7 +1477,7 @@ mod tests {
         for pair in rows.windows(2) {
             if sicompass_sdk::tags::target_counts(&pair[1]).total() > 0 {
                 assert!(
-                    pair[0].starts_with("Press i "),
+                    pair[0].starts_with("Press Right "),
                     "leads with the key: {}",
                     pair[0]
                 );

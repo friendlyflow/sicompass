@@ -1551,8 +1551,10 @@ pub fn apply_tabs_section(
     let provider_count = r.providers.len();
 
     // Parse the persisted nav entries (id + active provider path) per tab,
-    // dropping any whose provider index no longer exists.
-    let parsed: Vec<(IdArray, String, bool)> = sec
+    // dropping any whose provider index no longer exists. Each keeps the index
+    // it was saved at, so `activeTab` and `tabMru` can follow it when a tab
+    // before it is dropped.
+    let parsed: Vec<(usize, IdArray, String, bool)> = sec
         .get("tabs")
         .and_then(|v| v.as_str())
         .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
@@ -1562,7 +1564,8 @@ pub fn apply_tabs_section(
         })
         .map(|arr| {
             arr.into_iter()
-                .filter_map(|v| {
+                .enumerate()
+                .filter_map(|(saved, v)| {
                     let obj = v.as_object()?;
                     let ids = obj.get("id")?.as_array()?;
                     let path = obj.get("path")?.as_str()?.to_owned();
@@ -1585,7 +1588,7 @@ pub fn apply_tabs_section(
                     }
                     match id.get(0) {
                         Some(pi) if pi < provider_count && id.depth() > 0 => {
-                            Some((id, path, on_path))
+                            Some((saved, id, path, on_path))
                         }
                         _ => None,
                     }
@@ -1595,6 +1598,12 @@ pub fn apply_tabs_section(
         .unwrap_or_default();
 
     if !parsed.is_empty() {
+        // Saved tab index -> where that tab is now, `None` for a dropped tab.
+        let saved_len = parsed.last().map_or(0, |t| t.0 + 1);
+        let mut remap: Vec<Option<usize>> = vec![None; saved_len];
+        for (now, t) in parsed.iter().enumerate() {
+            remap[t.0] = Some(now);
+        }
         // Capture the bootstrap content provider names BEFORE detaching, so
         // each freshly built tab mirrors them exactly (count + order).
         let content_n = r.providers.len().saturating_sub(1);
@@ -1608,7 +1617,7 @@ pub fn apply_tabs_section(
         // built fresh. For each we attach the set, rebuild its saved provider
         // path, then park it back out into the tab record.
         let mut tabs: Vec<TabSnapshot> = Vec::with_capacity(parsed.len());
-        for (i, (id, path, on_path)) in parsed.into_iter().enumerate() {
+        for (i, (_, id, path, on_path)) in parsed.into_iter().enumerate() {
             let (cp, cf) = if i == 0 {
                 r.detach_content()
             } else {
@@ -1640,18 +1649,16 @@ pub fn apply_tabs_section(
         r.tab_timelines
             .resize_with(r.tabs.len(), sicompass_ui::app_state::Timeline::new);
 
-        // Resolve the active tab and make its parked content the live set.
-        let mut active = 0;
-        if let Some(active_str) = sec.get("activeTab").and_then(|v| v.as_str())
-            && let Ok(n) = active_str.parse::<usize>()
-            && n < r.tabs.len()
-        {
-            active = n;
-        }
+        // Resolve the active tab and the switcher's order, then make the active
+        // tab's parked content the live set.
+        let saved_mru = sec.get("tabMru").and_then(|v| v.as_str());
+        let saved_active = sec
+            .get("activeTab")
+            .and_then(|v| v.as_str())
+            .and_then(|s| s.parse::<usize>().ok());
+        let (active, mru) = restored_tab_order(saved_active, saved_mru, &remap, r.tabs.len());
         r.active_tab = active;
-        // Seed the MRU order to a default front-first sequence (no real visit
-        // history exists across restarts; the active tab leads).
-        r.reset_mru_default(active);
+        r.tab_mru = mru;
         let cp = std::mem::take(&mut r.tabs[active].providers);
         let cf = std::mem::take(&mut r.tabs[active].ffon);
         r.attach_content(cp, cf);
@@ -1669,6 +1676,49 @@ pub fn apply_tabs_section(
     }
     r.reset_mru_default(r.active_tab);
     r.load_active_tab();
+}
+
+/// The active tab and the tab switcher's most-recent-first order to restore,
+/// from the saved `activeTab` and `tabMru` (a JSON array of tab indices).
+///
+/// `remap[saved]` is where the tab saved at `saved` is now, `None` when it was
+/// dropped (its program is gone), and `len` is how many tabs were restored.
+/// Saved indices are mapped through it. The order keeps each restored tab once,
+/// appends any it did not name in index order, and always leads with the active
+/// tab. With no saved order (a config from an older build) or one that cannot
+/// be read, that gives "active, then 0, 1, 2…". An active tab that was dropped
+/// falls back to the most recent tab that is left.
+pub fn restored_tab_order(
+    saved_active: Option<usize>,
+    saved_mru: Option<&str>,
+    remap: &[Option<usize>],
+    len: usize,
+) -> (usize, Vec<usize>) {
+    let now = |saved: usize| remap.get(saved).copied().flatten().filter(|&i| i < len);
+    let mut order: Vec<usize> = Vec::with_capacity(len);
+    let saved_order: Vec<u64> = saved_mru
+        .and_then(|s| serde_json::from_str(s).ok())
+        .unwrap_or_default();
+    for saved in saved_order {
+        if let Some(i) = usize::try_from(saved).ok().and_then(now)
+            && !order.contains(&i)
+        {
+            order.push(i);
+        }
+    }
+    let active = saved_active
+        .and_then(now)
+        .or_else(|| order.first().copied())
+        .unwrap_or(0)
+        .min(len.saturating_sub(1));
+    order.retain(|&i| i != active);
+    order.insert(0, active);
+    for i in 0..len {
+        if !order.contains(&i) {
+            order.push(i);
+        }
+    }
+    (active, order)
 }
 
 /// Default on-screen font scale when `sicompass.fontScale` is not set (matches
@@ -2325,6 +2375,58 @@ fn builtin_programs(session: bool) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
+    use super::restored_tab_order;
+
+    #[test]
+    fn restored_tab_order_follows_the_saved_order() {
+        let remap = [Some(0), Some(1), Some(2)];
+        assert_eq!(
+            restored_tab_order(Some(2), Some("[2,0,1]"), &remap, 3),
+            (2, vec![2, 0, 1])
+        );
+    }
+
+    #[test]
+    fn restored_tab_order_without_a_saved_order_is_the_default() {
+        let remap = [Some(0), Some(1), Some(2)];
+        assert_eq!(restored_tab_order(Some(1), None, &remap, 3), (1, vec![1, 0, 2]));
+        assert_eq!(restored_tab_order(None, None, &remap, 3), (0, vec![0, 1, 2]));
+        assert_eq!(
+            restored_tab_order(Some(1), Some("not json"), &remap, 3),
+            (1, vec![1, 0, 2])
+        );
+    }
+
+    #[test]
+    fn restored_tab_order_leads_with_the_active_tab_and_names_each_tab_once() {
+        let remap = [Some(0), Some(1), Some(2)];
+        // Garbage, duplicates and an order that disagrees with the active tab.
+        assert_eq!(
+            restored_tab_order(Some(1), Some("[9,0,0,2]"), &remap, 3),
+            (1, vec![1, 0, 2])
+        );
+        // An active tab past the end falls back to the most recent one.
+        assert_eq!(
+            restored_tab_order(Some(7), Some("[2,1]"), &remap, 3),
+            (2, vec![2, 1, 0])
+        );
+    }
+
+    #[test]
+    fn restored_tab_order_maps_through_dropped_tabs() {
+        // Saved tab 1 was dropped, 2 and 3 moved down to 1 and 2.
+        let remap = [Some(0), None, Some(1), Some(2)];
+        assert_eq!(
+            restored_tab_order(Some(3), Some("[3,1,0,2]"), &remap, 3),
+            (2, vec![2, 0, 1])
+        );
+        // The active tab itself was dropped: the most recent one left leads.
+        assert_eq!(
+            restored_tab_order(Some(1), Some("[1,2,0,3]"), &remap, 3),
+            (1, vec![1, 0, 2])
+        );
+    }
+
     use super::*;
     use crate::plugin_manifest::{PluginManifest, PluginType};
     use sicompass_sdk::ffon::FfonElement;

@@ -10754,6 +10754,64 @@ fn apply_tabs_section_finds_the_program_by_name() {
     );
 }
 
+/// The `t` list is most recent first. That order is saved with the tabs and
+/// comes back after a restart, rather than "active, then 0, 1, 2…".
+#[test]
+fn tab_switcher_order_survives_a_restart() {
+    let mut h = Harness::new();
+    let fb_idx = h.provider_idx("filebrowser").unwrap();
+    navigate_to_provider(h.r(), fb_idx);
+    press_ctrl(h.r(), Keycode::T);
+    press_ctrl(h.r(), Keycode::T);
+    press_ctrl(h.r(), Keycode::_1);
+    let mru = h.renderer.tab_mru.clone();
+    let active = h.renderer.active_tab;
+    assert_eq!(h.renderer.tabs.len(), 3);
+    assert_ne!(
+        mru,
+        vec![active, 1, 2],
+        "the visits must leave an order the default would not give"
+    );
+
+    let data = std::fs::read_to_string(h.settings_path()).expect("settings.json");
+    let json: serde_json::Value = serde_json::from_str(&data).unwrap();
+    let sec = json
+        .get("sicompass")
+        .and_then(|v| v.as_object())
+        .unwrap()
+        .clone();
+    let saved: Vec<usize> =
+        serde_json::from_str(sec.get("tabMru").and_then(|v| v.as_str()).unwrap()).unwrap();
+    assert_eq!(saved, mru, "tabMru is written with the tabs");
+
+    let mut fresh = Harness::new();
+    sicompass::programs::apply_tabs_section(fresh.r(), &sec);
+    assert_eq!(fresh.renderer.tabs.len(), 3);
+    assert_eq!(fresh.renderer.active_tab, active);
+    assert_eq!(fresh.renderer.tab_mru, mru, "the order comes back as it was left");
+}
+
+/// A dropped tab (its program is gone) moves the tabs after it down one. The
+/// saved active tab and the saved order follow them.
+#[test]
+fn apply_tabs_section_keeps_active_tab_and_order_when_a_tab_is_dropped() {
+    let mut h = Harness::new();
+    let fb = h.provider_idx("filebrowser").unwrap();
+    let tabs_json = format!(
+        r#"[{{"id":[{fb}],"path":"/"}},{{"id":[{fb}],"path":"/","program":"no such program"}},{{"id":[{fb}],"path":"/"}},{{"id":[{fb}],"path":"/"}}]"#,
+    );
+    let mut sec = serde_json::Map::new();
+    sec.insert("tabs".to_owned(), serde_json::Value::String(tabs_json));
+    sec.insert("activeTab".to_owned(), serde_json::Value::String("3".to_owned()));
+    sec.insert("tabMru".to_owned(), serde_json::Value::String("[3,1,0,2]".to_owned()));
+
+    sicompass::programs::apply_tabs_section(h.r(), &sec);
+
+    assert_eq!(h.renderer.tabs.len(), 3);
+    assert_eq!(h.renderer.active_tab, 2, "saved tab 3 is now tab 2");
+    assert_eq!(h.renderer.tab_mru, vec![2, 0, 1]);
+}
+
 /// Regression: after restart, a tab snapshot may reference a cursor index
 /// past the end of the provider's current FFON tree — terminal scrollback,
 /// chat backlog and similar ephemeral content shrink across sessions. The
@@ -20666,7 +20724,7 @@ fn the_photo_album_shows_a_folder_as_one_grid_row_with_targets() {
     );
 
     go_to_row(&mut r, "a.png");
-    press(&mut r, Keycode::I);
+    press(&mut r, Keycode::Right);
     assert_eq!(r.coordinate, Coordinate::InElement);
     assert_eq!(r.nav_targets.len(), 3);
     assert_eq!(r.nav_index, 0);
@@ -20695,7 +20753,7 @@ fn a_file_called_like_a_tag_stays_a_file_in_the_album() {
     press(&mut r, Keycode::Right);
     wait_for_grid(&mut r, "x.jpg");
     go_to_row(&mut r, "x.jpg");
-    press(&mut r, Keycode::I);
+    press(&mut r, Keycode::Right);
     assert_eq!(r.nav_targets.len(), 2, "{:?}", screen(&r));
     let paths: Vec<std::path::PathBuf> = r
         .nav_targets
@@ -20742,7 +20800,7 @@ fn the_video_store_lists_only_videos_and_enter_plays_and_pauses() {
     assert!(screen(&r).iter().all(|row| !row.contains("photo.jpg")));
 
     go_to_row(&mut r, "a.webm");
-    press(&mut r, Keycode::I);
+    press(&mut r, Keycode::Right);
     assert_eq!(r.nav_targets.len(), 2);
     press(&mut r, Keycode::Right);
 
