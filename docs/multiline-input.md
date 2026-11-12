@@ -31,8 +31,11 @@ get all of the following without writing any editing code:
 | typing, Backspace, Delete, Left/Right | edit at the caret |
 | `Ctrl+Enter` | insert a new line (`\n`) |
 | Up / Down | same column on the previous or next **visual** line (a soft wrap counts as a line). Up on the first line goes to the start, Down on the last goes to the end |
-| Shift + arrows, Shift+Home/End | extend the selection |
+| Shift + arrows, Shift+Home/End | extend the selection (with Ctrl as well, by word or to the ends of the whole text) |
 | Home / End | start or end of the current line |
+| `Ctrl+Home` / `Ctrl+End` | start or end of the whole text |
+| `Ctrl+Left` / `Ctrl+Right` | start of the word before, end of the word after (`input::word_left`/`word_right`). In a `<password>` field, the start or end of the field |
+| `Ctrl+Backspace` / `Ctrl+Delete` | delete the selection, or back to the start or on to the end of the word, in one undo step |
 | `Enter` | confirm: the app calls your `commit_edit(old, new)` |
 | Escape | leave Insert mode |
 | `Ctrl+Z` / `Ctrl+Y` | undo and redo each typed chunk (see [undo-redo-timeline.md](undo-redo-timeline.md)) |
@@ -100,7 +103,10 @@ The model has two parts:
    `cursor_style: DashboardCursor::Bar` (in a plugin, `Frame::cursor` and
    `cursor_style: CursorStyle::Bar`, which the app passes through).
 5. **Route keys to `InputState`.** `insert_str`, `backspace`, `delete_forward`,
-   `left`, `right`, `home`, `end`, and `up`/`down(&lines, extend)`. Pass the lines
+   `left`, `right`, `home`, `end`, and `up`/`down(&lines, extend)`. With Ctrl:
+   `word_left`/`word_right(extend)` for the arrows, `delete_word_back` and
+   `delete_word_forward` for Backspace and Delete, `text_home`/`text_end(extend)`
+   for Home and End. Pass the lines
    from step 1 **for the width you last drew at** (remember it in
    `dashboard_render`), so Up/Down move through what the user saw.
 6. **Keep the keys the app uses.** Enter confirms, `Ctrl+Enter` inserts `"\n"`,

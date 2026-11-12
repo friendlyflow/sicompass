@@ -20618,6 +20618,40 @@ fn the_photo_album_shows_a_folder_as_one_grid_row_with_targets() {
     assert_eq!(r.nav_index, 1, "Escape comes back to the same picture");
 }
 
+/// Home and End go along a row of the album's grid, Ctrl+Home and Ctrl+End to its first
+/// and last picture, in the real album through the real keys.
+#[test]
+fn home_and_end_go_along_the_albums_grid_rows() {
+    let dir = media_folder(&["1.jpg", "2.jpg", "3.jpg", "4.jpg", "5.jpg"]);
+    let mut r = media_app("photoalbum", "photoFolder", dir.path());
+    press(&mut r, Keycode::Right);
+    wait_for_grid(&mut r, "5.jpg");
+    go_to_row(&mut r, "1.jpg");
+    press(&mut r, Keycode::Right);
+    assert_eq!(r.coordinate, Coordinate::InElement);
+    assert_eq!(r.nav_targets.len(), 5);
+
+    press_ctrl(&mut r, Keycode::End);
+    assert_eq!(r.nav_index, 4, "Ctrl+End: the last picture");
+    press_ctrl(&mut r, Keycode::Home);
+    assert_eq!(r.nav_index, 0, "Ctrl+Home: the first");
+
+    // Where the frame drew them: three columns, the album's stylesheet.
+    r.nav_positions = (0..5)
+        .map(|i| sicompass_ui::layout::TargetPos {
+            x: (i % 3) as f32 * 200.0,
+            y: (i / 3) as f32 * 150.0,
+        })
+        .collect();
+    press(&mut r, Keycode::End);
+    assert_eq!(r.nav_index, 2, "End: the end of the first row");
+    press(&mut r, Keycode::Down);
+    assert_eq!(r.nav_index, 4);
+    press(&mut r, Keycode::Home);
+    assert_eq!(r.nav_index, 3, "Home: the start of the second row");
+    assert_eq!(r.coordinate, Coordinate::InElement);
+}
+
 /// Asking for markup makes the file names the plugin's to escape, and this is the real
 /// program, through the real host, into the real list.
 #[test]
