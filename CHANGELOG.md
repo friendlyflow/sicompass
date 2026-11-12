@@ -3,6 +3,26 @@
 cargo-dist parses this file and uses the matching version's section as the
 GitHub Release body, so entries here are what users read on the download page.
 
+## 0.2.7
+
+### Editing text
+
+- Ctrl+Left and Ctrl+Right move by word in every text: a field, a search, a command. Ctrl+Backspace and Ctrl+Delete delete a word, Ctrl+Shift with Left or Right selects by word, and each says the word. A password field jumps to its start or end instead, so no word is given away.
+- Ctrl+Home and Ctrl+End go to the start and end of a field's whole text, and with Shift they select to there. In a search or a command they go to the list's first and last item.
+- The project board's cards and the terminal take the same keys (plugin updates 0.4.6 and 0.3.4).
+
+### Moving around
+
+- Home and End go to the start and end of a row in any grid, the photo album's included, on links, buttons, pictures and videos alike. Ctrl+Home and Ctrl+End go to the first and last of them, and in the big picture view to the first and last picture.
+- Meta, the timeline and the tab switcher have Home and End, and the list has Ctrl+Home and Ctrl+End.
+- Typing in meta mode narrows its keys down, as in the tab switcher.
+- The settings page has its onboarding line again, focused at the first launch: for help press Tab, for the list of programs press Left twice.
+
+### Fixes
+
+- The search inside a field moves through what you typed with Left and Right, and Backspace in a search deletes a selection whole.
+- The app maps far less memory for the GPU (27 MB instead of 87 MB at 1080p), and the dash drawn on the right arrow at font scale 1.25 is gone.
+
 ## 0.2.6
 
 ### Writing a command or a prompt
