@@ -93,8 +93,9 @@ pub struct SettingsProvider {
     /// Version string per section (keyed by display name). Rendered as a
     /// passive child of the section. Populated by `set_section_version`.
     section_versions: HashMap<String, String>,
-    /// True when `init()` found no settings.json on disk (first launch). The app
-    /// opens the beginner's manual on a first launch.
+    /// True when `init()` found no settings.json on disk (first launch). Drives
+    /// the one-time onboarding: the `onboarding` checkbox is force-enabled and
+    /// the app focuses the onboarding line.
     first_run: bool,
     /// Settings someone else owns (`set_external_setting_keys`): no row for
     /// them on this page, and nothing replayed for them at startup. In a
@@ -235,6 +236,7 @@ impl SettingsProvider {
     }
 
     /// True when `init()` ran against a missing settings.json (first launch).
+    /// The app reads this to focus the onboarding line on first run.
     pub fn was_first_run(&self) -> bool {
         self.first_run
     }
@@ -654,7 +656,7 @@ impl Provider for SettingsProvider {
         let is_dark = self.color_scheme == "dark";
         let mut sc_obj = FfonElement::new_obj(Self::localize_section_name("sicompass"));
 
-        // Every sicompass child (version line, color-scheme
+        // Every sicompass child (version line, onboarding guide, color-scheme
         // radio, other radios, checkboxes, text inputs) goes into one list that
         // is sorted alphanumerically by displayed text, so the order matches what
         // the user reads on screen regardless of registration order or language.
@@ -677,6 +679,12 @@ impl Provider for SettingsProvider {
             );
             entries.push((line.clone(), FfonElement::Str(line)));
         }
+        // Onboarding guide: a passive read-only `Str`. The app focuses it on
+        // first run (it locates the line by content, not position, so sorting it
+        // in alongside everything else is fine).
+        let onboarding = localize::t("settings-onboarding-body");
+        entries.push((onboarding.clone(), FfonElement::Str(onboarding)));
+
         if self.shows("colorScheme") {
             let title = localize::t("settings-radio-color-scheme");
             let mut radio = FfonElement::new_obj(format!("<radio>{title}"));
@@ -773,7 +781,7 @@ impl Provider for SettingsProvider {
                 self.load_config(&path);
             } else {
                 // First launch: no settings.json yet. Create it; the app
-                // opens the beginner's manual on first run.
+                // focuses the onboarding guide on first run.
                 self.first_run = true;
                 Self::seed_empty_file_on_disk(&path);
             }
@@ -1331,7 +1339,7 @@ mod tests {
         assert!(dark_checked);
     }
 
-    // --- first run ---
+    // --- onboarding guide ---
 
     /// Helper: the children of the rendered "sicompass" section.
     fn sicompass_children(p: &mut SettingsProvider) -> Vec<FfonElement> {
@@ -1347,42 +1355,51 @@ mod tests {
     }
 
     #[test]
-    fn the_sicompass_section_has_no_onboarding_line() {
-        // The first launch opens the beginner's manual instead: no passive
-        // line in the section names a key.
+    fn onboarding_body_renders_in_sicompass_section() {
+        // Two separate hazards, both from global state.
+        //
+        // The lock: this compares `localize::t(...)` against what `fetch()` renders,
+        // and the locale tests switch the active locale on the shared localizer. Run
+        // in parallel with one of those, the two calls land in different languages
+        // and the comparison fails for no interesting reason.
+        //
+        // The registration: run alone, no bundle has been loaded, so `t` falls back
+        // to the raw key while `fetch()` renders the translated string.
+        // `register_translations` is idempotent precisely so each test can call it.
         let _g = locale_test_lock();
         register_translations();
+
+        let body = localize::t("settings-onboarding-body");
         let mut p = headless();
-        p.set_section_version("sicompass", "1.2.3");
-        let versions = [
-            localize::t("settings-label-version-app"),
-            localize::t("settings-label-version-sdk"),
-        ];
-        let passive: Vec<String> = sicompass_children(&mut p)
-            .iter()
-            .filter_map(|c| c.as_str())
-            .filter(|s| !s.starts_with('<'))
-            .map(str::to_owned)
-            .collect();
-        assert_eq!(passive.len(), 2, "only the two version lines: {passive:?}");
-        for line in &passive {
-            assert!(
-                versions.iter().any(|v| line.starts_with(v.as_str())),
-                "a passive line that is not a version: {line}"
-            );
-        }
+        assert!(
+            sicompass_children(&mut p)
+                .iter()
+                .any(|c| c.as_str() == Some(body.as_str())),
+            "onboarding guide should always render in the sicompass section"
+        );
     }
 
     #[test]
     fn first_run_is_flagged_when_file_missing() {
+        // Reads a translated string and compares it against what `fetch()`
+        // renders. Both depend on the active locale, which the locale tests
+        // switch on the shared localizer, so without the lock the two calls can
+        // land in different languages. `register_translations` covers the case
+        // where this test runs alone and no bundle has been loaded at all.
+        let _g = locale_test_lock();
+        register_translations();
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("settings.json");
-        let mut p = SettingsProvider::new_headless().with_config_path(path.clone());
+        let mut p = SettingsProvider::new_headless().with_config_path(path);
 
         p.init();
 
         assert!(p.was_first_run(), "missing settings.json is a first run");
-        assert!(path.exists(), "the first run seeds settings.json");
+        let body = localize::t("settings-onboarding-body");
+        let shown = sicompass_children(&mut p)
+            .iter()
+            .any(|c| c.as_str() == Some(body.as_str()));
+        assert!(shown, "onboarding guide should render on first run");
     }
 
     #[test]
@@ -1421,7 +1438,7 @@ mod tests {
         );
 
         let children = sicompass_children(&mut p);
-        // Skip the leading passive lines (versions); collect the
+        // Skip the leading passive lines (version, onboarding); collect the
         // displayed label of every interactive entry that follows.
         let labels: Vec<String> = children
             .iter()

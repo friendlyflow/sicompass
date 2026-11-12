@@ -33,6 +33,7 @@ settings-checkbox-shoulder-surfing-protection = schermbescherming (blanco scherm
 settings-checkbox-screen-reader = schermlezer
 settings-screen-reader-failed = Kon de schermlezer niet starten: { $error }
 settings-checkbox-auto-update-check = controleer op updates bij opstarten
+settings-onboarding-body = Druk voor hulp op de Tab-toets. Druk twee keer op de pijl naar links voor de hoofdlijst met programma's.
 settings-radio-font-scale = tekstgrootte
 settings-radio-sort-order = sorteervolgorde
 

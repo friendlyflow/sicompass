@@ -41,6 +41,7 @@ settings-checkbox-shoulder-surfing-protection = shoulder-surfing protection (bla
 settings-checkbox-screen-reader = screen reader
 settings-screen-reader-failed = Could not start the screen reader: { $error }
 settings-checkbox-auto-update-check = check for updates on startup
+settings-onboarding-body = For help, press the tab key. For the root list of programs, hit the left key twice.
 settings-radio-font-scale = font scale
 settings-radio-sort-order = sort order
 

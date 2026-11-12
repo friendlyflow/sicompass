@@ -165,16 +165,15 @@ pub fn app_state(hooks: ProgramsHooks) -> Result<AppState, SiError> {
     // Must run AFTER providers are loaded so provider-index validation works.
     crate::programs::load_tabs_state(&mut state.renderer);
 
-    // On first run, open the beginner's manual so a new (screen reader) user is
-    // read it immediately, over the root list with settings focused, where
-    // Escape lands. Must run AFTER load_tabs_state, which otherwise resets the
-    // cursor to the bootstrap tab's default (the first program in the root
-    // list).
+    // On first run, land the cursor on the onboarding line so a new (screen
+    // reader) user is read the onboarding guide immediately. Must run AFTER
+    // load_tabs_state, which otherwise resets the cursor to the bootstrap
+    // tab's default (the first program in the root list).
     if first_run {
-        crate::programs::open_manual_on_first_run(&mut state.renderer);
-    } else {
-        sicompass_ui::list::create_list_current_layer(&mut state.renderer);
+        crate::programs::focus_onboarding(&mut state.renderer);
     }
+
+    sicompass_ui::list::create_list_current_layer(&mut state.renderer);
     Ok(state)
 }
 

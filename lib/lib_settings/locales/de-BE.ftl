@@ -33,6 +33,7 @@ settings-checkbox-shoulder-surfing-protection = Sichtschutz (leerer Bildschirm)
 settings-checkbox-screen-reader = Bildschirmleser
 settings-screen-reader-failed = Der Bildschirmleser konnte nicht gestartet werden: { $error }
 settings-checkbox-auto-update-check = beim Start nach Updates suchen
+settings-onboarding-body = Für Hilfe drücke die Tab-Taste. Für die Hauptliste der Programme drücke zweimal die Pfeiltaste nach links.
 settings-radio-font-scale = Schriftgröße
 settings-radio-sort-order = Sortierreihenfolge
 
