@@ -571,7 +571,7 @@ fn to_ipc_key(key: DashboardKey) -> ipc::Key {
 
 /// A plugin's frame as the renderer draws it, or `None` when its cell count
 /// disagrees with its own grid (the renderer indexes `row * cols + col`). A
-/// cursor or selection outside the grid is dropped, as for a WASM plugin.
+/// cursor or selection outside the grid is dropped.
 fn to_sdk_frame(f: ipc::Frame) -> Option<DashboardFrame> {
     if f.cells.len() != f.cols as usize * f.rows as usize {
         return None;

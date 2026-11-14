@@ -207,12 +207,11 @@ fn await_redirect(
 }
 
 // ---------------------------------------------------------------------------
-// The desktop itself, for both plugin runtimes
+// The desktop itself
 // ---------------------------------------------------------------------------
 //
-// A WASM guest names paths inside its sandbox, which `HostState::confine_granted`
-// maps and checks first; a plugin process names real paths. Either way, what
-// happens to the desktop is one of these.
+// A plugin process names real paths. What happens to the desktop is one of
+// these.
 
 /// The browser comes back to a loopback port only this call listens on, and
 /// only once. Waits until it does, `timeout_secs` passes, or `cancel` is set.

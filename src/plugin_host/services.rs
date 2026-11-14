@@ -1,8 +1,7 @@
 //! What a plugin process asks the app, and the app's answers.
 //!
-//! The same services a WASM guest reaches through its imports, minus the
-//! confinement: a plugin process names real paths, and could reach them itself.
-//! What stays scoped is what the app holds for the user rather than the
+//! A plugin process names real paths, and could reach them itself. What stays
+//! scoped is what the app holds for the user rather than the
 //! plugin: settings (its own section only) and the licence token (its own
 //! service's only). Those limits are the app's manners, not a sandbox: the
 //! process runs with the user's rights.

@@ -20442,10 +20442,8 @@ fn archiving_from_the_list_keeps_the_user_in_general_mode() {
 }
 
 /// A folder other programs keep changing (a download folder, `/tmp`) still
-/// lists whole in the sandboxed file browser. The host reads a folder up front
-/// and an entry removed meanwhile becomes an error in the listing; `std` inside
-/// the guest stopped at the first one and lost every entry after it, often all
-/// of them. `sicompass_pdk::fs::list_dir` skips just the vanished entry.
+/// lists whole in the file browser: an entry removed while the folder is read
+/// is skipped, and the entries after it are not lost.
 #[test]
 fn a_listing_survives_its_neighbours_vanishing() {
     let parent = TempDir::new().unwrap();
