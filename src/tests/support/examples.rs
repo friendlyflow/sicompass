@@ -22,7 +22,12 @@ fn profile_dir() -> std::path::PathBuf {
         // until Rust 1.99, `debug/build/<package>/<hash>/.../<test>` from 1.100.
         exe.ancestors()
             .take_while(|a| *a != target.as_path())
-            .filter(|a| matches!(a.file_name().and_then(|n| n.to_str()), Some("deps" | "build")))
+            .filter(|a| {
+                matches!(
+                    a.file_name().and_then(|n| n.to_str()),
+                    Some("deps" | "build")
+                )
+            })
             .last()
             .and_then(|a| a.parent())
             .unwrap_or(profile)
