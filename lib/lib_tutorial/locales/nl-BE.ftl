@@ -59,6 +59,30 @@ tutorial-sc-file-undo = Ctrl+Z: ongedaan maken. Ctrl+Shift+Z: opnieuw. Elk tabbl
 tutorial-sc-file-clipboard = Ctrl+C: kopiëren. Ctrl+X: knippen. Ctrl+V: plakken. Ctrl+Shift+C: kopieer de waarde achter het item, zoals het adres van een link, in plaats van het label. Delete of Ctrl+D: verwijder het geselecteerde item.
 tutorial-sc-file-save = Ctrl+S: bewaren. Ctrl+Shift+S: bewaren als. Ctrl+O: open een bewaard configuratiebestand. Bewaren en openen als bestand hebben de bestandsverkenner nodig, uit de store.
 tutorial-sc-file-update = Ctrl+U: installeer de updates die klaarstaan, van de app en van de programma's.
+# ---------------------------------------------------------------------------
+# 2b. Mouse and touch (hands-on, every gesture leads its line)
+# ---------------------------------------------------------------------------
+tutorial-sec-pointer = Muis en aanraking
+tutorial-pt-intro = Sicompass is gemaakt voor het toetsenbord, en een muis, een touchpad of een aanraakscherm werkt ook. Een klik doet wat een toets zou doen, en je schermlezer zegt het resultaat op dezelfde manier. Probeer elke stap hieronder met de muis.
+tutorial-pt-click = Klik: een klik gebruikt een regel meteen, zoals Enter of Rechts dat zou doen. Klik op het selectievakje hieronder. Je schermlezer zegt aangevinkt of niet aangevinkt.
+tutorial-pt-checkbox = <checkbox>Oefenselectievakje, klik op me om me te schakelen
+tutorial-pt-button-how = Een klik op een knop drukt hem in. Klik op de knop hieronder, en je schermlezer zegt dat hij ingedrukt is.
+tutorial-pt-button = Klik op deze knop: <button>demo</button>druk me in
+tutorial-pt-open-how = Een klik op een regel met een pijl naar rechts gaat erin. Klik op de regel hieronder.
+tutorial-pt-open = Klik op me om binnen te gaan
+tutorial-pt-inside = Je bent binnen geklikt. Klik nu op de regel bovenaan, die met de pijl naar links, om weer naar buiten te gaan.
+tutorial-pt-field-how = Een klik op een tekstveld begint het te bewerken, en de cursor komt waar je klikte. Klik op het veld hieronder, en klik er dan nog eens in om de cursor te verplaatsen, of sleep om te selecteren.
+tutorial-pt-field = Klik in mij: <input>hallo wereld</input>
+tutorial-pt-field-keep = Dubbelklik: in een tekstveld bewaart die wat je typte, zoals Enter. Een klik op een andere regel bewaart het ook, en een klik naast de lijst gooit het weg, zoals Escape.
+tutorial-pt-right = Rechtermuisklik: Escape. Die verlaat een zoekopdracht, het metascherm of elke andere modus, net als de Escape-toets. Een klik naast de lijst doet hetzelfde.
+tutorial-pt-swipe = Veeg: hou de rechtermuisknop ingedrukt en beweeg naar links om terug te gaan, of naar rechts om binnen te gaan in de regel waar je begon. De knoppen vooruit en terug aan de zijkant van een muis doen hetzelfde.
+tutorial-pt-wheel = Wieltje: één tik verplaatst de selectie één regel, zoals Op en Neer. In scrollmodus scrollt het de pagina.
+tutorial-pt-touchpad = Touchpad: twee vingers omhoog of omlaag zijn het wieltje. Twee vingers opzij gaan terug of vooruit, één keer per veeg.
+tutorial-pt-touch = Aanraakscherm: een tik is een klik. Sleep een vinger omhoog of omlaag om door de lijst te gaan, en veeg naar links of rechts om terug of binnen te gaan. In een tekstveld zet een tik de cursor, een lange druk selecteert een woord, en een dubbele tik bewaart wat je typte.
+tutorial-pt-several = Meerdere links of knoppen op één regel: klik op degene die je wil. Een klik ernaast selecteert alleen de regel.
+tutorial-pt-terminal = Terminal: in een programma op volledig scherm hoort de muis bij het programma, dus je kunt erin klikken. Klik op de regel bovenaan, of veeg terug, om het te verlaten.
+tutorial-pt-done = Dat is alles wat de muis en aanraking kunnen. Voor elk hiervan is er een toets, en Sicompass werkt zonder muis.
+
 tutorial-sec-how-it-works = Hoe het werkt
 tutorial-hiw-tree = Elke grafische interface is in wezen een hiërarchie. Sicompass maakt die hiërarchie expliciet en volledig vanaf het toetsenbord navigeerbaar, zodat één set toetsen alles aanstuurt.
 tutorial-hiw-programs = Elk item in de wortel is een programma, ook wel een provider genoemd: de webbrowser, e-mail, deze handleiding. Ze pluggen allemaal in dezelfde boom, dus zodra je er één kunt bedienen, kun je ze allemaal bedienen.

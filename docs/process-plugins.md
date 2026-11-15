@@ -60,14 +60,18 @@ Each message is a little-endian `u32` byte count, then the message in postcard
 carries an id and its reply names it.
 
 1. The plugin speaks first: `Hello { protocol, name }`. The app refuses a plugin
-   whose protocol major differs from its own (`PROTOCOL_VERSION`, now `1.4`) and
+   whose protocol major differs from its own (`PROTOCOL_VERSION`, now `1.5`) and
    says "update it from the Store". It keeps the version the plugin named
    (`Channel::speaks`).
 2. The app calls with `Call { id, request }`. There is one `Request` per thing a
    provider does, the same set the WIT `provider` interface had, plus
    `LocaleChanged`, (1.1) `CannotAddHere`, (1.2) `AllowsScrollPrefetch` and
    (1.3) `StartExtendedSearch`, `TakeExtendedSearchItems` and
-   `StopExtendedSearch`, and (1.4) `Completions`. The plugin answers with `Reply { id, response, moved_to }`.
+   `StopExtendedSearch`, (1.4) `Completions`, and (1.5) `DashboardMouse`, a
+   click, a drag or a wheel notch on the interactive dashboard, at a cell
+   (`Plugin::dashboard_mouse`, which the terminal turns into the mouse
+   reporting a program asked for). The app keeps the right button for itself.
+   The plugin answers with `Reply { id, response, moved_to }`.
    `moved_to` is where the plugin is now, when the call moved it (a command, an
    edit, a shell's `cd`), so `current_path` never needs a call.
 3. The plugin asks with `HostCall { id, request }` for what only the app knows, and

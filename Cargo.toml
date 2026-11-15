@@ -48,7 +48,7 @@ sicompass-updater = { path = "lib/lib_updater" }
 # (github:friendlyflow/sicompass-ui). Not on crates.io: pinned by git, to a `rev`
 # between releases and to `tag = "vX.Y.Z"` at a release. crane vendors it from
 # Cargo.lock like any git dependency, so there is no hash to maintain.
-sicompass-ui = { git = "https://github.com/friendlyflow/sicompass-ui", tag = "v0.2.4" }
+sicompass-ui = { git = "https://github.com/friendlyflow/sicompass-ui", rev = "78f256bb004585800ee5bfd97ff16f6714954b8a" }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }

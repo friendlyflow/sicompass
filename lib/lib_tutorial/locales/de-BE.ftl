@@ -58,6 +58,30 @@ tutorial-sc-file-undo = Strg+Z: rückgängig. Strg+Umschalt+Z: wiederholen. Jede
 tutorial-sc-file-clipboard = Strg+C: kopieren. Strg+X: ausschneiden. Strg+V: einfügen. Strg+Umschalt+C: kopiert den Wert hinter dem Element, etwa die Adresse eines Links, statt seiner Beschriftung. Entf oder Strg+D: löscht das ausgewählte Element.
 tutorial-sc-file-save = Strg+S: speichern. Strg+Umschalt+S: speichern unter. Strg+O: öffnet eine gespeicherte Konfigurationsdatei. Speichern und Öffnen einer Datei brauchen den Dateimanager, aus dem Store.
 tutorial-sc-file-update = Strg+U: installiert die bereiten Aktualisierungen, die der App und die der Programme.
+# ---------------------------------------------------------------------------
+# 2b. Mouse and touch (hands-on, every gesture leads its line)
+# ---------------------------------------------------------------------------
+tutorial-sec-pointer = Maus und Touch
+tutorial-pt-intro = Sicompass ist für die Tastatur gemacht, und eine Maus, ein Touchpad oder ein Touchscreen funktioniert auch. Ein Klick tut, was eine Taste tun würde, und Ihr Bildschirmleser sagt das Ergebnis auf die gleiche Weise. Probieren Sie jeden Schritt unten mit der Maus.
+tutorial-pt-click = Klick: Ein Klick benutzt eine Zeile sofort, so wie Enter oder Rechts. Klicken Sie auf das Kontrollkästchen unten. Ihr Bildschirmleser sagt aktiviert oder nicht aktiviert.
+tutorial-pt-checkbox = <checkbox>Übungs-Kontrollkästchen, klicken Sie auf mich, um mich umzuschalten
+tutorial-pt-button-how = Ein Klick auf eine Schaltfläche drückt sie. Klicken Sie auf die Schaltfläche unten, und Ihr Bildschirmleser sagt, dass sie gedrückt wurde.
+tutorial-pt-button = Klicken Sie auf diese Schaltfläche: <button>demo</button>drück mich
+tutorial-pt-open-how = Ein Klick auf eine Zeile mit einem Pfeil nach rechts geht in sie hinein. Klicken Sie auf die Zeile unten.
+tutorial-pt-open = Klicken Sie auf mich, um hineinzugehen
+tutorial-pt-inside = Sie sind hineingeklickt. Klicken Sie jetzt auf die Zeile ganz oben, die mit dem Pfeil nach links, um wieder hinauszugehen.
+tutorial-pt-field-how = Ein Klick auf ein Textfeld beginnt die Bearbeitung, und der Cursor steht dort, wo Sie geklickt haben. Klicken Sie auf das Feld unten, und klicken Sie dann noch einmal hinein, um den Cursor zu versetzen, oder ziehen Sie, um auszuwählen.
+tutorial-pt-field = Klicken Sie in mich: <input>hallo welt</input>
+tutorial-pt-field-keep = Doppelklick: In einem Textfeld behält er, was Sie getippt haben, so wie Enter. Ein Klick auf eine andere Zeile behält es auch, und ein Klick neben die Liste verwirft es, so wie Escape.
+tutorial-pt-right = Rechtsklick: Escape. Er verlässt eine Suche, die Metaliste oder jeden anderen Modus, genau wie die Escape-Taste. Ein Klick neben die Liste tut dasselbe.
+tutorial-pt-swipe = Wischen: Halten Sie die rechte Maustaste und bewegen Sie nach links, um zurückzugehen, oder nach rechts, um in die Zeile hineinzugehen, auf der Sie begonnen haben. Die Tasten Zurück und Vor an der Seite einer Maus tun dasselbe.
+tutorial-pt-wheel = Mausrad: Eine Raste bewegt die Auswahl um eine Zeile, so wie Hoch und Runter. Im Scrollmodus scrollt es die Seite.
+tutorial-pt-touchpad = Touchpad: Zwei Finger hoch oder runter sind das Mausrad. Zwei Finger zur Seite gehen zurück oder vor, einmal pro Wischen.
+tutorial-pt-touch = Touchscreen: Ein Tippen ist ein Klick. Ziehen Sie einen Finger hoch oder runter, um durch die Liste zu gehen, und wischen Sie nach links oder rechts, um zurück oder hinein zu gehen. In einem Textfeld setzt ein Tippen den Cursor, langes Drücken wählt ein Wort aus, und doppeltes Tippen behält, was Sie getippt haben.
+tutorial-pt-several = Mehrere Links oder Schaltflächen auf einer Zeile: Klicken Sie auf die gewünschte. Ein Klick daneben wählt nur die Zeile aus.
+tutorial-pt-terminal = Terminal: In einem Vollbildprogramm gehört die Maus dem Programm, Sie können also hineinklicken. Klicken Sie auf die Zeile ganz oben, oder wischen Sie zurück, um es zu verlassen.
+tutorial-pt-done = Das ist alles, was Maus und Touch können. Für jedes davon gibt es eine Taste, und Sicompass funktioniert ohne Maus.
+
 tutorial-sec-how-it-works = Wie es funktioniert
 tutorial-hiw-tree = Jede grafische Oberfläche ist im Grunde eine Hierarchie. Sicompass macht diese Hierarchie explizit und vollständig per Tastatur navigierbar, sodass ein Satz von Tasten alles steuert.
 tutorial-hiw-programs = Jedes Element an der Wurzel ist ein Programm, auch Provider genannt: der Webbrowser, die E-Mail, diese Anleitung. Sie stecken alle im selben Baum, sodass Sie, sobald Sie eines bedienen können, alle bedienen können.

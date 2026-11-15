@@ -58,6 +58,30 @@ tutorial-sc-file-undo = Ctrl+Z : annule. Ctrl+Shift+Z : refait. Chaque onglet ga
 tutorial-sc-file-clipboard = Ctrl+C : copie. Ctrl+X : coupe. Ctrl+V : colle. Ctrl+Shift+C : copie la valeur derrière l'élément, comme l'adresse d'un lien, plutôt que son libellé. Delete ou Ctrl+D : supprime l'élément sélectionné.
 tutorial-sc-file-save = Ctrl+S : enregistre. Ctrl+Shift+S : enregistre sous. Ctrl+O : ouvre un fichier de configuration enregistré. Enregistrer et ouvrir un fichier demandent le navigateur de fichiers, depuis le store.
 tutorial-sc-file-update = Ctrl+U : installe les mises à jour prêtes, de l'application et des programmes.
+# ---------------------------------------------------------------------------
+# 2b. Mouse and touch (hands-on, every gesture leads its line)
+# ---------------------------------------------------------------------------
+tutorial-sec-pointer = Souris et tactile
+tutorial-pt-intro = Sicompass est fait pour le clavier, et une souris, un pavé tactile ou un écran tactile marche aussi. Un clic fait ce que ferait une touche, et votre lecteur d'écran annonce le résultat de la même façon. Essayez chaque étape ci-dessous avec la souris.
+tutorial-pt-click = Clic : un clic utilise une ligne tout de suite, comme Enter ou Droite. Cliquez sur la case à cocher ci-dessous. Votre lecteur d'écran dit coché ou non coché.
+tutorial-pt-checkbox = <checkbox>Case à cocher d'entraînement, cliquez sur moi pour me basculer
+tutorial-pt-button-how = Un clic sur un bouton l'actionne. Cliquez sur le bouton ci-dessous, et votre lecteur d'écran dit qu'il a été actionné.
+tutorial-pt-button = Cliquez sur ce bouton : <button>demo</button>appuyez sur moi
+tutorial-pt-open-how = Un clic sur une ligne avec une flèche vers la droite entre dedans. Cliquez sur la ligne ci-dessous.
+tutorial-pt-open = Cliquez sur moi pour entrer
+tutorial-pt-inside = Vous êtes entré en cliquant. Cliquez maintenant sur la ligne du haut, celle avec la flèche vers la gauche, pour ressortir.
+tutorial-pt-field-how = Un clic sur un champ de texte commence à le modifier, et le curseur va là où vous avez cliqué. Cliquez sur le champ ci-dessous, puis cliquez encore dedans pour déplacer le curseur, ou faites glisser pour sélectionner.
+tutorial-pt-field = Cliquez en moi : <input>bonjour le monde</input>
+tutorial-pt-field-keep = Double clic : dans un champ de texte, il garde ce que vous avez tapé, comme Enter. Un clic sur une autre ligne le garde aussi, et un clic à côté de la liste le jette, comme Échap.
+tutorial-pt-right = Clic droit : Échap. Il quitte une recherche, l'écran méta ou tout autre mode, comme la touche Échap. Un clic à côté de la liste fait de même.
+tutorial-pt-swipe = Glisser : maintenez le bouton droit de la souris et allez vers la gauche pour revenir, ou vers la droite pour entrer dans la ligne où vous avez commencé. Les boutons précédent et suivant sur le côté d'une souris font de même.
+tutorial-pt-wheel = Molette : un cran déplace la sélection d'une ligne, comme Haut et Bas. En mode défilement, elle fait défiler la page.
+tutorial-pt-touchpad = Pavé tactile : deux doigts vers le haut ou le bas sont la molette. Deux doigts sur le côté reviennent ou avancent, une fois par geste.
+tutorial-pt-touch = Écran tactile : un toucher est un clic. Faites glisser un doigt vers le haut ou le bas pour parcourir la liste, et vers la gauche ou la droite pour revenir ou entrer. Dans un champ de texte, un toucher place le curseur, un appui long sélectionne un mot, et un double toucher garde ce que vous avez tapé.
+tutorial-pt-several = Plusieurs liens ou boutons sur une ligne : cliquez sur celui que vous voulez. Un clic à côté sélectionne seulement la ligne.
+tutorial-pt-terminal = Terminal : dans un programme en plein écran, la souris appartient au programme, vous pouvez donc cliquer dedans. Cliquez sur la ligne du haut, ou glissez en arrière, pour le quitter.
+tutorial-pt-done = Voilà tout ce que la souris et le tactile savent faire. Chacun de ces gestes a une touche, et Sicompass marche sans souris.
+
 tutorial-sec-how-it-works = Comment ça fonctionne
 tutorial-hiw-tree = Toute interface graphique est, au fond, une hiérarchie. Sicompass rend cette hiérarchie explicite et entièrement navigable au clavier, de sorte qu'un seul jeu de touches pilote tout.
 tutorial-hiw-programs = Chaque élément à la racine est un programme, aussi appelé provider : le navigateur web, la messagerie, ce tutoriel. Ils se branchent tous sur le même arbre, donc une fois que vous savez en naviguer un, vous les naviguez tous.

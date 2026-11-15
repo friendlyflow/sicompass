@@ -7,7 +7,8 @@ keyboard, with no mouse needed. Under the hood, your computer is a hierarchy,
 and every screen shows you one list, a single layer of it. Four arrow keys get
 you anywhere, the same way for your files, settings, email, and any other data.
 It is fast, precise, and predictable, it feels the same everywhere, and it works
-with screen readers on Linux, macOS, and Windows.
+with screen readers on Linux, macOS, and Windows. A mouse, a touchpad or a touch
+screen works too, if you want one, and a click does what a key would.
 
 It also holds a development environment: a git client, a text editor, a kanban
 board, Claude Code, and a real terminal.
@@ -162,6 +163,7 @@ the icon.
 - **Unambiguous focus**: you always know where the focus is, no guessing
 - **Flat interface**: no popups, dialogs, or overlays, everything is navigated inline in the list you are on
 - **Keyboard-first**: your hands never leave the keyboard, with tabbed workspaces and letter-driven command palettes
+- **Mouse and touch too**: a click uses a line at once, a click on the line above the list goes back, a right click is Escape, and a swipe goes back or in. The tutorial teaches it all
 - **Native accessibility**: built-in screen reader support on Linux, macOS, and Windows
 - **Help built in**: Tab opens a short beginner's manual from anywhere, and the tutorial lets you try every element and key
 - **Cross-platform**: packaged for Windows, macOS, and Linux, with paths, shells, and PTYs routed through platform helpers

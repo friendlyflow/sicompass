@@ -242,6 +242,34 @@ static SECTIONS: &[Node] = &[
             },
         ],
     },
+    // 2b. Mouse and touch: hands-on, every gesture leads its line. The keys stay
+    //     the way in, this is for those who also have a pointer.
+    Branch {
+        key: "tutorial-sec-pointer",
+        children: &[
+            Leaf("tutorial-pt-intro"),
+            Leaf("tutorial-pt-click"),
+            Leaf("tutorial-pt-checkbox"),
+            Leaf("tutorial-pt-button-how"),
+            Leaf("tutorial-pt-button"),
+            Leaf("tutorial-pt-open-how"),
+            Branch {
+                key: "tutorial-pt-open",
+                children: &[Leaf("tutorial-pt-inside")],
+            },
+            Leaf("tutorial-pt-field-how"),
+            Leaf("tutorial-pt-field"),
+            Leaf("tutorial-pt-field-keep"),
+            Leaf("tutorial-pt-right"),
+            Leaf("tutorial-pt-swipe"),
+            Leaf("tutorial-pt-wheel"),
+            Leaf("tutorial-pt-touchpad"),
+            Leaf("tutorial-pt-touch"),
+            Leaf("tutorial-pt-several"),
+            Leaf("tutorial-pt-terminal"),
+            Leaf("tutorial-pt-done"),
+        ],
+    },
     // 3. How it works: the mental model, lean. No key dumps (those live above).
     Branch {
         key: "tutorial-sec-how-it-works",
@@ -990,9 +1018,10 @@ mod tests {
         );
     }
 
-    const SECTION_NAMES: [&str; 7] = [
+    const SECTION_NAMES: [&str; 8] = [
         "Getting started",
         "Shortcuts at a glance",
+        "Mouse and touch",
         "How it works",
         "The programs",
         "Interactive playground",
@@ -1001,14 +1030,14 @@ mod tests {
     ];
 
     #[test]
-    fn test_root_has_the_seven_sections_getting_started_first() {
+    fn test_root_has_the_eight_sections_getting_started_first() {
         let mut p = provider();
         let elems = p.fetch();
         let keys = section_keys(&elems);
         assert_eq!(
             keys.len(),
-            7,
-            "expected exactly 7 top-level sections, got: {keys:?}"
+            8,
+            "expected exactly 8 top-level sections, got: {keys:?}"
         );
         assert!(
             keys[0].starts_with("Getting started"),
@@ -1621,7 +1650,7 @@ mod tests {
         p.push_path("The programs");
         p.pop_path();
         assert_eq!(p.current_path(), "/");
-        assert_eq!(section_keys(&p.fetch()).len(), 7);
+        assert_eq!(section_keys(&p.fetch()).len(), 8);
     }
 
     // ---- The tutorial's rules (docs/tutorial-guidelines.md) ----------------

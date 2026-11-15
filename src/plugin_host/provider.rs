@@ -1223,6 +1223,15 @@ impl Provider for ProcessProvider {
         self.req_bool("dashboard-key", Request::DashboardKey(to_ipc_key(key)))
     }
 
+    /// Sent only to a plugin that speaks 1.5: an older one would take the
+    /// request for a broken channel.
+    fn dashboard_mouse(&mut self, event: sicompass_sdk::DashboardMouse) -> bool {
+        if !self.channel.speaks("1.5") {
+            return false;
+        }
+        self.req_bool("dashboard-mouse", Request::DashboardMouse(event.into()))
+    }
+
     fn dashboard_text(&mut self, text: &str) {
         self.req_unit("dashboard-text", Request::DashboardText(text.to_owned()));
     }

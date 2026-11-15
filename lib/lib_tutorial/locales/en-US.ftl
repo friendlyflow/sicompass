@@ -69,6 +69,30 @@ tutorial-sc-file-save = Ctrl+S: save. Ctrl+Shift+S: save as. Ctrl+O: open a save
 tutorial-sc-file-update = Ctrl+U: install the updates that are ready, the app's and the programs'.
 
 # ---------------------------------------------------------------------------
+# 2b. Mouse and touch (hands-on, every gesture leads its line)
+# ---------------------------------------------------------------------------
+tutorial-sec-pointer = Mouse and touch
+tutorial-pt-intro = Sicompass is made for the keyboard, and a mouse, a touchpad or a touch screen works too. A click does what a key would, and your screen reader says the result the same way. Try each step below with the mouse.
+tutorial-pt-click = Click: a click uses a line at once, as Enter or Right would. Click the checkbox below. Your screen reader says checked or unchecked.
+tutorial-pt-checkbox = <checkbox>Practice checkbox, click me to toggle
+tutorial-pt-button-how = A click on a button presses it. Click the button below, and your screen reader says it was pressed.
+tutorial-pt-button = Click this button: <button>demo</button>press me
+tutorial-pt-open-how = A click on a line with an arrow right goes inside it. Click the line below.
+tutorial-pt-open = Click me to step inside
+tutorial-pt-inside = You clicked your way in. Now click the line at the top, the one with the arrow left, to come back out.
+tutorial-pt-field-how = A click on a text field starts editing it, and the caret goes where you clicked. Click the field below, then click again inside it to move the caret, or drag to select.
+tutorial-pt-field = Click into me: <input>hello world</input>
+tutorial-pt-field-keep = Double click: in a text field it keeps what you typed, as Enter does. A click on another line keeps it too, and a click beside the list throws it away, as Escape does.
+tutorial-pt-right = Right click: Escape. It leaves a search, the meta screen or any other mode, the same as the Escape key. A click beside the list does the same.
+tutorial-pt-swipe = Swipe: hold the right mouse button and move left to go back, or right to go inside the line where you started. The back and forward buttons on the side of a mouse do the same.
+tutorial-pt-wheel = Wheel: one notch moves the selection one line, as Up and Down do. In scroll mode it scrolls the page.
+tutorial-pt-touchpad = Touchpad: two fingers up or down are the wheel. Two fingers sideways go back or forward, once for each swipe.
+tutorial-pt-touch = Touch screen: a tap is a click. Drag a finger up or down to move through the list, and swipe it left or right to go back or inside. In a text field a tap places the caret, a long press selects a word, and a double tap keeps what you typed.
+tutorial-pt-several = Several links or buttons on one line: click the one you want. A click beside them only selects the line.
+tutorial-pt-terminal = Terminal: in a full screen program the mouse belongs to the program, so you can click in it. Click the line at the top, or swipe back, to leave it.
+tutorial-pt-done = That is everything the mouse and touch can do. Every one of these has a key, and Sicompass works without a mouse.
+
+# ---------------------------------------------------------------------------
 # 3. How it works (the mental model, lean)
 # ---------------------------------------------------------------------------
 tutorial-sec-how-it-works = How it works
