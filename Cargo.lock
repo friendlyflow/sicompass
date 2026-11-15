@@ -3976,7 +3976,7 @@ checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
 
 [[package]]
 name = "sicompass"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "accesskit",
  "accesskit_macos",
@@ -4031,7 +4031,7 @@ dependencies = [
 
 [[package]]
 name = "sicompass-builtins"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "sicompass-sdk",
  "sicompass-settings",
@@ -4041,9 +4041,9 @@ dependencies = [
 
 [[package]]
 name = "sicompass-sdk"
-version = "0.9.16"
+version = "0.9.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "451ab812e9341429b6382db88c660bc1a903c1b344eac26f4480db413374bf6b"
+checksum = "669002bc5a11d8fcf095624f87baf961ab3648e5b8900229a97494495e7df13f"
 dependencies = [
  "async-trait",
  "base64 0.23.1",
@@ -4072,7 +4072,7 @@ dependencies = [
 
 [[package]]
 name = "sicompass-settings"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "async-trait",
  "serde",
@@ -4083,7 +4083,7 @@ dependencies = [
 
 [[package]]
 name = "sicompass-store"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "base64 0.23.1",
  "ed25519-dalek",
@@ -4110,7 +4110,7 @@ dependencies = [
 
 [[package]]
 name = "sicompass-tutorial"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "serde_json",
  "sicompass-sdk",
@@ -4119,8 +4119,8 @@ dependencies = [
 
 [[package]]
 name = "sicompass-ui"
-version = "0.2.4"
-source = "git+https://github.com/friendlyflow/sicompass-ui?rev=78f256bb004585800ee5bfd97ff16f6714954b8a#78f256bb004585800ee5bfd97ff16f6714954b8a"
+version = "0.2.5"
+source = "git+https://github.com/friendlyflow/sicompass-ui?tag=v0.2.5#bac93593a37d39b5f346c6721647956cee08d075"
 dependencies = [
  "accesskit",
  "accesskit_macos",
@@ -4154,7 +4154,7 @@ dependencies = [
 
 [[package]]
 name = "sicompass-updater"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "reqwest",
  "semver",
@@ -4439,8 +4439,8 @@ dependencies = [
 
 [[package]]
 name = "terminal-plugin"
-version = "0.3.4"
-source = "git+https://github.com/friendlyflow/terminal-plugin-sicompass?rev=10b02767c714439a96b984c59f3561f70e5d21de#10b02767c714439a96b984c59f3561f70e5d21de"
+version = "0.3.5"
+source = "git+https://github.com/friendlyflow/terminal-plugin-sicompass?rev=e37de4f37f06c02dc69706ae17eb09b306a74cee#e37de4f37f06c02dc69706ae17eb09b306a74cee"
 dependencies = [
  "libc",
  "natord",

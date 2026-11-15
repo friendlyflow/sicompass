@@ -3,6 +3,24 @@
 cargo-dist parses this file and uses the matching version's section as the
 GitHub Release body, so entries here are what users read on the download page.
 
+## 0.2.8
+
+### The mouse, the touchpad and the touch screen
+
+- Sicompass stays made for the keyboard, and now a mouse works too. A click uses a line at once, as Enter or Right would: it ticks a checkbox, presses a button, follows a link, opens a folder, or starts editing a field with the caret where you clicked. On a line with several links or buttons, a click uses the one under it.
+- A click on the line above the list goes back. A right click, or a click beside the list, is Escape.
+- Hold the right mouse button and swipe left to go back, or right to go inside the line where you started. The side buttons of a mouse do the same, and so do two fingers sideways on a touchpad.
+- The wheel moves the selection one line a notch, and scrolls the page in scroll mode.
+- In a text field, drag to select and double click to keep what you typed. A click on another line keeps it too and goes on from there, and a click beside the list throws it away.
+- On a touch screen a tap is a click, a finger moves through the list, and a swipe goes back or inside.
+- The terminal's full-screen programs, such as htop, vim and mc, get the mouse (terminal plugin 0.3.5). A click on the line at the top leaves them.
+- The tutorial has a Mouse and touch section to try it all, and the beginner's manual a line about it.
+
+### Accessibility
+
+- A screen magnifier follows the selection and the caret, on Windows, macOS and X11.
+- A screen reader's activate command does what a click does.
+
 ## 0.2.7
 
 ### Editing text
