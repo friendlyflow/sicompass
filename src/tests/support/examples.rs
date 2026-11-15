@@ -17,7 +17,16 @@ fn profile_dir() -> std::path::PathBuf {
                 .join("target")
         });
     if exe.starts_with(&target) {
-        profile.to_path_buf()
+        // Inside the target directory the profile is the folder above the
+        // outermost `deps` or `build` on the way to the test: `debug/deps/<test>`
+        // until Rust 1.99, `debug/build/<package>/<hash>/.../<test>` from 1.100.
+        exe.ancestors()
+            .take_while(|a| *a != target.as_path())
+            .filter(|a| matches!(a.file_name().and_then(|n| n.to_str()), Some("deps" | "build")))
+            .last()
+            .and_then(|a| a.parent())
+            .unwrap_or(profile)
+            .to_path_buf()
     } else {
         target.join(profile.file_name().unwrap())
     }
