@@ -3,6 +3,12 @@
 cargo-dist parses this file and uses the matching version's section as the
 GitHub Release body, so entries here are what users read on the download page.
 
+## 0.2.9
+
+- On Windows, updating a plugin works while it runs. Ctrl+U and the Store's Update used to fail without installing anything, because Windows does not let a running program's folder be renamed.
+- On Windows, the Store's signed list of plugins is checked correctly again. Windows line endings broke its signature check.
+- The window controls (minimize, maximize and close) are as tall as the line at the top and follow the font scale. They used to be a fixed size, so at a small scale they hung below it, most visibly at the top left on macOS.
+
 ## 0.2.8
 
 ### The mouse, the touchpad and the touch screen
