@@ -360,21 +360,96 @@ fn make_executable(_path: &Path) -> Result<(), String> {
 
 /// Replace `plugins/<name>` by `staged`, keeping the old version until the new
 /// one is in place.
+///
+/// On Windows a folder cannot be renamed while a program runs from it, and
+/// every open tab of the plugin runs its `plugin.exe` there, in that folder.
+/// The files inside can still be renamed, the running program's included, so
+/// there the old files move out and the new ones in, one at a time
+/// ([`swap_contents`]). The app sees the new `plugin.json` and restarts the
+/// plugin. The old program, which cannot be deleted while it runs, goes at
+/// the next update ([`old_dir`]).
 fn swap_in(plugins_dir: &Path, name: &str, staged: &Path) -> Result<(), String> {
     let target = plugins_dir.join(name);
-    let old = plugins_dir.join(STAGING_DIR).join(format!("{name}.old"));
-    remove_if_present(&old)?;
-    let had_old = target.exists();
-    if had_old {
-        std::fs::rename(&target, &old).map_err(|e| format!("{}: {e}", target.display()))?;
+    if !target.exists() {
+        return std::fs::rename(staged, &target).map_err(|e| format!("{}: {e}", target.display()));
     }
-    if let Err(e) = std::fs::rename(staged, &target) {
-        if had_old {
-            let _ = std::fs::rename(&old, &target);
+    let old = old_dir(plugins_dir, name)?;
+    match std::fs::rename(&target, &old) {
+        Ok(()) => {
+            if let Err(e) = std::fs::rename(staged, &target) {
+                let _ = std::fs::rename(&old, &target);
+                return Err(format!("{}: {e}", target.display()));
+            }
         }
-        return Err(format!("{}: {e}", target.display()));
+        Err(_) if cfg!(windows) => swap_contents(&target, &old, staged)?,
+        Err(e) => return Err(format!("{}: {e}", target.display())),
     }
     let _ = remove_if_present(&old);
+    Ok(())
+}
+
+/// Where the version being replaced goes: `.store/<name>.old`, once what
+/// earlier updates left there is deleted. A program that was still running
+/// then cannot be deleted yet (Windows), so then `.store/<name>.old-<n>`.
+fn old_dir(plugins_dir: &Path, name: &str) -> Result<PathBuf, String> {
+    let staging_root = plugins_dir.join(STAGING_DIR);
+    let base = format!("{name}.old");
+    let is_old = |file: &str| {
+        file == base
+            || file
+                .strip_prefix(&base)
+                .and_then(|rest| rest.strip_prefix('-'))
+                .is_some_and(|n| n.parse::<u32>().is_ok())
+    };
+    for entry in std::fs::read_dir(&staging_root)
+        .into_iter()
+        .flatten()
+        .flatten()
+    {
+        if is_old(&entry.file_name().to_string_lossy()) {
+            let _ = remove_if_present(&entry.path());
+        }
+    }
+    (0..1000)
+        .map(|n| match n {
+            0 => staging_root.join(&base),
+            n => staging_root.join(format!("{base}-{n}")),
+        })
+        .find(|p| !p.exists())
+        .ok_or_else(|| format!("{}: too many old versions", staging_root.display()))
+}
+
+/// Move what is in `target` into `old`, then what is in `staged` into
+/// `target`, for when `target` itself cannot be renamed. Undone as far as it
+/// got when a move fails, so the previous version stays in place.
+fn swap_contents(target: &Path, old: &Path, staged: &Path) -> Result<(), String> {
+    let names = |dir: &Path| -> Result<Vec<std::ffi::OsString>, String> {
+        std::fs::read_dir(dir)
+            .and_then(|entries| entries.map(|e| e.map(|e| e.file_name())).collect())
+            .map_err(|e| format!("{}: {e}", dir.display()))
+    };
+    let current = names(target)?;
+    let new = names(staged)?;
+    std::fs::create_dir_all(old).map_err(|e| format!("{}: {e}", old.display()))?;
+    move_entries(&current, target, old)?;
+    if let Err(e) = move_entries(&new, staged, target) {
+        let _ = move_entries(&current, old, target);
+        return Err(e);
+    }
+    Ok(())
+}
+
+/// Rename each of `names` from `from` to `to`, moving back the ones already
+/// moved when one fails.
+fn move_entries(names: &[std::ffi::OsString], from: &Path, to: &Path) -> Result<(), String> {
+    for (i, name) in names.iter().enumerate() {
+        if let Err(e) = std::fs::rename(from.join(name), to.join(name)) {
+            for done in &names[..i] {
+                let _ = std::fs::rename(to.join(done), from.join(done));
+            }
+            return Err(format!("{}: {e}", from.join(name).display()));
+        }
+    }
     Ok(())
 }
 
@@ -458,5 +533,71 @@ mod tests {
             .unwrap();
         assert_eq!(s.url(RELEASE_FILE), "https://e.org/x/release.json");
         assert!(s.by_hand);
+    }
+
+    /// A plugin open in a tab runs from its folder, in it. Windows will not
+    /// rename that folder, and the update must still go in, twice in a row
+    /// (the first update's old program is still running at the second).
+    #[cfg(windows)]
+    #[test]
+    fn an_update_goes_in_while_the_plugin_runs() {
+        use std::process::{Command, Stdio};
+
+        let plugins = tempfile::tempdir().unwrap();
+        let target = plugins.path().join("demo");
+        std::fs::create_dir_all(target.join("locales")).unwrap();
+        std::fs::create_dir_all(plugins.path().join(STAGING_DIR)).unwrap();
+        // cmd.exe reading its commands from a pipe stands in for a plugin.
+        let exe = target.join("plugin.exe");
+        std::fs::copy(r"C:\Windows\System32\cmd.exe", &exe).unwrap();
+        std::fs::write(target.join("plugin.json"), "1").unwrap();
+        let mut running = Command::new(&exe)
+            .args(["/q", "/k"])
+            .current_dir(&target)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        // Started: it answers.
+        {
+            use std::io::{BufRead, Write};
+            let stdin = running.stdin.as_mut().unwrap();
+            writeln!(stdin, "echo ready").unwrap();
+            let mut line = String::new();
+            std::io::BufReader::new(running.stdout.as_mut().unwrap())
+                .read_line(&mut line)
+                .unwrap();
+            assert!(line.trim_end().ends_with("ready"), "{line}");
+        }
+        assert!(
+            std::fs::rename(&target, plugins.path().join("moved")).is_err(),
+            "the running plugin's folder is expected to be held"
+        );
+
+        for version in ["2", "3"] {
+            let staged = plugins.path().join(STAGING_DIR).join("demo");
+            std::fs::create_dir_all(staged.join("locales")).unwrap();
+            std::fs::write(staged.join("plugin.exe"), version).unwrap();
+            std::fs::write(staged.join("plugin.json"), version).unwrap();
+            std::fs::write(staged.join("locales").join("en-US.ftl"), version).unwrap();
+
+            swap_in(plugins.path(), "demo", &staged).unwrap();
+            let _ = remove_if_present(&staged);
+
+            for file in ["plugin.exe", "plugin.json", "locales/en-US.ftl"] {
+                assert_eq!(std::fs::read_to_string(target.join(file)).unwrap(), version);
+            }
+        }
+
+        let _ = running.kill();
+        let _ = running.wait();
+        // Stopped, the old program goes with the next update.
+        old_dir(plugins.path(), "demo").unwrap();
+        let left: Vec<_> = std::fs::read_dir(plugins.path().join(STAGING_DIR))
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name())
+            .collect();
+        assert!(left.is_empty(), "left in staging: {left:?}");
     }
 }
